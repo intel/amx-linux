@@ -31,7 +31,6 @@ int main()
 #include <string.h>
 #include <inttypes.h>
 #include <sys/mman.h>
-#include <signal.h>
 #include <sys/ucontext.h>
 #include <err.h>
 #include <stddef.h>
@@ -42,18 +41,6 @@ int main()
 #include <sys/auxv.h>
 #include <dlfcn.h>
 #include <unwind.h>
-
-static void sethandler(int sig, void (*handler)(int, siginfo_t *, void *),
-		       int flags)
-{
-	struct sigaction sa;
-	memset(&sa, 0, sizeof(sa));
-	sa.sa_sigaction = handler;
-	sa.sa_flags = SA_SIGINFO | flags;
-	sigemptyset(&sa.sa_mask);
-	if (sigaction(sig, &sa, 0))
-		err(1, "sigaction");
-}
 
 static volatile sig_atomic_t nerrs;
 static unsigned long sysinfo;

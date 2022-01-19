@@ -36,6 +36,10 @@ BINARIES_64 := $(patsubst %,$(OUTPUT)/%,$(BINARIES_64))
 
 CFLAGS := -O2 -g -std=gnu99 -pthread -Wall $(KHDR_INCLUDES)
 
+LIB := helpers
+LIB_OBJ_32 := $(patsubst %,$(OUTPUT)/%.o,$(LIB:%=%_32))
+LIB_OBJ_64 := $(patsubst %,$(OUTPUT)/%.o,$(LIB:%=%_64))
+
 # call32_from_64 in thunks.S uses absolute addresses.
 ifeq ($(CAN_BUILD_WITH_NOPIE),1)
 CFLAGS += -no-pie
@@ -69,12 +73,18 @@ all_32: $(BINARIES_32)
 
 all_64: $(BINARIES_64)
 
-EXTRA_CLEAN := $(BINARIES_32) $(BINARIES_64)
+EXTRA_CLEAN := $(BINARIES_32) $(BINARIES_64) $(LIB_OBJ_32) $(LIB_OBJ_64)
 
-$(BINARIES_32): $(OUTPUT)/%_32: %.c helpers.h
+$(LIB_OBJ_32): $(OUTPUT)/%_32.o: %.c
+	$(CC) -O -m32 -o $@ -c $^ $(CFLAGS) $(EXTRA_CFLAGS)
+
+$(LIB_OBJ_64): $(OUTPUT)/%_64.o: %.c
+	$(CC) -O -m64 -o $@ -c $^ $(CFLAGS) $(EXTRA_CFLAGS)
+
+$(BINARIES_32): $(OUTPUT)/%_32: %.c helpers.h $(LIB_OBJ_32)
 	$(CC) -m32 -o $@ $(CFLAGS) $(EXTRA_CFLAGS) $^ -lrt -ldl -lm
 
-$(BINARIES_64): $(OUTPUT)/%_64: %.c helpers.h
+$(BINARIES_64): $(OUTPUT)/%_64: %.c helpers.h $(LIB_OBJ_64)
 	$(CC) -m64 -o $@ $(CFLAGS) $(EXTRA_CFLAGS) $^ -lrt -ldl
 
 # x86_64 users should be encouraged to install 32-bit libraries

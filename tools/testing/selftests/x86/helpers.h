@@ -2,7 +2,13 @@
 #ifndef __SELFTESTS_X86_HELPERS_H
 #define __SELFTESTS_X86_HELPERS_H
 
+#include <signal.h>
 #include <asm/processor-flags.h>
+
+void sethandler(int sig, void (*handler)(int, siginfo_t *, void *),
+		int flags);
+
+void clearhandler(int sig);
 
 static inline unsigned long get_eflags(void)
 {

@@ -10,25 +10,12 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
-#include <signal.h>
 #include <err.h>
 #include <sys/syscall.h>
 
 #include "helpers.h"
 
 static unsigned int nerrs;
-
-static void sethandler(int sig, void (*handler)(int, siginfo_t *, void *),
-		       int flags)
-{
-	struct sigaction sa;
-	memset(&sa, 0, sizeof(sa));
-	sa.sa_sigaction = handler;
-	sa.sa_flags = SA_SIGINFO | flags;
-	sigemptyset(&sa.sa_mask);
-	if (sigaction(sig, &sa, 0))
-		err(1, "sigaction");
-}
 
 static void sigtrap(int sig, siginfo_t *si, void *ctx_void)
 {
