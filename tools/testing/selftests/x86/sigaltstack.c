@@ -88,8 +88,20 @@ static void sigalrm(int sig, siginfo_t *info, void *ctx_void)
 
 static void test_sigaltstack(void *altstack, unsigned long size)
 {
-	if (setup_altstack(altstack, size))
+	if (setup_altstack(altstack, size)) {
+		/*
+		 * If the kernel rejects an insufficient altstack with
+		 * ENOMEM, then skip the test.
+		 */
+		if (errno == ENOMEM && size < at_minstack_size) {
+			printf("[SKIP]\tThe running kernel disallows an insufficient altstack with "
+			       "the STRICT_SIGALTSTACK_SIZE option. As the altstack was already "
+			       "measured, the overflow test is not needed.\n");
+			return;
+		}
+
 		err(1, "sigaltstack()");
+	}
 
 	sigalrm_expected = (size > at_minstack_size) ? true : false;
 
