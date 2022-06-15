@@ -1,0 +1,281 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>LED handling under Linux &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Flash LED handling under Linux" href="leds-class-flash.html" />
+    <link rel="prev" title="LEDs" href="index.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="led-handling-under-linux">
+<h1>LED handling under Linux<a class="headerlink" href="#led-handling-under-linux" title="Permalink to this headline">¶</a></h1>
+<p>In its simplest form, the LED class just allows control of LEDs from
+userspace. LEDs appear in /sys/class/leds/. The maximum brightness of the
+LED is defined in max_brightness file. The brightness file will set the brightness
+of the LED (taking a value 0-max_brightness). Most LEDs don’t have hardware
+brightness support so will just be turned on for non-zero brightness settings.</p>
+<p>The class also introduces the optional concept of an LED trigger. A trigger
+is a kernel based source of led events. Triggers can either be simple or
+complex. A simple trigger isn’t configurable and is designed to slot into
+existing subsystems with minimal additional code. Examples are the disk-activity,
+nand-disk and sharpsl-charge triggers. With led triggers disabled, the code
+optimises away.</p>
+<p>Complex triggers while available to all LEDs have LED specific
+parameters and work on a per LED basis. The timer trigger is an example.
+The timer trigger will periodically change the LED brightness between
+LED_OFF and the current brightness setting. The “on” and “off” time can
+be specified via /sys/class/leds/&lt;device&gt;/delay_{on,off} in milliseconds.
+You can change the brightness value of a LED independently of the timer
+trigger. However, if you set the brightness value to LED_OFF it will
+also disable the timer trigger.</p>
+<p>You can change triggers in a similar manner to the way an IO scheduler
+is chosen (via /sys/class/leds/&lt;device&gt;/trigger). Trigger specific
+parameters can appear in /sys/class/leds/&lt;device&gt; once a given trigger is
+selected.</p>
+<section id="design-philosophy">
+<h2>Design Philosophy<a class="headerlink" href="#design-philosophy" title="Permalink to this headline">¶</a></h2>
+<p>The underlying design philosophy is simplicity. LEDs are simple devices
+and the aim is to keep a small amount of code giving as much functionality
+as possible.  Please keep this in mind when suggesting enhancements.</p>
+</section>
+<section id="led-device-naming">
+<h2>LED Device Naming<a class="headerlink" href="#led-device-naming" title="Permalink to this headline">¶</a></h2>
+<p>Is currently of the form:</p>
+<blockquote>
+<div><p>“devicename:color:function”</p>
+</div></blockquote>
+<ul class="simple">
+<li><dl class="simple">
+<dt>devicename:</dt><dd><p>it should refer to a unique identifier created by the kernel,
+like e.g. phyN for network devices or inputN for input devices, rather
+than to the hardware; the information related to the product and the bus
+to which given device is hooked is available in sysfs and can be
+retrieved using get_led_device_info.sh script from tools/leds; generally
+this section is expected mostly for LEDs that are somehow associated with
+other devices.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>color:</dt><dd><p>one of LED_COLOR_ID_* definitions from the header
+include/dt-bindings/leds/common.h.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>function:</dt><dd><p>one of LED_FUNCTION_* definitions from the header
+include/dt-bindings/leds/common.h.</p>
+</dd>
+</dl>
+</li>
+</ul>
+<p>If required color or function is missing, please submit a patch
+to <a class="reference external" href="mailto:linux-leds&#37;&#52;&#48;vger&#46;kernel&#46;org">linux-leds<span>&#64;</span>vger<span>&#46;</span>kernel<span>&#46;</span>org</a>.</p>
+<p>It is possible that more than one LED with the same color and function will
+be required for given platform, differing only with an ordinal number.
+In this case it is preferable to just concatenate the predefined LED_FUNCTION_*
+name with required “-N” suffix in the driver. fwnode based drivers can use
+function-enumerator property for that and then the concatenation will be handled
+automatically by the LED core upon LED class device registration.</p>
+<p>LED subsystem has also a protection against name clash, that may occur
+when LED class device is created by a driver of hot-pluggable device and
+it doesn’t provide unique devicename section. In this case numerical
+suffix (e.g. “_1”, “_2”, “_3” etc.) is added to the requested LED class
+device name.</p>
+<p>There might be still LED class drivers around using vendor or product name
+for devicename, but this approach is now deprecated as it doesn’t convey
+any added value. Product information can be found in other places in sysfs
+(see tools/leds/get_led_device_info.sh).</p>
+<p>Examples of proper LED names:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>“red:disk”</p></li>
+<li><p>“white:flash”</p></li>
+<li><p>“red:indicator”</p></li>
+<li><p>“phy1:green:wlan”</p></li>
+<li><p>“phy3::wlan”</p></li>
+<li><p>“:kbd_backlight”</p></li>
+<li><p>“input5::kbd_backlight”</p></li>
+<li><p>“input3::numlock”</p></li>
+<li><p>“input3::scrolllock”</p></li>
+<li><p>“input3::capslock”</p></li>
+<li><p>“mmc1::status”</p></li>
+<li><p>“white:status”</p></li>
+</ul>
+</div></blockquote>
+<p>get_led_device_info.sh script can be used for verifying if the LED name
+meets the requirements pointed out here. It performs validation of the LED class
+devicename sections and gives hints on expected value for a section in case
+the validation fails for it. So far the script supports validation
+of associations between LEDs and following types of devices:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>input devices</p></li>
+<li><p>ieee80211 compliant USB devices</p></li>
+</ul>
+</div></blockquote>
+<p>The script is open to extensions.</p>
+<p>There have been calls for LED properties such as color to be exported as
+individual led class attributes. As a solution which doesn’t incur as much
+overhead, I suggest these become part of the device name. The naming scheme
+above leaves scope for further attributes should they be needed. If sections
+of the name don’t apply, just leave that section blank.</p>
+</section>
+<section id="brightness-setting-api">
+<h2>Brightness setting API<a class="headerlink" href="#brightness-setting-api" title="Permalink to this headline">¶</a></h2>
+<p>LED subsystem core exposes following API for setting brightness:</p>
+<blockquote>
+<div><ul class="simple">
+<li><dl class="simple">
+<dt>led_set_brightness:</dt><dd><p>it is guaranteed not to sleep, passing LED_OFF stops
+blinking,</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>led_set_brightness_sync:</dt><dd><p>for use cases when immediate effect is desired -
+it can block the caller for the time required for accessing
+device registers and can sleep, passing LED_OFF stops hardware
+blinking, returns -EBUSY if software blink fallback is enabled.</p>
+</dd>
+</dl>
+</li>
+</ul>
+</div></blockquote>
+</section>
+<section id="led-registration-api">
+<h2>LED registration API<a class="headerlink" href="#led-registration-api" title="Permalink to this headline">¶</a></h2>
+<p>A driver wanting to register a LED classdev for use by other drivers /
+userspace needs to allocate and fill a led_classdev struct and then call
+<cite>[devm_]led_classdev_register</cite>. If the non devm version is used the driver
+must call led_classdev_unregister from its remove function before
+free-ing the led_classdev struct.</p>
+<p>If the driver can detect hardware initiated brightness changes and thus
+wants to have a brightness_hw_changed attribute then the LED_BRIGHT_HW_CHANGED
+flag must be set in flags before registering. Calling
+led_classdev_notify_brightness_hw_changed on a classdev not registered with
+the LED_BRIGHT_HW_CHANGED flag is a bug and will trigger a WARN_ON.</p>
+</section>
+<section id="hardware-accelerated-blink-of-leds">
+<h2>Hardware accelerated blink of LEDs<a class="headerlink" href="#hardware-accelerated-blink-of-leds" title="Permalink to this headline">¶</a></h2>
+<p>Some LEDs can be programmed to blink without any CPU interaction. To
+support this feature, a LED driver can optionally implement the
+blink_set() function (see &lt;linux/leds.h&gt;). To set an LED to blinking,
+however, it is better to use the API function led_blink_set(), as it
+will check and implement software fallback if necessary.</p>
+<p>To turn off blinking, use the API function led_brightness_set()
+with brightness value LED_OFF, which should stop any software
+timers that may have been required for blinking.</p>
+<p>The blink_set() function should choose a user friendly blinking value
+if it is called with <cite>*delay_on==0</cite> &amp;&amp; <cite>*delay_off==0</cite> parameters. In this
+case the driver should give back the chosen value through delay_on and
+delay_off parameters to the leds subsystem.</p>
+<p>Setting the brightness to zero with brightness_set() callback function
+should completely turn off the LED and cancel the previously programmed
+hardware blinking function, if any.</p>
+</section>
+<section id="known-issues">
+<h2>Known Issues<a class="headerlink" href="#known-issues" title="Permalink to this headline">¶</a></h2>
+<p>The LED Trigger core cannot be a module as the simple trigger functions
+would cause nightmare dependency issues. I see this as a minor issue
+compared to the benefits the simple trigger functionality brings. The
+rest of the LED subsystem can be modular.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">LED handling under Linux</a><ul>
+<li><a class="reference internal" href="#design-philosophy">Design Philosophy</a></li>
+<li><a class="reference internal" href="#led-device-naming">LED Device Naming</a></li>
+<li><a class="reference internal" href="#brightness-setting-api">Brightness setting API</a></li>
+<li><a class="reference internal" href="#led-registration-api">LED registration API</a></li>
+<li><a class="reference internal" href="#hardware-accelerated-blink-of-leds">Hardware accelerated blink of LEDs</a></li>
+<li><a class="reference internal" href="#known-issues">Known Issues</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/leds/leds-class.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/leds/leds-class.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,294 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Block Group Descriptors &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="block-group-descriptors">
+<h1>Block Group Descriptors<a class="headerlink" href="#block-group-descriptors" title="Permalink to this headline">¶</a></h1>
+<p>Each block group on the filesystem has one of these descriptors
+associated with it. As noted in the Layout section above, the group
+descriptors (if present) are the second item in the block group. The
+standard configuration is for each block group to contain a full copy of
+the block group descriptor table unless the sparse_super feature flag
+is set.</p>
+<p>Notice how the group descriptor records the location of both bitmaps and
+the inode table (i.e. they can float). This means that within a block
+group, the only data structures with fixed locations are the superblock
+and the group descriptor table. The flex_bg mechanism uses this
+property to group several block groups into a flex group and lay out all
+of the groups’ bitmaps and inode tables into one long run in the first
+group of the flex group.</p>
+<p>If the meta_bg feature flag is set, then several block groups are
+grouped together into a meta group. Note that in the meta_bg case,
+however, the first and last two block groups within the larger meta
+group contain only group descriptors for the groups inside the meta
+group.</p>
+<p>flex_bg and meta_bg do not appear to be mutually exclusive features.</p>
+<p>In ext2, ext3, and ext4 (when the 64bit feature is not enabled), the
+block group descriptor was only 32 bytes long and therefore ends at
+bg_checksum. On an ext4 filesystem with the 64bit feature enabled, the
+block group descriptor expands to at least the 64 bytes described below;
+the size is stored in the superblock.</p>
+<p>If gdt_csum is set and metadata_csum is not set, the block group
+checksum is the crc16 of the FS UUID, the group number, and the group
+descriptor structure. If metadata_csum is set, then the block group
+checksum is the lower 16 bits of the checksum of the FS UUID, the group
+number, and the group descriptor structure. Both block and inode bitmap
+checksums are calculated against the FS UUID, the group number, and the
+entire bitmap.</p>
+<p>The block group descriptor is laid out in <code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">ext4_group_desc</span></code>.</p>
+<table class="colwidths-given docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 10%" />
+<col style="width: 30%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Offset</p></th>
+<th class="head"><p>Size</p></th>
+<th class="head"><p>Name</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>0x0</p></td>
+<td><p>__le32</p></td>
+<td><p>bg_block_bitmap_lo</p></td>
+<td><p>Lower 32-bits of location of block bitmap.</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x4</p></td>
+<td><p>__le32</p></td>
+<td><p>bg_inode_bitmap_lo</p></td>
+<td><p>Lower 32-bits of location of inode bitmap.</p></td>
+</tr>
+<tr class="row-even"><td><p>0x8</p></td>
+<td><p>__le32</p></td>
+<td><p>bg_inode_table_lo</p></td>
+<td><p>Lower 32-bits of location of inode table.</p></td>
+</tr>
+<tr class="row-odd"><td><p>0xC</p></td>
+<td><p>__le16</p></td>
+<td><p>bg_free_blocks_count_lo</p></td>
+<td><p>Lower 16-bits of free block count.</p></td>
+</tr>
+<tr class="row-even"><td><p>0xE</p></td>
+<td><p>__le16</p></td>
+<td><p>bg_free_inodes_count_lo</p></td>
+<td><p>Lower 16-bits of free inode count.</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x10</p></td>
+<td><p>__le16</p></td>
+<td><p>bg_used_dirs_count_lo</p></td>
+<td><p>Lower 16-bits of directory count.</p></td>
+</tr>
+<tr class="row-even"><td><p>0x12</p></td>
+<td><p>__le16</p></td>
+<td><p>bg_flags</p></td>
+<td><p>Block group flags. See the <a class="reference internal" href="#bgflags">bgflags</a> table below.</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x14</p></td>
+<td><p>__le32</p></td>
+<td><p>bg_exclude_bitmap_lo</p></td>
+<td><p>Lower 32-bits of location of snapshot exclusion bitmap.</p></td>
+</tr>
+<tr class="row-even"><td><p>0x18</p></td>
+<td><p>__le16</p></td>
+<td><p>bg_block_bitmap_csum_lo</p></td>
+<td><p>Lower 16-bits of the block bitmap checksum.</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x1A</p></td>
+<td><p>__le16</p></td>
+<td><p>bg_inode_bitmap_csum_lo</p></td>
+<td><p>Lower 16-bits of the inode bitmap checksum.</p></td>
+</tr>
+<tr class="row-even"><td><p>0x1C</p></td>
+<td><p>__le16</p></td>
+<td><p>bg_itable_unused_lo</p></td>
+<td><p>Lower 16-bits of unused inode count. If set, we needn’t scan past the
+<code class="docutils literal notranslate"><span class="pre">(sb.s_inodes_per_group</span> <span class="pre">-</span> <span class="pre">gdt.bg_itable_unused)</span></code> th entry in the
+inode table for this group.</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x1E</p></td>
+<td><p>__le16</p></td>
+<td><p>bg_checksum</p></td>
+<td><p>Group descriptor checksum; crc16(sb_uuid+group_num+bg_desc) if the
+RO_COMPAT_GDT_CSUM feature is set, or
+crc32c(sb_uuid+group_num+bg_desc) &amp; 0xFFFF if the
+RO_COMPAT_METADATA_CSUM feature is set.  The bg_checksum
+field in bg_desc is skipped when calculating crc16 checksum,
+and set to zero if crc32c checksum is used.</p></td>
+</tr>
+<tr class="row-even"><td></td>
+<td></td>
+<td></td>
+<td><p>These fields only exist if the 64bit feature is enabled and s_desc_size
+&gt; 32.</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x20</p></td>
+<td><p>__le32</p></td>
+<td><p>bg_block_bitmap_hi</p></td>
+<td><p>Upper 32-bits of location of block bitmap.</p></td>
+</tr>
+<tr class="row-even"><td><p>0x24</p></td>
+<td><p>__le32</p></td>
+<td><p>bg_inode_bitmap_hi</p></td>
+<td><p>Upper 32-bits of location of inodes bitmap.</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x28</p></td>
+<td><p>__le32</p></td>
+<td><p>bg_inode_table_hi</p></td>
+<td><p>Upper 32-bits of location of inodes table.</p></td>
+</tr>
+<tr class="row-even"><td><p>0x2C</p></td>
+<td><p>__le16</p></td>
+<td><p>bg_free_blocks_count_hi</p></td>
+<td><p>Upper 16-bits of free block count.</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x2E</p></td>
+<td><p>__le16</p></td>
+<td><p>bg_free_inodes_count_hi</p></td>
+<td><p>Upper 16-bits of free inode count.</p></td>
+</tr>
+<tr class="row-even"><td><p>0x30</p></td>
+<td><p>__le16</p></td>
+<td><p>bg_used_dirs_count_hi</p></td>
+<td><p>Upper 16-bits of directory count.</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x32</p></td>
+<td><p>__le16</p></td>
+<td><p>bg_itable_unused_hi</p></td>
+<td><p>Upper 16-bits of unused inode count.</p></td>
+</tr>
+<tr class="row-even"><td><p>0x34</p></td>
+<td><p>__le32</p></td>
+<td><p>bg_exclude_bitmap_hi</p></td>
+<td><p>Upper 32-bits of location of snapshot exclusion bitmap.</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x38</p></td>
+<td><p>__le16</p></td>
+<td><p>bg_block_bitmap_csum_hi</p></td>
+<td><p>Upper 16-bits of the block bitmap checksum.</p></td>
+</tr>
+<tr class="row-even"><td><p>0x3A</p></td>
+<td><p>__le16</p></td>
+<td><p>bg_inode_bitmap_csum_hi</p></td>
+<td><p>Upper 16-bits of the inode bitmap checksum.</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x3C</p></td>
+<td><p>__u32</p></td>
+<td><p>bg_reserved</p></td>
+<td><p>Padding to 64 bytes.</p></td>
+</tr>
+</tbody>
+</table>
+<p id="bgflags">Block group flags can be any combination of the following:</p>
+<table class="colwidths-given docutils align-default">
+<colgroup>
+<col style="width: 20%" />
+<col style="width: 80%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Value</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>0x1</p></td>
+<td><p>inode table and bitmap are not initialized (EXT4_BG_INODE_UNINIT).</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x2</p></td>
+<td><p>block bitmap is not initialized (EXT4_BG_BLOCK_UNINIT).</p></td>
+</tr>
+<tr class="row-even"><td><p>0x4</p></td>
+<td><p>inode table is zeroed (EXT4_BG_INODE_ZEROED).</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/filesystems/ext4/group_descr.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/filesystems/ext4/group_descr.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

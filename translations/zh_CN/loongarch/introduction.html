@@ -1,0 +1,827 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>1. LoongArch介绍 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="2. 启动 Linux/LoongArch" href="booting.html" />
+    <link rel="prev" title="LoongArch体系结构" href="index.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../loongarch/introduction.html"><span class="doc">Introduction to LoongArch</span></a></p>
+</dd>
+<dt class="field-even">Translator</dt>
+<dd class="field-even"><p>Huacai Chen &lt;<a class="reference external" href="mailto:chenhuacai&#37;&#52;&#48;loongson&#46;cn">chenhuacai<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+</dl>
+<section id="loongarch">
+<h1><span class="section-number">1. </span>LoongArch介绍<a class="headerlink" href="#loongarch" title="Permalink to this headline">¶</a></h1>
+<p>LoongArch是一种新的RISC ISA，在一定程度上类似于MIPS和RISC-V。LoongArch指令集
+包括一个精简32位版（LA32R）、一个标准32位版（LA32S）、一个64位版（LA64）。
+LoongArch定义了四个特权级（PLV0~PLV3），其中PLV0是最高特权级，用于内核；而PLV3
+是最低特权级，用于应用程序。本文档介绍了LoongArch的寄存器、基础指令集、虚拟内
+存以及其他一些主题。</p>
+<section id="id1">
+<h2><span class="section-number">1.1. </span>寄存器<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>LoongArch的寄存器包括通用寄存器（GPRs）、浮点寄存器（FPRs）、向量寄存器（VRs）
+和用于特权模式（PLV0）的控制状态寄存器（CSRs）。</p>
+<section id="id2">
+<h3><span class="section-number">1.1.1. </span>通用寄存器<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h3>
+<p>LoongArch包括32个通用寄存器（ <code class="docutils literal notranslate"><span class="pre">$r0</span></code> ~ <code class="docutils literal notranslate"><span class="pre">$r31</span></code> ），LA32中每个寄存器为32位宽，
+LA64中每个寄存器为64位宽。 <code class="docutils literal notranslate"><span class="pre">$r0</span></code> 的内容总是固定为0，而其他寄存器在体系结构层面
+没有特殊功能。（ <code class="docutils literal notranslate"><span class="pre">$r1</span></code> 算是一个例外，在BL指令中固定用作链接返回寄存器。）</p>
+<p>内核使用了一套LoongArch寄存器约定，定义在LoongArch ELF psABI规范中，详细描述参见
+<a class="reference internal" href="#loongarch-references-zh-cn"><span class="std std-ref">参考文献</span></a>:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 28%" />
+<col style="width: 25%" />
+<col style="width: 31%" />
+<col style="width: 16%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>寄存器名</p></th>
+<th class="head"><p>别名</p></th>
+<th class="head"><p>用途</p></th>
+<th class="head"><p>跨调用保持</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">$r0</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">$zero</span></code></p></td>
+<td><p>常量0</p></td>
+<td><p>不使用</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">$r1</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">$ra</span></code></p></td>
+<td><p>返回地址</p></td>
+<td><p>否</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">$r2</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">$tp</span></code></p></td>
+<td><p>TLS/线程信息指针</p></td>
+<td><p>不使用</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">$r3</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">$sp</span></code></p></td>
+<td><p>栈指针</p></td>
+<td><p>是</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">$r4</span></code>-<code class="docutils literal notranslate"><span class="pre">$r11</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">$a0</span></code>-<code class="docutils literal notranslate"><span class="pre">$a7</span></code></p></td>
+<td><p>参数寄存器</p></td>
+<td><p>否</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">$r4</span></code>-<code class="docutils literal notranslate"><span class="pre">$r5</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">$v0</span></code>-<code class="docutils literal notranslate"><span class="pre">$v1</span></code></p></td>
+<td><p>返回值</p></td>
+<td><p>否</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">$r12</span></code>-<code class="docutils literal notranslate"><span class="pre">$r20</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">$t0</span></code>-<code class="docutils literal notranslate"><span class="pre">$t8</span></code></p></td>
+<td><p>临时寄存器</p></td>
+<td><p>否</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">$r21</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">$u0</span></code></p></td>
+<td><p>每CPU变量基地址</p></td>
+<td><p>不使用</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">$r22</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">$fp</span></code></p></td>
+<td><p>帧指针</p></td>
+<td><p>是</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">$r23</span></code>-<code class="docutils literal notranslate"><span class="pre">$r31</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">$s0</span></code>-<code class="docutils literal notranslate"><span class="pre">$s8</span></code></p></td>
+<td><p>静态寄存器</p></td>
+<td><p>是</p></td>
+</tr>
+</tbody>
+</table>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>注意： <code class="docutils literal notranslate"><span class="pre">$r21</span></code> 寄存器在ELF psABI中保留未使用，但是在Linux内核用于保
+存每CPU变量基地址。该寄存器没有ABI命名，不过在内核中称为 <code class="docutils literal notranslate"><span class="pre">$u0</span></code> 。在
+一些遗留代码中有时可能见到 <code class="docutils literal notranslate"><span class="pre">$v0</span></code> 和 <code class="docutils literal notranslate"><span class="pre">$v1</span></code> ，它们是 <code class="docutils literal notranslate"><span class="pre">$a0</span></code> 和
+<code class="docutils literal notranslate"><span class="pre">$a1</span></code> 的别名，属于已经废弃的用法。</p>
+</div>
+</section>
+<section id="id3">
+<h3><span class="section-number">1.1.2. </span>浮点寄存器<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h3>
+<p>当系统中存在FPU时，LoongArch有32个浮点寄存器（ <code class="docutils literal notranslate"><span class="pre">$f0</span></code> ~ <code class="docutils literal notranslate"><span class="pre">$f31</span></code> ）。在LA64
+的CPU核上，每个寄存器均为64位宽。</p>
+<p>浮点寄存器的使用约定与LoongArch ELF psABI规范的描述相同：</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 27%" />
+<col style="width: 28%" />
+<col style="width: 30%" />
+<col style="width: 16%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>寄存器名</p></th>
+<th class="head"><p>别名</p></th>
+<th class="head"><p>用途</p></th>
+<th class="head"><p>跨调用保持</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">$f0</span></code>-<code class="docutils literal notranslate"><span class="pre">$f7</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">$fa0</span></code>-<code class="docutils literal notranslate"><span class="pre">$fa7</span></code></p></td>
+<td><p>参数寄存器</p></td>
+<td><p>否</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">$f0</span></code>-<code class="docutils literal notranslate"><span class="pre">$f1</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">$fv0</span></code>-<code class="docutils literal notranslate"><span class="pre">$fv1</span></code></p></td>
+<td><p>返回值</p></td>
+<td><p>否</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">$f8</span></code>-<code class="docutils literal notranslate"><span class="pre">$f23</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">$ft0</span></code>-<code class="docutils literal notranslate"><span class="pre">$ft15</span></code></p></td>
+<td><p>临时寄存器</p></td>
+<td><p>否</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">$f24</span></code>-<code class="docutils literal notranslate"><span class="pre">$f31</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">$fs0</span></code>-<code class="docutils literal notranslate"><span class="pre">$fs7</span></code></p></td>
+<td><p>静态寄存器</p></td>
+<td><p>是</p></td>
+</tr>
+</tbody>
+</table>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>注意：在一些遗留代码中有时可能见到 <code class="docutils literal notranslate"><span class="pre">$fv0</span></code> 和 <code class="docutils literal notranslate"><span class="pre">$fv1</span></code> ，它们是
+<code class="docutils literal notranslate"><span class="pre">$fa0</span></code> 和 <code class="docutils literal notranslate"><span class="pre">$fa1</span></code> 的别名，属于已经废弃的用法。</p>
+</div>
+</section>
+<section id="id4">
+<h3><span class="section-number">1.1.3. </span>向量寄存器<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h3>
+<p>LoongArch现有两种向量扩展：</p>
+<ul class="simple">
+<li><p>128位向量扩展LSX（全称Loongson SIMD eXtention），</p></li>
+<li><p>256位向量扩展LASX（全称Loongson Advanced SIMD eXtention）。</p></li>
+</ul>
+<p>LSX使用 <code class="docutils literal notranslate"><span class="pre">$v0</span></code> ~ <code class="docutils literal notranslate"><span class="pre">$v31</span></code> 向量寄存器，而LASX则使用 <code class="docutils literal notranslate"><span class="pre">$x0</span></code> ~ <code class="docutils literal notranslate"><span class="pre">$x31</span></code> 。</p>
+<p>浮点寄存器和向量寄存器是复用的，比如：在一个实现了LSX和LASX的核上， <code class="docutils literal notranslate"><span class="pre">$x0</span></code> 的
+低128位与 <code class="docutils literal notranslate"><span class="pre">$v0</span></code> 共用， <code class="docutils literal notranslate"><span class="pre">$v0</span></code> 的低64位与 <code class="docutils literal notranslate"><span class="pre">$f0</span></code> 共用，其他寄存器依此类推。</p>
+</section>
+<section id="id5">
+<h3><span class="section-number">1.1.4. </span>控制状态寄存器<a class="headerlink" href="#id5" title="Permalink to this headline">¶</a></h3>
+<p>控制状态寄存器只能在特权模式（PLV0）下访问:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 27%" />
+<col style="width: 57%" />
+<col style="width: 16%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>地址</p></th>
+<th class="head"><p>全称描述</p></th>
+<th class="head"><p>简称</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>0x0</p></td>
+<td><p>当前模式信息</p></td>
+<td><p>CRMD</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x1</p></td>
+<td><p>异常前模式信息</p></td>
+<td><p>PRMD</p></td>
+</tr>
+<tr class="row-even"><td><p>0x2</p></td>
+<td><p>扩展部件使能</p></td>
+<td><p>EUEN</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x3</p></td>
+<td><p>杂项控制</p></td>
+<td><p>MISC</p></td>
+</tr>
+<tr class="row-even"><td><p>0x4</p></td>
+<td><p>异常配置</p></td>
+<td><p>ECFG</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x5</p></td>
+<td><p>异常状态</p></td>
+<td><p>ESTAT</p></td>
+</tr>
+<tr class="row-even"><td><p>0x6</p></td>
+<td><p>异常返回地址</p></td>
+<td><p>ERA</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x7</p></td>
+<td><p>出错(Faulting)虚拟地址</p></td>
+<td><p>BADV</p></td>
+</tr>
+<tr class="row-even"><td><p>0x8</p></td>
+<td><p>出错(Faulting)指令字</p></td>
+<td><p>BADI</p></td>
+</tr>
+<tr class="row-odd"><td><p>0xC</p></td>
+<td><p>异常入口地址</p></td>
+<td><p>EENTRY</p></td>
+</tr>
+<tr class="row-even"><td><p>0x10</p></td>
+<td><p>TLB索引</p></td>
+<td><p>TLBIDX</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x11</p></td>
+<td><p>TLB表项高位</p></td>
+<td><p>TLBEHI</p></td>
+</tr>
+<tr class="row-even"><td><p>0x12</p></td>
+<td><p>TLB表项低位0</p></td>
+<td><p>TLBELO0</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x13</p></td>
+<td><p>TLB表项低位1</p></td>
+<td><p>TLBELO1</p></td>
+</tr>
+<tr class="row-even"><td><p>0x18</p></td>
+<td><p>地址空间标识符</p></td>
+<td><p>ASID</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x19</p></td>
+<td><p>低半地址空间页全局目录基址</p></td>
+<td><p>PGDL</p></td>
+</tr>
+<tr class="row-even"><td><p>0x1A</p></td>
+<td><p>高半地址空间页全局目录基址</p></td>
+<td><p>PGDH</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x1B</p></td>
+<td><p>页全局目录基址</p></td>
+<td><p>PGD</p></td>
+</tr>
+<tr class="row-even"><td><p>0x1C</p></td>
+<td><p>页表遍历控制低半部分</p></td>
+<td><p>PWCL</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x1D</p></td>
+<td><p>页表遍历控制高半部分</p></td>
+<td><p>PWCH</p></td>
+</tr>
+<tr class="row-even"><td><p>0x1E</p></td>
+<td><p>STLB页大小</p></td>
+<td><p>STLBPS</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x1F</p></td>
+<td><p>缩减虚地址配置</p></td>
+<td><p>RVACFG</p></td>
+</tr>
+<tr class="row-even"><td><p>0x20</p></td>
+<td><p>CPU编号</p></td>
+<td><p>CPUID</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x21</p></td>
+<td><p>特权资源配置信息1</p></td>
+<td><p>PRCFG1</p></td>
+</tr>
+<tr class="row-even"><td><p>0x22</p></td>
+<td><p>特权资源配置信息2</p></td>
+<td><p>PRCFG2</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x23</p></td>
+<td><p>特权资源配置信息3</p></td>
+<td><p>PRCFG3</p></td>
+</tr>
+<tr class="row-even"><td><p>0x30+n (0≤n≤15)</p></td>
+<td><p>数据保存寄存器</p></td>
+<td><p>SAVEn</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x40</p></td>
+<td><p>定时器编号</p></td>
+<td><p>TID</p></td>
+</tr>
+<tr class="row-even"><td><p>0x41</p></td>
+<td><p>定时器配置</p></td>
+<td><p>TCFG</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x42</p></td>
+<td><p>定时器值</p></td>
+<td><p>TVAL</p></td>
+</tr>
+<tr class="row-even"><td><p>0x43</p></td>
+<td><p>计时器补偿</p></td>
+<td><p>CNTC</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x44</p></td>
+<td><p>定时器中断清除</p></td>
+<td><p>TICLR</p></td>
+</tr>
+<tr class="row-even"><td><p>0x60</p></td>
+<td><p>LLBit相关控制</p></td>
+<td><p>LLBCTL</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x80</p></td>
+<td><p>实现相关控制1</p></td>
+<td><p>IMPCTL1</p></td>
+</tr>
+<tr class="row-even"><td><p>0x81</p></td>
+<td><p>实现相关控制2</p></td>
+<td><p>IMPCTL2</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x88</p></td>
+<td><p>TLB重填异常入口地址</p></td>
+<td><p>TLBRENTRY</p></td>
+</tr>
+<tr class="row-even"><td><p>0x89</p></td>
+<td><p>TLB重填异常出错(Faulting)虚地址</p></td>
+<td><p>TLBRBADV</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x8A</p></td>
+<td><p>TLB重填异常返回地址</p></td>
+<td><p>TLBRERA</p></td>
+</tr>
+<tr class="row-even"><td><p>0x8B</p></td>
+<td><p>TLB重填异常数据保存</p></td>
+<td><p>TLBRSAVE</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x8C</p></td>
+<td><p>TLB重填异常表项低位0</p></td>
+<td><p>TLBRELO0</p></td>
+</tr>
+<tr class="row-even"><td><p>0x8D</p></td>
+<td><p>TLB重填异常表项低位1</p></td>
+<td><p>TLBRELO1</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x8E</p></td>
+<td><p>TLB重填异常表项高位</p></td>
+<td><p>TLBEHI</p></td>
+</tr>
+<tr class="row-even"><td><p>0x8F</p></td>
+<td><p>TLB重填异常前模式信息</p></td>
+<td><p>TLBRPRMD</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x90</p></td>
+<td><p>机器错误控制</p></td>
+<td><p>MERRCTL</p></td>
+</tr>
+<tr class="row-even"><td><p>0x91</p></td>
+<td><p>机器错误信息1</p></td>
+<td><p>MERRINFO1</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x92</p></td>
+<td><p>机器错误信息2</p></td>
+<td><p>MERRINFO2</p></td>
+</tr>
+<tr class="row-even"><td><p>0x93</p></td>
+<td><p>机器错误异常入口地址</p></td>
+<td><p>MERRENTRY</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x94</p></td>
+<td><p>机器错误异常返回地址</p></td>
+<td><p>MERRERA</p></td>
+</tr>
+<tr class="row-even"><td><p>0x95</p></td>
+<td><p>机器错误异常数据保存</p></td>
+<td><p>MERRSAVE</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x98</p></td>
+<td><p>高速缓存标签</p></td>
+<td><p>CTAG</p></td>
+</tr>
+<tr class="row-even"><td><p>0x180+n (0≤n≤3)</p></td>
+<td><p>直接映射配置窗口n</p></td>
+<td><p>DMWn</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x200+2n (0≤n≤31)</p></td>
+<td><p>性能监测配置n</p></td>
+<td><p>PMCFGn</p></td>
+</tr>
+<tr class="row-even"><td><p>0x201+2n (0≤n≤31)</p></td>
+<td><p>性能监测计数器n</p></td>
+<td><p>PMCNTn</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x300</p></td>
+<td><p>内存读写监视点整体控制</p></td>
+<td><p>MWPC</p></td>
+</tr>
+<tr class="row-even"><td><p>0x301</p></td>
+<td><p>内存读写监视点整体状态</p></td>
+<td><p>MWPS</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x310+8n (0≤n≤7)</p></td>
+<td><p>内存读写监视点n配置1</p></td>
+<td><p>MWPnCFG1</p></td>
+</tr>
+<tr class="row-even"><td><p>0x311+8n (0≤n≤7)</p></td>
+<td><p>内存读写监视点n配置2</p></td>
+<td><p>MWPnCFG2</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x312+8n (0≤n≤7)</p></td>
+<td><p>内存读写监视点n配置3</p></td>
+<td><p>MWPnCFG3</p></td>
+</tr>
+<tr class="row-even"><td><p>0x313+8n (0≤n≤7)</p></td>
+<td><p>内存读写监视点n配置4</p></td>
+<td><p>MWPnCFG4</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x380</p></td>
+<td><p>取指监视点整体控制</p></td>
+<td><p>FWPC</p></td>
+</tr>
+<tr class="row-even"><td><p>0x381</p></td>
+<td><p>取指监视点整体状态</p></td>
+<td><p>FWPS</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x390+8n (0≤n≤7)</p></td>
+<td><p>取指监视点n配置1</p></td>
+<td><p>FWPnCFG1</p></td>
+</tr>
+<tr class="row-even"><td><p>0x391+8n (0≤n≤7)</p></td>
+<td><p>取指监视点n配置2</p></td>
+<td><p>FWPnCFG2</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x392+8n (0≤n≤7)</p></td>
+<td><p>取指监视点n配置3</p></td>
+<td><p>FWPnCFG3</p></td>
+</tr>
+<tr class="row-even"><td><p>0x393+8n (0≤n≤7)</p></td>
+<td><p>取指监视点n配置4</p></td>
+<td><p>FWPnCFG4</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x500</p></td>
+<td><p>调试寄存器</p></td>
+<td><p>DBG</p></td>
+</tr>
+<tr class="row-even"><td><p>0x501</p></td>
+<td><p>调试异常返回地址</p></td>
+<td><p>DERA</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x502</p></td>
+<td><p>调试数据保存</p></td>
+<td><p>DSAVE</p></td>
+</tr>
+</tbody>
+</table>
+<p>ERA，TLBRERA，MERRERA和DERA有时也分别称为EPC，TLBREPC，MERREPC和DEPC。</p>
+</section>
+</section>
+<section id="id6">
+<h2><span class="section-number">1.2. </span>基础指令集<a class="headerlink" href="#id6" title="Permalink to this headline">¶</a></h2>
+<section id="id7">
+<h3><span class="section-number">1.2.1. </span>指令格式<a class="headerlink" href="#id7" title="Permalink to this headline">¶</a></h3>
+<p>LoongArch的指令字长为32位，一共有9种基本指令格式（以及一些变体）:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 30%" />
+<col style="width: 70%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>格式名称</p></th>
+<th class="head"><p>指令构成</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>2R</p></td>
+<td><p>Opcode + Rj + Rd</p></td>
+</tr>
+<tr class="row-odd"><td><p>3R</p></td>
+<td><p>Opcode + Rk + Rj + Rd</p></td>
+</tr>
+<tr class="row-even"><td><p>4R</p></td>
+<td><p>Opcode + Ra + Rk + Rj + Rd</p></td>
+</tr>
+<tr class="row-odd"><td><p>2RI8</p></td>
+<td><p>Opcode + I8 + Rj + Rd</p></td>
+</tr>
+<tr class="row-even"><td><p>2RI12</p></td>
+<td><p>Opcode + I12 + Rj + Rd</p></td>
+</tr>
+<tr class="row-odd"><td><p>2RI14</p></td>
+<td><p>Opcode + I14 + Rj + Rd</p></td>
+</tr>
+<tr class="row-even"><td><p>2RI16</p></td>
+<td><p>Opcode + I16 + Rj + Rd</p></td>
+</tr>
+<tr class="row-odd"><td><p>1RI21</p></td>
+<td><p>Opcode + I21L + Rj + I21H</p></td>
+</tr>
+<tr class="row-even"><td><p>I26</p></td>
+<td><p>Opcode + I26L + I26H</p></td>
+</tr>
+</tbody>
+</table>
+<p>Opcode是指令操作码，Rj和Rk是源操作数（寄存器），Rd是目标操作数（寄存器），Ra是
+4R-type格式特有的附加操作数（寄存器）。I8/I12/I14/I16/I21/I26分别是8位/12位/14位/
+16位/21位/26位的立即数。其中较长的21位和26位立即数在指令字中被分割为高位部分与低位
+部分，所以你们在这里的格式描述中能够看到I21L/I21H和I26L/I26H这样带后缀的表述。</p>
+</section>
+<section id="id8">
+<h3><span class="section-number">1.2.2. </span>指令列表<a class="headerlink" href="#id8" title="Permalink to this headline">¶</a></h3>
+<p>为了简便起见，我们在此只罗列一下指令名称（助记符），需要详细信息请阅读
+<a class="reference internal" href="#loongarch-references-zh-cn"><span class="std std-ref">参考文献</span></a> 中的文档。</p>
+<ol class="arabic">
+<li><p>算术运算指令:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ADD.W SUB.W ADDI.W ADD.D SUB.D ADDI.D
+SLT SLTU SLTI SLTUI
+AND OR NOR XOR ANDN ORN ANDI ORI XORI
+MUL.W MULH.W MULH.WU DIV.W DIV.WU MOD.W MOD.WU
+MUL.D MULH.D MULH.DU DIV.D DIV.DU MOD.D MOD.DU
+PCADDI PCADDU12I PCADDU18I
+LU12I.W LU32I.D LU52I.D ADDU16I.D
+</pre></div>
+</div>
+</li>
+<li><p>移位运算指令:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>SLL.W SRL.W SRA.W ROTR.W SLLI.W SRLI.W SRAI.W ROTRI.W
+SLL.D SRL.D SRA.D ROTR.D SLLI.D SRLI.D SRAI.D ROTRI.D
+</pre></div>
+</div>
+</li>
+<li><p>位域操作指令:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>EXT.W.B EXT.W.H CLO.W CLO.D SLZ.W CLZ.D CTO.W CTO.D CTZ.W CTZ.D
+BYTEPICK.W BYTEPICK.D BSTRINS.W BSTRINS.D BSTRPICK.W BSTRPICK.D
+REVB.2H REVB.4H REVB.2W REVB.D REVH.2W REVH.D BITREV.4B BITREV.8B BITREV.W BITREV.D
+MASKEQZ MASKNEZ
+</pre></div>
+</div>
+</li>
+<li><p>分支转移指令:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>BEQ BNE BLT BGE BLTU BGEU BEQZ BNEZ B BL JIRL
+</pre></div>
+</div>
+</li>
+<li><p>访存读写指令:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>LD.B LD.BU LD.H LD.HU LD.W LD.WU LD.D ST.B ST.H ST.W ST.D
+LDX.B LDX.BU LDX.H LDX.HU LDX.W LDX.WU LDX.D STX.B STX.H STX.W STX.D
+LDPTR.W LDPTR.D STPTR.W STPTR.D
+PRELD PRELDX
+</pre></div>
+</div>
+</li>
+<li><p>原子操作指令:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>LL.W SC.W LL.D SC.D
+AMSWAP.W AMSWAP.D AMADD.W AMADD.D AMAND.W AMAND.D AMOR.W AMOR.D AMXOR.W AMXOR.D
+AMMAX.W AMMAX.D AMMIN.W AMMIN.D
+</pre></div>
+</div>
+</li>
+<li><p>栅障指令:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>IBAR DBAR
+</pre></div>
+</div>
+</li>
+<li><p>特殊指令:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>SYSCALL BREAK CPUCFG NOP IDLE ERTN(ERET) DBCL(DBGCALL) RDTIMEL.W RDTIMEH.W RDTIME.D
+ASRTLE.D ASRTGT.D
+</pre></div>
+</div>
+</li>
+<li><p>特权指令:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>CSRRD CSRWR CSRXCHG
+IOCSRRD.B IOCSRRD.H IOCSRRD.W IOCSRRD.D IOCSRWR.B IOCSRWR.H IOCSRWR.W IOCSRWR.D
+CACOP TLBP(TLBSRCH) TLBRD TLBWR TLBFILL TLBCLR TLBFLUSH INVTLB LDDIR LDPTE
+</pre></div>
+</div>
+</li>
+</ol>
+</section>
+</section>
+<section id="id9">
+<h2><span class="section-number">1.3. </span>虚拟内存<a class="headerlink" href="#id9" title="Permalink to this headline">¶</a></h2>
+<p>LoongArch可以使用直接映射虚拟内存和分页映射虚拟内存。</p>
+<p>直接映射虚拟内存通过CSR.DMWn（n=0~3）来进行配置，虚拟地址（VA）和物理地址（PA）
+之间有简单的映射关系:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>VA = PA + 固定偏移
+</pre></div>
+</div>
+<p>分页映射的虚拟地址（VA）和物理地址（PA）有任意的映射关系，这种关系记录在TLB和页
+表中。LoongArch的TLB包括一个全相联的MTLB（Multiple Page Size TLB，多样页大小TLB）
+和一个组相联的STLB（Single Page Size TLB，单一页大小TLB）。</p>
+<p>缺省状态下，LA32的整个虚拟地址空间配置如下：</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 18%" />
+<col style="width: 41%" />
+<col style="width: 41%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>区段名</p></th>
+<th class="head"><p>地址范围</p></th>
+<th class="head"><p>属性</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">UVRANGE</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">0x00000000</span> <span class="pre">-</span> <span class="pre">0x7FFFFFFF</span></code></p></td>
+<td><p>分页映射, 可缓存, PLV0~3</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">KPRANGE0</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">0x80000000</span> <span class="pre">-</span> <span class="pre">0x9FFFFFFF</span></code></p></td>
+<td><p>直接映射, 非缓存, PLV0</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">KPRANGE1</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">0xA0000000</span> <span class="pre">-</span> <span class="pre">0xBFFFFFFF</span></code></p></td>
+<td><p>直接映射, 可缓存, PLV0</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">KVRANGE</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">0xC0000000</span> <span class="pre">-</span> <span class="pre">0xFFFFFFFF</span></code></p></td>
+<td><p>分页映射, 可缓存, PLV0</p></td>
+</tr>
+</tbody>
+</table>
+<p>用户态（PLV3）只能访问UVRANGE，对于直接映射的KPRANGE0和KPRANGE1，将虚拟地址的第
+30~31位清零就等于物理地址。例如：物理地址0x00001000对应的非缓存直接映射虚拟地址
+是0x80001000，而其可缓存直接映射虚拟地址是0xA0001000。</p>
+<p>缺省状态下，LA64的整个虚拟地址空间配置如下：</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 18%" />
+<col style="width: 32%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>区段名</p></th>
+<th class="head"><p>地址范围</p></th>
+<th class="head"><p>属性</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">XUVRANGE</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">0x0000000000000000</span> <span class="pre">-</span>
+<span class="pre">0x3FFFFFFFFFFFFFFF</span></code></p></td>
+<td><p>分页映射, 可缓存, PLV0~3</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">XSPRANGE</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">0x4000000000000000</span> <span class="pre">-</span>
+<span class="pre">0x7FFFFFFFFFFFFFFF</span></code></p></td>
+<td><p>直接映射, 可缓存 / 非缓存, PLV0</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">XKPRANGE</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">0x8000000000000000</span> <span class="pre">-</span>
+<span class="pre">0xBFFFFFFFFFFFFFFF</span></code></p></td>
+<td><p>直接映射, 可缓存 / 非缓存, PLV0</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">XKVRANGE</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">0xC000000000000000</span> <span class="pre">-</span>
+<span class="pre">0xFFFFFFFFFFFFFFFF</span></code></p></td>
+<td><p>分页映射, 可缓存, PLV0</p></td>
+</tr>
+</tbody>
+</table>
+<p>用户态（PLV3）只能访问XUVRANGE，对于直接映射的XSPRANGE和XKPRANGE，将虚拟地址的第
+60~63位清零就等于物理地址，而其缓存属性是通过虚拟地址的第60~61位配置的（0表示强序
+非缓存，1表示一致可缓存，2表示弱序非缓存）。</p>
+<p>目前，我们仅用XKPRANGE来进行直接映射，XSPRANGE保留给以后用。</p>
+<p>此处给出一个直接映射的例子：物理地址0x00000000_00001000的强序非缓存直接映射虚拟地址
+（在XKPRANGE中）是0x80000000_00001000，其一致可缓存直接映射虚拟地址（在XKPRANGE中）
+是0x90000000_00001000，而其弱序非缓存直接映射虚拟地址（在XKPRANGE中）是0xA0000000_
+00001000。</p>
+</section>
+<section id="loongsonloongarch">
+<h2><span class="section-number">1.4. </span>Loongson与LoongArch的关系<a class="headerlink" href="#loongsonloongarch" title="Permalink to this headline">¶</a></h2>
+<p>LoongArch是一种RISC指令集架构（ISA），不同于现存的任何一种ISA，而Loongson（即龙
+芯）是一个处理器家族。龙芯包括三个系列：Loongson-1（龙芯1号）是32位处理器系列，
+Loongson-2（龙芯2号）是低端64位处理器系列，而Loongson-3（龙芯3号）是高端64位处理
+器系列。旧的龙芯处理器基于MIPS架构，而新的龙芯处理器基于LoongArch架构。以龙芯3号
+为例：龙芯3A1000/3B1500/3A2000/3A3000/3A4000都是兼容MIPS的，而龙芯3A5000（以及将
+来的型号）都是基于LoongArch的。</p>
+</section>
+<section id="loongarch-references-zh-cn">
+<span id="id10"></span><h2><span class="section-number">1.5. </span>参考文献<a class="headerlink" href="#loongarch-references-zh-cn" title="Permalink to this headline">¶</a></h2>
+<p>Loongson官方网站（龙芯中科技术股份有限公司）：</p>
+<blockquote>
+<div><p><a class="reference external" href="http://www.loongson.cn/">http://www.loongson.cn/</a></p>
+</div></blockquote>
+<p>Loongson与LoongArch的开发者网站（软件与文档资源）：</p>
+<blockquote>
+<div><p><a class="reference external" href="http://www.loongnix.cn/">http://www.loongnix.cn/</a></p>
+<p><a class="reference external" href="https://github.com/loongson/">https://github.com/loongson/</a></p>
+<p><a class="reference external" href="https://loongson.github.io/LoongArch-Documentation/">https://loongson.github.io/LoongArch-Documentation/</a></p>
+</div></blockquote>
+<p>LoongArch指令集架构的文档：</p>
+<blockquote>
+<div><p><a class="reference external" href="https://github.com/loongson/LoongArch-Documentation/releases/latest/download/LoongArch-Vol1-v1.02-CN.pdf">https://github.com/loongson/LoongArch-Documentation/releases/latest/download/LoongArch-Vol1-v1.02-CN.pdf</a> （中文版）</p>
+<p><a class="reference external" href="https://github.com/loongson/LoongArch-Documentation/releases/latest/download/LoongArch-Vol1-v1.02-EN.pdf">https://github.com/loongson/LoongArch-Documentation/releases/latest/download/LoongArch-Vol1-v1.02-EN.pdf</a> （英文版）</p>
+</div></blockquote>
+<p>LoongArch的ELF psABI文档：</p>
+<blockquote>
+<div><p><a class="reference external" href="https://github.com/loongson/LoongArch-Documentation/releases/latest/download/LoongArch-ELF-ABI-v2.00-CN.pdf">https://github.com/loongson/LoongArch-Documentation/releases/latest/download/LoongArch-ELF-ABI-v2.00-CN.pdf</a> （中文版）</p>
+<p><a class="reference external" href="https://github.com/loongson/LoongArch-Documentation/releases/latest/download/LoongArch-ELF-ABI-v2.00-EN.pdf">https://github.com/loongson/LoongArch-Documentation/releases/latest/download/LoongArch-ELF-ABI-v2.00-EN.pdf</a> （英文版）</p>
+</div></blockquote>
+<p>Loongson与LoongArch的Linux内核源码仓库：</p>
+<blockquote>
+<div><p><a class="reference external" href="https://git.kernel.org/pub/scm/linux/kernel/git/chenhuacai/linux-loongson.git">https://git.kernel.org/pub/scm/linux/kernel/git/chenhuacai/linux-loongson.git</a></p>
+</div></blockquote>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">1. LoongArch介绍</a><ul>
+<li><a class="reference internal" href="#id1">1.1. 寄存器</a><ul>
+<li><a class="reference internal" href="#id2">1.1.1. 通用寄存器</a></li>
+<li><a class="reference internal" href="#id3">1.1.2. 浮点寄存器</a></li>
+<li><a class="reference internal" href="#id4">1.1.3. 向量寄存器</a></li>
+<li><a class="reference internal" href="#id5">1.1.4. 控制状态寄存器</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id6">1.2. 基础指令集</a><ul>
+<li><a class="reference internal" href="#id7">1.2.1. 指令格式</a></li>
+<li><a class="reference internal" href="#id8">1.2.2. 指令列表</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id9">1.3. 虚拟内存</a></li>
+<li><a class="reference internal" href="#loongsonloongarch">1.4. Loongson与LoongArch的关系</a></li>
+<li><a class="reference internal" href="#loongarch-references-zh-cn">1.5. 参考文献</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/loongarch/introduction.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/loongarch/introduction.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

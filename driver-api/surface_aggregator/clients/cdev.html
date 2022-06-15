@@ -1,0 +1,494 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>User-Space EC Interface (cdev) &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="User-Space DTX (Clipboard Detachment System) Interface" href="dtx.html" />
+    <link rel="prev" title="Client Driver Documentation" href="index.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="user-space-ec-interface-cdev">
+<h1><a class="toc-backref" href="#id2">User-Space EC Interface (cdev)</a><a class="headerlink" href="#user-space-ec-interface-cdev" title="Permalink to this headline">¶</a></h1>
+<p>The <code class="docutils literal notranslate"><span class="pre">surface_aggregator_cdev</span></code> module provides a misc-device for the SSAM
+controller to allow for a (more or less) direct connection from user-space to
+the SAM EC. It is intended to be used for development and debugging, and
+therefore should not be used or relied upon in any other way. Note that this
+module is not loaded automatically, but instead must be loaded manually.</p>
+<p>The provided interface is accessible through the <code class="docutils literal notranslate"><span class="pre">/dev/surface/aggregator</span></code>
+device-file. All functionality of this interface is provided via IOCTLs.
+These IOCTLs and their respective input/output parameter structs are defined in
+<code class="docutils literal notranslate"><span class="pre">include/uapi/linux/surface_aggregator/cdev.h</span></code>.</p>
+<p>A small python library and scripts for accessing this interface can be found
+at <a class="reference external" href="https://github.com/linux-surface/surface-aggregator-module/tree/master/scripts/ssam">https://github.com/linux-surface/surface-aggregator-module/tree/master/scripts/ssam</a>.</p>
+<div class="contents topic" id="contents">
+<p class="topic-title">Contents</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="#user-space-ec-interface-cdev" id="id2">User-Space EC Interface (cdev)</a></p>
+<ul>
+<li><p><a class="reference internal" href="#receiving-events" id="id3">Receiving Events</a></p></li>
+<li><p><a class="reference internal" href="#controller-ioctls" id="id4">Controller IOCTLs</a></p>
+<ul>
+<li><p><a class="reference internal" href="#ssam-cdev-request" id="id5"><code class="docutils literal notranslate"><span class="pre">SSAM_CDEV_REQUEST</span></code></a></p></li>
+<li><p><a class="reference internal" href="#ssam-cdev-notif-register" id="id6"><code class="docutils literal notranslate"><span class="pre">SSAM_CDEV_NOTIF_REGISTER</span></code></a></p></li>
+<li><p><a class="reference internal" href="#ssam-cdev-notif-unregister" id="id7"><code class="docutils literal notranslate"><span class="pre">SSAM_CDEV_NOTIF_UNREGISTER</span></code></a></p></li>
+<li><p><a class="reference internal" href="#ssam-cdev-event-enable" id="id8"><code class="docutils literal notranslate"><span class="pre">SSAM_CDEV_EVENT_ENABLE</span></code></a></p></li>
+<li><p><a class="reference internal" href="#ssam-cdev-event-disable" id="id9"><code class="docutils literal notranslate"><span class="pre">SSAM_CDEV_EVENT_DISABLE</span></code></a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#structures-and-enums" id="id10">Structures and Enums</a></p></li>
+</ul>
+</li>
+</ul>
+</div>
+<section id="receiving-events">
+<h2><a class="toc-backref" href="#id3">Receiving Events</a><a class="headerlink" href="#receiving-events" title="Permalink to this headline">¶</a></h2>
+<p>Events can be received by reading from the device-file. The are represented by
+the <a class="reference internal" href="#c.ssam_cdev_event" title="ssam_cdev_event"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">ssam_cdev_event</span></code></a> datatype.</p>
+<p>Before events are available to be read, however, the desired notifiers must be
+registered via the <code class="docutils literal notranslate"><span class="pre">SSAM_CDEV_NOTIF_REGISTER</span></code> IOCTL. Notifiers are, in
+essence, callbacks, called when the EC sends an event. They are, in this
+interface, associated with a specific target category and device-file-instance.
+They forward any event of this category to the buffer of the corresponding
+instance, from which it can then be read.</p>
+<p>Notifiers themselves do not enable events on the EC. Thus, it may additionally
+be necessary to enable events via the <code class="docutils literal notranslate"><span class="pre">SSAM_CDEV_EVENT_ENABLE</span></code> IOCTL. While
+notifiers work per-client (i.e. per-device-file-instance), events are enabled
+globally, for the EC and all of its clients (regardless of userspace or
+non-userspace). The <code class="docutils literal notranslate"><span class="pre">SSAM_CDEV_EVENT_ENABLE</span></code> and <code class="docutils literal notranslate"><span class="pre">SSAM_CDEV_EVENT_DISABLE</span></code>
+IOCTLs take care of reference counting the events, such that an event is
+enabled as long as there is a client that has requested it.</p>
+<p>Note that enabled events are not automatically disabled once the client
+instance is closed. Therefore any client process (or group of processes) should
+balance their event enable calls with the corresponding event disable calls. It
+is, however, perfectly valid to enable and disable events on different client
+instances. For example, it is valid to set up notifiers and read events on
+client instance <code class="docutils literal notranslate"><span class="pre">A</span></code>, enable those events on instance <code class="docutils literal notranslate"><span class="pre">B</span></code> (note that these
+will also be received by A since events are enabled/disabled globally), and
+after no more events are desired, disable the previously enabled events via
+instance <code class="docutils literal notranslate"><span class="pre">C</span></code>.</p>
+</section>
+<section id="controller-ioctls">
+<h2><a class="toc-backref" href="#id4">Controller IOCTLs</a><a class="headerlink" href="#controller-ioctls" title="Permalink to this headline">¶</a></h2>
+<p>The following IOCTLs are provided:</p>
+<table class="docutils align-default" id="id1">
+<caption><span class="caption-text">Controller IOCTLs</span><a class="headerlink" href="#id1" title="Permalink to this table">¶</a></caption>
+<colgroup>
+<col style="width: 13%" />
+<col style="width: 13%" />
+<col style="width: 13%" />
+<col style="width: 13%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Type</p></th>
+<th class="head"><p>Number</p></th>
+<th class="head"><p>Direction</p></th>
+<th class="head"><p>Name</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">0xA5</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">1</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">WR</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">REQUEST</span></code></p></td>
+<td><p>Perform synchronous SAM request.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">0xA5</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">2</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">W</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">NOTIF_REGISTER</span></code></p></td>
+<td><p>Register event notifier.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">0xA5</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">3</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">W</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">NOTIF_UNREGISTER</span></code></p></td>
+<td><p>Unregister event notifier.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">0xA5</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">4</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">W</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">EVENT_ENABLE</span></code></p></td>
+<td><p>Enable event source.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">0xA5</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">5</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">W</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">EVENT_DISABLE</span></code></p></td>
+<td><p>Disable event source.</p></td>
+</tr>
+</tbody>
+</table>
+<section id="ssam-cdev-request">
+<h3><a class="toc-backref" href="#id5"><code class="docutils literal notranslate"><span class="pre">SSAM_CDEV_REQUEST</span></code></a><a class="headerlink" href="#ssam-cdev-request" title="Permalink to this headline">¶</a></h3>
+<p>Defined as <code class="docutils literal notranslate"><span class="pre">_IOWR(0xA5,</span> <span class="pre">1,</span> <span class="pre">struct</span> <span class="pre">ssam_cdev_request)</span></code>.</p>
+<p>Executes a synchronous SAM request. The request specification is passed in
+as argument of type <a class="reference internal" href="#c.ssam_cdev_request" title="ssam_cdev_request"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">ssam_cdev_request</span></code></a>, which is then written to/modified
+by the IOCTL to return status and result of the request.</p>
+<p>Request payload data must be allocated separately and is passed in via the
+<code class="docutils literal notranslate"><span class="pre">payload.data</span></code> and <code class="docutils literal notranslate"><span class="pre">payload.length</span></code> members. If a response is required,
+the response buffer must be allocated by the caller and passed in via the
+<code class="docutils literal notranslate"><span class="pre">response.data</span></code> member. The <code class="docutils literal notranslate"><span class="pre">response.length</span></code> member must be set to the
+capacity of this buffer, or if no response is required, zero. Upon
+completion of the request, the call will write the response to the response
+buffer (if its capacity allows it) and overwrite the length field with the
+actual size of the response, in bytes.</p>
+<p>Additionally, if the request has a response, this must be indicated via the
+request flags, as is done with in-kernel requests. Request flags can be set
+via the <code class="docutils literal notranslate"><span class="pre">flags</span></code> member and the values correspond to the values found in
+<a class="reference internal" href="#c.ssam_cdev_request_flags" title="ssam_cdev_request_flags"><code class="xref c c-type docutils literal notranslate"><span class="pre">enum</span> <span class="pre">ssam_cdev_request_flags</span></code></a>.</p>
+<p>Finally, the status of the request itself is returned in the <code class="docutils literal notranslate"><span class="pre">status</span></code>
+member (a negative errno value indicating failure). Note that failure
+indication of the IOCTL is separated from failure indication of the request:
+The IOCTL returns a negative status code if anything failed during setup of
+the request (<code class="docutils literal notranslate"><span class="pre">-EFAULT</span></code>) or if the provided argument or any of its fields
+are invalid (<code class="docutils literal notranslate"><span class="pre">-EINVAL</span></code>). In this case, the status value of the request
+argument may be set, providing more detail on what went wrong (e.g.
+<code class="docutils literal notranslate"><span class="pre">-ENOMEM</span></code> for out-of-memory), but this value may also be zero. The IOCTL
+will return with a zero status code in case the request has been set up,
+submitted, and completed (i.e. handed back to user-space) successfully from
+inside the IOCTL, but the request <code class="docutils literal notranslate"><span class="pre">status</span></code> member may still be negative in
+case the actual execution of the request failed after it has been submitted.</p>
+<p>A full definition of the argument struct is provided below.</p>
+</section>
+<section id="ssam-cdev-notif-register">
+<h3><a class="toc-backref" href="#id6"><code class="docutils literal notranslate"><span class="pre">SSAM_CDEV_NOTIF_REGISTER</span></code></a><a class="headerlink" href="#ssam-cdev-notif-register" title="Permalink to this headline">¶</a></h3>
+<p>Defined as <code class="docutils literal notranslate"><span class="pre">_IOW(0xA5,</span> <span class="pre">2,</span> <span class="pre">struct</span> <span class="pre">ssam_cdev_notifier_desc)</span></code>.</p>
+<p>Register a notifier for the event target category specified in the given
+notifier description with the specified priority. Notifiers registration is
+required to receive events, but does not enable events themselves. After a
+notifier for a specific target category has been registered, all events of that
+category will be forwarded to the userspace client and can then be read from
+the device file instance. Note that events may have to be enabled, e.g. via the
+<code class="docutils literal notranslate"><span class="pre">SSAM_CDEV_EVENT_ENABLE</span></code> IOCTL, before the EC will send them.</p>
+<p>Only one notifier can be registered per target category and client instance. If
+a notifier has already been registered, this IOCTL will fail with <code class="docutils literal notranslate"><span class="pre">-EEXIST</span></code>.</p>
+<p>Notifiers will automatically be removed when the device file instance is
+closed.</p>
+</section>
+<section id="ssam-cdev-notif-unregister">
+<h3><a class="toc-backref" href="#id7"><code class="docutils literal notranslate"><span class="pre">SSAM_CDEV_NOTIF_UNREGISTER</span></code></a><a class="headerlink" href="#ssam-cdev-notif-unregister" title="Permalink to this headline">¶</a></h3>
+<p>Defined as <code class="docutils literal notranslate"><span class="pre">_IOW(0xA5,</span> <span class="pre">3,</span> <span class="pre">struct</span> <span class="pre">ssam_cdev_notifier_desc)</span></code>.</p>
+<p>Unregisters the notifier associated with the specified target category. The
+priority field will be ignored by this IOCTL. If no notifier has been
+registered for this client instance and the given category, this IOCTL will
+fail with <code class="docutils literal notranslate"><span class="pre">-ENOENT</span></code>.</p>
+</section>
+<section id="ssam-cdev-event-enable">
+<h3><a class="toc-backref" href="#id8"><code class="docutils literal notranslate"><span class="pre">SSAM_CDEV_EVENT_ENABLE</span></code></a><a class="headerlink" href="#ssam-cdev-event-enable" title="Permalink to this headline">¶</a></h3>
+<p>Defined as <code class="docutils literal notranslate"><span class="pre">_IOW(0xA5,</span> <span class="pre">4,</span> <span class="pre">struct</span> <span class="pre">ssam_cdev_event_desc)</span></code>.</p>
+<p>Enable the event associated with the given event descriptor.</p>
+<p>Note that this call will not register a notifier itself, it will only enable
+events on the controller. If you want to receive events by reading from the
+device file, you will need to register the corresponding notifier(s) on that
+instance.</p>
+<p>Events are not automatically disabled when the device file is closed. This must
+be done manually, via a call to the <code class="docutils literal notranslate"><span class="pre">SSAM_CDEV_EVENT_DISABLE</span></code> IOCTL.</p>
+</section>
+<section id="ssam-cdev-event-disable">
+<h3><a class="toc-backref" href="#id9"><code class="docutils literal notranslate"><span class="pre">SSAM_CDEV_EVENT_DISABLE</span></code></a><a class="headerlink" href="#ssam-cdev-event-disable" title="Permalink to this headline">¶</a></h3>
+<p>Defined as <code class="docutils literal notranslate"><span class="pre">_IOW(0xA5,</span> <span class="pre">5,</span> <span class="pre">struct</span> <span class="pre">ssam_cdev_event_desc)</span></code>.</p>
+<p>Disable the event associated with the given event descriptor.</p>
+<p>Note that this will not unregister any notifiers. Events may still be received
+and forwarded to user-space after this call. The only safe way of stopping
+events from being received is unregistering all previously registered
+notifiers.</p>
+</section>
+</section>
+<section id="structures-and-enums">
+<h2><a class="toc-backref" href="#id10">Structures and Enums</a><a class="headerlink" href="#structures-and-enums" title="Permalink to this headline">¶</a></h2>
+<dl class="type">
+<dt id="c.ssam_cdev_request_flags">
+enum <code class="sig-name descname">ssam_cdev_request_flags</code><a class="headerlink" href="#c.ssam_cdev_request_flags" title="Permalink to this definition">¶</a></dt>
+<dd><p>Request flags for SSAM cdev request IOCTL.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Constants</strong></p>
+<p><code class="docutils literal notranslate"><span class="pre">SSAM_CDEV_REQUEST_HAS_RESPONSE</span></code></p>
+<blockquote>
+<div><p>Specifies that the request expects a response. If not set, the request
+will be directly completed after its underlying packet has been
+transmitted. If set, the request transport system waits for a response
+of the request.</p>
+</div></blockquote>
+<p><code class="docutils literal notranslate"><span class="pre">SSAM_CDEV_REQUEST_UNSEQUENCED</span></code></p>
+<blockquote>
+<div><p>Specifies that the request should be transmitted via an unsequenced
+packet. If set, the request must not have a response, meaning that this
+flag and the <code class="docutils literal notranslate"><span class="pre">SSAM_CDEV_REQUEST_HAS_RESPONSE</span></code> flag are mutually
+exclusive.</p>
+</div></blockquote>
+</div>
+<dl class="type">
+<dt id="c.ssam_cdev_request">
+struct <code class="sig-name descname">ssam_cdev_request</code><a class="headerlink" href="#c.ssam_cdev_request" title="Permalink to this definition">¶</a></dt>
+<dd><p>Controller request IOCTL argument.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct ssam_cdev_request {
+    __u8 target_category;
+    __u8 target_id;
+    __u8 command_id;
+    __u8 instance_id;
+    __u16 flags;
+    __s16 status;
+    struct {
+        __u64 data;
+        __u16 length;
+        __u8 __pad[6];
+    } payload;
+    struct {
+        __u64 data;
+        __u16 length;
+        __u8 __pad[6];
+    } response;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">target_category</span></code></dt><dd><p>Target category of the SAM request.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">target_id</span></code></dt><dd><p>Target ID of the SAM request.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">command_id</span></code></dt><dd><p>Command ID of the SAM request.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">instance_id</span></code></dt><dd><p>Instance ID of the SAM request.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">flags</span></code></dt><dd><p>Request flags (see <a class="reference internal" href="#c.ssam_cdev_request_flags" title="ssam_cdev_request_flags"><code class="xref c c-type docutils literal notranslate"><span class="pre">enum</span> <span class="pre">ssam_cdev_request_flags</span></code></a>).</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">status</span></code></dt><dd><p>Request status (output).</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">payload</span></code></dt><dd><p>Request payload (input data).</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">payload.data</span></code></dt><dd><p>Pointer to request payload data.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">payload.length</span></code></dt><dd><p>Length of request payload data (in bytes).</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">response</span></code></dt><dd><p>Request response (output data).</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">response.data</span></code></dt><dd><p>Pointer to response buffer.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">response.length</span></code></dt><dd><p>On input: Capacity of response buffer (in bytes).
+On output: Length of request response (number of bytes
+in the buffer that are actually used).</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.ssam_cdev_notifier_desc">
+struct <code class="sig-name descname">ssam_cdev_notifier_desc</code><a class="headerlink" href="#c.ssam_cdev_notifier_desc" title="Permalink to this definition">¶</a></dt>
+<dd><p>Notifier descriptor.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct ssam_cdev_notifier_desc {
+    __s32 priority;
+    __u8 target_category;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">priority</span></code></dt><dd><p>Priority value determining the order in which notifier
+callbacks will be called. A higher value means higher
+priority, i.e. the associated callback will be executed
+earlier than other (lower priority) callbacks.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">target_category</span></code></dt><dd><p>The event target category for which this notifier should
+receive events.</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>Specifies the notifier that should be registered or unregistered,
+specifically with which priority and for which target category of events.</p>
+<dl class="type">
+<dt id="c.ssam_cdev_event_desc">
+struct <code class="sig-name descname">ssam_cdev_event_desc</code><a class="headerlink" href="#c.ssam_cdev_event_desc" title="Permalink to this definition">¶</a></dt>
+<dd><p>Event descriptor.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct ssam_cdev_event_desc {
+    struct {
+        __u8 target_category;
+        __u8 target_id;
+        __u8 cid_enable;
+        __u8 cid_disable;
+    } reg;
+    struct {
+        __u8 target_category;
+        __u8 instance;
+    } id;
+    __u8 flags;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">reg</span></code></dt><dd><p>Registry via which the event will be enabled/disabled.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">reg.target_category</span></code></dt><dd><p>Target category for the event registry requests.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">reg.target_id</span></code></dt><dd><p>Target ID for the event registry requests.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">reg.cid_enable</span></code></dt><dd><p>Command ID for the event-enable request.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">reg.cid_disable</span></code></dt><dd><p>Command ID for the event-disable request.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">id</span></code></dt><dd><p>ID specifying the event.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">id.target_category</span></code></dt><dd><p>Target category of the event source.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">id.instance</span></code></dt><dd><p>Instance ID of the event source.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">flags</span></code></dt><dd><p>Flags used for enabling the event.</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>Specifies which event should be enabled/disabled and how to do that.</p>
+<dl class="type">
+<dt id="c.ssam_cdev_event">
+struct <code class="sig-name descname">ssam_cdev_event</code><a class="headerlink" href="#c.ssam_cdev_event" title="Permalink to this definition">¶</a></dt>
+<dd><p>SSAM event sent by the EC.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct ssam_cdev_event {
+    __u8 target_category;
+    __u8 target_id;
+    __u8 command_id;
+    __u8 instance_id;
+    __u16 length;
+    __u8 data[];
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">target_category</span></code></dt><dd><p>Target category of the event source. See <code class="xref c c-type docutils literal notranslate"><span class="pre">enum</span> <span class="pre">ssam_ssh_tc</span></code>.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">target_id</span></code></dt><dd><p>Target ID of the event source.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">command_id</span></code></dt><dd><p>Command ID of the event.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">instance_id</span></code></dt><dd><p>Instance ID of the event source.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">length</span></code></dt><dd><p>Length of the event payload in bytes.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">data</span></code></dt><dd><p>Event payload data.</p>
+</dd>
+</dl>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">User-Space EC Interface (cdev)</a><ul>
+<li><a class="reference internal" href="#receiving-events">Receiving Events</a></li>
+<li><a class="reference internal" href="#controller-ioctls">Controller IOCTLs</a><ul>
+<li><a class="reference internal" href="#ssam-cdev-request"><code class="docutils literal notranslate"><span class="pre">SSAM_CDEV_REQUEST</span></code></a></li>
+<li><a class="reference internal" href="#ssam-cdev-notif-register"><code class="docutils literal notranslate"><span class="pre">SSAM_CDEV_NOTIF_REGISTER</span></code></a></li>
+<li><a class="reference internal" href="#ssam-cdev-notif-unregister"><code class="docutils literal notranslate"><span class="pre">SSAM_CDEV_NOTIF_UNREGISTER</span></code></a></li>
+<li><a class="reference internal" href="#ssam-cdev-event-enable"><code class="docutils literal notranslate"><span class="pre">SSAM_CDEV_EVENT_ENABLE</span></code></a></li>
+<li><a class="reference internal" href="#ssam-cdev-event-disable"><code class="docutils literal notranslate"><span class="pre">SSAM_CDEV_EVENT_DISABLE</span></code></a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#structures-and-enums">Structures and Enums</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/driver-api/surface_aggregator/clients/cdev.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/driver-api/surface_aggregator/clients/cdev.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

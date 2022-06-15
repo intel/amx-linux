@@ -1,0 +1,211 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Dell Remote BIOS Update driver (dell_rbu) &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Device Mapper" href="device-mapper/index.html" />
+    <link rel="prev" title="How CPU topology info is exported via sysfs" href="cputopology.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="dell-remote-bios-update-driver-dell-rbu">
+<h1>Dell Remote BIOS Update driver (dell_rbu)<a class="headerlink" href="#dell-remote-bios-update-driver-dell-rbu" title="Permalink to this headline">¶</a></h1>
+<section id="purpose">
+<h2>Purpose<a class="headerlink" href="#purpose" title="Permalink to this headline">¶</a></h2>
+<p>Document demonstrating the use of the Dell Remote BIOS Update driver
+for updating BIOS images on Dell servers and desktops.</p>
+</section>
+<section id="scope">
+<h2>Scope<a class="headerlink" href="#scope" title="Permalink to this headline">¶</a></h2>
+<p>This document discusses the functionality of the rbu driver only.
+It does not cover the support needed from applications to enable the BIOS to
+update itself with the image downloaded in to the memory.</p>
+</section>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Permalink to this headline">¶</a></h2>
+<p>This driver works with Dell OpenManage or Dell Update Packages for updating
+the BIOS on Dell servers (starting from servers sold since 1999), desktops
+and notebooks (starting from those sold in 2005).</p>
+<p>Please go to  <a class="reference external" href="http://support.dell.com">http://support.dell.com</a> register and you can find info on
+OpenManage and Dell Update packages (DUP).</p>
+<p>Libsmbios can also be used to update BIOS on Dell systems go to
+<a class="reference external" href="https://linux.dell.com/libsmbios/">https://linux.dell.com/libsmbios/</a> for details.</p>
+<p>Dell_RBU driver supports BIOS update using the monolithic image and packetized
+image methods. In case of monolithic the driver allocates a contiguous chunk
+of physical pages having the BIOS image. In case of packetized the app
+using the driver breaks the image in to packets of fixed sizes and the driver
+would place each packet in contiguous physical memory. The driver also
+maintains a link list of packets for reading them back.</p>
+<p>If the dell_rbu driver is unloaded all the allocated memory is freed.</p>
+<p>The rbu driver needs to have an application (as mentioned above) which will
+inform the BIOS to enable the update in the next system reboot.</p>
+<p>The user should not unload the rbu driver after downloading the BIOS image
+or updating.</p>
+<p>The driver load creates the following directories under the /sys file system:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/sys/class/firmware/dell_rbu/loading
+/sys/class/firmware/dell_rbu/data
+/sys/devices/platform/dell_rbu/image_type
+/sys/devices/platform/dell_rbu/data
+/sys/devices/platform/dell_rbu/packet_size
+</pre></div>
+</div>
+<p>The driver supports two types of update mechanism; monolithic and packetized.
+These update mechanism depends upon the BIOS currently running on the system.
+Most of the Dell systems support a monolithic update where the BIOS image is
+copied to a single contiguous block of physical memory.</p>
+<p>In case of packet mechanism the single memory can be broken in smaller chunks
+of contiguous memory and the BIOS image is scattered in these packets.</p>
+<p>By default the driver uses monolithic memory for the update type. This can be
+changed to packets during the driver load time by specifying the load
+parameter image_type=packet.  This can also be changed later as below:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>echo packet &gt; /sys/devices/platform/dell_rbu/image_type
+</pre></div>
+</div>
+<p>In packet update mode the packet size has to be given before any packets can
+be downloaded. It is done as below:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>echo XXXX &gt; /sys/devices/platform/dell_rbu/packet_size
+</pre></div>
+</div>
+<p>In the packet update mechanism, the user needs to create a new file having
+packets of data arranged back to back. It can be done as follows:
+The user creates packets header, gets the chunk of the BIOS image and
+places it next to the packetheader; now, the packetheader + BIOS image chunk
+added together should match the specified packet_size. This makes one
+packet, the user needs to create more such packets out of the entire BIOS
+image file and then arrange all these packets back to back in to one single
+file.</p>
+<p>This file is then copied to /sys/class/firmware/dell_rbu/data.
+Once this file gets to the driver, the driver extracts packet_size data from
+the file and spreads it across the physical memory in contiguous packet_sized
+space.</p>
+<p>This method makes sure that all the packets get to the driver in a single operation.</p>
+<p>In monolithic update the user simply get the BIOS image (.hdr file) and copies
+to the data file as is without any change to the BIOS image itself.</p>
+<p>Do the steps below to download the BIOS image.</p>
+<ol class="arabic simple">
+<li><p>echo 1 &gt; /sys/class/firmware/dell_rbu/loading</p></li>
+<li><p>cp bios_image.hdr /sys/class/firmware/dell_rbu/data</p></li>
+<li><p>echo 0 &gt; /sys/class/firmware/dell_rbu/loading</p></li>
+</ol>
+<p>The /sys/class/firmware/dell_rbu/ entries will remain till the following is
+done.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>echo -1 &gt; /sys/class/firmware/dell_rbu/loading
+</pre></div>
+</div>
+<p>Until this step is completed the driver cannot be unloaded.</p>
+<p>Also echoing either mono, packet or init in to image_type will free up the
+memory allocated by the driver.</p>
+<p>If a user by accident executes steps 1 and 3 above without executing step 2;
+it will make the /sys/class/firmware/dell_rbu/ entries disappear.</p>
+<p>The entries can be recreated by doing the following:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>echo init &gt; /sys/devices/platform/dell_rbu/image_type
+</pre></div>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>echoing init in image_type does not change its original value.</p>
+</div>
+<p>Also the driver provides /sys/devices/platform/dell_rbu/data readonly file to
+read back the image downloaded.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>After updating the BIOS image a user mode application needs to execute
+code which sends the BIOS update request to the BIOS. So on the next reboot
+the BIOS knows about the new image downloaded and it updates itself.
+Also don’t unload the rbu driver if the image has to be updated.</p>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Dell Remote BIOS Update driver (dell_rbu)</a><ul>
+<li><a class="reference internal" href="#purpose">Purpose</a></li>
+<li><a class="reference internal" href="#scope">Scope</a></li>
+<li><a class="reference internal" href="#overview">Overview</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/admin-guide/dell_rbu.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/admin-guide/dell_rbu.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

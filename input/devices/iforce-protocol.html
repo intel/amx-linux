@@ -1,0 +1,508 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>10. Iforce Protocol &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="11. Parallel Port Joystick Drivers" href="joystick-parport.html" />
+    <link rel="prev" title="9. Elantech Touchpad Driver" href="elantech.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="iforce-protocol">
+<h1><span class="section-number">10. </span>Iforce Protocol<a class="headerlink" href="#iforce-protocol" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">Author</dt>
+<dd class="field-odd"><p>Johann Deneux &lt;<a class="reference external" href="mailto:johann&#46;deneux&#37;&#52;&#48;gmail&#46;com">johann<span>&#46;</span>deneux<span>&#64;</span>gmail<span>&#46;</span>com</a>&gt;</p>
+</dd>
+</dl>
+<p>Home page at <a class="reference external" href="http://web.archive.org/web/*/http://www.esil.univ-mrs.fr">http://web.archive.org/web/*/http://www.esil.univ-mrs.fr</a></p>
+<dl class="field-list simple">
+<dt class="field-odd">Additions</dt>
+<dd class="field-odd"><p>by Vojtech Pavlik.</p>
+</dd>
+</dl>
+<section id="introduction">
+<h2><span class="section-number">10.1. </span>Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>This document describes what I managed to discover about the protocol used to
+specify force effects to I-Force 2.0 devices.  None of this information comes
+from Immerse. That’s why you should not trust what is written in this
+document. This document is intended to help understanding the protocol.
+This is not a reference. Comments and corrections are welcome.  To contact me,
+send an email to: <a class="reference external" href="mailto:johann&#46;deneux&#37;&#52;&#48;gmail&#46;com">johann<span>&#46;</span>deneux<span>&#64;</span>gmail<span>&#46;</span>com</a></p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>I shall not be held responsible for any damage or harm caused if you try to
+send data to your I-Force device based on what you read in this document.</p>
+</div>
+</section>
+<section id="preliminary-notes">
+<h2><span class="section-number">10.2. </span>Preliminary Notes<a class="headerlink" href="#preliminary-notes" title="Permalink to this headline">¶</a></h2>
+<p>All values are hexadecimal with big-endian encoding (msb on the left). Beware,
+values inside packets are encoded using little-endian.  Bytes whose roles are
+unknown are marked ???  Information that needs deeper inspection is marked (?)</p>
+<section id="general-form-of-a-packet">
+<h3><span class="section-number">10.2.1. </span>General form of a packet<a class="headerlink" href="#general-form-of-a-packet" title="Permalink to this headline">¶</a></h3>
+<p>This is how packets look when the device uses the rs232 to communicate.</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 15%" />
+<col style="width: 15%" />
+<col style="width: 23%" />
+<col style="width: 31%" />
+<col style="width: 15%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>2B</p></td>
+<td><p>OP</p></td>
+<td><p>LEN</p></td>
+<td><p>DATA</p></td>
+<td><p>CS</p></td>
+</tr>
+</tbody>
+</table>
+<p>CS is the checksum. It is equal to the exclusive or of all bytes.</p>
+<p>When using USB:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 67%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>OP</p></td>
+<td><p>DATA</p></td>
+</tr>
+</tbody>
+</table>
+<p>The 2B, LEN and CS fields have disappeared, probably because USB handles
+frames and data corruption is handled or unsignificant.</p>
+<p>First, I describe effects that are sent by the device to the computer</p>
+</section>
+</section>
+<section id="device-input-state">
+<h2><span class="section-number">10.3. </span>Device input state<a class="headerlink" href="#device-input-state" title="Permalink to this headline">¶</a></h2>
+<p>This packet is used to indicate the state of each button and the value of each
+axis:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>OP= 01 for a joystick, 03 for a wheel
+LEN= Varies from device to device
+00 X-Axis lsb
+01 X-Axis msb
+02 Y-Axis lsb, or gas pedal for a wheel
+03 Y-Axis msb, or brake pedal for a wheel
+04 Throttle
+05 Buttons
+06 Lower 4 bits: Buttons
+   Upper 4 bits: Hat
+07 Rudder
+</pre></div>
+</div>
+</section>
+<section id="device-effects-states">
+<h2><span class="section-number">10.4. </span>Device effects states<a class="headerlink" href="#device-effects-states" title="Permalink to this headline">¶</a></h2>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>OP= 02
+LEN= Varies
+00 ? Bit 1 (Value 2) is the value of the deadman switch
+01 Bit 8 is set if the effect is playing. Bits 0 to 7 are the effect id.
+02 ??
+03 Address of parameter block changed (lsb)
+04 Address of parameter block changed (msb)
+05 Address of second parameter block changed (lsb)
+... depending on the number of parameter blocks updated
+</pre></div>
+</div>
+<section id="force-effect">
+<h3><span class="section-number">10.4.1. </span>Force effect<a class="headerlink" href="#force-effect" title="Permalink to this headline">¶</a></h3>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>OP=  01
+LEN= 0e
+00 Channel (when playing several effects at the same time, each must
+            be assigned a channel)
+01 Wave form
+        Val 00 Constant
+        Val 20 Square
+        Val 21 Triangle
+        Val 22 Sine
+        Val 23 Sawtooth up
+        Val 24 Sawtooth down
+        Val 40 Spring (Force = f(pos))
+        Val 41 Friction (Force = f(velocity)) and Inertia
+               (Force = f(acceleration))
+
+
+02 Axes affected and trigger
+        Bits 4-7: Val 2 = effect along one axis. Byte 05 indicates direction
+                Val 4 = X axis only. Byte 05 must contain 5a
+                Val 8 = Y axis only. Byte 05 must contain b4
+                Val c = X and Y axes. Bytes 05 must contain 60
+        Bits 0-3: Val 0 = No trigger
+                Val x+1 = Button x triggers the effect
+        When the whole byte is 0, cancel the previously set trigger
+
+03-04 Duration of effect (little endian encoding, in ms)
+
+05 Direction of effect, if applicable. Else, see 02 for value to assign.
+
+06-07 Minimum time between triggering.
+
+08-09 Address of periodicity or magnitude parameters
+0a-0b Address of attack and fade parameters, or ffff if none.
+*or*
+08-09 Address of interactive parameters for X-axis,
+      or ffff if not applicable
+0a-0b Address of interactive parameters for Y-axis,
+      or ffff if not applicable
+
+0c-0d Delay before execution of effect (little endian encoding, in ms)
+</pre></div>
+</div>
+</section>
+<section id="time-based-parameters">
+<h3><span class="section-number">10.4.2. </span>Time based parameters<a class="headerlink" href="#time-based-parameters" title="Permalink to this headline">¶</a></h3>
+<section id="attack-and-fade">
+<h4><span class="section-number">10.4.2.1. </span>Attack and fade<a class="headerlink" href="#attack-and-fade" title="Permalink to this headline">¶</a></h4>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>OP=  02
+LEN= 08
+00-01 Address where to store the parameters
+02-03 Duration of attack (little endian encoding, in ms)
+04 Level at end of attack. Signed byte.
+05-06 Duration of fade.
+07 Level at end of fade.
+</pre></div>
+</div>
+</section>
+<section id="magnitude">
+<h4><span class="section-number">10.4.2.2. </span>Magnitude<a class="headerlink" href="#magnitude" title="Permalink to this headline">¶</a></h4>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>OP=  03
+LEN= 03
+00-01 Address
+02 Level. Signed byte.
+</pre></div>
+</div>
+</section>
+<section id="periodicity">
+<h4><span class="section-number">10.4.2.3. </span>Periodicity<a class="headerlink" href="#periodicity" title="Permalink to this headline">¶</a></h4>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>OP=  04
+LEN= 07
+00-01 Address
+02 Magnitude. Signed byte.
+03 Offset. Signed byte.
+04 Phase. Val 00 = 0 deg, Val 40 = 90 degs.
+05-06 Period (little endian encoding, in ms)
+</pre></div>
+</div>
+</section>
+</section>
+<section id="interactive-parameters">
+<h3><span class="section-number">10.4.3. </span>Interactive parameters<a class="headerlink" href="#interactive-parameters" title="Permalink to this headline">¶</a></h3>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>OP=  05
+LEN= 0a
+00-01 Address
+02 Positive Coeff
+03 Negative Coeff
+04+05 Offset (center)
+06+07 Dead band (Val 01F4 = 5000 (decimal))
+08 Positive saturation (Val 0a = 1000 (decimal) Val 64 = 10000 (decimal))
+09 Negative saturation
+</pre></div>
+</div>
+<p>The encoding is a bit funny here: For coeffs, these are signed values. The
+maximum value is 64 (100 decimal), the min is 9c.
+For the offset, the minimum value is FE0C, the maximum value is 01F4.
+For the deadband, the minimum value is 0, the max is 03E8.</p>
+</section>
+<section id="controls">
+<h3><span class="section-number">10.4.4. </span>Controls<a class="headerlink" href="#controls" title="Permalink to this headline">¶</a></h3>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>OP=  41
+LEN= 03
+00 Channel
+01 Start/Stop
+        Val 00: Stop
+        Val 01: Start and play once.
+        Val 41: Start and play n times (See byte 02 below)
+02 Number of iterations n.
+</pre></div>
+</div>
+</section>
+<section id="init">
+<h3><span class="section-number">10.4.5. </span>Init<a class="headerlink" href="#init" title="Permalink to this headline">¶</a></h3>
+<section id="querying-features">
+<h4><span class="section-number">10.4.5.1. </span>Querying features<a class="headerlink" href="#querying-features" title="Permalink to this headline">¶</a></h4>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>OP=  ff
+Query command. Length varies according to the query type.
+The general format of this packet is:
+ff 01 QUERY [INDEX] CHECKSUM
+responses are of the same form:
+FF LEN QUERY VALUE_QUERIED CHECKSUM2
+where LEN = 1 + length(VALUE_QUERIED)
+</pre></div>
+</div>
+<section id="query-ram-size">
+<h5><span class="section-number">10.4.5.1.1. </span>Query ram size<a class="headerlink" href="#query-ram-size" title="Permalink to this headline">¶</a></h5>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>QUERY = 42 (&#39;B&#39;uffer size)
+</pre></div>
+</div>
+<p>The device should reply with the same packet plus two additional bytes
+containing the size of the memory:
+ff 03 42 03 e8 CS would mean that the device has 1000 bytes of ram available.</p>
+</section>
+<section id="query-number-of-effects">
+<h5><span class="section-number">10.4.5.1.2. </span>Query number of effects<a class="headerlink" href="#query-number-of-effects" title="Permalink to this headline">¶</a></h5>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>QUERY = 4e (&#39;N&#39;umber of effects)
+</pre></div>
+</div>
+<p>The device should respond by sending the number of effects that can be played
+at the same time (one byte)
+ff 02 4e 14 CS would stand for 20 effects.</p>
+</section>
+<section id="vendor-s-id">
+<h5><span class="section-number">10.4.5.1.3. </span>Vendor’s id<a class="headerlink" href="#vendor-s-id" title="Permalink to this headline">¶</a></h5>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>QUERY = 4d (&#39;M&#39;anufacturer)
+</pre></div>
+</div>
+<p>Query the vendors’id (2 bytes)</p>
+</section>
+<section id="product-id">
+<h5><span class="section-number">10.4.5.1.4. </span>Product id<a class="headerlink" href="#product-id" title="Permalink to this headline">¶</a></h5>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>QUERY = 50 (&#39;P&#39;roduct)
+</pre></div>
+</div>
+<p>Query the product id (2 bytes)</p>
+</section>
+<section id="open-device">
+<h5><span class="section-number">10.4.5.1.5. </span>Open device<a class="headerlink" href="#open-device" title="Permalink to this headline">¶</a></h5>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>QUERY = 4f (&#39;O&#39;pen)
+</pre></div>
+</div>
+<p>No data returned.</p>
+</section>
+<section id="close-device">
+<h5><span class="section-number">10.4.5.1.6. </span>Close device<a class="headerlink" href="#close-device" title="Permalink to this headline">¶</a></h5>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>QUERY = 43 (&#39;C&#39;)lose
+</pre></div>
+</div>
+<p>No data returned.</p>
+</section>
+<section id="query-effect">
+<h5><span class="section-number">10.4.5.1.7. </span>Query effect<a class="headerlink" href="#query-effect" title="Permalink to this headline">¶</a></h5>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>QUERY = 45 (&#39;E&#39;)
+</pre></div>
+</div>
+<p>Send effect type.
+Returns nonzero if supported (2 bytes)</p>
+</section>
+<section id="firmware-version">
+<h5><span class="section-number">10.4.5.1.8. </span>Firmware Version<a class="headerlink" href="#firmware-version" title="Permalink to this headline">¶</a></h5>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>QUERY = 56 (&#39;V&#39;ersion)
+</pre></div>
+</div>
+<p>Sends back 3 bytes - major, minor, subminor</p>
+</section>
+</section>
+<section id="initialisation-of-the-device">
+<h4><span class="section-number">10.4.5.2. </span>Initialisation of the device<a class="headerlink" href="#initialisation-of-the-device" title="Permalink to this headline">¶</a></h4>
+<section id="set-control">
+<h5><span class="section-number">10.4.5.2.1. </span>Set Control<a class="headerlink" href="#set-control" title="Permalink to this headline">¶</a></h5>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Device dependent, can be different on different models!</p>
+</div>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>OP=  40 &lt;idx&gt; &lt;val&gt; [&lt;val&gt;]
+LEN= 2 or 3
+00 Idx
+   Idx 00 Set dead zone (0..2048)
+   Idx 01 Ignore Deadman sensor (0..1)
+   Idx 02 Enable comm watchdog (0..1)
+   Idx 03 Set the strength of the spring (0..100)
+   Idx 04 Enable or disable the spring (0/1)
+   Idx 05 Set axis saturation threshold (0..2048)
+</pre></div>
+</div>
+</section>
+<section id="set-effect-state">
+<h5><span class="section-number">10.4.5.2.2. </span>Set Effect State<a class="headerlink" href="#set-effect-state" title="Permalink to this headline">¶</a></h5>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>OP=  42 &lt;val&gt;
+LEN= 1
+00 State
+   Bit 3 Pause force feedback
+   Bit 2 Enable force feedback
+   Bit 0 Stop all effects
+</pre></div>
+</div>
+</section>
+<section id="set-overall">
+<h5><span class="section-number">10.4.5.2.3. </span>Set overall<a class="headerlink" href="#set-overall" title="Permalink to this headline">¶</a></h5>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>OP=  43 &lt;val&gt;
+LEN= 1
+00 Gain
+   Val 00 = 0%
+   Val 40 = 50%
+   Val 80 = 100%
+</pre></div>
+</div>
+</section>
+</section>
+</section>
+<section id="parameter-memory">
+<h3><span class="section-number">10.4.6. </span>Parameter memory<a class="headerlink" href="#parameter-memory" title="Permalink to this headline">¶</a></h3>
+<p>Each device has a certain amount of memory to store parameters of effects.
+The amount of RAM may vary, I encountered values from 200 to 1000 bytes. Below
+is the amount of memory apparently needed for every set of parameters:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>period : 0c</p></li>
+<li><p>magnitude : 02</p></li>
+<li><p>attack and fade : 0e</p></li>
+<li><p>interactive : 08</p></li>
+</ul>
+</div></blockquote>
+</section>
+</section>
+<section id="appendix-how-to-study-the-protocol">
+<h2><span class="section-number">10.5. </span>Appendix: How to study the protocol?<a class="headerlink" href="#appendix-how-to-study-the-protocol" title="Permalink to this headline">¶</a></h2>
+<p>1. Generate effects using the force editor provided with the DirectX SDK, or
+use Immersion Studio (freely available at their web site in the developer section:
+www.immersion.com)
+2. Start a soft spying RS232 or USB (depending on where you connected your
+joystick/wheel). I used ComPortSpy from fCoder (alpha version!)
+3. Play the effect, and watch what happens on the spy screen.</p>
+<p>A few words about ComPortSpy:
+At first glance, this software seems, hum, well… buggy. In fact, data appear with a
+few seconds latency. Personally, I restart it every time I play an effect.
+Remember it’s free (as in free beer) and alpha!</p>
+</section>
+<section id="urls">
+<h2><span class="section-number">10.6. </span>URLS<a class="headerlink" href="#urls" title="Permalink to this headline">¶</a></h2>
+<p>Check <a class="reference external" href="http://www.immerse.com">http://www.immerse.com</a> for Immersion Studio,
+and <a class="reference external" href="http://www.fcoder.com">http://www.fcoder.com</a> for ComPortSpy.</p>
+<p>I-Force is trademark of Immersion Corp.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">10. Iforce Protocol</a><ul>
+<li><a class="reference internal" href="#introduction">10.1. Introduction</a></li>
+<li><a class="reference internal" href="#preliminary-notes">10.2. Preliminary Notes</a><ul>
+<li><a class="reference internal" href="#general-form-of-a-packet">10.2.1. General form of a packet</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#device-input-state">10.3. Device input state</a></li>
+<li><a class="reference internal" href="#device-effects-states">10.4. Device effects states</a><ul>
+<li><a class="reference internal" href="#force-effect">10.4.1. Force effect</a></li>
+<li><a class="reference internal" href="#time-based-parameters">10.4.2. Time based parameters</a><ul>
+<li><a class="reference internal" href="#attack-and-fade">10.4.2.1. Attack and fade</a></li>
+<li><a class="reference internal" href="#magnitude">10.4.2.2. Magnitude</a></li>
+<li><a class="reference internal" href="#periodicity">10.4.2.3. Periodicity</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#interactive-parameters">10.4.3. Interactive parameters</a></li>
+<li><a class="reference internal" href="#controls">10.4.4. Controls</a></li>
+<li><a class="reference internal" href="#init">10.4.5. Init</a><ul>
+<li><a class="reference internal" href="#querying-features">10.4.5.1. Querying features</a><ul>
+<li><a class="reference internal" href="#query-ram-size">10.4.5.1.1. Query ram size</a></li>
+<li><a class="reference internal" href="#query-number-of-effects">10.4.5.1.2. Query number of effects</a></li>
+<li><a class="reference internal" href="#vendor-s-id">10.4.5.1.3. Vendor’s id</a></li>
+<li><a class="reference internal" href="#product-id">10.4.5.1.4. Product id</a></li>
+<li><a class="reference internal" href="#open-device">10.4.5.1.5. Open device</a></li>
+<li><a class="reference internal" href="#close-device">10.4.5.1.6. Close device</a></li>
+<li><a class="reference internal" href="#query-effect">10.4.5.1.7. Query effect</a></li>
+<li><a class="reference internal" href="#firmware-version">10.4.5.1.8. Firmware Version</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#initialisation-of-the-device">10.4.5.2. Initialisation of the device</a><ul>
+<li><a class="reference internal" href="#set-control">10.4.5.2.1. Set Control</a></li>
+<li><a class="reference internal" href="#set-effect-state">10.4.5.2.2. Set Effect State</a></li>
+<li><a class="reference internal" href="#set-overall">10.4.5.2.3. Set overall</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#parameter-memory">10.4.6. Parameter memory</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#appendix-how-to-study-the-protocol">10.5. Appendix: How to study the protocol?</a></li>
+<li><a class="reference internal" href="#urls">10.6. URLS</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/input/devices/iforce-protocol.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/input/devices/iforce-protocol.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

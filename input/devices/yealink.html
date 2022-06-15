@@ -1,0 +1,343 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>18. Driver documentation for yealink usb-p1k phones &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Linux Hardware Monitoring" href="../../hwmon/index.html" />
+    <link rel="prev" title="17. xpad - Linux USB driver for Xbox compatible controllers" href="xpad.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="driver-documentation-for-yealink-usb-p1k-phones">
+<h1><span class="section-number">18. </span>Driver documentation for yealink usb-p1k phones<a class="headerlink" href="#driver-documentation-for-yealink-usb-p1k-phones" title="Permalink to this headline">¶</a></h1>
+<section id="status">
+<h2><span class="section-number">18.1. </span>Status<a class="headerlink" href="#status" title="Permalink to this headline">¶</a></h2>
+<p>The p1k is a relatively cheap usb 1.1 phone with:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>keyboard            full support, yealink.ko / input event API</p></li>
+<li><p>LCD                 full support, yealink.ko / sysfs API</p></li>
+<li><p>LED                 full support, yealink.ko / sysfs API</p></li>
+<li><p>dialtone            full support, yealink.ko / sysfs API</p></li>
+<li><p>ringtone            full support, yealink.ko / sysfs API</p></li>
+<li><p>audio playback      full support, snd_usb_audio.ko / alsa API</p></li>
+<li><p>audio record        full support, snd_usb_audio.ko / alsa API</p></li>
+</ul>
+</div></blockquote>
+<p>For vendor documentation see <a class="reference external" href="http://www.yealink.com">http://www.yealink.com</a></p>
+</section>
+<section id="keyboard-features">
+<h2><span class="section-number">18.2. </span>keyboard features<a class="headerlink" href="#keyboard-features" title="Permalink to this headline">¶</a></h2>
+<p>The current mapping in the kernel is provided by the map_p1k_to_key
+function:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Physical USB-P1K button layout       input events
+
+
+           up                             up
+     IN           OUT                left,   right
+          down                           down
+
+   pickup   C    hangup              enter, backspace, escape
+     1      2      3                 1, 2, 3
+     4      5      6                 4, 5, 6,
+     7      8      9                 7, 8, 9,
+     *      0      #                 *, 0, #,
+</pre></div>
+</div>
+<p>The “up” and “down” keys, are symbolised by arrows on the button.
+The “pickup” and “hangup” keys are symbolised by a green and red phone
+on the button.</p>
+</section>
+<section id="lcd-features">
+<h2><span class="section-number">18.3. </span>LCD features<a class="headerlink" href="#lcd-features" title="Permalink to this headline">¶</a></h2>
+<p>The LCD is divided and organised as a 3 line display:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>  |[]   [][]   [][]   [][]   in   |[][]
+  |[] M [][] D [][] : [][]   out  |[][]
+                            store
+
+  NEW REP         SU MO TU WE TH FR SA
+
+  [] [] [] [] [] [] [] [] [] [] [] []
+  [] [] [] [] [] [] [] [] [] [] [] []
+
+
+Line 1  Format (see below)    : 18.e8.M8.88...188
+        Icon names            :   M  D  :  IN OUT STORE
+Line 2  Format                : .........
+        Icon name             : NEW REP SU MO TU WE TH FR SA
+Line 3  Format                : 888888888888
+</pre></div>
+</div>
+<dl>
+<dt>Format description:</dt><dd><p>From a userspace perspective the world is separated into “digits” and “icons”.
+A digit can have a character set, an icon can only be ON or OFF.</p>
+<p>Format specifier:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>&#39;8&#39; :  Generic 7 segment digit with individual addressable segments
+
+Reduced capability 7 segment digit, when segments are hard wired together.
+&#39;1&#39; : 2 segments digit only able to produce a 1.
+&#39;e&#39; : Most significant day of the month digit,
+      able to produce at least 1 2 3.
+&#39;M&#39; : Most significant minute digit,
+      able to produce at least 0 1 2 3 4 5.
+
+Icons or pictograms:
+&#39;.&#39; : For example like AM, PM, SU, a &#39;dot&#39; .. or other single segment
+      elements.
+</pre></div>
+</div>
+</dd>
+</dl>
+</section>
+<section id="driver-usage">
+<h2><span class="section-number">18.4. </span>Driver usage<a class="headerlink" href="#driver-usage" title="Permalink to this headline">¶</a></h2>
+<p>For userland the following interfaces are available using the sysfs interface:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/sys/.../
+         line1        Read/Write, lcd line1
+         line2        Read/Write, lcd line2
+         line3        Read/Write, lcd line3
+
+         get_icons    Read, returns a set of available icons.
+         hide_icon    Write, hide the element by writing the icon name.
+         show_icon    Write, display the element by writing the icon name.
+
+         map_seg7     Read/Write, the 7 segments char set, common for all
+                      yealink phones. (see map_to_7segment.h)
+
+         ringtone     Write, upload binary representation of a ringtone,
+                      see yealink.c. status EXPERIMENTAL due to potential
+                      races between async. and sync usb calls.
+</pre></div>
+</div>
+<section id="linex">
+<h3><span class="section-number">18.4.1. </span>lineX<a class="headerlink" href="#linex" title="Permalink to this headline">¶</a></h3>
+<p>Reading /sys/../lineX will return the format string with its current value.</p>
+<blockquote>
+<div><p>Example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>cat ./line3
+888888888888
+Linux Rocks!
+</pre></div>
+</div>
+</div></blockquote>
+<p>Writing to /sys/../lineX will set the corresponding LCD line.</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Excess characters are ignored.</p></li>
+<li><p>If less characters are written than allowed, the remaining digits are
+unchanged.</p></li>
+<li><p>The tab ‘t’and ‘n’ char does not overwrite the original content.</p></li>
+<li><p>Writing a space to an icon will always hide its content.</p></li>
+</ul>
+<blockquote>
+<div><p>Example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>date +&quot;%m.%e.%k:%M&quot;  | sed &#39;s/^0/ /&#39; &gt; ./line1
+</pre></div>
+</div>
+<p>Will update the LCD with the current date &amp; time.</p>
+</div></blockquote>
+</div></blockquote>
+</section>
+<section id="get-icons">
+<h3><span class="section-number">18.4.2. </span>get_icons<a class="headerlink" href="#get-icons" title="Permalink to this headline">¶</a></h3>
+<p>Reading will return all available icon names and its current settings:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>cat ./get_icons
+on M
+on D
+on :
+   IN
+   OUT
+   STORE
+   NEW
+   REP
+   SU
+   MO
+   TU
+   WE
+   TH
+   FR
+   SA
+   LED
+   DIALTONE
+   RINGTONE
+</pre></div>
+</div>
+</section>
+<section id="show-hide-icons">
+<h3><span class="section-number">18.4.3. </span>show/hide icons<a class="headerlink" href="#show-hide-icons" title="Permalink to this headline">¶</a></h3>
+<p>Writing to these files will update the state of the icon.
+Only one icon at a time can be updated.</p>
+<p>If an icon is also on a ./lineX the corresponding value is
+updated with the first letter of the icon.</p>
+<blockquote>
+<div><p>Example - light up the store icon:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>echo -n &quot;STORE&quot; &gt; ./show_icon
+
+cat ./line1
+18.e8.M8.88...188
+              S
+</pre></div>
+</div>
+<p>Example - sound the ringtone for 10 seconds:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>echo -n RINGTONE &gt; /sys/..../show_icon
+sleep 10
+echo -n RINGTONE &gt; /sys/..../hide_icon
+</pre></div>
+</div>
+</div></blockquote>
+</section>
+</section>
+<section id="sound-features">
+<h2><span class="section-number">18.5. </span>Sound features<a class="headerlink" href="#sound-features" title="Permalink to this headline">¶</a></h2>
+<p>Sound is supported by the ALSA driver: snd_usb_audio</p>
+<p>One 16-bit channel with sample and playback rates of 8000 Hz is the practical
+limit of the device.</p>
+<blockquote>
+<div><p>Example - recording test:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>arecord -v -d 10 -r 8000 -f S16_LE -t wav  foobar.wav
+</pre></div>
+</div>
+<p>Example - playback test:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>aplay foobar.wav
+</pre></div>
+</div>
+</div></blockquote>
+</section>
+<section id="troubleshooting">
+<h2><span class="section-number">18.6. </span>Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permalink to this headline">¶</a></h2>
+<dl class="field-list simple">
+<dt class="field-odd">Q</dt>
+<dd class="field-odd"><p>Module yealink compiled and installed without any problem but phone
+is not initialized and does not react to any actions.</p>
+</dd>
+<dt class="field-even">A</dt>
+<dd class="field-even"><p>If you see something like:
+hiddev0: USB HID v1.00 Device [Yealink Network Technology Ltd. VOIP USB Phone
+in dmesg, it means that the hid driver has grabbed the device first. Try to
+load module yealink before any other usb hid driver. Please see the
+instructions provided by your distribution on module configuration.</p>
+</dd>
+<dt class="field-odd">Q</dt>
+<dd class="field-odd"><p>Phone is working now (displays version and accepts keypad input) but I can’t
+find the sysfs files.</p>
+</dd>
+<dt class="field-even">A</dt>
+<dd class="field-even"><p>The sysfs files are located on the particular usb endpoint. On most
+distributions you can do: “find /sys/ -name get_icons” for a hint.</p>
+</dd>
+</dl>
+</section>
+<section id="credits-acknowledgments">
+<h2><span class="section-number">18.7. </span>Credits &amp; Acknowledgments<a class="headerlink" href="#credits-acknowledgments" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><ul class="simple">
+<li><p>Olivier Vandorpe, for starting the usbb2k-api project doing much of
+the reverse engineering.</p></li>
+<li><p>Martin Diehl, for pointing out how to handle USB memory allocation.</p></li>
+<li><p>Dmitry Torokhov, for the numerous code reviews and suggestions.</p></li>
+</ul>
+</div></blockquote>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">18. Driver documentation for yealink usb-p1k phones</a><ul>
+<li><a class="reference internal" href="#status">18.1. Status</a></li>
+<li><a class="reference internal" href="#keyboard-features">18.2. keyboard features</a></li>
+<li><a class="reference internal" href="#lcd-features">18.3. LCD features</a></li>
+<li><a class="reference internal" href="#driver-usage">18.4. Driver usage</a><ul>
+<li><a class="reference internal" href="#linex">18.4.1. lineX</a></li>
+<li><a class="reference internal" href="#get-icons">18.4.2. get_icons</a></li>
+<li><a class="reference internal" href="#show-hide-icons">18.4.3. show/hide icons</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#sound-features">18.5. Sound features</a></li>
+<li><a class="reference internal" href="#troubleshooting">18.6. Troubleshooting</a></li>
+<li><a class="reference internal" href="#credits-acknowledgments">18.7. Credits &amp; Acknowledgments</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/input/devices/yealink.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/input/devices/yealink.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

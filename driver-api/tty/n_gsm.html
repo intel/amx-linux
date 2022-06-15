@@ -1,0 +1,263 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>GSM 0710 tty multiplexor HOWTO &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="N_TTY" href="n_tty.html" />
+    <link rel="prev" title="MOXA Smartio/Industio Family Device Driver Installation Guide" href="moxa-smartio.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="gsm-0710-tty-multiplexor-howto">
+<h1>GSM 0710 tty multiplexor HOWTO<a class="headerlink" href="#gsm-0710-tty-multiplexor-howto" title="Permalink to this headline">¶</a></h1>
+<div class="contents local topic" id="contents">
+<ul class="simple">
+<li><p><a class="reference internal" href="#how-to-use-it" id="id1">How to use it</a></p>
+<ul>
+<li><p><a class="reference internal" href="#config-initiator" id="id2">Config Initiator</a></p></li>
+<li><p><a class="reference internal" href="#config-requester" id="id3">Config Requester</a></p></li>
+</ul>
+</li>
+</ul>
+</div>
+<p>This line discipline implements the GSM 07.10 multiplexing protocol
+detailed in the following 3GPP document:</p>
+<blockquote>
+<div><p><a class="reference external" href="https://www.3gpp.org/ftp/Specs/archive/07_series/07.10/0710-720.zip">https://www.3gpp.org/ftp/Specs/archive/07_series/07.10/0710-720.zip</a></p>
+</div></blockquote>
+<p>This document give some hints on how to use this driver with GPRS and 3G
+modems connected to a physical serial port.</p>
+<section id="how-to-use-it">
+<h2><a class="toc-backref" href="#id1">How to use it</a><a class="headerlink" href="#how-to-use-it" title="Permalink to this headline">¶</a></h2>
+<section id="config-initiator">
+<h3><a class="toc-backref" href="#id2">Config Initiator</a><a class="headerlink" href="#config-initiator" title="Permalink to this headline">¶</a></h3>
+<ol class="arabic">
+<li><p>Initialize the modem in 0710 mux mode (usually <code class="docutils literal notranslate"><span class="pre">AT+CMUX=</span></code> command) through
+its serial port. Depending on the modem used, you can pass more or less
+parameters to this command.</p></li>
+<li><p>Switch the serial line to using the n_gsm line discipline by using
+<code class="docutils literal notranslate"><span class="pre">TIOCSETD</span></code> ioctl.</p></li>
+<li><p>Configure the mux using <code class="docutils literal notranslate"><span class="pre">GSMIOC_GETCONF</span></code>/<code class="docutils literal notranslate"><span class="pre">GSMIOC_SETCONF</span></code> ioctl.</p></li>
+<li><p>Obtain base gsmtty number for the used serial port.</p>
+<p>Major parts of the initialization program
+(a good starting point is util-linux-ng/sys-utils/ldattach.c):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#include &lt;stdio.h&gt;
+#include &lt;stdint.h&gt;
+#include &lt;linux/gsmmux.h&gt;
+#include &lt;linux/tty.h&gt;
+
+#define DEFAULT_SPEED     B115200
+#define SERIAL_PORT       /dev/ttyS0
+
+int ldisc = N_GSM0710;
+struct gsm_config c;
+struct termios configuration;
+uint32_t first;
+
+/* open the serial port connected to the modem */
+fd = open(SERIAL_PORT, O_RDWR | O_NOCTTY | O_NDELAY);
+
+/* configure the serial port : speed, flow control ... */
+
+/* send the AT commands to switch the modem to CMUX mode
+   and check that it&#39;s successful (should return OK) */
+write(fd, &quot;AT+CMUX=0\r&quot;, 10);
+
+/* experience showed that some modems need some time before
+   being able to answer to the first MUX packet so a delay
+   may be needed here in some case */
+sleep(3);
+
+/* use n_gsm line discipline */
+ioctl(fd, TIOCSETD, &amp;ldisc);
+
+/* get n_gsm configuration */
+ioctl(fd, GSMIOC_GETCONF, &amp;c);
+/* we are initiator and need encoding 0 (basic) */
+c.initiator = 1;
+c.encapsulation = 0;
+/* our modem defaults to a maximum size of 127 bytes */
+c.mru = 127;
+c.mtu = 127;
+/* set the new configuration */
+ioctl(fd, GSMIOC_SETCONF, &amp;c);
+/* get first gsmtty device node */
+ioctl(fd, GSMIOC_GETFIRST, &amp;first);
+printf(&quot;first muxed line: /dev/gsmtty%i\n&quot;, first);
+
+/* and wait for ever to keep the line discipline enabled */
+daemon(0,0);
+pause();
+</pre></div>
+</div>
+</li>
+<li><p>Use these devices as plain serial ports.</p>
+<p>For example, it’s possible:</p>
+<ul class="simple">
+<li><p>to use <em>gnokii</em> to send / receive SMS on <code class="docutils literal notranslate"><span class="pre">ttygsm1</span></code></p></li>
+<li><p>to use <em>ppp</em> to establish a datalink on <code class="docutils literal notranslate"><span class="pre">ttygsm2</span></code></p></li>
+</ul>
+</li>
+<li><p>First close all virtual ports before closing the physical port.</p>
+<p>Note that after closing the physical port the modem is still in multiplexing
+mode. This may prevent a successful re-opening of the port later. To avoid
+this situation either reset the modem if your hardware allows that or send
+a disconnect command frame manually before initializing the multiplexing mode
+for the second time. The byte sequence for the disconnect command frame is:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>0xf9, 0x03, 0xef, 0x03, 0xc3, 0x16, 0xf9
+</pre></div>
+</div>
+</li>
+</ol>
+</section>
+<section id="config-requester">
+<h3><a class="toc-backref" href="#id3">Config Requester</a><a class="headerlink" href="#config-requester" title="Permalink to this headline">¶</a></h3>
+<ol class="arabic">
+<li><p>Receive <code class="docutils literal notranslate"><span class="pre">AT+CMUX=</span></code> command through its serial port, initialize mux mode
+config.</p></li>
+<li><p>Switch the serial line to using the <em>n_gsm</em> line discipline by using
+<code class="docutils literal notranslate"><span class="pre">TIOCSETD</span></code> ioctl.</p></li>
+<li><p>Configure the mux using <code class="docutils literal notranslate"><span class="pre">GSMIOC_GETCONF</span></code>/<code class="docutils literal notranslate"><span class="pre">GSMIOC_SETCONF</span></code> ioctl.</p></li>
+<li><p>Obtain base gsmtty number for the used serial port:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#include &lt;stdio.h&gt;
+#include &lt;stdint.h&gt;
+#include &lt;linux/gsmmux.h&gt;
+#include &lt;linux/tty.h&gt;
+#define DEFAULT_SPEED   B115200
+#define SERIAL_PORT     /dev/ttyS0
+
+int ldisc = N_GSM0710;
+struct gsm_config c;
+struct termios configuration;
+uint32_t first;
+
+/* open the serial port */
+fd = open(SERIAL_PORT, O_RDWR | O_NOCTTY | O_NDELAY);
+
+/* configure the serial port : speed, flow control ... */
+
+/* get serial data and check &quot;AT+CMUX=command&quot; parameter ... */
+
+/* use n_gsm line discipline */
+ioctl(fd, TIOCSETD, &amp;ldisc);
+
+/* get n_gsm configuration */
+ioctl(fd, GSMIOC_GETCONF, &amp;c);
+/* we are requester and need encoding 0 (basic) */
+c.initiator = 0;
+c.encapsulation = 0;
+/* our modem defaults to a maximum size of 127 bytes */
+c.mru = 127;
+c.mtu = 127;
+/* set the new configuration */
+ioctl(fd, GSMIOC_SETCONF, &amp;c);
+/* get first gsmtty device node */
+ioctl(fd, GSMIOC_GETFIRST, &amp;first);
+printf(&quot;first muxed line: /dev/gsmtty%i\n&quot;, first);
+
+/* and wait for ever to keep the line discipline enabled */
+daemon(0,0);
+pause();
+</pre></div>
+</div>
+</li>
+</ol>
+<p>11-03-08 - Eric Bénard - &lt;<a class="reference external" href="mailto:eric&#37;&#52;&#48;eukrea&#46;com">eric<span>&#64;</span>eukrea<span>&#46;</span>com</a>&gt;</p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">GSM 0710 tty multiplexor HOWTO</a><ul>
+<li><a class="reference internal" href="#how-to-use-it">How to use it</a><ul>
+<li><a class="reference internal" href="#config-initiator">Config Initiator</a></li>
+<li><a class="reference internal" href="#config-requester">Config Requester</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/tty/n_gsm.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/tty/n_gsm.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

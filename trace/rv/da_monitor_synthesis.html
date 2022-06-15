@@ -1,0 +1,236 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Deterministic Automata Monitor Synthesis &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Deterministic Automata Instrumentation" href="da_monitor_instrumentation.html" />
+    <link rel="prev" title="Deterministic Automata" href="deterministic_automata.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="deterministic-automata-monitor-synthesis">
+<h1>Deterministic Automata Monitor Synthesis<a class="headerlink" href="#deterministic-automata-monitor-synthesis" title="Permalink to this headline">¶</a></h1>
+<p>The starting point for the application of runtime verification (RV) technics
+is the <em>specification</em> or <em>modeling</em> of the desired (or undesired) behavior
+of the system under scrutiny.</p>
+<p>The formal representation needs to be then <em>synthesized</em> into a <em>monitor</em>
+that can then be used in the analysis of the trace of the system. The
+<em>monitor</em> connects to the system via an <em>instrumentation</em> that converts
+the events from the <em>system</em> to the events of the <em>specification</em>.</p>
+<p>In Linux terms, the runtime verification monitors are encapsulated inside
+the <em>RV monitor</em> abstraction. The RV monitor includes a set of instances
+of the monitor (per-cpu monitor, per-task monitor, and so on), the helper
+functions that glue the monitor to the system reference model, and the
+trace output as a reaction to event parsing and exceptions, as depicted
+below:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Linux  +----- RV Monitor ----------------------------------+ Formal
+ Realm |                                                   |  Realm
+ +-------------------+     +----------------+     +-----------------+
+ |   Linux kernel    |     |     Monitor    |     |     Reference   |
+ |     Tracing       |  -&gt; |   Instance(s)  | &lt;-  |       Model     |
+ | (instrumentation) |     | (verification) |     | (specification) |
+ +-------------------+     +----------------+     +-----------------+
+        |                          |                       |
+        |                          V                       |
+        |                     +----------+                 |
+        |                     | Reaction |                 |
+        |                     +--+--+--+-+                 |
+        |                        |  |  |                   |
+        |                        |  |  +-&gt; trace output ?  |
+        +------------------------|--|----------------------+
+                                 |  +----&gt; panic ?
+                                 +-------&gt; &lt;user-specified&gt;
+</pre></div>
+</div>
+<section id="da-monitor-synthesis">
+<h2>DA monitor synthesis<a class="headerlink" href="#da-monitor-synthesis" title="Permalink to this headline">¶</a></h2>
+<p>The synthesis of automata-based models into the Linux <em>RV monitor</em> abstraction
+is automated by the dot2k tool and the rv/da_monitor.h header file that
+contains a set of macros that automatically generate the monitor’s code.</p>
+</section>
+<section id="dot2k">
+<h2>dot2k<a class="headerlink" href="#dot2k" title="Permalink to this headline">¶</a></h2>
+<p>The dot2k utility leverages dot2c by converting an automaton model in
+the DOT format into the C representation [1] and creating the skeleton of
+a kernel monitor in C.</p>
+<p>For example, it is possible to transform the wip.dot model present in
+[1] into a per-cpu monitor with the following command:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ dot2k -d wip.dot -t per_cpu
+</pre></div>
+</div>
+<p>This will create a directory named wip/ with the following files:</p>
+<ul class="simple">
+<li><p>wip.h: the wip model in C</p></li>
+<li><p>wip.c: the RV monitor</p></li>
+</ul>
+<p>The wip.c file contains the monitor declaration and the starting point for
+the system instrumentation.</p>
+</section>
+<section id="monitor-macros">
+<h2>Monitor macros<a class="headerlink" href="#monitor-macros" title="Permalink to this headline">¶</a></h2>
+<p>The rv/da_monitor.h enables automatic code generation for the <em>Monitor
+Instance(s)</em> using C macros.</p>
+<p>The benefits of the usage of macro for monitor synthesis are 3-fold as it:</p>
+<ul class="simple">
+<li><p>Reduces the code duplication;</p></li>
+<li><p>Facilitates the bug fix/improvement;</p></li>
+<li><p>Avoids the case of developers changing the core of the monitor code
+to manipulate the model in a (let’s say) non-standard way.</p></li>
+</ul>
+<p>This initial implementation presents three different types of monitor instances:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">#define</span> <span class="pre">DECLARE_DA_MON_GLOBAL(name,</span> <span class="pre">type)</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">#define</span> <span class="pre">DECLARE_DA_MON_PER_CPU(name,</span> <span class="pre">type)</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">#define</span> <span class="pre">DECLARE_DA_MON_PER_TASK(name,</span> <span class="pre">type)</span></code></p></li>
+</ul>
+<p>The first declares the functions for a global deterministic automata monitor,
+the second for monitors with per-cpu instances, and the third with per-task
+instances.</p>
+<p>In all cases, the ‘name’ argument is a string that identifies the monitor, and
+the ‘type’ argument is the data type used by dot2k on the representation of
+the model in C.</p>
+<p>For example, the wip model with two states and three events can be
+stored in an ‘unsigned char’ type. Considering that the preemption control
+is a per-cpu behavior, the monitor declaration in the ‘wip.c’ file is:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>DECLARE_DA_MON_PER_CPU(wip, unsigned char);
+</pre></div>
+</div>
+<p>The monitor is executed by sending events to be processed via the functions
+presented below:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>da_handle_event_$(MONITOR_NAME)($(event from event enum));
+da_handle_start_event_$(MONITOR_NAME)($(event from event enum));
+da_handle_start_run_event_$(MONITOR_NAME)($(event from event enum));
+</pre></div>
+</div>
+<p>The function <code class="docutils literal notranslate"><span class="pre">da_handle_event_$(MONITOR_NAME)()</span></code> is the regular case where
+the event will be processed if the monitor is processing events.</p>
+<p>When a monitor is enabled, it is placed in the initial state of the automata.
+However, the monitor does not know if the system is in the <em>initial state</em>.</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">da_handle_start_event_$(MONITOR_NAME)()</span></code> function is used to notify the
+monitor that the system is returning to the initial state, so the monitor can
+start monitoring the next event.</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">da_handle_start_run_event_$(MONITOR_NAME)()</span></code> function is used to notify
+the monitor that the system is known to be in the initial state, so the
+monitor can start monitoring and monitor the current event.</p>
+<p>Using the wip model as example, the events “preempt_disable” and
+“sched_waking” should be sent to monitor, respectively, via [2]:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>da_handle_event_wip(preempt_disable_wip);
+da_handle_event_wip(sched_waking_wip);
+</pre></div>
+</div>
+<p>While the event “preempt_enabled” will use:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>da_handle_start_event_wip(preempt_enable_wip);
+</pre></div>
+</div>
+<p>To notify the monitor that the system will be returning to the initial state,
+so the system and the monitor should be in sync.</p>
+</section>
+<section id="final-remarks">
+<h2>Final remarks<a class="headerlink" href="#final-remarks" title="Permalink to this headline">¶</a></h2>
+<p>With the monitor synthesis in place using the rv/da_monitor.h and
+dot2k, the developer’s work should be limited to the instrumentation
+of the system, increasing the confidence in the overall approach.</p>
+<p>[1] For details about deterministic automata format and the translation
+from one representation to another, see:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Documentation/trace/rv/deterministic_automata.rst
+</pre></div>
+</div>
+<p>[2] dot2k appends the monitor’s name suffix to the events enums to
+avoid conflicting variables when exporting the global vmlinux.h
+use by BPF programs.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Deterministic Automata Monitor Synthesis</a><ul>
+<li><a class="reference internal" href="#da-monitor-synthesis">DA monitor synthesis</a></li>
+<li><a class="reference internal" href="#dot2k">dot2k</a></li>
+<li><a class="reference internal" href="#monitor-macros">Monitor macros</a></li>
+<li><a class="reference internal" href="#final-remarks">Final remarks</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/trace/rv/da_monitor_synthesis.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/trace/rv/da_monitor_synthesis.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

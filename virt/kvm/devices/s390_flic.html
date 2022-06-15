@@ -1,0 +1,246 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>FLIC (floating interrupt controller) &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="Generic vcpu interface" href="vcpu.html" />
+    <link rel="prev" title="MPIC interrupt controller" href="mpic.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="flic-floating-interrupt-controller">
+<h1>FLIC (floating interrupt controller)<a class="headerlink" href="#flic-floating-interrupt-controller" title="Permalink to this headline">¶</a></h1>
+<p>FLIC handles floating (non per-cpu) interrupts, i.e. I/O, service and some
+machine check interruptions. All interrupts are stored in a per-vm list of
+pending interrupts. FLIC performs operations on this list.</p>
+<p>Only one FLIC instance may be instantiated.</p>
+<p>FLIC provides support to
+- add interrupts (KVM_DEV_FLIC_ENQUEUE)
+- inspect currently pending interrupts (KVM_FLIC_GET_ALL_IRQS)
+- purge all pending floating interrupts (KVM_DEV_FLIC_CLEAR_IRQS)
+- purge one pending floating I/O interrupt (KVM_DEV_FLIC_CLEAR_IO_IRQ)
+- enable/disable for the guest transparent async page faults
+- register and modify adapter interrupt sources (KVM_DEV_FLIC_ADAPTER_*)
+- modify AIS (adapter-interruption-suppression) mode state (KVM_DEV_FLIC_AISM)
+- inject adapter interrupts on a specified adapter (KVM_DEV_FLIC_AIRQ_INJECT)
+- get/set all AIS mode states (KVM_DEV_FLIC_AISM_ALL)</p>
+<dl>
+<dt>Groups:</dt><dd><dl>
+<dt>KVM_DEV_FLIC_ENQUEUE</dt><dd><p>Passes a buffer and length into the kernel which are then injected into
+the list of pending interrupts.
+attr-&gt;addr contains the pointer to the buffer and attr-&gt;attr contains
+the length of the buffer.
+The format of the data structure kvm_s390_irq as it is copied from userspace
+is defined in usr/include/linux/kvm.h.</p>
+</dd>
+<dt>KVM_DEV_FLIC_GET_ALL_IRQS</dt><dd><p>Copies all floating interrupts into a buffer provided by userspace.
+When the buffer is too small it returns -ENOMEM, which is the indication
+for userspace to try again with a bigger buffer.</p>
+<p>-ENOBUFS is returned when the allocation of a kernelspace buffer has
+failed.</p>
+<p>-EFAULT is returned when copying data to userspace failed.
+All interrupts remain pending, i.e. are not deleted from the list of
+currently pending interrupts.
+attr-&gt;addr contains the userspace address of the buffer into which all
+interrupt data will be copied.
+attr-&gt;attr contains the size of the buffer in bytes.</p>
+</dd>
+<dt>KVM_DEV_FLIC_CLEAR_IRQS</dt><dd><p>Simply deletes all elements from the list of currently pending floating
+interrupts.  No interrupts are injected into the guest.</p>
+</dd>
+<dt>KVM_DEV_FLIC_CLEAR_IO_IRQ</dt><dd><p>Deletes one (if any) I/O interrupt for a subchannel identified by the
+subsystem identification word passed via the buffer specified by
+attr-&gt;addr (address) and attr-&gt;attr (length).</p>
+</dd>
+<dt>KVM_DEV_FLIC_APF_ENABLE</dt><dd><p>Enables async page faults for the guest. So in case of a major page fault
+the host is allowed to handle this async and continues the guest.</p>
+</dd>
+<dt>KVM_DEV_FLIC_APF_DISABLE_WAIT</dt><dd><p>Disables async page faults for the guest and waits until already pending
+async page faults are done. This is necessary to trigger a completion interrupt
+for every init interrupt before migrating the interrupt list.</p>
+</dd>
+<dt>KVM_DEV_FLIC_ADAPTER_REGISTER</dt><dd><blockquote>
+<div><p>Register an I/O adapter interrupt source. Takes a kvm_s390_io_adapter
+describing the adapter to register:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct kvm_s390_io_adapter {
+        __u32 id;
+        __u8 isc;
+        __u8 maskable;
+        __u8 swap;
+        __u8 flags;
+};
+</pre></div>
+</div>
+</div></blockquote>
+<p>id contains the unique id for the adapter, isc the I/O interruption subclass
+to use, maskable whether this adapter may be masked (interrupts turned off),
+swap whether the indicators need to be byte swapped, and flags contains
+further characteristics of the adapter.</p>
+<p>Currently defined values for ‘flags’ are:</p>
+<ul class="simple">
+<li><p>KVM_S390_ADAPTER_SUPPRESSIBLE: adapter is subject to AIS
+(adapter-interrupt-suppression) facility. This flag only has an effect if
+the AIS capability is enabled.</p></li>
+</ul>
+<p>Unknown flag values are ignored.</p>
+</dd>
+<dt>KVM_DEV_FLIC_ADAPTER_MODIFY</dt><dd><p>Modifies attributes of an existing I/O adapter interrupt source. Takes
+a kvm_s390_io_adapter_req specifying the adapter and the operation:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct kvm_s390_io_adapter_req {
+        __u32 id;
+        __u8 type;
+        __u8 mask;
+        __u16 pad0;
+        __u64 addr;
+};
+</pre></div>
+</div>
+<p>id specifies the adapter and type the operation. The supported operations
+are:</p>
+<dl class="simple">
+<dt>KVM_S390_IO_ADAPTER_MASK</dt><dd><p>mask or unmask the adapter, as specified in mask</p>
+</dd>
+<dt>KVM_S390_IO_ADAPTER_MAP</dt><dd><p>This is now a no-op. The mapping is purely done by the irq route.</p>
+</dd>
+<dt>KVM_S390_IO_ADAPTER_UNMAP</dt><dd><p>This is now a no-op. The mapping is purely done by the irq route.</p>
+</dd>
+</dl>
+</dd>
+<dt>KVM_DEV_FLIC_AISM</dt><dd><p>modify the adapter-interruption-suppression mode for a given isc if the
+AIS capability is enabled. Takes a kvm_s390_ais_req describing:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct kvm_s390_ais_req {
+        __u8 isc;
+        __u16 mode;
+};
+</pre></div>
+</div>
+<p>isc contains the target I/O interruption subclass, mode the target
+adapter-interruption-suppression mode. The following modes are
+currently supported:</p>
+<ul class="simple">
+<li><p>KVM_S390_AIS_MODE_ALL: ALL-Interruptions Mode, i.e. airq injection
+is always allowed;</p></li>
+<li><p>KVM_S390_AIS_MODE_SINGLE: SINGLE-Interruption Mode, i.e. airq
+injection is only allowed once and the following adapter interrupts
+will be suppressed until the mode is set again to ALL-Interruptions
+or SINGLE-Interruption mode.</p></li>
+</ul>
+</dd>
+<dt>KVM_DEV_FLIC_AIRQ_INJECT</dt><dd><p>Inject adapter interrupts on a specified adapter.
+attr-&gt;attr contains the unique id for the adapter, which allows for
+adapter-specific checks and actions.
+For adapters subject to AIS, handle the airq injection suppression for
+an isc according to the adapter-interruption-suppression mode on condition
+that the AIS capability is enabled.</p>
+</dd>
+<dt>KVM_DEV_FLIC_AISM_ALL</dt><dd><p>Gets or sets the adapter-interruption-suppression mode for all ISCs. Takes
+a kvm_s390_ais_all describing:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct kvm_s390_ais_all {
+       __u8 simm; /* Single-Interruption-Mode mask */
+       __u8 nimm; /* No-Interruption-Mode mask *
+};
+</pre></div>
+</div>
+<p>simm contains Single-Interruption-Mode mask for all ISCs, nimm contains
+No-Interruption-Mode mask for all ISCs. Each bit in simm and nimm corresponds
+to an ISC (MSB0 bit 0 to ISC 0 and so on). The combination of simm bit and
+nimm bit presents AIS mode for a ISC.</p>
+<p>KVM_DEV_FLIC_AISM_ALL is indicated by KVM_CAP_S390_AIS_MIGRATION.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+<p>Note: The KVM_SET_DEVICE_ATTR/KVM_GET_DEVICE_ATTR device ioctls executed on
+FLIC with an unknown group or attribute gives the error code EINVAL (instead of
+ENXIO, as specified in the API documentation). It is not possible to conclude
+that a FLIC operation is unavailable based on the error code resulting from a
+usage attempt.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The KVM_DEV_FLIC_CLEAR_IO_IRQ ioctl will return EINVAL in case a
+zero schid is specified.</p>
+</div>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/virt/kvm/devices/s390_flic.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/virt/kvm/devices/s390_flic.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

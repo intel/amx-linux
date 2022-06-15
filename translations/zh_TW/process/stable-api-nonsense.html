@@ -1,0 +1,262 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Linux 內核驅動接口 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="所有你想知道的事情 - 關於linux穩定版發布" href="stable-kernel-rules.html" />
+    <link rel="prev" title="Linux內核補丁提交清單" href="submit-checklist.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是爲讓中文讀者更容易閱讀和理解，而不是作爲一個分支。因此，
+如果您對此文件有任何意見或改動，請先嘗試更新原始英文文件。如果要更改或
+修正某處翻譯文件，請將意見或補丁發送給維護者（聯繫方式見下）。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您發現本文檔與原始文件有任何不同或者有翻譯問題，請聯繫該文件的譯者，
+或者發送電子郵件給胡皓文以獲取幫助：&lt;<a class="reference external" href="mailto:src&#46;res&#37;&#52;&#48;email&#46;cn">src<span>&#46;</span>res<span>&#64;</span>email<span>&#46;</span>cn</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../process/stable-api-nonsense.html#stable-api-nonsense"><span class="std std-ref">Documentation/process/stable-api-nonsense.rst</span></a></p>
+</dd>
+</dl>
+<p>譯者:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>中文版維護者： 鍾宇  TripleX Chung &lt;xxx.phy@gmail.com&gt;
+中文版翻譯者： 鍾宇  TripleX Chung &lt;xxx.phy@gmail.com&gt;
+中文版校譯者： 李陽  Li Yang &lt;leoyang.li@nxp.com&gt;
+              胡皓文 Hu Haowen &lt;src.res@email.cn&gt;
+</pre></div>
+</div>
+<section id="linux">
+<h1>Linux 內核驅動接口<a class="headerlink" href="#linux" title="Permalink to this headline">¶</a></h1>
+<p>寫作本文檔的目的，是爲了解釋爲什麼Linux既沒有二進位內核接口，也沒有穩定
+的內核接口。這裡所說的內核接口，是指內核里的接口，而不是內核和用戶空間
+的接口。內核到用戶空間的接口，是提供給應用程式使用的系統調用，系統調用
+在歷史上幾乎沒有過變化，將來也不會有變化。我有一些老應用程式是在0.9版本
+或者更早版本的內核上編譯的，在使用2.6版本內核的Linux發布上依然用得很好
+。用戶和應用程式作者可以將這個接口看成是穩定的。</p>
+<section id="id1">
+<h2>執行綱要<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>你也許以爲自己想要穩定的內核接口，但是你不清楚你要的實際上不是它。你需
+要的其實是穩定的驅動程序，而你只有將驅動程序放到公版內核的原始碼樹里，
+才有可能達到這個目的。而且這樣做還有很多其它好處，正是因爲這些好處使得
+Linux能成爲強壯，穩定，成熟的作業系統，這也是你最開始選擇Linux的原因。</p>
+</section>
+<section id="id2">
+<h2>入門<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>只有那些寫驅動程序的「怪人」才會擔心內核接口的改變，對廣大用戶來說，既
+看不到內核接口，也不需要去關心它。</p>
+<p>首先，我不打算討論關於任何非GPL許可的內核驅動的法律問題，這些非GPL許可
+的驅動程序包括不公開原始碼，隱藏原始碼，二進位或者是用原始碼包裝，或者
+是其它任何形式的不能以GPL許可公開原始碼的驅動程序。如果有法律問題，請咨
+詢律師，我只是一個程式設計師，所以我只打算探討技術問題（不是小看法律問題，
+法律問題很實際，並且需要一直關注）。</p>
+<p>既然只談技術問題，我們就有了下面兩個主題：二進位內核接口和穩定的內核源
+代碼接口。這兩個問題是互相關聯的，讓我們先解決掉二進位接口的問題。</p>
+</section>
+<section id="id3">
+<h2>二進位內核接口<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h2>
+<p>假如我們有一個穩定的內核原始碼接口，那麼自然而然的，我們就擁有了穩定的
+二進位接口，是這樣的嗎？錯。讓我們看看關於Linux內核的幾點事實：</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>取決於所用的C編譯器的版本，不同的內核數據結構里的結構體的對齊方
+式會有差別，代碼中不同函數的表現形式也不一樣（函數是不是被inline
+編譯取決於編譯器行爲）。不同的函數的表現形式並不重要，但是數據
+結構內部的對齊方式很關鍵。</p></li>
+<li><p>取決於內核的配置選項，不同的選項會讓內核的很多東西發生改變：</p>
+<ul>
+<li><p>同一個結構體可能包含不同的成員變量</p></li>
+<li><p>有的函數可能根本不會被實現（比如編譯的時候沒有選擇SMP支持
+一些鎖函數就會被定義成空函數）。</p></li>
+<li><p>內核使用的內存會以不同的方式對齊，這取決於不同的內核配置選
+項。</p></li>
+</ul>
+</li>
+<li><p>Linux可以在很多的不同體系結構的處理器上運行。在某個體系結構上編
+譯好的二進位驅動程序，不可能在另外一個體系結構上正確的運行。</p></li>
+</ul>
+</div></blockquote>
+<p>對於一個特定的內核，滿足這些條件並不難，使用同一個C編譯器和同樣的內核配
+置選項來編譯驅動程序模塊就可以了。這對於給一個特定Linux發布的特定版本提
+供驅動程序，是完全可以滿足需求的。但是如果你要給不同發布的不同版本都發
+布一個驅動程序，就需要在每個發布上用不同的內核設置參數都編譯一次內核，
+這簡直跟噩夢一樣。而且還要注意到，每個Linux發布還提供不同的Linux內核，
+這些內核都針對不同的硬體類型進行了優化（有很多種不同的處理器，還有不同
+的內核設置選項）。所以每發布一次驅動程序，都需要提供很多不同版本的內核
+模塊。</p>
+<p>相信我，如果你真的要採取這種發布方式，一定會慢慢瘋掉，我很久以前就有過
+深刻的教訓…</p>
+</section>
+<section id="id4">
+<h2>穩定的內核原始碼接口<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h2>
+<p>如果有人不將他的內核驅動程序，放入公版內核的原始碼樹，而又想讓驅動程序
+一直保持在最新的內核中可用，那麼這個話題將會變得沒完沒了。
+內核開發是持續而且快節奏的，從來都不會慢下來。內核開發人員在當前接口中
+找到bug，或者找到更好的實現方式。一旦發現這些，他們就很快會去修改當前的
+接口。修改接口意味著，函數名可能會改變，結構體可能被擴充或者刪減，函數
+的參數也可能發生改變。一旦接口被修改，內核中使用這些接口的地方需要同時
+修正，這樣才能保證所有的東西繼續工作。</p>
+<p>舉一個例子，內核的USB驅動程序接口在USB子系統的整個生命周期中，至少經歷
+了三次重寫。這些重寫解決以下問題：</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>把數據流從同步模式改成非同步模式，這個改動減少了一些驅動程序的
+複雜度，提高了所有USB驅動程序的吞吐率，這樣幾乎所有的USB設備都
+能以最大速率工作了。</p></li>
+<li><p>修改了USB核心代碼中爲USB驅動分配數據包內存的方式，所有的驅動都
+需要提供更多的參數給USB核心，以修正了很多已經被記錄在案的死鎖。</p></li>
+</ul>
+</div></blockquote>
+<p>這和一些封閉原始碼的作業系統形成鮮明的對比，在那些作業系統上，不得不額
+外的維護舊的USB接口。這導致了一個可能性，新的開發者依然會不小心使用舊的
+接口，以不恰當的方式編寫代碼，進而影響到作業系統的穩定性。
+在上面的例子中，所有的開發者都同意這些重要的改動，在這樣的情況下修改代
+價很低。如果Linux保持一個穩定的內核原始碼接口，那麼就得創建一個新的接口
+；舊的，有問題的接口必須一直維護，給Linux USB開發者帶來額外的工作。既然
+所有的Linux USB驅動的作者都是利用自己的時間工作，那麼要求他們去做毫無意
+義的免費額外工作，是不可能的。
+安全問題對Linux來說十分重要。一個安全問題被發現，就會在短時間內得到修
+正。在很多情況下，這將導致Linux內核中的一些接口被重寫，以從根本上避免安
+全問題。一旦接口被重寫，所有使用這些接口的驅動程序，必須同時得到修正，
+以確定安全問題已經得到修復並且不可能在未來還有同樣的安全問題。如果內核
+內部接口不允許改變，那麼就不可能修復這樣的安全問題，也不可能確認這樣的
+安全問題以後不會發生。
+開發者一直在清理內核接口。如果一個接口沒有人在使用了，它就會被刪除。這
+樣可以確保內核儘可能的小，而且所有潛在的接口都會得到儘可能完整的測試
+（沒有人使用的接口是不可能得到良好的測試的）。</p>
+</section>
+<section id="id5">
+<h2>要做什麼<a class="headerlink" href="#id5" title="Permalink to this headline">¶</a></h2>
+<p>如果你寫了一個Linux內核驅動，但是它還不在Linux原始碼樹里，作爲一個開發
+者，你應該怎麼做？爲每個發布的每個版本提供一個二進位驅動，那簡直是一個
+噩夢，要跟上永遠處於變化之中的內核接口，也是一件辛苦活。
+很簡單，讓你的驅動進入內核原始碼樹（要記得我們在談論的是以GPL許可發行
+的驅動，如果你的代碼不符合GPL，那麼祝你好運，你只能自己解決這個問題了，
+你這個吸血鬼&lt;把Andrew和Linus對吸血鬼的定義連結到這裡&gt;）。當你的代碼加入
+公版內核原始碼樹之後，如果一個內核接口改變，你的驅動會直接被修改接口的
+那個人修改。保證你的驅動永遠都可以編譯通過，並且一直工作，你幾乎不需要
+做什麼事情。</p>
+<p>把驅動放到內核原始碼樹里會有很多的好處：</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>驅動的質量會提升，而維護成本（對原始作者來說）會下降。</p></li>
+<li><p>其他人會給驅動添加新特性。</p></li>
+<li><p>其他人會找到驅動中的bug並修復。</p></li>
+<li><p>其他人會在驅動中找到性能優化的機會。</p></li>
+<li><p>當外部的接口的改變需要修改驅動程序的時候，其他人會修改驅動程序</p></li>
+<li><p>不需要聯繫任何發行商，這個驅動會自動的隨著所有的Linux發布一起發
+布。</p></li>
+</ul>
+</div></blockquote>
+<p>和別的作業系統相比，Linux爲更多不同的設備提供現成的驅動，而且能在更多不
+同體系結構的處理器上支持這些設備。這個經過考驗的開發模式，必然是錯不了
+的 :)</p>
+</section>
+<section id="id6">
+<h2>感謝<a class="headerlink" href="#id6" title="Permalink to this headline">¶</a></h2>
+<p>感謝 Randy Dunlap, Andrew Morton, David Brownell, Hanna Linder,
+Robert Love, and Nishanth Aravamudan 對於本文檔早期版本的評審和建議。</p>
+<p>英文版維護者： Greg Kroah-Hartman &lt;<a class="reference external" href="mailto:greg&#37;&#52;&#48;kroah&#46;com">greg<span>&#64;</span>kroah<span>&#46;</span>com</a>&gt;</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Linux 內核驅動接口</a><ul>
+<li><a class="reference internal" href="#id1">執行綱要</a></li>
+<li><a class="reference internal" href="#id2">入門</a></li>
+<li><a class="reference internal" href="#id3">二進位內核接口</a></li>
+<li><a class="reference internal" href="#id4">穩定的內核原始碼接口</a></li>
+<li><a class="reference internal" href="#id5">要做什麼</a></li>
+<li><a class="reference internal" href="#id6">感謝</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_TW/process/stable-api-nonsense.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_TW/process/stable-api-nonsense.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

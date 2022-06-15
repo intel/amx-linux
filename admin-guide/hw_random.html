@@ -1,0 +1,201 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Hardware random number generators &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Using the initial RAM disk (initrd)" href="initrd.html" />
+    <link rel="prev" title="Notes on the change from 16-bit UIDs to 32-bit UIDs" href="highuid.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="hardware-random-number-generators">
+<h1>Hardware random number generators<a class="headerlink" href="#hardware-random-number-generators" title="Permalink to this headline">¶</a></h1>
+<section id="introduction">
+<h2>Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>The hw_random framework is software that makes use of a
+special hardware feature on your CPU or motherboard,
+a Random Number Generator (RNG).  The software has two parts:
+a core providing the /dev/hwrng character device and its
+sysfs support, plus a hardware-specific driver that plugs
+into that core.</p>
+<p>To make the most effective use of these mechanisms, you
+should download the support software as well.  Download the
+latest version of the “rng-tools” package from the
+hw_random driver’s official Web site:</p>
+<blockquote>
+<div><p><a class="reference external" href="http://sourceforge.net/projects/gkernel/">http://sourceforge.net/projects/gkernel/</a></p>
+</div></blockquote>
+<p>Those tools use /dev/hwrng to fill the kernel entropy pool,
+which is used internally and exported by the /dev/urandom and
+/dev/random special files.</p>
+</section>
+<section id="theory-of-operation">
+<h2>Theory of operation<a class="headerlink" href="#theory-of-operation" title="Permalink to this headline">¶</a></h2>
+<p>CHARACTER DEVICE.  Using the standard open()
+and read() system calls, you can read random data from
+the hardware RNG device.  This data is NOT CHECKED by any
+fitness tests, and could potentially be bogus (if the
+hardware is faulty or has been tampered with).  Data is only
+output if the hardware “has-data” flag is set, but nevertheless
+a security-conscious person would run fitness tests on the
+data before assuming it is truly random.</p>
+<p>The rng-tools package uses such tests in “rngd”, and lets you
+run them by hand with a “rngtest” utility.</p>
+<p>/dev/hwrng is char device major 10, minor 183.</p>
+<p>CLASS DEVICE.  There is a /sys/class/misc/hw_random node with
+two unique attributes, “rng_available” and “rng_current”.  The
+“rng_available” attribute lists the hardware-specific drivers
+available, while “rng_current” lists the one which is currently
+connected to /dev/hwrng.  If your system has more than one
+RNG available, you may change the one used by writing a name from
+the list in “rng_available” into “rng_current”.</p>
+<hr class="docutils" />
+<dl class="simple">
+<dt>Hardware driver for Intel/AMD/VIA Random Number Generators (RNG)</dt><dd><ul class="simple">
+<li><p>Copyright 2000,2001 Jeff Garzik &lt;<a class="reference external" href="mailto:jgarzik&#37;&#52;&#48;pobox&#46;com">jgarzik<span>&#64;</span>pobox<span>&#46;</span>com</a>&gt;</p></li>
+<li><p>Copyright 2000,2001 Philipp Rumpf &lt;<a class="reference external" href="mailto:prumpf&#37;&#52;&#48;mandrakesoft&#46;com">prumpf<span>&#64;</span>mandrakesoft<span>&#46;</span>com</a>&gt;</p></li>
+</ul>
+</dd>
+</dl>
+</section>
+<section id="about-the-intel-rng-hardware-from-the-firmware-hub-datasheet">
+<h2>About the Intel RNG hardware, from the firmware hub datasheet<a class="headerlink" href="#about-the-intel-rng-hardware-from-the-firmware-hub-datasheet" title="Permalink to this headline">¶</a></h2>
+<p>The Firmware Hub integrates a Random Number Generator (RNG)
+using thermal noise generated from inherently random quantum
+mechanical properties of silicon. When not generating new random
+bits the RNG circuitry will enter a low power state. Intel will
+provide a binary software driver to give third party software
+access to our RNG for use as a security feature. At this time,
+the RNG is only to be used with a system in an OS-present state.</p>
+</section>
+<section id="intel-rng-driver-notes">
+<h2>Intel RNG Driver notes<a class="headerlink" href="#intel-rng-driver-notes" title="Permalink to this headline">¶</a></h2>
+<p>FIXME: support poll(2)</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>request_mem_region was removed, for three reasons:</p>
+<ol class="arabic simple">
+<li><p>Only one RNG is supported by this driver;</p></li>
+<li><p>The location used by the RNG is a fixed location in
+MMIO-addressable memory;</p></li>
+<li><p>users with properly working BIOS e820 handling will always
+have the region in which the RNG is located reserved, so
+request_mem_region calls always fail for proper setups.
+However, for people who use mem=XX, BIOS e820 information is
+<strong>not</strong> in /proc/iomem, and request_mem_region(RNG_ADDR) can
+succeed.</p></li>
+</ol>
+</div>
+</section>
+<section id="driver-details">
+<h2>Driver details<a class="headerlink" href="#driver-details" title="Permalink to this headline">¶</a></h2>
+<dl class="simple">
+<dt>Based on:</dt><dd><p>Intel 82802AB/82802AC Firmware Hub (FWH) Datasheet
+May 1999 Order Number: 290658-002 R</p>
+</dd>
+<dt>Intel 82802 Firmware Hub:</dt><dd><p>Random Number Generator
+Programmer’s Reference Manual
+December 1999 Order Number: 298029-001 R</p>
+</dd>
+<dt>Intel 82802 Firmware HUB Random Number Generator Driver</dt><dd><p>Copyright (c) 2000 Matt Sottek &lt;<a class="reference external" href="mailto:msottek&#37;&#52;&#48;quiknet&#46;com">msottek<span>&#64;</span>quiknet<span>&#46;</span>com</a>&gt;</p>
+</dd>
+</dl>
+<p>Special thanks to Matt Sottek.  I did the “guts”, he
+did the “brains” and all the testing.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Hardware random number generators</a><ul>
+<li><a class="reference internal" href="#introduction">Introduction</a></li>
+<li><a class="reference internal" href="#theory-of-operation">Theory of operation</a></li>
+<li><a class="reference internal" href="#about-the-intel-rng-hardware-from-the-firmware-hub-datasheet">About the Intel RNG hardware, from the firmware hub datasheet</a></li>
+<li><a class="reference internal" href="#intel-rng-driver-notes">Intel RNG Driver notes</a></li>
+<li><a class="reference internal" href="#driver-details">Driver details</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/admin-guide/hw_random.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/admin-guide/hw_random.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

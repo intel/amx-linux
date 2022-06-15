@@ -1,0 +1,198 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>The s390 DIAGNOSE call on KVM &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="s390 (IBM Z) Ultravisor and Protected VMs" href="s390-pv.html" />
+    <link rel="prev" title="KVM for s390 systems" href="index.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="the-s390-diagnose-call-on-kvm">
+<h1>The s390 DIAGNOSE call on KVM<a class="headerlink" href="#the-s390-diagnose-call-on-kvm" title="Permalink to this headline">¶</a></h1>
+<p>KVM on s390 supports the DIAGNOSE call for making hypercalls, both for
+native hypercalls and for selected hypercalls found on other s390
+hypervisors.</p>
+<p>Note that bits are numbered as by the usual s390 convention (most significant
+bit on the left).</p>
+<section id="general-remarks">
+<h2>General remarks<a class="headerlink" href="#general-remarks" title="Permalink to this headline">¶</a></h2>
+<p>DIAGNOSE calls by the guest cause a mandatory intercept. This implies
+all supported DIAGNOSE calls need to be handled by either KVM or its
+userspace.</p>
+<p>All DIAGNOSE calls supported by KVM use the RS-a format:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>--------------------------------------
+|  &#39;83&#39;  | R1 | R3 | B2 |     D2     |
+--------------------------------------
+0        8    12   16   20           31
+</pre></div>
+</div>
+<p>The second-operand address (obtained by the base/displacement calculation)
+is not used to address data. Instead, bits 48-63 of this address specify
+the function code, and bits 0-47 are ignored.</p>
+<p>The supported DIAGNOSE function codes vary by the userspace used. For
+DIAGNOSE function codes not specific to KVM, please refer to the
+documentation for the s390 hypervisors defining them.</p>
+</section>
+<section id="diagnose-function-code-x-500-kvm-virtio-functions">
+<h2>DIAGNOSE function code ‘X’500’ - KVM virtio functions<a class="headerlink" href="#diagnose-function-code-x-500-kvm-virtio-functions" title="Permalink to this headline">¶</a></h2>
+<p>If the function code specifies 0x500, various virtio-related functions
+are performed.</p>
+<p>General register 1 contains the virtio subfunction code. Supported
+virtio subfunctions depend on KVM’s userspace. Generally, userspace
+provides either s390-virtio (subcodes 0-2) or virtio-ccw (subcode 3).</p>
+<p>Upon completion of the DIAGNOSE instruction, general register 2 contains
+the function’s return code, which is either a return code or a subcode
+specific value.</p>
+<dl>
+<dt>Subcode 0 - s390-virtio notification and early console printk</dt><dd><p>Handled by userspace.</p>
+</dd>
+<dt>Subcode 1 - s390-virtio reset</dt><dd><p>Handled by userspace.</p>
+</dd>
+<dt>Subcode 2 - s390-virtio set status</dt><dd><p>Handled by userspace.</p>
+</dd>
+<dt>Subcode 3 - virtio-ccw notification</dt><dd><p>Handled by either userspace or KVM (ioeventfd case).</p>
+<p>General register 2 contains a subchannel-identification word denoting
+the subchannel of the virtio-ccw proxy device to be notified.</p>
+<p>General register 3 contains the number of the virtqueue to be notified.</p>
+<p>General register 4 contains a 64bit identifier for KVM usage (the
+kvm_io_bus cookie). If general register 4 does not contain a valid
+identifier, it is ignored.</p>
+<p>After completion of the DIAGNOSE call, general register 2 may contain
+a 64bit identifier (in the kvm_io_bus cookie case), or a negative
+error value, if an internal error occurred.</p>
+<p>See also the virtio standard for a discussion of this hypercall.</p>
+</dd>
+</dl>
+</section>
+<section id="diagnose-function-code-x-501-kvm-breakpoint">
+<h2>DIAGNOSE function code ‘X’501 - KVM breakpoint<a class="headerlink" href="#diagnose-function-code-x-501-kvm-breakpoint" title="Permalink to this headline">¶</a></h2>
+<p>If the function code specifies 0x501, breakpoint functions may be performed.
+This function code is handled by userspace.</p>
+<p>This diagnose function code has no subfunctions and uses no parameters.</p>
+</section>
+<section id="diagnose-function-code-x-9c-voluntary-time-slice-yield">
+<h2>DIAGNOSE function code ‘X’9C - Voluntary Time Slice Yield<a class="headerlink" href="#diagnose-function-code-x-9c-voluntary-time-slice-yield" title="Permalink to this headline">¶</a></h2>
+<p>General register 1 contains the target CPU address.</p>
+<p>In a guest of a hypervisor like LPAR, KVM or z/VM using shared host CPUs,
+DIAGNOSE with function code 0x9c may improve system performance by
+yielding the host CPU on which the guest CPU is running to be assigned
+to another guest CPU, preferably the logical CPU containing the specified
+target CPU.</p>
+<section id="diag-x-9c-forwarding">
+<h3>DIAG ‘X’9C forwarding<a class="headerlink" href="#diag-x-9c-forwarding" title="Permalink to this headline">¶</a></h3>
+<p>The guest may send a DIAGNOSE 0x9c in order to yield to a certain
+other vcpu. An example is a Linux guest that tries to yield to the vcpu
+that is currently holding a spinlock, but not running.</p>
+<p>However, on the host the real cpu backing the vcpu may itself not be
+running.
+Forwarding the DIAGNOSE 0x9c initially sent by the guest to yield to
+the backing cpu will hopefully cause that cpu, and thus subsequently
+the guest’s vcpu, to be scheduled.</p>
+<dl class="simple">
+<dt>diag9c_forwarding_hz</dt><dd><p>KVM kernel parameter allowing to specify the maximum number of DIAGNOSE
+0x9c forwarding per second in the purpose of avoiding a DIAGNOSE 0x9c
+forwarding storm.
+A value of 0 turns the forwarding off.</p>
+</dd>
+</dl>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">The s390 DIAGNOSE call on KVM</a><ul>
+<li><a class="reference internal" href="#general-remarks">General remarks</a></li>
+<li><a class="reference internal" href="#diagnose-function-code-x-500-kvm-virtio-functions">DIAGNOSE function code ‘X’500’ - KVM virtio functions</a></li>
+<li><a class="reference internal" href="#diagnose-function-code-x-501-kvm-breakpoint">DIAGNOSE function code ‘X’501 - KVM breakpoint</a></li>
+<li><a class="reference internal" href="#diagnose-function-code-x-9c-voluntary-time-slice-yield">DIAGNOSE function code ‘X’9C - Voluntary Time Slice Yield</a><ul>
+<li><a class="reference internal" href="#diag-x-9c-forwarding">DIAG ‘X’9C forwarding</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/virt/kvm/s390/s390-diag.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/virt/kvm/s390/s390-diag.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

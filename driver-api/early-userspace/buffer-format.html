@@ -1,0 +1,255 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>initramfs buffer format &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="CPU and Device Power Management" href="../pm/index.html" />
+    <link rel="prev" title="Early userspace support" href="early_userspace_support.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="initramfs-buffer-format">
+<h1>initramfs buffer format<a class="headerlink" href="#initramfs-buffer-format" title="Permalink to this headline">¶</a></h1>
+<p>Al Viro, H. Peter Anvin</p>
+<p>Last revision: 2002-01-13</p>
+<p>Starting with kernel 2.5.x, the old “initial ramdisk” protocol is
+getting {replaced/complemented} with the new “initial ramfs”
+(initramfs) protocol.  The initramfs contents is passed using the same
+memory buffer protocol used by the initrd protocol, but the contents
+is different.  The initramfs buffer contains an archive which is
+expanded into a ramfs filesystem; this document details the format of
+the initramfs buffer format.</p>
+<p>The initramfs buffer format is based around the “newc” or “crc” CPIO
+formats, and can be created with the cpio(1) utility.  The cpio
+archive can be compressed using gzip(1).  One valid version of an
+initramfs buffer is thus a single .cpio.gz file.</p>
+<p>The full format of the initramfs buffer is defined by the following
+grammar, where:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>*       is used to indicate &quot;0 or more occurrences of&quot;
+(|)     indicates alternatives
++       indicates concatenation
+GZIP()  indicates the gzip(1) of the operand
+ALGN(n) means padding with null bytes to an n-byte boundary
+
+initramfs  := (&quot;\0&quot; | cpio_archive | cpio_gzip_archive)*
+
+cpio_gzip_archive := GZIP(cpio_archive)
+
+cpio_archive := cpio_file* + (&lt;nothing&gt; | cpio_trailer)
+
+cpio_file := ALGN(4) + cpio_header + filename + &quot;\0&quot; + ALGN(4) + data
+
+cpio_trailer := ALGN(4) + cpio_header + &quot;TRAILER!!!\0&quot; + ALGN(4)
+</pre></div>
+</div>
+<p>In human terms, the initramfs buffer contains a collection of
+compressed and/or uncompressed cpio archives (in the “newc” or “crc”
+formats); arbitrary amounts zero bytes (for padding) can be added
+between members.</p>
+<p>The cpio “TRAILER!!!” entry (cpio end-of-archive) is optional, but is
+not ignored; see “handling of hard links” below.</p>
+<p>The structure of the cpio_header is as follows (all fields contain
+hexadecimal ASCII numbers fully padded with ‘0’ on the left to the
+full width of the field, for example, the integer 4780 is represented
+by the ASCII string “000012ac”):</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 17%" />
+<col style="width: 23%" />
+<col style="width: 60%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Field name</p></th>
+<th class="head"><p>Field size</p></th>
+<th class="head"><p>Meaning</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>c_magic</p></td>
+<td><p>6 bytes</p></td>
+<td><p>The string “070701” or “070702”</p></td>
+</tr>
+<tr class="row-odd"><td><p>c_ino</p></td>
+<td><p>8 bytes</p></td>
+<td><p>File inode number</p></td>
+</tr>
+<tr class="row-even"><td><p>c_mode</p></td>
+<td><p>8 bytes</p></td>
+<td><p>File mode and permissions</p></td>
+</tr>
+<tr class="row-odd"><td><p>c_uid</p></td>
+<td><p>8 bytes</p></td>
+<td><p>File uid</p></td>
+</tr>
+<tr class="row-even"><td><p>c_gid</p></td>
+<td><p>8 bytes</p></td>
+<td><p>File gid</p></td>
+</tr>
+<tr class="row-odd"><td><p>c_nlink</p></td>
+<td><p>8 bytes</p></td>
+<td><p>Number of links</p></td>
+</tr>
+<tr class="row-even"><td><p>c_mtime</p></td>
+<td><p>8 bytes</p></td>
+<td><p>Modification time</p></td>
+</tr>
+<tr class="row-odd"><td><p>c_filesize</p></td>
+<td><p>8 bytes</p></td>
+<td><p>Size of data field</p></td>
+</tr>
+<tr class="row-even"><td><p>c_maj</p></td>
+<td><p>8 bytes</p></td>
+<td><p>Major part of file device number</p></td>
+</tr>
+<tr class="row-odd"><td><p>c_min</p></td>
+<td><p>8 bytes</p></td>
+<td><p>Minor part of file device number</p></td>
+</tr>
+<tr class="row-even"><td><p>c_rmaj</p></td>
+<td><p>8 bytes</p></td>
+<td><p>Major part of device node reference</p></td>
+</tr>
+<tr class="row-odd"><td><p>c_rmin</p></td>
+<td><p>8 bytes</p></td>
+<td><p>Minor part of device node reference</p></td>
+</tr>
+<tr class="row-even"><td><p>c_namesize</p></td>
+<td><p>8 bytes</p></td>
+<td><p>Length of filename, including final 0</p></td>
+</tr>
+<tr class="row-odd"><td><p>c_chksum</p></td>
+<td><p>8 bytes</p></td>
+<td><p>Checksum of data field if c_magic is 070702;
+otherwise zero</p></td>
+</tr>
+</tbody>
+</table>
+<p>The c_mode field matches the contents of st_mode returned by stat(2)
+on Linux, and encodes the file type and file permissions.</p>
+<p>The c_filesize should be zero for any file which is not a regular file
+or symlink.</p>
+<p>The c_chksum field contains a simple 32-bit unsigned sum of all the
+bytes in the data field.  cpio(1) refers to this as “crc”, which is
+clearly incorrect (a cyclic redundancy check is a different and
+significantly stronger integrity check), however, this is the
+algorithm used.</p>
+<p>If the filename is “TRAILER!!!” this is actually an end-of-archive
+marker; the c_filesize for an end-of-archive marker must be zero.</p>
+<section id="handling-of-hard-links">
+<h2>Handling of hard links<a class="headerlink" href="#handling-of-hard-links" title="Permalink to this headline">¶</a></h2>
+<p>When a nondirectory with c_nlink &gt; 1 is seen, the (c_maj,c_min,c_ino)
+tuple is looked up in a tuple buffer.  If not found, it is entered in
+the tuple buffer and the entry is created as usual; if found, a hard
+link rather than a second copy of the file is created.  It is not
+necessary (but permitted) to include a second copy of the file
+contents; if the file contents is not included, the c_filesize field
+should be set to zero to indicate no data section follows.  If data is
+present, the previous instance of the file is overwritten; this allows
+the data-carrying instance of a file to occur anywhere in the sequence
+(GNU cpio is reported to attach the data to the last instance of a
+file only.)</p>
+<p>c_filesize must not be zero for a symlink.</p>
+<p>When a “TRAILER!!!” end-of-archive marker is seen, the tuple buffer is
+reset.  This permits archives which are generated independently to be
+concatenated.</p>
+<p>To combine file data from different sources (without having to
+regenerate the (c_maj,c_min,c_ino) fields), therefore, either one of
+the following techniques can be used:</p>
+<ol class="loweralpha simple">
+<li><p>Separate the different file data sources with a “TRAILER!!!”
+end-of-archive marker, or</p></li>
+<li><p>Make sure c_nlink == 1 for all nondirectory entries.</p></li>
+</ol>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">initramfs buffer format</a><ul>
+<li><a class="reference internal" href="#handling-of-hard-links">Handling of hard links</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/early-userspace/buffer-format.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/early-userspace/buffer-format.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

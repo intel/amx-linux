@@ -1,0 +1,227 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Kernel driver ntc_thermistor &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Kernel driver nzxt-kraken2" href="nzxt-kraken2.html" />
+    <link rel="prev" title="Kernel driver nsa320_hwmon" href="nsa320.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="kernel-driver-ntc-thermistor">
+<h1>Kernel driver ntc_thermistor<a class="headerlink" href="#kernel-driver-ntc-thermistor" title="Permalink to this headline">¶</a></h1>
+<p>Supported thermistors from Murata:</p>
+<ul>
+<li><p>Murata NTC Thermistors NCP15WB473, NCP18WB473, NCP21WB473, NCP03WB473,
+NCP15WL333, NCP03WF104, NCP15XH103</p>
+<p>Prefixes: ‘ncp15wb473’, ‘ncp18wb473’, ‘ncp21wb473’, ‘ncp03wb473’,
+‘ncp15wl333’, ‘ncp03wf104’, ‘ncp15xh103’</p>
+<p>Datasheet: Publicly available at Murata</p>
+</li>
+</ul>
+<p>Supported thermistors from EPCOS:</p>
+<ul>
+<li><p>EPCOS NTC Thermistors B57330V2103</p>
+<p>Prefixes: b57330v2103</p>
+<p>Datasheet: Publicly available at EPCOS</p>
+</li>
+</ul>
+<p>Other NTC thermistors can be supported simply by adding compensation
+tables; e.g., NCP15WL333 support is added by the table ncpXXwl333.</p>
+<p>Authors:</p>
+<blockquote>
+<div><p>MyungJoo Ham &lt;<a class="reference external" href="mailto:myungjoo&#46;ham&#37;&#52;&#48;samsung&#46;com">myungjoo<span>&#46;</span>ham<span>&#64;</span>samsung<span>&#46;</span>com</a>&gt;</p>
+</div></blockquote>
+<section id="description">
+<h2>Description<a class="headerlink" href="#description" title="Permalink to this headline">¶</a></h2>
+<p>The NTC (Negative Temperature Coefficient) thermistor is a simple thermistor
+that requires users to provide the resistance and lookup the corresponding
+compensation table to get the temperature input.</p>
+<p>The NTC driver provides lookup tables with a linear approximation function
+and four circuit models with an option not to use any of the four models.</p>
+<p>Using the following convention:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$    resistor
+[TH] the thermistor
+</pre></div>
+</div>
+<p>The four circuit models provided are:</p>
+<ol class="arabic">
+<li><p>connect = NTC_CONNECTED_POSITIVE, pullup_ohm &gt; 0:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[pullup_uV]
+    |    |
+   [TH]  $ (pullup_ohm)
+    |    |
+    +----+-----------------------[read_uV]
+    |
+    $ (pulldown_ohm)
+    |
+   -+- (ground)
+</pre></div>
+</div>
+</li>
+<li><p>connect = NTC_CONNECTED_POSITIVE, pullup_ohm = 0 (not-connected):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[pullup_uV]
+    |
+   [TH]
+    |
+    +----------------------------[read_uV]
+    |
+    $ (pulldown_ohm)
+    |
+   -+- (ground)
+</pre></div>
+</div>
+</li>
+<li><p>connect = NTC_CONNECTED_GROUND, pulldown_ohm &gt; 0:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[pullup_uV]
+    |
+    $ (pullup_ohm)
+    |
+    +----+-----------------------[read_uV]
+    |    |
+   [TH]  $ (pulldown_ohm)
+    |    |
+   -+----+- (ground)
+</pre></div>
+</div>
+</li>
+<li><p>connect = NTC_CONNECTED_GROUND, pulldown_ohm = 0 (not-connected):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[pullup_uV]
+    |
+    $ (pullup_ohm)
+    |
+    +----------------------------[read_uV]
+    |
+   [TH]
+    |
+   -+- (ground)
+</pre></div>
+</div>
+</li>
+</ol>
+<p>When one of the four circuit models is used, read_uV, pullup_uV, pullup_ohm,
+pulldown_ohm, and connect should be provided. When none of the four models
+are suitable or the user can get the resistance directly, the user should
+provide read_ohm and _not_ provide the others.</p>
+</section>
+<section id="sysfs-interface">
+<h2>Sysfs Interface<a class="headerlink" href="#sysfs-interface" title="Permalink to this headline">¶</a></h2>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 19%" />
+<col style="width: 3%" />
+<col style="width: 78%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>name</p></th>
+<th class="head"></th>
+<th class="head"><p>the mandatory global attribute, the thermistor name.</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>temp1_type</p></td>
+<td><p>RO</p></td>
+<td><p>always 4 (thermistor)</p></td>
+</tr>
+<tr class="row-odd"><td><p>temp1_input</p></td>
+<td><p>RO</p></td>
+<td><p>measure the temperature and provide the measured value.
+(reading this file initiates the reading procedure.)</p></td>
+</tr>
+</tbody>
+</table>
+<p>Note that each NTC thermistor has only _one_ thermistor; thus, only temp1 exists.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Kernel driver ntc_thermistor</a><ul>
+<li><a class="reference internal" href="#description">Description</a></li>
+<li><a class="reference internal" href="#sysfs-interface">Sysfs Interface</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/hwmon/ntc_thermistor.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/hwmon/ntc_thermistor.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

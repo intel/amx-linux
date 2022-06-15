@@ -1,0 +1,228 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>The 53c700 Driver Notes &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="AACRAID Driver for Linux (take two)" href="aacraid.html" />
+    <link rel="prev" title="Linux SCSI Subsystem" href="index.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="the-53c700-driver-notes">
+<h1>The 53c700 Driver Notes<a class="headerlink" href="#the-53c700-driver-notes" title="Permalink to this headline">¶</a></h1>
+<section id="general-description">
+<h2>General Description<a class="headerlink" href="#general-description" title="Permalink to this headline">¶</a></h2>
+<p>This driver supports the 53c700 and 53c700-66 chips.  It also supports
+the 53c710 but only in 53c700 emulation mode.  It is full featured and
+does sync (-66 and 710 only), disconnects and tag command queueing.</p>
+<p>Since the 53c700 must be interfaced to a bus, you need to wrapper the
+card detector around this driver.  For an example, see the
+NCR_D700.[ch] or lasi700.[ch] files.</p>
+<p>The comments in the 53c700.[ch] files tell you which parts you need to
+fill in to get the driver working.</p>
+</section>
+<section id="compile-time-flags">
+<h2>Compile Time Flags<a class="headerlink" href="#compile-time-flags" title="Permalink to this headline">¶</a></h2>
+<p>A compile time flag is:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>CONFIG_53C700_LE_ON_BE
+</pre></div>
+</div>
+<p>define if the chipset must be supported in little endian mode on a big
+endian architecture (used for the 700 on parisc).</p>
+</section>
+<section id="using-the-chip-core-driver">
+<h2>Using the Chip Core Driver<a class="headerlink" href="#using-the-chip-core-driver" title="Permalink to this headline">¶</a></h2>
+<p>In order to plumb the 53c700 chip core driver into a working SCSI
+driver, you need to know three things about the way the chip is wired
+into your system (or expansion card).</p>
+<ol class="arabic simple">
+<li><p>The clock speed of the SCSI core</p></li>
+<li><p>The interrupt line used</p></li>
+<li><p>The memory (or io space) location of the 53c700 registers.</p></li>
+</ol>
+<p>Optionally, you may also need to know other things, like how to read
+the SCSI Id from the card bios or whether the chip is wired for
+differential operation.</p>
+<p>Usually you can find items 2. and 3. from general spec. documents or
+even by examining the configuration of a working driver under another
+operating system.</p>
+<p>The clock speed is usually buried deep in the technical literature.
+It is required because it is used to set up both the synchronous and
+asynchronous dividers for the chip.  As a general rule of thumb,
+manufacturers set the clock speed at the lowest possible setting
+consistent with the best operation of the chip (although some choose
+to drive it off the CPU or bus clock rather than going to the expense
+of an extra clock chip).  The best operation clock speeds are:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 64%" />
+<col style="width: 36%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>53c700</p></td>
+<td><p>25MHz</p></td>
+</tr>
+<tr class="row-even"><td><p>53c700-66</p></td>
+<td><p>50MHz</p></td>
+</tr>
+<tr class="row-odd"><td><p>53c710</p></td>
+<td><p>40Mhz</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="writing-your-glue-driver">
+<h2>Writing Your Glue Driver<a class="headerlink" href="#writing-your-glue-driver" title="Permalink to this headline">¶</a></h2>
+<p>This will be a standard SCSI driver (I don’t know of a good document
+describing this, just copy from some other driver) with at least a
+detect and release entry.</p>
+<p>In the detect routine, you need to allocate a struct
+NCR_700_Host_Parameters sized memory area and clear it (so that the
+default values for everything are 0).  Then you must fill in the
+parameters that matter to you (see below), plumb the NCR_700_intr
+routine into the interrupt line and call NCR_700_detect with the host
+template and the new parameters as arguments.  You should also call
+the relevant request_*_region function and place the register base
+address into the ‘base’ pointer of the host parameters.</p>
+<p>In the release routine, you must free the NCR_700_Host_Parameters that
+you allocated, call the corresponding release_*_region and free the
+interrupt.</p>
+<section id="handling-interrupts">
+<h3>Handling Interrupts<a class="headerlink" href="#handling-interrupts" title="Permalink to this headline">¶</a></h3>
+<p>In general, you should just plumb the card’s interrupt line in with</p>
+<p>request_irq(irq, NCR_700_intr, &lt;irq flags&gt;, &lt;driver name&gt;, host);</p>
+<p>where host is the return from the relevant NCR_700_detect() routine.</p>
+<p>You may also write your own interrupt handling routine which calls
+NCR_700_intr() directly.  However, you should only really do this if
+you have a card with more than one chip on it and you can read a
+register to tell which set of chips wants the interrupt.</p>
+</section>
+<section id="settable-ncr-700-host-parameters">
+<h3>Settable NCR_700_Host_Parameters<a class="headerlink" href="#settable-ncr-700-host-parameters" title="Permalink to this headline">¶</a></h3>
+<p>The following are a list of the user settable parameters:</p>
+<dl class="simple">
+<dt>clock: (MANDATORY)</dt><dd><p>Set to the clock speed of the chip in MHz.</p>
+</dd>
+<dt>base: (MANDATORY)</dt><dd><p>Set to the base of the io or mem region for the register set. On 64
+bit architectures this is only 32 bits wide, so the registers must be
+mapped into the low 32 bits of memory.</p>
+</dd>
+<dt>pci_dev: (OPTIONAL)</dt><dd><p>Set to the PCI board device.  Leave NULL for a non-pci board.  This is
+used for the pci_alloc_consistent() and pci_map_*() functions.</p>
+</dd>
+<dt>dmode_extra: (OPTIONAL, 53c710 only)</dt><dd><p>Extra flags for the DMODE register.  These are used to control bus
+output pins on the 710.  The settings should be a combination of
+DMODE_FC1 and DMODE_FC2.  What these pins actually do is entirely up
+to the board designer.  Usually it is safe to ignore this setting.</p>
+</dd>
+<dt>differential: (OPTIONAL)</dt><dd><p>Set to 1 if the chip drives a differential bus.</p>
+</dd>
+<dt>force_le_on_be: (OPTIONAL, only if CONFIG_53C700_LE_ON_BE is set)</dt><dd><p>Set to 1 if the chip is operating in little endian mode on a big
+endian architecture.</p>
+</dd>
+<dt>chip710: (OPTIONAL)</dt><dd><p>Set to 1 if the chip is a 53c710.</p>
+</dd>
+<dt>burst_disable: (OPTIONAL, 53c710 only)</dt><dd><p>Disable 8 byte bursting for DMA transfers.</p>
+</dd>
+</dl>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">The 53c700 Driver Notes</a><ul>
+<li><a class="reference internal" href="#general-description">General Description</a></li>
+<li><a class="reference internal" href="#compile-time-flags">Compile Time Flags</a></li>
+<li><a class="reference internal" href="#using-the-chip-core-driver">Using the Chip Core Driver</a></li>
+<li><a class="reference internal" href="#writing-your-glue-driver">Writing Your Glue Driver</a><ul>
+<li><a class="reference internal" href="#handling-interrupts">Handling Interrupts</a></li>
+<li><a class="reference internal" href="#settable-ncr-700-host-parameters">Settable NCR_700_Host_Parameters</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/scsi/53c700.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/scsi/53c700.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

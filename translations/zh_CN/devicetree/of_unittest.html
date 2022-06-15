@@ -1,0 +1,282 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Open Firmware Devicetree 单元测试 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="内核中的设备树API" href="kernel-api.html" />
+    <link rel="prev" title="Linux 和 Devicetree" href="usage-model.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../devicetree/of_unittest.html"><span class="doc">Open Firmware Devicetree Unittest</span></a></p>
+</dd>
+<dt class="field-even">翻译</dt>
+<dd class="field-even"><p>司延腾 Yanteng Si &lt;<a class="reference external" href="mailto:siyanteng&#37;&#52;&#48;loongson&#46;cn">siyanteng<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+<dt class="field-odd">校译</dt>
+<dd class="field-odd"><p></p></dd>
+</dl>
+<section id="open-firmware-devicetree">
+<h1>Open Firmware Devicetree 单元测试<a class="headerlink" href="#open-firmware-devicetree" title="Permalink to this headline">¶</a></h1>
+<p>作者: Gaurav Minocha &lt;<a class="reference external" href="mailto:gaurav&#46;minocha&#46;os&#37;&#52;&#48;gmail&#46;com">gaurav<span>&#46;</span>minocha<span>&#46;</span>os<span>&#64;</span>gmail<span>&#46;</span>com</a>&gt;</p>
+<section id="id1">
+<h2>1. 概述<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>本文档解释了执行 OF 单元测试所需的测试数据是如何动态地附加到实时树上的，与机器的架构无关。</p>
+<p>建议在继续读下去之前，先阅读以下文件。</p>
+<ol class="arabic simple">
+<li><p><a class="reference internal" href="../../../devicetree/usage-model.html"><span class="doc">Linux and the Devicetree</span></a></p></li>
+<li><p><a class="reference external" href="http://www.devicetree.org/Device_Tree_Usage">http://www.devicetree.org/Device_Tree_Usage</a></p></li>
+</ol>
+<p>OF Selftest被设计用来测试提供给设备驱动开发者的接口（include/linux/of.h），以从未扁平
+化的设备树数据结构中获取设备信息等。这个接口被大多数设备驱动在各种使用情况下使用。</p>
+</section>
+<section id="id2">
+<h2>2. 测试数据<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>设备树源文件（drivers/of/unittest-data/testcases.dts）包含执行drivers/of/unittest.c
+中自动化单元测试所需的测试数据。目前，以下设备树源包含文件（.dtsi）被包含在testcases.dt中:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>drivers/of/unittest-data/tests-interrupts.dtsi
+drivers/of/unittest-data/tests-platform.dtsi
+drivers/of/unittest-data/tests-phandle.dtsi
+drivers/of/unittest-data/tests-match.dtsi
+</pre></div>
+</div>
+<p>当内核在启用OF_SELFTEST的情况下被构建时，那么下面的make规则:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$(obj)/%.dtb: $(src)/%.dts FORCE
+        $(call if_changed_dep, dtc)
+</pre></div>
+</div>
+<p>用于将DT源文件（testcases.dts）编译成二进制blob（testcases.dtb），也被称为扁平化的DT。</p>
+<p>之后，使用以下规则将上述二进制blob包装成一个汇编文件（testcases.dtb.S）:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$(obj)/%.dtb.S: $(obj)/%.dtb
+        $(call cmd, dt_S_dtb)
+</pre></div>
+</div>
+<p>汇编文件被编译成一个对象文件（testcases.dtb.o），并被链接到内核镜像中。</p>
+<section id="id3">
+<h3>2.1. 添加测试数据<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h3>
+<p>未扁平化的设备树结构体:</p>
+<p>未扁平化的设备树由连接的设备节点组成，其树状结构形式如下所述:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>// following struct members are used to construct the tree
+struct device_node {
+    ...
+    struct  device_node *parent;
+    struct  device_node *child;
+    struct  device_node *sibling;
+    ...
+};
+</pre></div>
+</div>
+<p>图1描述了一个机器的未扁平化设备树的通用结构，只考虑了子节点和同级指针。存在另一个指针，
+<code class="docutils literal notranslate"><span class="pre">*parent</span></code> ，用于反向遍历该树。因此，在一个特定的层次上，子节点和所有的兄弟姐妹节点将
+有一个指向共同节点的父指针（例如，child1、sibling2、sibling3、sibling4的父指针指向
+根节点）:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>root (&#39;/&#39;)
+|
+child1 -&gt; sibling2 -&gt; sibling3 -&gt; sibling4 -&gt; null
+|         |           |           |
+|         |           |          null
+|         |           |
+|         |        child31 -&gt; sibling32 -&gt; null
+|         |           |          |
+|         |          null       null
+|         |
+|      child21 -&gt; sibling22 -&gt; sibling23 -&gt; null
+|         |          |            |
+|        null       null         null
+|
+child11 -&gt; sibling12 -&gt; sibling13 -&gt; sibling14 -&gt; null
+|           |           |            |
+|           |           |           null
+|           |           |
+null        null       child131 -&gt; null
+                        |
+                        null
+</pre></div>
+</div>
+<p>Figure 1: 未扁平化的设备树的通用结构</p>
+<p>在执行OF单元测试之前，需要将测试数据附加到机器的设备树上（如果存在）。因此，当调用
+selftest_data_add()时，首先会读取通过以下内核符号链接到内核镜像中的扁平化设备树
+数据:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>__dtb_testcases_begin - address marking the start of test data blob
+__dtb_testcases_end   - address marking the end of test data blob
+</pre></div>
+</div>
+<p>其次，它调用<a class="reference internal" href="../../../devicetree/kernel-api.html#c.of_fdt_unflatten_tree" title="of_fdt_unflatten_tree"><code class="xref c c-func docutils literal notranslate"><span class="pre">of_fdt_unflatten_tree()</span></code></a>来解除扁平化的blob。最后，如果机器的设备树
+（即实时树）是存在的，那么它将未扁平化的测试数据树附加到实时树上，否则它将自己作为
+实时设备树附加。</p>
+<p>attach_node_and_children()使用of_attach_node()将节点附加到实时树上，如下所
+述。为了解释这一点，图2中描述的测试数据树被附加到图1中描述的实时树上:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>root (&#39;/&#39;)
+    |
+testcase-data
+    |
+test-child0 -&gt; test-sibling1 -&gt; test-sibling2 -&gt; test-sibling3 -&gt; null
+    |               |                |                |
+test-child01      null             null             null
+</pre></div>
+</div>
+<p>Figure 2: 将测试数据树附在实时树上的例子。</p>
+<p>根据上面的方案，实时树已经存在，所以不需要附加根(‘/’)节点。所有其他节点都是通过在
+每个节点上调用of_attach_node()来附加的。</p>
+<p>在函数of_attach_node()中，新的节点被附在实时树中给定的父节点的子节点上。但是，如
+果父节点已经有了一个孩子，那么新节点就会取代当前的孩子，并将其变成其兄弟姐妹。因此，
+当测试案例的数据节点被连接到上面的实时树（图1）时，最终的结构如图3所示:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>root (&#39;/&#39;)
+|
+testcase-data -&gt; child1 -&gt; sibling2 -&gt; sibling3 -&gt; sibling4 -&gt; null
+|               |          |           |           |
+(...)             |          |           |          null
+                |          |         child31 -&gt; sibling32 -&gt; null
+                |          |           |           |
+                |          |          null        null
+                |          |
+                |        child21 -&gt; sibling22 -&gt; sibling23 -&gt; null
+                |          |           |            |
+                |         null        null         null
+                |
+                child11 -&gt; sibling12 -&gt; sibling13 -&gt; sibling14 -&gt; null
+                |          |            |            |
+                null       null          |           null
+                                        |
+                                        child131 -&gt; null
+                                        |
+                                        null
+-----------------------------------------------------------------------
+
+root (&#39;/&#39;)
+|
+testcase-data -&gt; child1 -&gt; sibling2 -&gt; sibling3 -&gt; sibling4 -&gt; null
+|               |          |           |           |
+|             (...)      (...)       (...)        null
+|
+test-sibling3 -&gt; test-sibling2 -&gt; test-sibling1 -&gt; test-child0 -&gt; null
+|                |                   |                |
+null             null                null         test-child01
+</pre></div>
+</div>
+<p>Figure 3: 附加测试案例数据后的实时设备树结构。</p>
+<p>聪明的读者会注意到，与先前的结构相比，test-child0节点成为最后一个兄弟姐妹（图2）。
+在连接了第一个test-child0节点之后，又连接了test-sibling1节点，该节点推动子节点
+（即test-child0）成为兄弟姐妹，并使自己成为子节点，如上所述。</p>
+<p>如果发现一个重复的节点（即如果一个具有相同full_name属性的节点已经存在于实时树中），
+那么该节点不会被附加，而是通过调用函数update_node_properties()将其属性更新到活
+树的节点中。</p>
+</section>
+<section id="id4">
+<h3>2.2. 删除测试数据<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h3>
+<p>一旦测试用例执行完，selftest_data_remove被调用，以移除最初连接的设备节点（首先是
+叶子节点被分离，然后向上移动父节点被移除，最后是整个树）。selftest_data_remove()
+调用detach_node_and_children()，使用<a class="reference internal" href="../../../devicetree/kernel-api.html#c.of_detach_node" title="of_detach_node"><code class="xref c c-func docutils literal notranslate"><span class="pre">of_detach_node()</span></code></a>将节点从实时设备树上分离。</p>
+<p>为了分离一个节点，<a class="reference internal" href="../../../devicetree/kernel-api.html#c.of_detach_node" title="of_detach_node"><code class="xref c c-func docutils literal notranslate"><span class="pre">of_detach_node()</span></code></a>要么将给定节点的父节点的子节点指针更新为其同级节
+点，要么根据情况将前一个同级节点附在给定节点的同级节点上。就这样吧。 :)</p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Open Firmware Devicetree 单元测试</a><ul>
+<li><a class="reference internal" href="#id1">1. 概述</a></li>
+<li><a class="reference internal" href="#id2">2. 测试数据</a><ul>
+<li><a class="reference internal" href="#id3">2.1. 添加测试数据</a></li>
+<li><a class="reference internal" href="#id4">2.2. 删除测试数据</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/devicetree/of_unittest.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/devicetree/of_unittest.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

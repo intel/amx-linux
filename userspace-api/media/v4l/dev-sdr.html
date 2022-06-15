@@ -1,0 +1,198 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>4.10. Software Defined Radio Interface (SDR) &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="4.11. Touch Devices" href="dev-touch.html" />
+    <link rel="prev" title="4.9. RDS Interface" href="dev-rds.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="software-defined-radio-interface-sdr">
+<span id="sdr"></span><h1><span class="section-number">4.10. </span>Software Defined Radio Interface (SDR)<a class="headerlink" href="#software-defined-radio-interface-sdr" title="Permalink to this headline">¶</a></h1>
+<p>SDR is an abbreviation of Software Defined Radio, the radio device which
+uses application software for modulation or demodulation. This interface
+is intended for controlling and data streaming of such devices.</p>
+<p>SDR devices are accessed through character device special files named
+<code class="docutils literal notranslate"><span class="pre">/dev/swradio0</span></code> to <code class="docutils literal notranslate"><span class="pre">/dev/swradio255</span></code> with major number 81 and
+dynamically allocated minor numbers 0 to 255.</p>
+<section id="querying-capabilities">
+<h2><span class="section-number">4.10.1. </span>Querying Capabilities<a class="headerlink" href="#querying-capabilities" title="Permalink to this headline">¶</a></h2>
+<p>Devices supporting the SDR receiver interface set the
+<code class="docutils literal notranslate"><span class="pre">V4L2_CAP_SDR_CAPTURE</span></code> and <code class="docutils literal notranslate"><span class="pre">V4L2_CAP_TUNER</span></code> flag in the
+<code class="docutils literal notranslate"><span class="pre">capabilities</span></code> field of struct
+<code class="xref c c-type docutils literal notranslate"><span class="pre">v4l2_capability</span></code> returned by the
+<a class="reference internal" href="vidioc-querycap.html#vidioc-querycap"><span class="std std-ref">ioctl VIDIOC_QUERYCAP</span></a> ioctl. That flag means the
+device has an Analog to Digital Converter (ADC), which is a mandatory
+element for the SDR receiver.</p>
+<p>Devices supporting the SDR transmitter interface set the
+<code class="docutils literal notranslate"><span class="pre">V4L2_CAP_SDR_OUTPUT</span></code> and <code class="docutils literal notranslate"><span class="pre">V4L2_CAP_MODULATOR</span></code> flag in the
+<code class="docutils literal notranslate"><span class="pre">capabilities</span></code> field of struct
+<code class="xref c c-type docutils literal notranslate"><span class="pre">v4l2_capability</span></code> returned by the
+<a class="reference internal" href="vidioc-querycap.html#vidioc-querycap"><span class="std std-ref">ioctl VIDIOC_QUERYCAP</span></a> ioctl. That flag means the
+device has an Digital to Analog Converter (DAC), which is a mandatory
+element for the SDR transmitter.</p>
+<p>At least one of the read/write or streaming I/O methods
+must be supported.</p>
+</section>
+<section id="supplemental-functions">
+<h2><span class="section-number">4.10.2. </span>Supplemental Functions<a class="headerlink" href="#supplemental-functions" title="Permalink to this headline">¶</a></h2>
+<p>SDR devices can support <a class="reference internal" href="control.html#control"><span class="std std-ref">controls</span></a>, and must support
+the <a class="reference internal" href="tuner.html#tuner"><span class="std std-ref">Tuners and Modulators</span></a> ioctls. Tuner ioctls are used for setting the
+ADC/DAC sampling rate (sampling frequency) and the possible radio
+frequency (RF).</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">V4L2_TUNER_SDR</span></code> tuner type is used for setting SDR device ADC/DAC
+frequency, and the <code class="docutils literal notranslate"><span class="pre">V4L2_TUNER_RF</span></code> tuner type is used for setting
+radio frequency. The tuner index of the RF tuner (if any) must always
+follow the SDR tuner index. Normally the SDR tuner is #0 and the RF
+tuner is #1.</p>
+<p>The <a class="reference internal" href="vidioc-s-hw-freq-seek.html#vidioc-s-hw-freq-seek"><span class="std std-ref">ioctl VIDIOC_S_HW_FREQ_SEEK</span></a> ioctl is
+not supported.</p>
+</section>
+<section id="data-format-negotiation">
+<h2><span class="section-number">4.10.3. </span>Data Format Negotiation<a class="headerlink" href="#data-format-negotiation" title="Permalink to this headline">¶</a></h2>
+<p>The SDR device uses the <a class="reference internal" href="format.html#format"><span class="std std-ref">Data Formats</span></a> ioctls to select the
+capture and output format. Both the sampling resolution and the data
+streaming format are bound to that selectable format. In addition to the
+basic <a class="reference internal" href="format.html#format"><span class="std std-ref">Data Formats</span></a> ioctls, the
+<a class="reference internal" href="vidioc-enum-fmt.html#vidioc-enum-fmt"><span class="std std-ref">ioctl VIDIOC_ENUM_FMT</span></a> ioctl must be supported as
+well.</p>
+<p>To use the <a class="reference internal" href="format.html#format"><span class="std std-ref">Data Formats</span></a> ioctls applications set the <code class="docutils literal notranslate"><span class="pre">type</span></code>
+field of a struct <code class="xref c c-type docutils literal notranslate"><span class="pre">v4l2_format</span></code> to
+<code class="docutils literal notranslate"><span class="pre">V4L2_BUF_TYPE_SDR_CAPTURE</span></code> or <code class="docutils literal notranslate"><span class="pre">V4L2_BUF_TYPE_SDR_OUTPUT</span></code> and use
+the struct <code class="xref c c-type docutils literal notranslate"><span class="pre">v4l2_sdr_format</span></code> <code class="docutils literal notranslate"><span class="pre">sdr</span></code> member
+of the <code class="docutils literal notranslate"><span class="pre">fmt</span></code> union as needed per the desired operation. Currently
+there are two fields, <code class="docutils literal notranslate"><span class="pre">pixelformat</span></code> and <code class="docutils literal notranslate"><span class="pre">buffersize</span></code>, of
+struct <code class="xref c c-type docutils literal notranslate"><span class="pre">v4l2_sdr_format</span></code> which are used.
+Content of the <code class="docutils literal notranslate"><span class="pre">pixelformat</span></code> is V4L2 FourCC code of the data format.
+The <code class="docutils literal notranslate"><span class="pre">buffersize</span></code> field is maximum buffer size in bytes required for
+data transfer, set by the driver in order to inform application.</p>
+<dl class="type">
+<dt id="c.V4L.v4l2_sdr_format">
+<code class="sig-name descname">v4l2_sdr_format</code><a class="headerlink" href="#c.V4L.v4l2_sdr_format" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<table class="docutils align-default" id="id1">
+<caption><span class="caption-text">struct v4l2_sdr_format</span><a class="headerlink" href="#id1" title="Permalink to this table">¶</a></caption>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 50%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>__u32</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">pixelformat</span></code></p></td>
+<td><p>The data format or type of compression, set by the application.
+This is a little endian
+<a class="reference internal" href="vidioc-enum-fmt.html#v4l2-fourcc"><span class="std std-ref">four character code</span></a>. V4L2 defines SDR
+formats in <a class="reference internal" href="sdr-formats.html#sdr-formats"><span class="std std-ref">SDR Formats</span></a>.</p></td>
+</tr>
+<tr class="row-even"><td><p>__u32</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">buffersize</span></code></p></td>
+<td><p>Maximum size in bytes required for data. Value is set by the
+driver.</p></td>
+</tr>
+<tr class="row-odd"><td><p>__u8</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">reserved[24]</span></code></p></td>
+<td><p>This array is reserved for future extensions. Drivers and
+applications must set it to zero.</p></td>
+</tr>
+</tbody>
+</table>
+<p>An SDR device may support <a class="reference internal" href="rw.html#rw"><span class="std std-ref">read/write</span></a> and/or streaming
+(<a class="reference internal" href="mmap.html#mmap"><span class="std std-ref">memory mapping</span></a> or <a class="reference internal" href="userp.html#userp"><span class="std std-ref">user pointer</span></a>) I/O.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">4.10. Software Defined Radio Interface (SDR)</a><ul>
+<li><a class="reference internal" href="#querying-capabilities">4.10.1. Querying Capabilities</a></li>
+<li><a class="reference internal" href="#supplemental-functions">4.10.2. Supplemental Functions</a></li>
+<li><a class="reference internal" href="#data-format-negotiation">4.10.3. Data Format Negotiation</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/userspace-api/media/v4l/dev-sdr.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/userspace-api/media/v4l/dev-sdr.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

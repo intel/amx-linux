@@ -1,0 +1,131 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Soft-Dirty PTEs &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Automatically bind swap device to numa node" href="swap_numa.html" />
+    <link rel="prev" title="Shrinker Debugfs Interface" href="shrinker_debugfs.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="soft-dirty-ptes">
+<span id="soft-dirty"></span><h1>Soft-Dirty PTEs<a class="headerlink" href="#soft-dirty-ptes" title="Permalink to this headline">¶</a></h1>
+<p>The soft-dirty is a bit on a PTE which helps to track which pages a task
+writes to. In order to do this tracking one should</p>
+<blockquote>
+<div><ol class="arabic">
+<li><p>Clear soft-dirty bits from the task’s PTEs.</p>
+<p>This is done by writing “4” into the <code class="docutils literal notranslate"><span class="pre">/proc/PID/clear_refs</span></code> file of the
+task in question.</p>
+</li>
+<li><p>Wait some time.</p></li>
+<li><p>Read soft-dirty bits from the PTEs.</p>
+<p>This is done by reading from the <code class="docutils literal notranslate"><span class="pre">/proc/PID/pagemap</span></code>. The bit 55 of the
+64-bit qword is the soft-dirty one. If set, the respective PTE was
+written to since step 1.</p>
+</li>
+</ol>
+</div></blockquote>
+<p>Internally, to do this tracking, the writable bit is cleared from PTEs
+when the soft-dirty bit is cleared. So, after this, when the task tries to
+modify a page at some virtual address the #PF occurs and the kernel sets
+the soft-dirty bit on the respective PTE.</p>
+<p>Note, that although all the task’s address space is marked as r/o after the
+soft-dirty bits clear, the #PF-s that occur after that are processed fast.
+This is so, since the pages are still mapped to physical memory, and thus all
+the kernel does is finds this fact out and puts both writable and soft-dirty
+bits on the PTE.</p>
+<p>While in most cases tracking memory changes by #PF-s is more than enough
+there is still a scenario when we can lose soft dirty bits – a task
+unmaps a previously mapped memory region and then maps a new one at exactly
+the same place. When unmap is called, the kernel internally clears PTE values
+including soft dirty bits. To notify user space application about such
+memory region renewal the kernel always marks new memory regions (and
+expanded regions) as soft dirty.</p>
+<p>This feature is actively used by the checkpoint-restore project. You
+can find more details about it on <a class="reference external" href="http://criu.org">http://criu.org</a></p>
+<p>– Pavel Emelyanov, Apr 9, 2013</p>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/admin-guide/mm/soft-dirty.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/admin-guide/mm/soft-dirty.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,153 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>No New Privileges Flag &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Seccomp BPF (SECure COMPuting with filters)" href="seccomp_filter.html" />
+    <link rel="prev" title="The Linux kernel user-space API guide" href="index.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="no-new-privileges-flag">
+<h1>No New Privileges Flag<a class="headerlink" href="#no-new-privileges-flag" title="Permalink to this headline">¶</a></h1>
+<p>The execve system call can grant a newly-started program privileges that
+its parent did not have.  The most obvious examples are setuid/setgid
+programs and file capabilities.  To prevent the parent program from
+gaining these privileges as well, the kernel and user code must be
+careful to prevent the parent from doing anything that could subvert the
+child.  For example:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>The dynamic loader handles <code class="docutils literal notranslate"><span class="pre">LD_*</span></code> environment variables differently if
+a program is setuid.</p></li>
+<li><p>chroot is disallowed to unprivileged processes, since it would allow
+<code class="docutils literal notranslate"><span class="pre">/etc/passwd</span></code> to be replaced from the point of view of a process that
+inherited chroot.</p></li>
+<li><p>The exec code has special handling for ptrace.</p></li>
+</ul>
+</div></blockquote>
+<p>These are all ad-hoc fixes.  The <code class="docutils literal notranslate"><span class="pre">no_new_privs</span></code> bit (since Linux 3.5) is a
+new, generic mechanism to make it safe for a process to modify its
+execution environment in a manner that persists across execve.  Any task
+can set <code class="docutils literal notranslate"><span class="pre">no_new_privs</span></code>.  Once the bit is set, it is inherited across fork,
+clone, and execve and cannot be unset.  With <code class="docutils literal notranslate"><span class="pre">no_new_privs</span></code> set, <code class="docutils literal notranslate"><span class="pre">execve()</span></code>
+promises not to grant the privilege to do anything that could not have
+been done without the execve call.  For example, the setuid and setgid
+bits will no longer change the uid or gid; file capabilities will not
+add to the permitted set, and LSMs will not relax constraints after
+execve.</p>
+<p>To set <code class="docutils literal notranslate"><span class="pre">no_new_privs</span></code>, use:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
+</pre></div>
+</div>
+<p>Be careful, though: LSMs might also not tighten constraints on exec
+in <code class="docutils literal notranslate"><span class="pre">no_new_privs</span></code> mode.  (This means that setting up a general-purpose
+service launcher to set <code class="docutils literal notranslate"><span class="pre">no_new_privs</span></code> before execing daemons may
+interfere with LSM-based sandboxing.)</p>
+<p>Note that <code class="docutils literal notranslate"><span class="pre">no_new_privs</span></code> does not prevent privilege changes that do not
+involve <code class="docutils literal notranslate"><span class="pre">execve()</span></code>.  An appropriately privileged task can still call
+<code class="docutils literal notranslate"><span class="pre">setuid(2)</span></code> and receive SCM_RIGHTS datagrams.</p>
+<p>There are two main use cases for <code class="docutils literal notranslate"><span class="pre">no_new_privs</span></code> so far:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Filters installed for the seccomp mode 2 sandbox persist across
+execve and can change the behavior of newly-executed programs.
+Unprivileged users are therefore only allowed to install such filters
+if <code class="docutils literal notranslate"><span class="pre">no_new_privs</span></code> is set.</p></li>
+<li><p>By itself, <code class="docutils literal notranslate"><span class="pre">no_new_privs</span></code> can be used to reduce the attack surface
+available to an unprivileged user.  If everything running with a
+given uid has <code class="docutils literal notranslate"><span class="pre">no_new_privs</span></code> set, then that uid will be unable to
+escalate its privileges by directly attacking setuid, setgid, and
+fcap-using binaries; it will need to compromise something without the
+<code class="docutils literal notranslate"><span class="pre">no_new_privs</span></code> bit set first.</p></li>
+</ul>
+</div></blockquote>
+<p>In the future, other potentially dangerous kernel features could become
+available to unprivileged tasks if <code class="docutils literal notranslate"><span class="pre">no_new_privs</span></code> is set.  In principle,
+several options to <code class="docutils literal notranslate"><span class="pre">unshare(2)</span></code> and <code class="docutils literal notranslate"><span class="pre">clone(2)</span></code> would be safe when
+<code class="docutils literal notranslate"><span class="pre">no_new_privs</span></code> is set, and <code class="docutils literal notranslate"><span class="pre">no_new_privs</span></code> + <code class="docutils literal notranslate"><span class="pre">chroot</span></code> is considerable less
+dangerous than chroot by itself.</p>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/userspace-api/no_new_privs.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/userspace-api/no_new_privs.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

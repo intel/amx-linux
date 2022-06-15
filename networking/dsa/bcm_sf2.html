@@ -1,0 +1,213 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Broadcom Starfighter 2 Ethernet switch driver &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="LAN9303 Ethernet switch driver" href="lan9303.html" />
+    <link rel="prev" title="Broadcom RoboSwitch Ethernet switch driver" href="b53.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="broadcom-starfighter-2-ethernet-switch-driver">
+<h1>Broadcom Starfighter 2 Ethernet switch driver<a class="headerlink" href="#broadcom-starfighter-2-ethernet-switch-driver" title="Permalink to this headline">¶</a></h1>
+<p>Broadcom’s Starfighter 2 Ethernet switch hardware block is commonly found and
+deployed in the following products:</p>
+<ul class="simple">
+<li><p>xDSL gateways such as BCM63138</p></li>
+<li><p>streaming/multimedia Set Top Box such as BCM7445</p></li>
+<li><p>Cable Modem/residential gateways such as BCM7145/BCM3390</p></li>
+</ul>
+<p>The switch is typically deployed in a configuration involving between 5 to 13
+ports, offering a range of built-in and customizable interfaces:</p>
+<ul class="simple">
+<li><p>single integrated Gigabit PHY</p></li>
+<li><p>quad integrated Gigabit PHY</p></li>
+<li><p>quad external Gigabit PHY w/ MDIO multiplexer</p></li>
+<li><p>integrated MoCA PHY</p></li>
+<li><p>several external MII/RevMII/GMII/RGMII interfaces</p></li>
+</ul>
+<p>The switch also supports specific congestion control features which allow MoCA
+fail-over not to lose packets during a MoCA role re-election, as well as out of
+band back-pressure to the host CPU network interface when downstream interfaces
+are connected at a lower speed.</p>
+<p>The switch hardware block is typically interfaced using MMIO accesses and
+contains a bunch of sub-blocks/registers:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">SWITCH_CORE</span></code>: common switch registers</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">SWITCH_REG</span></code>: external interfaces switch register</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">SWITCH_MDIO</span></code>: external MDIO bus controller (there is another one in SWITCH_CORE,
+which is used for indirect PHY accesses)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">SWITCH_INDIR_RW</span></code>: 64-bits wide register helper block</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">SWITCH_INTRL2_0/1</span></code>: Level-2 interrupt controllers</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">SWITCH_ACB</span></code>: Admission control block</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">SWITCH_FCB</span></code>: Fail-over control block</p></li>
+</ul>
+<section id="implementation-details">
+<h2>Implementation details<a class="headerlink" href="#implementation-details" title="Permalink to this headline">¶</a></h2>
+<p>The driver is located in <code class="docutils literal notranslate"><span class="pre">drivers/net/dsa/bcm_sf2.c</span></code> and is implemented as a DSA
+driver; see <code class="docutils literal notranslate"><span class="pre">Documentation/networking/dsa/dsa.rst</span></code> for details on the subsystem
+and what it provides.</p>
+<p>The SF2 switch is configured to enable a Broadcom specific 4-bytes switch tag
+which gets inserted by the switch for every packet forwarded to the CPU
+interface, conversely, the CPU network interface should insert a similar tag for
+packets entering the CPU port. The tag format is described in
+<code class="docutils literal notranslate"><span class="pre">net/dsa/tag_brcm.c</span></code>.</p>
+<p>Overall, the SF2 driver is a fairly regular DSA driver; there are a few
+specifics covered below.</p>
+<section id="device-tree-probing">
+<h3>Device Tree probing<a class="headerlink" href="#device-tree-probing" title="Permalink to this headline">¶</a></h3>
+<p>The DSA platform device driver is probed using a specific compatible string
+provided in <code class="docutils literal notranslate"><span class="pre">net/dsa/dsa.c</span></code>. The reason for that is because the DSA subsystem gets
+registered as a platform device driver currently. DSA will provide the needed
+device_node pointers which are then accessible by the switch driver setup
+function to setup resources such as register ranges and interrupts. This
+currently works very well because none of the of_* functions utilized by the
+driver require a <a class="reference internal" href="../../driver-api/infrastructure.html#c.device" title="device"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span></code></a> to be bound to a struct device_node, but things
+may change in the future.</p>
+</section>
+<section id="mdio-indirect-accesses">
+<h3>MDIO indirect accesses<a class="headerlink" href="#mdio-indirect-accesses" title="Permalink to this headline">¶</a></h3>
+<p>Due to a limitation in how Broadcom switches have been designed, external
+Broadcom switches connected to a SF2 require the use of the DSA slave MDIO bus
+in order to properly configure them. By default, the SF2 pseudo-PHY address, and
+an external switch pseudo-PHY address will both be snooping for incoming MDIO
+transactions, since they are at the same address (30), resulting in some kind of
+“double” programming. Using DSA, and setting <code class="docutils literal notranslate"><span class="pre">ds-&gt;phys_mii_mask</span></code> accordingly, we
+selectively divert reads and writes towards external Broadcom switches
+pseudo-PHY addresses. Newer revisions of the SF2 hardware have introduced a
+configurable pseudo-PHY address which circumvents the initial design limitation.</p>
+</section>
+<section id="multimedia-over-coaxial-moca-interfaces">
+<h3>Multimedia over CoAxial (MoCA) interfaces<a class="headerlink" href="#multimedia-over-coaxial-moca-interfaces" title="Permalink to this headline">¶</a></h3>
+<p>MoCA interfaces are fairly specific and require the use of a firmware blob which
+gets loaded onto the MoCA processor(s) for packet processing. The switch
+hardware contains logic which will assert/de-assert link states accordingly for
+the MoCA interface whenever the MoCA coaxial cable gets disconnected or the
+firmware gets reloaded. The SF2 driver relies on such events to properly set its
+MoCA interface carrier state and properly report this to the networking stack.</p>
+<p>The MoCA interfaces are supported using the PHY library’s fixed PHY/emulated PHY
+device and the switch driver registers a <code class="docutils literal notranslate"><span class="pre">fixed_link_update</span></code> callback for such
+PHYs which reflects the link state obtained from the interrupt handler.</p>
+</section>
+<section id="power-management">
+<h3>Power Management<a class="headerlink" href="#power-management" title="Permalink to this headline">¶</a></h3>
+<p>Whenever possible, the SF2 driver tries to minimize the overall switch power
+consumption by applying a combination of:</p>
+<ul class="simple">
+<li><p>turning off internal buffers/memories</p></li>
+<li><p>disabling packet processing logic</p></li>
+<li><p>putting integrated PHYs in IDDQ/low-power</p></li>
+<li><p>reducing the switch core clock based on the active port count</p></li>
+<li><p>enabling and advertising EEE</p></li>
+<li><p>turning off RGMII data processing logic when the link goes down</p></li>
+</ul>
+</section>
+<section id="wake-on-lan">
+<h3>Wake-on-LAN<a class="headerlink" href="#wake-on-lan" title="Permalink to this headline">¶</a></h3>
+<p>Wake-on-LAN is currently implemented by utilizing the host processor Ethernet
+MAC controller wake-on logic. Whenever Wake-on-LAN is requested, an intersection
+between the user request and the supported host Ethernet interface WoL
+capabilities is done and the intersection result gets configured. During
+system-wide suspend/resume, only ports not participating in Wake-on-LAN are
+disabled.</p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Broadcom Starfighter 2 Ethernet switch driver</a><ul>
+<li><a class="reference internal" href="#implementation-details">Implementation details</a><ul>
+<li><a class="reference internal" href="#device-tree-probing">Device Tree probing</a></li>
+<li><a class="reference internal" href="#mdio-indirect-accesses">MDIO indirect accesses</a></li>
+<li><a class="reference internal" href="#multimedia-over-coaxial-moca-interfaces">Multimedia over CoAxial (MoCA) interfaces</a></li>
+<li><a class="reference internal" href="#power-management">Power Management</a></li>
+<li><a class="reference internal" href="#wake-on-lan">Wake-on-LAN</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/networking/dsa/bcm_sf2.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/networking/dsa/bcm_sf2.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

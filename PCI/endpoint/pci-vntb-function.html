@@ -1,0 +1,268 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>9.8. PCI vNTB Function &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="9.9. PCI Non-Transparent Bridge (NTB) Endpoint Function (EPF) User Guide" href="pci-vntb-howto.html" />
+    <link rel="prev" title="9.7. PCI Non-Transparent Bridge (NTB) Endpoint Function (EPF) User Guide" href="pci-ntb-howto.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="pci-vntb-function">
+<h1><span class="section-number">9.8. </span>PCI vNTB Function<a class="headerlink" href="#pci-vntb-function" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">Author</dt>
+<dd class="field-odd"><p>Frank Li &lt;<a class="reference external" href="mailto:Frank&#46;Li&#37;&#52;&#48;nxp&#46;com">Frank<span>&#46;</span>Li<span>&#64;</span>nxp<span>&#46;</span>com</a>&gt;</p>
+</dd>
+</dl>
+<p>The difference between PCI NTB function and PCI vNTB function is</p>
+<p>PCI NTB function need at two endpoint instances and connect HOST1
+and HOST2.</p>
+<p>PCI vNTB function only use one host and one endpoint(EP), use NTB
+connect EP and PCI host</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>+------------+         +---------------------------------------+
+|            |         |                                       |
++------------+         |                        +--------------+
+| NTB        |         |                        | NTB          |
+| NetDev     |         |                        | NetDev       |
++------------+         |                        +--------------+
+| NTB        |         |                        | NTB          |
+| Transfer   |         |                        | Transfer     |
++------------+         |                        +--------------+
+|            |         |                        |              |
+|  PCI NTB   |         |                        |              |
+|    EPF     |         |                        |              |
+|   Driver   |         |                        | PCI Virtual  |
+|            |         +---------------+        | NTB Driver   |
+|            |         | PCI EP NTB    |&lt;------&gt;|              |
+|            |         |  FN Driver    |        |              |
++------------+         +---------------+        +--------------+
+|            |         |               |        |              |
+|  PCI BUS   | &lt;-----&gt; |  PCI EP BUS   |        |  Virtual PCI |
+|            |  PCI    |               |        |     BUS      |
++------------+         +---------------+--------+--------------+
+    PCI RC                        PCI EP
+</pre></div>
+</div>
+<section id="constructs-used-for-implementing-vntb">
+<h2><span class="section-number">9.8.1. </span>Constructs used for Implementing vNTB<a class="headerlink" href="#constructs-used-for-implementing-vntb" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>Config Region</p></li>
+<li><p>Self Scratchpad Registers</p></li>
+<li><p>Peer Scratchpad Registers</p></li>
+<li><p>Doorbell (DB) Registers</p></li>
+<li><p>Memory Window (MW)</p></li>
+</ol>
+</div></blockquote>
+<section id="config-region">
+<h3><span class="section-number">9.8.1.1. </span>Config Region:<a class="headerlink" href="#config-region" title="Permalink to this headline">¶</a></h3>
+<p>It is same as PCI NTB Function driver</p>
+</section>
+<section id="scratchpad-registers">
+<h3><span class="section-number">9.8.1.2. </span>Scratchpad Registers:<a class="headerlink" href="#scratchpad-registers" title="Permalink to this headline">¶</a></h3>
+<p>It is appended after Config region.</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>+--------------------------------------------------+ Base
+|                                                  |
+|                                                  |
+|                                                  |
+|          Common Config Register                  |
+|                                                  |
+|                                                  |
+|                                                  |
++-----------------------+--------------------------+ Base + span_offset
+|                       |                          |
+|    Peer Span Space    |    Span Space            |
+|                       |                          |
+|                       |                          |
++-----------------------+--------------------------+ Base + span_offset
+|                       |                          |      + span_count * 4
+|                       |                          |
+|     Span Space        |   Peer Span Space        |
+|                       |                          |
++-----------------------+--------------------------+
+      Virtual PCI             Pcie Endpoint
+      NTB Driver               NTB Driver
+</pre></div>
+</div>
+</section>
+<section id="doorbell-registers">
+<h3><span class="section-number">9.8.1.3. </span>Doorbell Registers:<a class="headerlink" href="#doorbell-registers" title="Permalink to this headline">¶</a></h3>
+<blockquote>
+<div><p>Doorbell Registers are used by the hosts to interrupt each other.</p>
+</div></blockquote>
+</section>
+<section id="memory-window">
+<h3><span class="section-number">9.8.1.4. </span>Memory Window:<a class="headerlink" href="#memory-window" title="Permalink to this headline">¶</a></h3>
+<blockquote>
+<div><p>Actual transfer of data between the two hosts will happen using the
+memory window.</p>
+</div></blockquote>
+</section>
+</section>
+<section id="modeling-constructs">
+<h2><span class="section-number">9.8.2. </span>Modeling Constructs:<a class="headerlink" href="#modeling-constructs" title="Permalink to this headline">¶</a></h2>
+<p>32-bit BARs.</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 29%" />
+<col style="width: 71%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>BAR NO</p></th>
+<th class="head"><p>CONSTRUCTS USED</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>BAR0</p></td>
+<td><p>Config Region</p></td>
+</tr>
+<tr class="row-odd"><td><p>BAR1</p></td>
+<td><p>Doorbell</p></td>
+</tr>
+<tr class="row-even"><td><p>BAR2</p></td>
+<td><p>Memory Window 1</p></td>
+</tr>
+<tr class="row-odd"><td><p>BAR3</p></td>
+<td><p>Memory Window 2</p></td>
+</tr>
+<tr class="row-even"><td><p>BAR4</p></td>
+<td><p>Memory Window 3</p></td>
+</tr>
+<tr class="row-odd"><td><p>BAR5</p></td>
+<td><p>Memory Window 4</p></td>
+</tr>
+</tbody>
+</table>
+<p>64-bit BARs.</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 16%" />
+<col style="width: 84%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>BAR NO</p></th>
+<th class="head"><p>CONSTRUCTS USED</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>BAR0</p></td>
+<td><p>Config Region + Scratchpad</p></td>
+</tr>
+<tr class="row-odd"><td><p>BAR1</p></td>
+<td></td>
+</tr>
+<tr class="row-even"><td><p>BAR2</p></td>
+<td><p>Doorbell</p></td>
+</tr>
+<tr class="row-odd"><td><p>BAR3</p></td>
+<td></td>
+</tr>
+<tr class="row-even"><td><p>BAR4</p></td>
+<td><p>Memory Window 1</p></td>
+</tr>
+<tr class="row-odd"><td><p>BAR5</p></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">9.8. PCI vNTB Function</a><ul>
+<li><a class="reference internal" href="#constructs-used-for-implementing-vntb">9.8.1. Constructs used for Implementing vNTB</a><ul>
+<li><a class="reference internal" href="#config-region">9.8.1.1. Config Region:</a></li>
+<li><a class="reference internal" href="#scratchpad-registers">9.8.1.2. Scratchpad Registers:</a></li>
+<li><a class="reference internal" href="#doorbell-registers">9.8.1.3. Doorbell Registers:</a></li>
+<li><a class="reference internal" href="#memory-window">9.8.1.4. Memory Window:</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#modeling-constructs">9.8.2. Modeling Constructs:</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/PCI/endpoint/pci-vntb-function.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/PCI/endpoint/pci-vntb-function.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

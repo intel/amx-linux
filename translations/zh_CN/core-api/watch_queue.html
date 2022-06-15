@@ -1,0 +1,420 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>通用通知机制 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="符号命名空间（Symbol Namespaces）" href="symbol-namespaces.html" />
+    <link rel="prev" title="并发管理的工作队列 (cmwq)" href="workqueue.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../core-api/watch_queue.html"><span class="doc">General notification mechanism</span></a></p>
+</dd>
+<dt class="field-even">翻译</dt>
+<dd class="field-even"><p></p></dd>
+</dl>
+<p>周彬彬 Binbin Zhou &lt;<a class="reference external" href="mailto:zhoubinbin&#37;&#52;&#48;loongson&#46;cn">zhoubinbin<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;</p>
+<dl class="field-list simple">
+<dt class="field-odd">校译</dt>
+<dd class="field-odd"><p></p></dd>
+</dl>
+<p>司延腾 Yanteng Si &lt;<a class="reference external" href="mailto:siyanteng&#37;&#52;&#48;loongson&#46;cn">siyanteng<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;
+吴想成 Wu Xiangcheng &lt;<a class="reference external" href="mailto:bobwxc&#37;&#52;&#48;email&#46;cn">bobwxc<span>&#64;</span>email<span>&#46;</span>cn</a>&gt;</p>
+<section id="id1">
+<h1>通用通知机制<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h1>
+<p>通用通知机制是建立在标准管道驱动之上的，它可以有效地将来自内核的通知消息拼接到用
+户空间打开的管道中。这可以与以下方面结合使用:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>* Key/keyring 通知
+</pre></div>
+</div>
+<p>通知缓冲区可以通过以下方式启用：</p>
+<blockquote>
+<div><p>“General setup”/“General notification queue”
+(CONFIG_WATCH_QUEUE)</p>
+</div></blockquote>
+<p>文档包含以下章节：</p>
+<div class="contents local topic" id="contents">
+<ul class="simple">
+<li><p><a class="reference internal" href="#id2" id="id10">概述</a></p></li>
+<li><p><a class="reference internal" href="#id3" id="id11">消息结构</a></p></li>
+<li><p><a class="reference internal" href="#api" id="id12">观测列表（通知源）API</a></p></li>
+<li><p><a class="reference internal" href="#id4" id="id13">观测队列（通知输出）API</a></p></li>
+<li><p><a class="reference internal" href="#id5" id="id14">观测订阅API</a></p></li>
+<li><p><a class="reference internal" href="#id6" id="id15">通知发布API</a></p></li>
+<li><p><a class="reference internal" href="#id7" id="id16">观测源</a></p></li>
+<li><p><a class="reference internal" href="#id8" id="id17">事件过滤</a></p></li>
+<li><p><a class="reference internal" href="#id9" id="id18">用户空间代码示例</a></p></li>
+</ul>
+</div>
+<section id="id2">
+<h2><a class="toc-backref" href="#id10">概述</a><a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>该设施以一种特殊模式打开的管道形式出现，管道的内部环形缓冲区用于保存内核生成的消
+息。然后通过read()读出这些消息。在此类管道上禁用拼接以及类似的操作，因为它们希望
+在某些情况下将其添加的内容还原到环中-这可能最终会与通知消息重叠。</p>
+<p>管道的所有者必须告诉内核它想通过该管道观察哪些源。只有连接到该管道上的源才会将消
+息插入其中。请注意，一个源可能绑定到多个管道，并同时将消息插入到所有管道中。</p>
+<p>还可以将过滤器放置在管道上，以便在不感兴趣时可以忽略某些源类型和子事件。</p>
+<p>如果环中没有可用的插槽，或者没有预分配的消息缓冲区可用，则将丢弃消息。在这两种情
+况下，read()都会在读取缓冲区中当前的最后一条消息后，将WATCH_META_LOSS_NOTIFICATION
+插入到输出缓冲区中。</p>
+<p>请注意，当生成一个通知时，内核不会等待消费者收集它，而是继续执行。这意味着可以在
+持有自旋锁的同时生成通知，并且还可以保护内核不被用户空间故障无限期地阻碍。</p>
+</section>
+<section id="id3">
+<h2><a class="toc-backref" href="#id11">消息结构</a><a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h2>
+<p>通知消息由一个简短的头部开始:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct watch_notification {
+        __u32   type:24;
+        __u32   subtype:8;
+        __u32   info;
+};
+</pre></div>
+</div>
+<p>“type”表示通知记录的来源，“subtype”表示该来源的记录类型（见下文观测源章节）。该类
+型也可以是“WATCH_TYPE_META”。这是一个由观测队列本身在内部生成的特殊记录类型。有两
+个子类型：</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>WATCH_META_REMOVAL_NOTIFICATION</p></li>
+<li><p>WATCH_META_LOSS_NOTIFICATION</p></li>
+</ul>
+</div></blockquote>
+<p>第一个表示安装了观察的对象已被删除或销毁，第二个表示某些消息已丢失。</p>
+<p>“info”表示一系列东西，包括：</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>消息的长度，以字节为单位，包括头（带有WATCH_INFO_LENGTH的掩码，并按
+WATCH_INFO_LENGTH__SHIFT移位）。这表示记录的大小，可能在8到127字节之间。</p></li>
+<li><p>观测ID（带有WATCH_INFO_ID掩码，并按WATCH_INFO_ID__SHIFT移位）。这表示观测的主
+叫ID，可能在0到255之间。多个观测组可以共享一个队列，这提供了一种区分它们的方法。</p></li>
+<li><p>特定类型的字段（WATCH_INFO_TYPE_INFO）。这是由通知生产者设置的，以指示类型和
+子类型的某些特定含义。</p></li>
+</ul>
+</div></blockquote>
+<p>除长度外，信息中的所有内容都可以用于过滤。</p>
+<p>头部后面可以有补充信息。此格式是由类型和子类型决定的。</p>
+</section>
+<section id="api">
+<h2><a class="toc-backref" href="#id12">观测列表（通知源）API</a><a class="headerlink" href="#api" title="Permalink to this headline">¶</a></h2>
+<p>“观测列表“是订阅通知源的观测者的列表。列表可以附加到对象（比如键或超级块），也可
+以是全局的（比如对于设备事件）。从用户空间的角度来看，一个非全局的观测列表通常是
+通过引用它所属的对象来引用的（比如使用KEYCTL_NOTIFY并给它一个密钥序列号来观测特定
+的密钥）。</p>
+<p>为了管理观测列表，提供了以下函数：</p>
+<blockquote>
+<div><ul>
+<li><div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void init_watch_list(struct watch_list *wlist,
+                     void (*release_watch)(struct watch *wlist));
+</pre></div>
+</div>
+<p>初始化一个观测列表。 如果 <code class="docutils literal notranslate"><span class="pre">release_watch</span></code> 不是NULL，那么这表示当watch_list对
+象被销毁时，应该调用函数来丢弃观测列表对被观测对象的任何引用。</p>
+</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">remove_watch_list(struct</span> <span class="pre">watch_list</span> <span class="pre">*wlist);</span></code></p>
+<p>这将删除订阅watch_list的所有观测，并释放它们，然后销毁watch_list对象本身。</p>
+</li>
+</ul>
+</div></blockquote>
+</section>
+<section id="id4">
+<h2><a class="toc-backref" href="#id13">观测队列（通知输出）API</a><a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h2>
+<p>“观测队列”是由应用程序分配的用以记录通知的缓冲区，其工作原理完全隐藏在管道设备驱
+动中，但必须获得对它的引用才能设置观测。可以通过以下方式进行管理：</p>
+<blockquote>
+<div><ul>
+<li><p><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">watch_queue</span> <span class="pre">*get_watch_queue(int</span> <span class="pre">fd);</span></code></p>
+<p>由于观测队列在内核中通过实现缓冲区的管道的文件描述符表示，用户空间必须通过系
+统调用传递该文件描述符，这可以用于从系统调用中查找指向观测队列的不透明指针。</p>
+</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">put_watch_queue(struct</span> <span class="pre">watch_queue</span> <span class="pre">*wqueue);</span></code></p>
+<p>该函数用以丢弃从 <code class="docutils literal notranslate"><span class="pre">get_watch_queue()</span></code> 获得的引用。</p>
+</li>
+</ul>
+</div></blockquote>
+</section>
+<section id="id5">
+<h2><a class="toc-backref" href="#id14">观测订阅API</a><a class="headerlink" href="#id5" title="Permalink to this headline">¶</a></h2>
+<p>“观测”是观测列表上的订阅，表示观测队列，从而表示应写入通知记录的缓冲区。观测队列
+对象还可以携带该对象的过滤规则，由用户空间设置。watch结构体的某些部分可以由驱动程
+序设置:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct watch {
+        union {
+                u32             info_id;        /* 在info字段中进行OR运算的ID */
+                ...
+        };
+        void                    *private;       /* 被观测对象的私有数据 */
+        u64                     id;             /* 内部标识符 */
+        ...
+};
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">info_id</span></code> 值是从用户空间获得并按WATCH_INFO_ID__SHIFT移位的8位数字。当通知写入关
+联的观测队列缓冲区时，这将与struct watch_notification::info的WATCH_INFO_ID字段进
+行或运算。</p>
+<p><code class="docutils literal notranslate"><span class="pre">private</span></code> 字段是与watch_list相关联的驱动程序数据，并由 <code class="docutils literal notranslate"><span class="pre">watch_list::release_watch()</span></code>
+函数清除。</p>
+<p><code class="docutils literal notranslate"><span class="pre">id</span></code> 字段是源的ID。使用不同ID发布的通知将被忽略。</p>
+<p>提供以下函数来管理观测:</p>
+<blockquote>
+<div><ul>
+<li><p><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">init_watch(struct</span> <span class="pre">watch</span> <span class="pre">*watch,</span> <span class="pre">struct</span> <span class="pre">watch_queue</span> <span class="pre">*wqueue);</span></code></p>
+<p>初始化一个观测对象，把它的指针设置到观察队列中，使用适当的限制来避免死锁。</p>
+</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">add_watch_to_object(struct</span> <span class="pre">watch</span> <span class="pre">*watch,</span> <span class="pre">struct</span> <span class="pre">watch_list</span> <span class="pre">*wlist);</span></code></p>
+<p>将观测订阅到观测列表（通知源）。watch结构体中的driver-settable字段必须在调用
+它之前设置。</p>
+</li>
+<li><div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int remove_watch_from_object(struct watch_list *wlist,
+                             struct watch_queue *wqueue,
+                             u64 id, false);
+</pre></div>
+</div>
+<p>从观测列表中删除一个观测，该观测必须与指定的观测队列（<code class="docutils literal notranslate"><span class="pre">wqueue</span></code>）和对象标识
+符（<code class="docutils literal notranslate"><span class="pre">id</span></code>）匹配。通知（<code class="docutils literal notranslate"><span class="pre">WATCH_META_REMOVAL_NOTIFICATION</span></code>）被发送到观测队列
+表示该观测已被删除。</p>
+</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">remove_watch_from_object(struct</span> <span class="pre">watch_list</span> <span class="pre">*wlist,</span> <span class="pre">NULL,</span> <span class="pre">0,</span> <span class="pre">true);</span></code></p>
+<p>从观测列表中删除所有观测。预计这将被称为销毁前的准备工作，届时新的观测将无法
+访问观测列表。通知（<code class="docutils literal notranslate"><span class="pre">WATCH_META_REMOVAL_NOTIFICATION</span></code>）被发送到每个订阅观测
+的观测队列，以表明该观测已被删除。</p>
+</li>
+</ul>
+</div></blockquote>
+</section>
+<section id="id6">
+<h2><a class="toc-backref" href="#id15">通知发布API</a><a class="headerlink" href="#id6" title="Permalink to this headline">¶</a></h2>
+<p>要将通知发布到观测列表以便订阅的观测可以看到，应使用以下函数:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void post_watch_notification(struct watch_list *wlist,
+                             struct watch_notification *n,
+                             const struct cred *cred,
+                             u64 id);
+</pre></div>
+</div>
+<p>应预先设置通知格式，并应传入一个指向头部（<code class="docutils literal notranslate"><span class="pre">n</span></code>）的指针。通知可能大于此值，并且缓
+冲槽为单位的大小在 <code class="docutils literal notranslate"><span class="pre">n-&gt;info</span> <span class="pre">&amp;</span> <span class="pre">WATCH_INFO_LENGTH</span></code> 中注明。</p>
+<p><code class="docutils literal notranslate"><span class="pre">cred</span></code> 结构体表示源（对象）的证书，并传递给LSM，例如SELinux，以允许或禁止根据该队
+列（对象）的证书在每个单独队列中记录注释。</p>
+<p><code class="docutils literal notranslate"><span class="pre">id</span></code> 是源对象ID（如密钥上的序列号）。只有设置相同ID的观测才能看到这个通知。</p>
+</section>
+<section id="id7">
+<h2><a class="toc-backref" href="#id16">观测源</a><a class="headerlink" href="#id7" title="Permalink to this headline">¶</a></h2>
+<p>任何特定的缓冲区都可以从多个源获取信息。 这些源包括:</p>
+<blockquote>
+<div><ul>
+<li><p>WATCH_TYPE_KEY_NOTIFY</p>
+<p>这种类型的通知表示密钥和密钥环的变化，包括密钥环内容或密钥属性的变化。</p>
+<p>更多信息请参见Documentation/security/keys/core.rst。</p>
+</li>
+</ul>
+</div></blockquote>
+</section>
+<section id="id8">
+<h2><a class="toc-backref" href="#id17">事件过滤</a><a class="headerlink" href="#id8" title="Permalink to this headline">¶</a></h2>
+<p>当创建观测队列后，我们可以应用一组过滤器以限制接收的事件:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct watch_notification_filter filter = {
+        ...
+};
+ioctl(fd, IOC_WATCH_QUEUE_SET_FILTER, &amp;filter)
+</pre></div>
+</div>
+<p>过滤器的描述的类型变量是:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct watch_notification_filter {
+        __u32   nr_filters;
+        __u32   __reserved;
+        struct watch_notification_type_filter filters[];
+};
+</pre></div>
+</div>
+<p>其中“nr_filters”表示filters[]数组中过滤器的数量，而“__reserved”应为0。
+“filter”数组有以下类型的元素:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct watch_notification_type_filter {
+        __u32   type;
+        __u32   info_filter;
+        __u32   info_mask;
+        __u32   subtype_filter[8];
+};
+</pre></div>
+</div>
+<p>其中：</p>
+<blockquote>
+<div><ul>
+<li><p><code class="docutils literal notranslate"><span class="pre">type</span></code> 是过滤的事件类型，应类似于“WATCH_TYPE_KEY_NOTIFY”。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">info_filter</span></code> 与 <code class="docutils literal notranslate"><span class="pre">info_mask</span></code> 充当通知记录的信息字段的过滤器，只有在以下情
+况，通知才会写入缓冲区:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>(watch.info &amp; info_mask) == info_filter
+</pre></div>
+</div>
+<p>例如，这可以用于忽略不在一个挂载树上的观测点的事件。</p>
+</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">subtype_filter</span></code> 是一个位掩码，表示感兴趣的子类型。subtype_filter[0]的
+bit[0]对应子类型0，bit[1]对应子类型1，以此类推。</p></li>
+</ul>
+</div></blockquote>
+<p>若ioctl()的参数为NULL，则过滤器将被移除，并且来自观测源的所有事件都将通过。</p>
+</section>
+<section id="id9">
+<h2><a class="toc-backref" href="#id18">用户空间代码示例</a><a class="headerlink" href="#id9" title="Permalink to this headline">¶</a></h2>
+<p>缓冲区的创建如下所示:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>pipe2(fds, O_TMPFILE);
+ioctl(fds[1], IOC_WATCH_QUEUE_SET_SIZE, 256);
+</pre></div>
+</div>
+<p>它可以被设置成接收密钥环变化的通知:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>keyctl(KEYCTL_WATCH_KEY, KEY_SPEC_SESSION_KEYRING, fds[1], 0x01);
+</pre></div>
+</div>
+<p>然后，这些通知可以被如下方式所使用:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>static void consumer(int rfd, struct watch_queue_buffer *buf)
+{
+        unsigned char buffer[128];
+        ssize_t buf_len;
+
+        while (buf_len = read(rfd, buffer, sizeof(buffer)),
+               buf_len &gt; 0
+               ) {
+                void *p = buffer;
+                void *end = buffer + buf_len;
+                while (p &lt; end) {
+                        union {
+                                struct watch_notification n;
+                                unsigned char buf1[128];
+                        } n;
+                        size_t largest, len;
+
+                        largest = end - p;
+                        if (largest &gt; 128)
+                                largest = 128;
+                        memcpy(&amp;n, p, largest);
+
+                        len = (n-&gt;info &amp; WATCH_INFO_LENGTH) &gt;&gt;
+                                WATCH_INFO_LENGTH__SHIFT;
+                        if (len == 0 || len &gt; largest)
+                                return;
+
+                        switch (n.n.type) {
+                        case WATCH_TYPE_META:
+                                got_meta(&amp;n.n);
+                        case WATCH_TYPE_KEY_NOTIFY:
+                                saw_key_change(&amp;n.n);
+                                break;
+                        }
+
+                        p += len;
+                }
+        }
+}
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">通用通知机制</a><ul>
+<li><a class="reference internal" href="#id2">概述</a></li>
+<li><a class="reference internal" href="#id3">消息结构</a></li>
+<li><a class="reference internal" href="#api">观测列表（通知源）API</a></li>
+<li><a class="reference internal" href="#id4">观测队列（通知输出）API</a></li>
+<li><a class="reference internal" href="#id5">观测订阅API</a></li>
+<li><a class="reference internal" href="#id6">通知发布API</a></li>
+<li><a class="reference internal" href="#id7">观测源</a></li>
+<li><a class="reference internal" href="#id8">事件过滤</a></li>
+<li><a class="reference internal" href="#id9">用户空间代码示例</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/core-api/watch_queue.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/core-api/watch_queue.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

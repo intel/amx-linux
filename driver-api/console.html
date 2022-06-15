@@ -1,0 +1,249 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Console Drivers &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Dell Systems Management Base Driver" href="dcdbas.html" />
+    <link rel="prev" title="Kernel Connector" href="connector.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="console-drivers">
+<h1>Console Drivers<a class="headerlink" href="#console-drivers" title="Permalink to this headline">¶</a></h1>
+<p>The Linux kernel has 2 general types of console drivers.  The first type is
+assigned by the kernel to all the virtual consoles during the boot process.
+This type will be called ‘system driver’, and only one system driver is allowed
+to exist. The system driver is persistent and it can never be unloaded, though
+it may become inactive.</p>
+<p>The second type has to be explicitly loaded and unloaded. This will be called
+‘modular driver’ by this document. Multiple modular drivers can coexist at
+any time with each driver sharing the console with other drivers including
+the system driver. However, modular drivers cannot take over the console
+that is currently occupied by another modular driver. (Exception: Drivers that
+call do_take_over_console() will succeed in the takeover regardless of the type
+of driver occupying the consoles.) They can only take over the console that is
+occupied by the system driver. In the same token, if the modular driver is
+released by the console, the system driver will take over.</p>
+<p>Modular drivers, from the programmer’s point of view, have to call:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>do_take_over_console() - load and bind driver to console layer
+give_up_console() - unload driver; it will only work if driver
+                    is fully unbound
+</pre></div>
+</div>
+<p>In newer kernels, the following are also available:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>do_register_con_driver()
+do_unregister_con_driver()
+</pre></div>
+</div>
+<p>If sysfs is enabled, the contents of /sys/class/vtconsole can be
+examined. This shows the console backends currently registered by the
+system which are named vtcon&lt;n&gt; where &lt;n&gt; is an integer from 0 to 15.
+Thus:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ls /sys/class/vtconsole
+.  ..  vtcon0  vtcon1
+</pre></div>
+</div>
+<p>Each directory in /sys/class/vtconsole has 3 files:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ls /sys/class/vtconsole/vtcon0
+.  ..  bind  name  uevent
+</pre></div>
+</div>
+<p>What do these files signify?</p>
+<blockquote>
+<div><ol class="arabic">
+<li><p>bind - this is a read/write file. It shows the status of the driver if
+read, or acts to bind or unbind the driver to the virtual consoles
+when written to. The possible values are:</p>
+<dl class="simple">
+<dt>0</dt><dd><ul class="simple">
+<li><p>means the driver is not bound and if echo’ed, commands the driver
+to unbind</p></li>
+</ul>
+</dd>
+<dt>1</dt><dd><ul class="simple">
+<li><p>means the driver is bound and if echo’ed, commands the driver to
+bind</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><p>name - read-only file. Shows the name of the driver in this format:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>cat /sys/class/vtconsole/vtcon0/name
+(S) VGA+
+
+    &#39;(S)&#39; stands for a (S)ystem driver, i.e., it cannot be directly
+    commanded to bind or unbind
+
+    &#39;VGA+&#39; is the name of the driver
+
+cat /sys/class/vtconsole/vtcon1/name
+(M) frame buffer device
+
+    In this case, &#39;(M)&#39; stands for a (M)odular driver, one that can be
+    directly commanded to bind or unbind.
+</pre></div>
+</div>
+</li>
+<li><p>uevent - ignore this file</p></li>
+</ol>
+</div></blockquote>
+<p>When unbinding, the modular driver is detached first, and then the system
+driver takes over the consoles vacated by the driver. Binding, on the other
+hand, will bind the driver to the consoles that are currently occupied by a
+system driver.</p>
+<dl>
+<dt>NOTE1:</dt><dd><p>Binding and unbinding must be selected in Kconfig. It’s under:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Device Drivers -&gt;
+    Character devices -&gt;
+            Support for binding and unbinding console drivers
+</pre></div>
+</div>
+</dd>
+<dt>NOTE2:</dt><dd><p>If any of the virtual consoles are in KD_GRAPHICS mode, then binding or
+unbinding will not succeed. An example of an application that sets the
+console to KD_GRAPHICS is X.</p>
+</dd>
+</dl>
+<p>How useful is this feature? This is very useful for console driver
+developers. By unbinding the driver from the console layer, one can unload the
+driver, make changes, recompile, reload and rebind the driver without any need
+for rebooting the kernel. For regular users who may want to switch from
+framebuffer console to VGA console and vice versa, this feature also makes
+this possible. (NOTE NOTE NOTE: Please read fbcon.txt under Documentation/fb
+for more details.)</p>
+<section id="notes-for-developers">
+<h2>Notes for developers<a class="headerlink" href="#notes-for-developers" title="Permalink to this headline">¶</a></h2>
+<p>do_take_over_console() is now broken up into:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>do_register_con_driver()
+do_bind_con_driver() - private function
+</pre></div>
+</div>
+<p>give_up_console() is a wrapper to do_unregister_con_driver(), and a driver must
+be fully unbound for this call to succeed. con_is_bound() will check if the
+driver is bound or not.</p>
+</section>
+<section id="guidelines-for-console-driver-writers">
+<h2>Guidelines for console driver writers<a class="headerlink" href="#guidelines-for-console-driver-writers" title="Permalink to this headline">¶</a></h2>
+<p>In order for binding to and unbinding from the console to properly work,
+console drivers must follow these guidelines:</p>
+<ol class="arabic simple">
+<li><p>All drivers, except system drivers, must call either do_register_con_driver()
+or do_take_over_console(). do_register_con_driver() will just add the driver
+to the console’s internal list. It won’t take over the
+console. do_take_over_console(), as it name implies, will also take over (or
+bind to) the console.</p></li>
+<li><p>All resources allocated during con-&gt;con_init() must be released in
+con-&gt;con_deinit().</p></li>
+<li><p>All resources allocated in con-&gt;con_startup() must be released when the
+driver, which was previously bound, becomes unbound.  The console layer
+does not have a complementary call to con-&gt;con_startup() so it’s up to the
+driver to check when it’s legal to release these resources. Calling
+con_is_bound() in con-&gt;con_deinit() will help.  If the call returned
+false(), then it’s safe to release the resources.  This balance has to be
+ensured because con-&gt;con_startup() can be called again when a request to
+rebind the driver to the console arrives.</p></li>
+<li><p>Upon exit of the driver, ensure that the driver is totally unbound. If the
+condition is satisfied, then the driver must call do_unregister_con_driver()
+or give_up_console().</p></li>
+<li><p>do_unregister_con_driver() can also be called on conditions which make it
+impossible for the driver to service console requests.  This can happen
+with the framebuffer console that suddenly lost all of its drivers.</p></li>
+</ol>
+<p>The current crop of console drivers should still work correctly, but binding
+and unbinding them may cause problems. With minimal fixes, these drivers can
+be made to work correctly.</p>
+<p>Antonino Daplas &lt;<a class="reference external" href="mailto:adaplas&#37;&#52;&#48;pol&#46;net">adaplas<span>&#64;</span>pol<span>&#46;</span>net</a>&gt;</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Console Drivers</a><ul>
+<li><a class="reference internal" href="#notes-for-developers">Notes for developers</a></li>
+<li><a class="reference internal" href="#guidelines-for-console-driver-writers">Guidelines for console driver writers</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/driver-api/console.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/driver-api/console.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

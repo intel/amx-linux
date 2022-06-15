@@ -1,0 +1,191 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Process Number Controller &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="RDMA Controller" href="rdma.html" />
+    <link rel="prev" title="Network priority cgroup" href="net_prio.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="process-number-controller">
+<h1>Process Number Controller<a class="headerlink" href="#process-number-controller" title="Permalink to this headline">¶</a></h1>
+<section id="abstract">
+<h2>Abstract<a class="headerlink" href="#abstract" title="Permalink to this headline">¶</a></h2>
+<p>The process number controller is used to allow a cgroup hierarchy to stop any
+new tasks from being fork()’d or clone()’d after a certain limit is reached.</p>
+<p>Since it is trivial to hit the task limit without hitting any kmemcg limits in
+place, PIDs are a fundamental resource. As such, PID exhaustion must be
+preventable in the scope of a cgroup hierarchy by allowing resource limiting of
+the number of tasks in a cgroup.</p>
+</section>
+<section id="usage">
+<h2>Usage<a class="headerlink" href="#usage" title="Permalink to this headline">¶</a></h2>
+<p>In order to use the <cite>pids</cite> controller, set the maximum number of tasks in
+pids.max (this is not available in the root cgroup for obvious reasons). The
+number of processes currently in the cgroup is given by pids.current.</p>
+<p>Organisational operations are not blocked by cgroup policies, so it is possible
+to have pids.current &gt; pids.max. This can be done by either setting the limit to
+be smaller than pids.current, or attaching enough processes to the cgroup such
+that pids.current &gt; pids.max. However, it is not possible to violate a cgroup
+policy through fork() or clone(). fork() and clone() will return -EAGAIN if the
+creation of a new process would cause a cgroup policy to be violated.</p>
+<p>To set a cgroup to have no limit, set pids.max to “max”. This is the default for
+all new cgroups (N.B. that PID limits are hierarchical, so the most stringent
+limit in the hierarchy is followed).</p>
+<p>pids.current tracks all child cgroup hierarchies, so parent/pids.current is a
+superset of parent/child/pids.current.</p>
+<p>The pids.events file contains event counters:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>max: Number of times fork failed because limit was hit.</p></li>
+</ul>
+</div></blockquote>
+</section>
+<section id="example">
+<h2>Example<a class="headerlink" href="#example" title="Permalink to this headline">¶</a></h2>
+<p>First, we mount the pids controller:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># mkdir -p /sys/fs/cgroup/pids
+# mount -t cgroup -o pids none /sys/fs/cgroup/pids
+</pre></div>
+</div>
+<p>Then we create a hierarchy, set limits and attach processes to it:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># mkdir -p /sys/fs/cgroup/pids/parent/child
+# echo 2 &gt; /sys/fs/cgroup/pids/parent/pids.max
+# echo $$ &gt; /sys/fs/cgroup/pids/parent/cgroup.procs
+# cat /sys/fs/cgroup/pids/parent/pids.current
+2
+#
+</pre></div>
+</div>
+<p>It should be noted that attempts to overcome the set limit (2 in this case) will
+fail:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># cat /sys/fs/cgroup/pids/parent/pids.current
+2
+# ( /bin/echo &quot;Here&#39;s some processes for you.&quot; | cat )
+sh: fork: Resource temporary unavailable
+#
+</pre></div>
+</div>
+<p>Even if we migrate to a child cgroup (which doesn’t have a set limit), we will
+not be able to overcome the most stringent limit in the hierarchy (in this case,
+parent’s):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># echo $$ &gt; /sys/fs/cgroup/pids/parent/child/cgroup.procs
+# cat /sys/fs/cgroup/pids/parent/pids.current
+2
+# cat /sys/fs/cgroup/pids/parent/child/pids.current
+2
+# cat /sys/fs/cgroup/pids/parent/child/pids.max
+max
+# ( /bin/echo &quot;Here&#39;s some processes for you.&quot; | cat )
+sh: fork: Resource temporary unavailable
+#
+</pre></div>
+</div>
+<p>We can set a limit that is smaller than pids.current, which will stop any new
+processes from being forked at all (note that the shell itself counts towards
+pids.current):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># echo 1 &gt; /sys/fs/cgroup/pids/parent/pids.max
+# /bin/echo &quot;We can&#39;t even spawn a single process now.&quot;
+sh: fork: Resource temporary unavailable
+# echo 0 &gt; /sys/fs/cgroup/pids/parent/pids.max
+# /bin/echo &quot;We can&#39;t even spawn a single process now.&quot;
+sh: fork: Resource temporary unavailable
+#
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Process Number Controller</a><ul>
+<li><a class="reference internal" href="#abstract">Abstract</a></li>
+<li><a class="reference internal" href="#usage">Usage</a></li>
+<li><a class="reference internal" href="#example">Example</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/admin-guide/cgroup-v1/pids.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/admin-guide/cgroup-v1/pids.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

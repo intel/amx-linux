@@ -1,0 +1,582 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>BPF Kernel Functions (kfuncs) &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Program Types" href="programs.html" />
+    <link rel="prev" title="Helper functions" href="helpers.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="bpf-kernel-functions-kfuncs">
+<h1>BPF Kernel Functions (kfuncs)<a class="headerlink" href="#bpf-kernel-functions-kfuncs" title="Permalink to this headline">¶</a></h1>
+<section id="introduction">
+<h2>1. Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>BPF Kernel Functions or more commonly known as kfuncs are functions in the Linux
+kernel which are exposed for use by BPF programs. Unlike normal BPF helpers,
+kfuncs do not have a stable interface and can change from one kernel release to
+another. Hence, BPF programs need to be updated in response to changes in the
+kernel.</p>
+</section>
+<section id="defining-a-kfunc">
+<h2>2. Defining a kfunc<a class="headerlink" href="#defining-a-kfunc" title="Permalink to this headline">¶</a></h2>
+<p>There are two ways to expose a kernel function to BPF programs, either make an
+existing function in the kernel visible, or add a new wrapper for BPF. In both
+cases, care must be taken that BPF program can only call such function in a
+valid context. To enforce this, visibility of a kfunc can be per program type.</p>
+<p>If you are not creating a BPF wrapper for existing kernel function, skip ahead
+to <a class="reference internal" href="#bpf-kfunc-nodef"><span class="std std-ref">2.3 Using an existing kernel function</span></a>.</p>
+<section id="creating-a-wrapper-kfunc">
+<h3>2.1 Creating a wrapper kfunc<a class="headerlink" href="#creating-a-wrapper-kfunc" title="Permalink to this headline">¶</a></h3>
+<p>When defining a wrapper kfunc, the wrapper function should have extern linkage.
+This prevents the compiler from optimizing away dead code, as this wrapper kfunc
+is not invoked anywhere in the kernel itself. It is not necessary to provide a
+prototype in a header for the wrapper kfunc.</p>
+<p>An example is given below:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/* Disables missing prototype warnings */
+__diag_push();
+__diag_ignore_all(&quot;-Wmissing-prototypes&quot;,
+                  &quot;Global kfuncs as their definitions will be in BTF&quot;);
+
+struct task_struct *bpf_find_get_task_by_vpid(pid_t nr)
+{
+        return find_get_task_by_vpid(nr);
+}
+
+__diag_pop();
+</pre></div>
+</div>
+<p>A wrapper kfunc is often needed when we need to annotate parameters of the
+kfunc. Otherwise one may directly make the kfunc visible to the BPF program by
+registering it with the BPF subsystem. See <a class="reference internal" href="#bpf-kfunc-nodef"><span class="std std-ref">2.3 Using an existing kernel function</span></a>.</p>
+</section>
+<section id="annotating-kfunc-parameters">
+<h3>2.2 Annotating kfunc parameters<a class="headerlink" href="#annotating-kfunc-parameters" title="Permalink to this headline">¶</a></h3>
+<p>Similar to BPF helpers, there is sometime need for additional context required
+by the verifier to make the usage of kernel functions safer and more useful.
+Hence, we can annotate a parameter by suffixing the name of the argument of the
+kfunc with a __tag, where tag may be one of the supported annotations.</p>
+</section>
+<section id="sz-annotation">
+<h3>2.2.1 __sz Annotation<a class="headerlink" href="#sz-annotation" title="Permalink to this headline">¶</a></h3>
+<p>This annotation is used to indicate a memory and size pair in the argument list.
+An example is given below:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void bpf_memzero(void *mem, int mem__sz)
+{
+...
+}
+</pre></div>
+</div>
+<p>Here, the verifier will treat first argument as a PTR_TO_MEM, and second
+argument as its size. By default, without __sz annotation, the size of the type
+of the pointer is used. Without __sz annotation, a kfunc cannot accept a void
+pointer.</p>
+</section>
+<section id="k-annotation">
+<h3>2.2.2 __k Annotation<a class="headerlink" href="#k-annotation" title="Permalink to this headline">¶</a></h3>
+<p>This annotation is only understood for scalar arguments, where it indicates that
+the verifier must check the scalar argument to be a known constant, which does
+not indicate a size parameter, and the value of the constant is relevant to the
+safety of the program.</p>
+<p>An example is given below:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void *bpf_obj_new(u32 local_type_id__k, ...)
+{
+...
+}
+</pre></div>
+</div>
+<p>Here, bpf_obj_new uses local_type_id argument to find out the size of that type
+ID in program’s BTF and return a sized pointer to it. Each type ID will have a
+distinct size, hence it is crucial to treat each such call as distinct when
+values don’t match during verifier state pruning checks.</p>
+<p>Hence, whenever a constant scalar argument is accepted by a kfunc which is not a
+size parameter, and the value of the constant matters for program safety, __k
+suffix should be used.</p>
+</section>
+<section id="using-an-existing-kernel-function">
+<span id="bpf-kfunc-nodef"></span><h3>2.3 Using an existing kernel function<a class="headerlink" href="#using-an-existing-kernel-function" title="Permalink to this headline">¶</a></h3>
+<p>When an existing function in the kernel is fit for consumption by BPF programs,
+it can be directly registered with the BPF subsystem. However, care must still
+be taken to review the context in which it will be invoked by the BPF program
+and whether it is safe to do so.</p>
+</section>
+<section id="annotating-kfuncs">
+<h3>2.4 Annotating kfuncs<a class="headerlink" href="#annotating-kfuncs" title="Permalink to this headline">¶</a></h3>
+<p>In addition to kfuncs’ arguments, verifier may need more information about the
+type of kfunc(s) being registered with the BPF subsystem. To do so, we define
+flags on a set of kfuncs as follows:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>BTF_SET8_START(bpf_task_set)
+BTF_ID_FLAGS(func, bpf_get_task_pid, KF_ACQUIRE | KF_RET_NULL)
+BTF_ID_FLAGS(func, bpf_put_pid, KF_RELEASE)
+BTF_SET8_END(bpf_task_set)
+</pre></div>
+</div>
+<p>This set encodes the BTF ID of each kfunc listed above, and encodes the flags
+along with it. Ofcourse, it is also allowed to specify no flags.</p>
+</section>
+<section id="kf-acquire-flag">
+<h3>2.4.1 KF_ACQUIRE flag<a class="headerlink" href="#kf-acquire-flag" title="Permalink to this headline">¶</a></h3>
+<p>The KF_ACQUIRE flag is used to indicate that the kfunc returns a pointer to a
+refcounted object. The verifier will then ensure that the pointer to the object
+is eventually released using a release kfunc, or transferred to a map using a
+referenced kptr (by invoking bpf_kptr_xchg). If not, the verifier fails the
+loading of the BPF program until no lingering references remain in all possible
+explored states of the program.</p>
+</section>
+<section id="kf-ret-null-flag">
+<h3>2.4.2 KF_RET_NULL flag<a class="headerlink" href="#kf-ret-null-flag" title="Permalink to this headline">¶</a></h3>
+<p>The KF_RET_NULL flag is used to indicate that the pointer returned by the kfunc
+may be NULL. Hence, it forces the user to do a NULL check on the pointer
+returned from the kfunc before making use of it (dereferencing or passing to
+another helper). This flag is often used in pairing with KF_ACQUIRE flag, but
+both are orthogonal to each other.</p>
+</section>
+<section id="kf-release-flag">
+<h3>2.4.3 KF_RELEASE flag<a class="headerlink" href="#kf-release-flag" title="Permalink to this headline">¶</a></h3>
+<p>The KF_RELEASE flag is used to indicate that the kfunc releases the pointer
+passed in to it. There can be only one referenced pointer that can be passed in.
+All copies of the pointer being released are invalidated as a result of invoking
+kfunc with this flag.</p>
+</section>
+<section id="kf-kptr-get-flag">
+<h3>2.4.4 KF_KPTR_GET flag<a class="headerlink" href="#kf-kptr-get-flag" title="Permalink to this headline">¶</a></h3>
+<p>The KF_KPTR_GET flag is used to indicate that the kfunc takes the first argument
+as a pointer to kptr, safely increments the refcount of the object it points to,
+and returns a reference to the user. The rest of the arguments may be normal
+arguments of a kfunc. The KF_KPTR_GET flag should be used in conjunction with
+KF_ACQUIRE and KF_RET_NULL flags.</p>
+</section>
+<section id="kf-trusted-args-flag">
+<h3>2.4.5 KF_TRUSTED_ARGS flag<a class="headerlink" href="#kf-trusted-args-flag" title="Permalink to this headline">¶</a></h3>
+<p>The KF_TRUSTED_ARGS flag is used for kfuncs taking pointer arguments. It
+indicates that the all pointer arguments are valid, and that all pointers to
+BTF objects have been passed in their unmodified form (that is, at a zero
+offset, and without having been obtained from walking another pointer).</p>
+<p>There are two types of pointers to kernel objects which are considered “valid”:</p>
+<ol class="arabic simple">
+<li><p>Pointers which are passed as tracepoint or struct_ops callback arguments.</p></li>
+<li><p>Pointers which were returned from a KF_ACQUIRE or KF_KPTR_GET kfunc.</p></li>
+</ol>
+<p>Pointers to non-BTF objects (e.g. scalar pointers) may also be passed to
+KF_TRUSTED_ARGS kfuncs, and may have a non-zero offset.</p>
+<p>The definition of “valid” pointers is subject to change at any time, and has
+absolutely no ABI stability guarantees.</p>
+</section>
+<section id="kf-sleepable-flag">
+<h3>2.4.6 KF_SLEEPABLE flag<a class="headerlink" href="#kf-sleepable-flag" title="Permalink to this headline">¶</a></h3>
+<p>The KF_SLEEPABLE flag is used for kfuncs that may sleep. Such kfuncs can only
+be called by sleepable BPF programs (BPF_F_SLEEPABLE).</p>
+</section>
+<section id="kf-destructive-flag">
+<h3>2.4.7 KF_DESTRUCTIVE flag<a class="headerlink" href="#kf-destructive-flag" title="Permalink to this headline">¶</a></h3>
+<p>The KF_DESTRUCTIVE flag is used to indicate functions calling which is
+destructive to the system. For example such a call can result in system
+rebooting or panicking. Due to this additional restrictions apply to these
+calls. At the moment they only require CAP_SYS_BOOT capability, but more can be
+added later.</p>
+</section>
+<section id="kf-rcu-flag">
+<h3>2.4.8 KF_RCU flag<a class="headerlink" href="#kf-rcu-flag" title="Permalink to this headline">¶</a></h3>
+<p>The KF_RCU flag is used for kfuncs which have a rcu ptr as its argument.
+When used together with KF_ACQUIRE, it indicates the kfunc should have a
+single argument which must be a trusted argument or a MEM_RCU pointer.
+The argument may have reference count of 0 and the kfunc must take this
+into consideration.</p>
+</section>
+<section id="registering-the-kfuncs">
+<h3>2.5 Registering the kfuncs<a class="headerlink" href="#registering-the-kfuncs" title="Permalink to this headline">¶</a></h3>
+<p>Once the kfunc is prepared for use, the final step to making it visible is
+registering it with the BPF subsystem. Registration is done per BPF program
+type. An example is shown below:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>BTF_SET8_START(bpf_task_set)
+BTF_ID_FLAGS(func, bpf_get_task_pid, KF_ACQUIRE | KF_RET_NULL)
+BTF_ID_FLAGS(func, bpf_put_pid, KF_RELEASE)
+BTF_SET8_END(bpf_task_set)
+
+static const struct btf_kfunc_id_set bpf_task_kfunc_set = {
+        .owner = THIS_MODULE,
+        .set   = &amp;bpf_task_set,
+};
+
+static int init_subsystem(void)
+{
+        return register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACING, &amp;bpf_task_kfunc_set);
+}
+late_initcall(init_subsystem);
+</pre></div>
+</div>
+</section>
+</section>
+<section id="core-kfuncs">
+<h2>3. Core kfuncs<a class="headerlink" href="#core-kfuncs" title="Permalink to this headline">¶</a></h2>
+<p>The BPF subsystem provides a number of “core” kfuncs that are potentially
+applicable to a wide variety of different possible use cases and programs.
+Those kfuncs are documented here.</p>
+<section id="struct-task-struct-kfuncs">
+<h3>3.1 struct task_struct * kfuncs<a class="headerlink" href="#struct-task-struct-kfuncs" title="Permalink to this headline">¶</a></h3>
+<p>There are a number of kfuncs that allow <code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">task_struct</span> <span class="pre">*</span></code> objects to be
+used as kptrs:</p>
+<dl class="function">
+<dt id="c.bpf_task_acquire">
+struct task_struct * <code class="sig-name descname">bpf_task_acquire</code><span class="sig-paren">(</span>struct task_struct<em> *p</em><span class="sig-paren">)</span><a class="headerlink" href="#c.bpf_task_acquire" title="Permalink to this definition">¶</a></dt>
+<dd><p>Acquire a reference to a task. A task acquired by this kfunc which is not stored in a map as a kptr, must be released by calling <a class="reference internal" href="#c.bpf_task_release" title="bpf_task_release"><code class="xref c c-func docutils literal notranslate"><span class="pre">bpf_task_release()</span></code></a>.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">task_struct</span> <span class="pre">*p</span></code></dt><dd><p>The task on which a reference is being acquired.</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.bpf_task_release">
+void <code class="sig-name descname">bpf_task_release</code><span class="sig-paren">(</span>struct task_struct<em> *p</em><span class="sig-paren">)</span><a class="headerlink" href="#c.bpf_task_release" title="Permalink to this definition">¶</a></dt>
+<dd><p>Release the reference acquired on a task.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">task_struct</span> <span class="pre">*p</span></code></dt><dd><p>The task on which a reference is being released.</p>
+</dd>
+</dl>
+</div>
+<p>These kfuncs are useful when you want to acquire or release a reference to a
+<code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">task_struct</span> <span class="pre">*</span></code> that was passed as e.g. a tracepoint arg, or a
+struct_ops callback arg. For example:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cm">/**</span>
+<span class="cm"> * A trivial example tracepoint program that shows how to</span>
+<span class="cm"> * acquire and release a struct task_struct * pointer.</span>
+<span class="cm"> */</span><span class="w"></span>
+<span class="n">SEC</span><span class="p">(</span><span class="s">&quot;tp_btf/task_newtask&quot;</span><span class="p">)</span><span class="w"></span>
+<span class="kt">int</span><span class="w"> </span><span class="n">BPF_PROG</span><span class="p">(</span><span class="n">task_acquire_release_example</span><span class="p">,</span><span class="w"> </span><span class="k">struct</span> <span class="nc">task_struct</span><span class="w"> </span><span class="o">*</span><span class="n">task</span><span class="p">,</span><span class="w"> </span><span class="n">u64</span><span class="w"> </span><span class="n">clone_flags</span><span class="p">)</span><span class="w"></span>
+<span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="k">struct</span> <span class="nc">task_struct</span><span class="w"> </span><span class="o">*</span><span class="n">acquired</span><span class="p">;</span><span class="w"></span>
+
+<span class="w">        </span><span class="n">acquired</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">bpf_task_acquire</span><span class="p">(</span><span class="n">task</span><span class="p">);</span><span class="w"></span>
+
+<span class="w">        </span><span class="cm">/*</span>
+<span class="cm">         * In a typical program you&#39;d do something like store</span>
+<span class="cm">         * the task in a map, and the map will automatically</span>
+<span class="cm">         * release it later. Here, we release it manually.</span>
+<span class="cm">         */</span><span class="w"></span>
+<span class="w">        </span><span class="n">bpf_task_release</span><span class="p">(</span><span class="n">acquired</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+<hr class="docutils" />
+<p>A BPF program can also look up a task from a pid. This can be useful if the
+caller doesn’t have a trusted pointer to a <code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">task_struct</span> <span class="pre">*</span></code> object that
+it can acquire a reference on with <a class="reference internal" href="#c.bpf_task_acquire" title="bpf_task_acquire"><code class="xref c c-func docutils literal notranslate"><span class="pre">bpf_task_acquire()</span></code></a>.</p>
+<dl class="function">
+<dt id="c.bpf_task_from_pid">
+struct task_struct * <code class="sig-name descname">bpf_task_from_pid</code><span class="sig-paren">(</span>s32<em> pid</em><span class="sig-paren">)</span><a class="headerlink" href="#c.bpf_task_from_pid" title="Permalink to this definition">¶</a></dt>
+<dd><p>Find a struct task_struct from its pid by looking it up in the root pid namespace idr. If a task is returned, it must either be stored in a map, or released with <a class="reference internal" href="#c.bpf_task_release" title="bpf_task_release"><code class="xref c c-func docutils literal notranslate"><span class="pre">bpf_task_release()</span></code></a>.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">s32</span> <span class="pre">pid</span></code></dt><dd><p>The pid of the task being looked up.</p>
+</dd>
+</dl>
+</div>
+<p>Here is an example of it being used:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">SEC</span><span class="p">(</span><span class="s">&quot;tp_btf/task_newtask&quot;</span><span class="p">)</span><span class="w"></span>
+<span class="kt">int</span><span class="w"> </span><span class="n">BPF_PROG</span><span class="p">(</span><span class="n">task_get_pid_example</span><span class="p">,</span><span class="w"> </span><span class="k">struct</span> <span class="nc">task_struct</span><span class="w"> </span><span class="o">*</span><span class="n">task</span><span class="p">,</span><span class="w"> </span><span class="n">u64</span><span class="w"> </span><span class="n">clone_flags</span><span class="p">)</span><span class="w"></span>
+<span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="k">struct</span> <span class="nc">task_struct</span><span class="w"> </span><span class="o">*</span><span class="n">lookup</span><span class="p">;</span><span class="w"></span>
+
+<span class="w">        </span><span class="n">lookup</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">bpf_task_from_pid</span><span class="p">(</span><span class="n">task</span><span class="o">-&gt;</span><span class="n">pid</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">lookup</span><span class="p">)</span><span class="w"></span>
+<span class="w">                </span><span class="cm">/* A task should always be found, as %task is a tracepoint arg. */</span><span class="w"></span>
+<span class="w">                </span><span class="k">return</span><span class="w"> </span><span class="o">-</span><span class="n">ENOENT</span><span class="p">;</span><span class="w"></span>
+
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">lookup</span><span class="o">-&gt;</span><span class="n">pid</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">task</span><span class="o">-&gt;</span><span class="n">pid</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">                </span><span class="cm">/* bpf_task_from_pid() looks up the task via its</span>
+<span class="cm">                 * globally-unique pid from the init_pid_ns. Thus,</span>
+<span class="cm">                 * the pid of the lookup task should always be the</span>
+<span class="cm">                 * same as the input task.</span>
+<span class="cm">                 */</span><span class="w"></span>
+<span class="w">                </span><span class="n">bpf_task_release</span><span class="p">(</span><span class="n">lookup</span><span class="p">);</span><span class="w"></span>
+<span class="w">                </span><span class="k">return</span><span class="w"> </span><span class="o">-</span><span class="n">EINVAL</span><span class="p">;</span><span class="w"></span>
+<span class="w">        </span><span class="p">}</span><span class="w"></span>
+
+<span class="w">        </span><span class="cm">/* bpf_task_from_pid() returns an acquired reference,</span>
+<span class="cm">         * so it must be dropped before returning from the</span>
+<span class="cm">         * tracepoint handler.</span>
+<span class="cm">         */</span><span class="w"></span>
+<span class="w">        </span><span class="n">bpf_task_release</span><span class="p">(</span><span class="n">lookup</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+</section>
+<section id="struct-cgroup-kfuncs">
+<h3>3.2 struct cgroup * kfuncs<a class="headerlink" href="#struct-cgroup-kfuncs" title="Permalink to this headline">¶</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cgroup</span> <span class="pre">*</span></code> objects also have acquire and release functions:</p>
+<dl class="function">
+<dt id="c.bpf_cgroup_acquire">
+struct cgroup * <code class="sig-name descname">bpf_cgroup_acquire</code><span class="sig-paren">(</span>struct cgroup<em> *cgrp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.bpf_cgroup_acquire" title="Permalink to this definition">¶</a></dt>
+<dd><p>Acquire a reference to a cgroup. A cgroup acquired by this kfunc which is not stored in a map as a kptr, must be released by calling <a class="reference internal" href="#c.bpf_cgroup_release" title="bpf_cgroup_release"><code class="xref c c-func docutils literal notranslate"><span class="pre">bpf_cgroup_release()</span></code></a>.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cgroup</span> <span class="pre">*cgrp</span></code></dt><dd><p>The cgroup on which a reference is being acquired.</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.bpf_cgroup_release">
+void <code class="sig-name descname">bpf_cgroup_release</code><span class="sig-paren">(</span>struct cgroup<em> *cgrp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.bpf_cgroup_release" title="Permalink to this definition">¶</a></dt>
+<dd><p>Release the reference acquired on a cgroup. If this kfunc is invoked in an RCU read region, the cgroup is guaranteed to not be freed until the current grace period has ended, even if its refcount drops to 0.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cgroup</span> <span class="pre">*cgrp</span></code></dt><dd><p>The cgroup on which a reference is being released.</p>
+</dd>
+</dl>
+</div>
+<p>These kfuncs are used in exactly the same manner as <a class="reference internal" href="#c.bpf_task_acquire" title="bpf_task_acquire"><code class="xref c c-func docutils literal notranslate"><span class="pre">bpf_task_acquire()</span></code></a> and
+<a class="reference internal" href="#c.bpf_task_release" title="bpf_task_release"><code class="xref c c-func docutils literal notranslate"><span class="pre">bpf_task_release()</span></code></a> respectively, so we won’t provide examples for them.</p>
+<hr class="docutils" />
+<p>You may also acquire a reference to a <code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cgroup</span></code> kptr that’s already
+stored in a map using <a class="reference internal" href="#c.bpf_cgroup_kptr_get" title="bpf_cgroup_kptr_get"><code class="xref c c-func docutils literal notranslate"><span class="pre">bpf_cgroup_kptr_get()</span></code></a>:</p>
+<dl class="function">
+<dt id="c.bpf_cgroup_kptr_get">
+struct cgroup * <code class="sig-name descname">bpf_cgroup_kptr_get</code><span class="sig-paren">(</span>struct cgroup<em> **cgrpp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.bpf_cgroup_kptr_get" title="Permalink to this definition">¶</a></dt>
+<dd><p>Acquire a reference on a struct cgroup kptr. A cgroup kptr acquired by this kfunc which is not subsequently stored in a map, must be released by calling <a class="reference internal" href="#c.bpf_cgroup_release" title="bpf_cgroup_release"><code class="xref c c-func docutils literal notranslate"><span class="pre">bpf_cgroup_release()</span></code></a>.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cgroup</span> <span class="pre">**cgrpp</span></code></dt><dd><p>A pointer to a cgroup kptr on which a reference is being acquired.</p>
+</dd>
+</dl>
+</div>
+<p>Here’s an example of how it can be used:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cm">/* struct containing the struct task_struct kptr which is actually stored in the map. */</span><span class="w"></span>
+<span class="k">struct</span> <span class="nc">__cgroups_kfunc_map_value</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="k">struct</span> <span class="nc">cgroup</span><span class="w"> </span><span class="n">__kptr_ref</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">cgroup</span><span class="p">;</span><span class="w"></span>
+<span class="p">};</span><span class="w"></span>
+
+<span class="cm">/* The map containing struct __cgroups_kfunc_map_value entries. */</span><span class="w"></span>
+<span class="k">struct</span> <span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="n">__uint</span><span class="p">(</span><span class="n">type</span><span class="p">,</span><span class="w"> </span><span class="n">BPF_MAP_TYPE_HASH</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="n">__type</span><span class="p">(</span><span class="n">key</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="n">__type</span><span class="p">(</span><span class="n">value</span><span class="p">,</span><span class="w"> </span><span class="k">struct</span> <span class="nc">__cgroups_kfunc_map_value</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="n">__uint</span><span class="p">(</span><span class="n">max_entries</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span><span class="w"></span>
+<span class="p">}</span><span class="w"> </span><span class="n">__cgroups_kfunc_map</span><span class="w"> </span><span class="n">SEC</span><span class="p">(</span><span class="s">&quot;.maps&quot;</span><span class="p">);</span><span class="w"></span>
+
+<span class="cm">/* ... */</span><span class="w"></span>
+
+<span class="cm">/**</span>
+<span class="cm"> * A simple example tracepoint program showing how a</span>
+<span class="cm"> * struct cgroup kptr that is stored in a map can</span>
+<span class="cm"> * be acquired using the bpf_cgroup_kptr_get() kfunc.</span>
+<span class="cm"> */</span><span class="w"></span>
+<span class="w"> </span><span class="n">SEC</span><span class="p">(</span><span class="s">&quot;tp_btf/cgroup_mkdir&quot;</span><span class="p">)</span><span class="w"></span>
+<span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">BPF_PROG</span><span class="p">(</span><span class="n">cgroup_kptr_get_example</span><span class="p">,</span><span class="w"> </span><span class="k">struct</span> <span class="nc">cgroup</span><span class="w"> </span><span class="o">*</span><span class="n">cgrp</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="o">*</span><span class="n">path</span><span class="p">)</span><span class="w"></span>
+<span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="k">struct</span> <span class="nc">cgroup</span><span class="w"> </span><span class="o">*</span><span class="n">kptr</span><span class="p">;</span><span class="w"></span>
+<span class="w">        </span><span class="k">struct</span> <span class="nc">__cgroups_kfunc_map_value</span><span class="w"> </span><span class="o">*</span><span class="n">v</span><span class="p">;</span><span class="w"></span>
+<span class="w">        </span><span class="n">s32</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">cgrp</span><span class="o">-&gt;</span><span class="n">self</span><span class="p">.</span><span class="n">id</span><span class="p">;</span><span class="w"></span>
+
+<span class="w">        </span><span class="cm">/* Assume a cgroup kptr was previously stored in the map. */</span><span class="w"></span>
+<span class="w">        </span><span class="n">v</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">bpf_map_lookup_elem</span><span class="p">(</span><span class="o">&amp;</span><span class="n">__cgroups_kfunc_map</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">id</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">v</span><span class="p">)</span><span class="w"></span>
+<span class="w">                </span><span class="k">return</span><span class="w"> </span><span class="o">-</span><span class="n">ENOENT</span><span class="p">;</span><span class="w"></span>
+
+<span class="w">        </span><span class="cm">/* Acquire a reference to the cgroup kptr that&#39;s already stored in the map. */</span><span class="w"></span>
+<span class="w">        </span><span class="n">kptr</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">bpf_cgroup_kptr_get</span><span class="p">(</span><span class="o">&amp;</span><span class="n">v</span><span class="o">-&gt;</span><span class="n">cgroup</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">kptr</span><span class="p">)</span><span class="w"></span>
+<span class="w">                </span><span class="cm">/* If no cgroup was present in the map, it&#39;s because</span>
+<span class="cm">                 * we&#39;re racing with another CPU that removed it with</span>
+<span class="cm">                 * bpf_kptr_xchg() between the bpf_map_lookup_elem()</span>
+<span class="cm">                 * above, and our call to bpf_cgroup_kptr_get().</span>
+<span class="cm">                 * bpf_cgroup_kptr_get() internally safely handles this</span>
+<span class="cm">                 * race, and will return NULL if the task is no longer</span>
+<span class="cm">                 * present in the map by the time we invoke the kfunc.</span>
+<span class="cm">                 */</span><span class="w"></span>
+<span class="w">                </span><span class="k">return</span><span class="w"> </span><span class="o">-</span><span class="n">EBUSY</span><span class="p">;</span><span class="w"></span>
+
+<span class="w">        </span><span class="cm">/* Free the reference we just took above. Note that the</span>
+<span class="cm">         * original struct cgroup kptr is still in the map. It will</span>
+<span class="cm">         * be freed either at a later time if another context deletes</span>
+<span class="cm">         * it from the map, or automatically by the BPF subsystem if</span>
+<span class="cm">         * it&#39;s still present when the map is destroyed.</span>
+<span class="cm">         */</span><span class="w"></span>
+<span class="w">        </span><span class="n">bpf_cgroup_release</span><span class="p">(</span><span class="n">kptr</span><span class="p">);</span><span class="w"></span>
+
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+<hr class="docutils" />
+<p>Another kfunc available for interacting with <code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cgroup</span> <span class="pre">*</span></code> objects is
+<a class="reference internal" href="#c.bpf_cgroup_ancestor" title="bpf_cgroup_ancestor"><code class="xref c c-func docutils literal notranslate"><span class="pre">bpf_cgroup_ancestor()</span></code></a>. This allows callers to access the ancestor of a cgroup,
+and return it as a cgroup kptr.</p>
+<dl class="function">
+<dt id="c.bpf_cgroup_ancestor">
+struct cgroup * <code class="sig-name descname">bpf_cgroup_ancestor</code><span class="sig-paren">(</span>struct cgroup<em> *cgrp</em>, int<em> level</em><span class="sig-paren">)</span><a class="headerlink" href="#c.bpf_cgroup_ancestor" title="Permalink to this definition">¶</a></dt>
+<dd><p>Perform a lookup on an entry in a cgroup’s ancestor array. A cgroup returned by this kfunc which is not subsequently stored in a map, must be released by calling <a class="reference internal" href="#c.bpf_cgroup_release" title="bpf_cgroup_release"><code class="xref c c-func docutils literal notranslate"><span class="pre">bpf_cgroup_release()</span></code></a>.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cgroup</span> <span class="pre">*cgrp</span></code></dt><dd><p>The cgroup for which we’re performing a lookup.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">level</span></code></dt><dd><p>The level of ancestor to look up.</p>
+</dd>
+</dl>
+</div>
+<p>Eventually, BPF should be updated to allow this to happen with a normal memory
+load in the program itself. This is currently not possible without more work in
+the verifier. <a class="reference internal" href="#c.bpf_cgroup_ancestor" title="bpf_cgroup_ancestor"><code class="xref c c-func docutils literal notranslate"><span class="pre">bpf_cgroup_ancestor()</span></code></a> can be used as follows:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cm">/**</span>
+<span class="cm"> * Simple tracepoint example that illustrates how a cgroup&#39;s</span>
+<span class="cm"> * ancestor can be accessed using bpf_cgroup_ancestor().</span>
+<span class="cm"> */</span><span class="w"></span>
+<span class="n">SEC</span><span class="p">(</span><span class="s">&quot;tp_btf/cgroup_mkdir&quot;</span><span class="p">)</span><span class="w"></span>
+<span class="kt">int</span><span class="w"> </span><span class="n">BPF_PROG</span><span class="p">(</span><span class="n">cgrp_ancestor_example</span><span class="p">,</span><span class="w"> </span><span class="k">struct</span> <span class="nc">cgroup</span><span class="w"> </span><span class="o">*</span><span class="n">cgrp</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="o">*</span><span class="n">path</span><span class="p">)</span><span class="w"></span>
+<span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="k">struct</span> <span class="nc">cgroup</span><span class="w"> </span><span class="o">*</span><span class="n">parent</span><span class="p">;</span><span class="w"></span>
+
+<span class="w">        </span><span class="cm">/* The parent cgroup resides at the level before the current cgroup&#39;s level. */</span><span class="w"></span>
+<span class="w">        </span><span class="n">parent</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">bpf_cgroup_ancestor</span><span class="p">(</span><span class="n">cgrp</span><span class="p">,</span><span class="w"> </span><span class="n">cgrp</span><span class="o">-&gt;</span><span class="n">level</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">parent</span><span class="p">)</span><span class="w"></span>
+<span class="w">                </span><span class="k">return</span><span class="w"> </span><span class="o">-</span><span class="n">ENOENT</span><span class="p">;</span><span class="w"></span>
+
+<span class="w">        </span><span class="n">bpf_printk</span><span class="p">(</span><span class="s">&quot;Parent id is %d&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">parent</span><span class="o">-&gt;</span><span class="n">self</span><span class="p">.</span><span class="n">id</span><span class="p">);</span><span class="w"></span>
+
+<span class="w">        </span><span class="cm">/* Return the parent cgroup that was acquired above. */</span><span class="w"></span>
+<span class="w">        </span><span class="n">bpf_cgroup_release</span><span class="p">(</span><span class="n">parent</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">BPF Kernel Functions (kfuncs)</a><ul>
+<li><a class="reference internal" href="#introduction">1. Introduction</a></li>
+<li><a class="reference internal" href="#defining-a-kfunc">2. Defining a kfunc</a><ul>
+<li><a class="reference internal" href="#creating-a-wrapper-kfunc">2.1 Creating a wrapper kfunc</a></li>
+<li><a class="reference internal" href="#annotating-kfunc-parameters">2.2 Annotating kfunc parameters</a></li>
+<li><a class="reference internal" href="#sz-annotation">2.2.1 __sz Annotation</a></li>
+<li><a class="reference internal" href="#k-annotation">2.2.2 __k Annotation</a></li>
+<li><a class="reference internal" href="#using-an-existing-kernel-function">2.3 Using an existing kernel function</a></li>
+<li><a class="reference internal" href="#annotating-kfuncs">2.4 Annotating kfuncs</a></li>
+<li><a class="reference internal" href="#kf-acquire-flag">2.4.1 KF_ACQUIRE flag</a></li>
+<li><a class="reference internal" href="#kf-ret-null-flag">2.4.2 KF_RET_NULL flag</a></li>
+<li><a class="reference internal" href="#kf-release-flag">2.4.3 KF_RELEASE flag</a></li>
+<li><a class="reference internal" href="#kf-kptr-get-flag">2.4.4 KF_KPTR_GET flag</a></li>
+<li><a class="reference internal" href="#kf-trusted-args-flag">2.4.5 KF_TRUSTED_ARGS flag</a></li>
+<li><a class="reference internal" href="#kf-sleepable-flag">2.4.6 KF_SLEEPABLE flag</a></li>
+<li><a class="reference internal" href="#kf-destructive-flag">2.4.7 KF_DESTRUCTIVE flag</a></li>
+<li><a class="reference internal" href="#kf-rcu-flag">2.4.8 KF_RCU flag</a></li>
+<li><a class="reference internal" href="#registering-the-kfuncs">2.5 Registering the kfuncs</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#core-kfuncs">3. Core kfuncs</a><ul>
+<li><a class="reference internal" href="#struct-task-struct-kfuncs">3.1 struct task_struct * kfuncs</a></li>
+<li><a class="reference internal" href="#struct-cgroup-kfuncs">3.2 struct cgroup * kfuncs</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/bpf/kfuncs.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/bpf/kfuncs.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

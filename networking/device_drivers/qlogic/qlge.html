@@ -1,0 +1,211 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>QLogic QLGE 10Gb Ethernet device driver &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="Wi-Fi Device Drivers" href="../wifi/index.html" />
+    <link rel="prev" title="QLogic QLGE Device Drivers" href="index.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="qlogic-qlge-10gb-ethernet-device-driver">
+<h1>QLogic QLGE 10Gb Ethernet device driver<a class="headerlink" href="#qlogic-qlge-10gb-ethernet-device-driver" title="Permalink to this headline">¶</a></h1>
+<p>This driver use drgn and devlink for debugging.</p>
+<section id="dump-kernel-data-structures-in-drgn">
+<h2>Dump kernel data structures in drgn<a class="headerlink" href="#dump-kernel-data-structures-in-drgn" title="Permalink to this headline">¶</a></h2>
+<p>To dump kernel data structures, the following Python script can be used
+in drgn:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">align</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">a</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;the alignment a should be a power of 2</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">mask</span> <span class="o">=</span> <span class="n">a</span> <span class="o">-</span> <span class="mi">1</span>
+    <span class="k">return</span> <span class="p">(</span><span class="n">x</span><span class="o">+</span> <span class="n">mask</span><span class="p">)</span> <span class="o">&amp;</span> <span class="o">~</span><span class="n">mask</span>
+
+<span class="k">def</span> <span class="nf">struct_size</span><span class="p">(</span><span class="n">struct_type</span><span class="p">):</span>
+    <span class="n">struct_str</span> <span class="o">=</span> <span class="s2">&quot;struct </span><span class="si">{}</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">struct_type</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">sizeof</span><span class="p">(</span><span class="n">Object</span><span class="p">(</span><span class="n">prog</span><span class="p">,</span> <span class="n">struct_str</span><span class="p">,</span> <span class="n">address</span><span class="o">=</span><span class="mh">0x0</span><span class="p">))</span>
+
+<span class="k">def</span> <span class="nf">netdev_priv</span><span class="p">(</span><span class="n">netdevice</span><span class="p">):</span>
+    <span class="n">NETDEV_ALIGN</span> <span class="o">=</span> <span class="mi">32</span>
+    <span class="k">return</span> <span class="n">netdevice</span><span class="o">.</span><span class="n">value_</span><span class="p">()</span> <span class="o">+</span> <span class="n">align</span><span class="p">(</span><span class="n">struct_size</span><span class="p">(</span><span class="s2">&quot;net_device&quot;</span><span class="p">),</span> <span class="n">NETDEV_ALIGN</span><span class="p">)</span>
+
+<span class="n">name</span> <span class="o">=</span> <span class="s1">&#39;xxx&#39;</span>
+<span class="n">qlge_device</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="n">netdevices</span> <span class="o">=</span> <span class="n">prog</span><span class="p">[</span><span class="s1">&#39;init_net&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">dev_base_head</span><span class="o">.</span><span class="n">address_of_</span><span class="p">()</span>
+<span class="k">for</span> <span class="n">netdevice</span> <span class="ow">in</span> <span class="n">list_for_each_entry</span><span class="p">(</span><span class="s2">&quot;struct net_device&quot;</span><span class="p">,</span> <span class="n">netdevices</span><span class="p">,</span> <span class="s2">&quot;dev_list&quot;</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">netdevice</span><span class="o">.</span><span class="n">name</span><span class="o">.</span><span class="n">string_</span><span class="p">()</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s1">&#39;ascii&#39;</span><span class="p">)</span> <span class="o">==</span> <span class="n">name</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">netdevice</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+
+<span class="n">ql_adapter</span> <span class="o">=</span> <span class="n">Object</span><span class="p">(</span><span class="n">prog</span><span class="p">,</span> <span class="s2">&quot;struct ql_adapter&quot;</span><span class="p">,</span> <span class="n">address</span><span class="o">=</span><span class="n">netdev_priv</span><span class="p">(</span><span class="n">qlge_device</span><span class="p">))</span>
+</pre></div>
+</div>
+<p>The struct ql_adapter will be printed in drgn as follows,</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">ql_adapter</span>
+<span class="go">(struct ql_adapter){</span>
+<span class="go">        .ricb = (struct ricb){</span>
+<span class="go">                .base_cq = (u8)0,</span>
+<span class="go">                .flags = (u8)120,</span>
+<span class="go">                .mask = (__le16)26637,</span>
+<span class="go">                .hash_cq_id = (u8 [1024]){ 172, 142, 255, 255 },</span>
+<span class="go">                .ipv6_hash_key = (__le32 [10]){},</span>
+<span class="go">                .ipv4_hash_key = (__le32 [4]){},</span>
+<span class="go">        },</span>
+<span class="go">        .flags = (unsigned long)0,</span>
+<span class="go">        .wol = (u32)0,</span>
+<span class="go">        .nic_stats = (struct nic_stats){</span>
+<span class="go">                .tx_pkts = (u64)0,</span>
+<span class="go">                .tx_bytes = (u64)0,</span>
+<span class="go">                .tx_mcast_pkts = (u64)0,</span>
+<span class="go">                .tx_bcast_pkts = (u64)0,</span>
+<span class="go">                .tx_ucast_pkts = (u64)0,</span>
+<span class="go">                .tx_ctl_pkts = (u64)0,</span>
+<span class="go">                .tx_pause_pkts = (u64)0,</span>
+<span class="go">                ...</span>
+<span class="go">        },</span>
+<span class="go">        .active_vlans = (unsigned long [64]){</span>
+<span class="go">                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 52780853100545, 18446744073709551615,</span>
+<span class="go">                18446619461681283072, 0, 42949673024, 2147483647,</span>
+<span class="go">        },</span>
+<span class="go">        .rx_ring = (struct rx_ring [17]){</span>
+<span class="go">                {</span>
+<span class="go">                        .cqicb = (struct cqicb){</span>
+<span class="go">                                .msix_vect = (u8)0,</span>
+<span class="go">                                .reserved1 = (u8)0,</span>
+<span class="go">                                .reserved2 = (u8)0,</span>
+<span class="go">                                .flags = (u8)0,</span>
+<span class="go">                                .len = (__le16)0,</span>
+<span class="go">                                .rid = (__le16)0,</span>
+<span class="go">                                ...</span>
+<span class="go">                        },</span>
+<span class="go">                        .cq_base = (void *)0x0,</span>
+<span class="go">                        .cq_base_dma = (dma_addr_t)0,</span>
+<span class="go">                }</span>
+<span class="go">                ...</span>
+<span class="go">        }</span>
+<span class="go">}</span>
+</pre></div>
+</div>
+</section>
+<section id="coredump-via-devlink">
+<h2>coredump via devlink<a class="headerlink" href="#coredump-via-devlink" title="Permalink to this headline">¶</a></h2>
+<p>And the coredump obtained via devlink in json format looks like,</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$ devlink health dump show DEVICE reporter coredump -p -j
+<span class="o">{</span>
+    <span class="s2">&quot;Core Registers&quot;</span>: <span class="o">{</span>
+        <span class="s2">&quot;segment&quot;</span>: <span class="m">1</span>,
+        <span class="s2">&quot;values&quot;</span>: <span class="o">[</span> <span class="m">0</span>,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 <span class="o">]</span>
+    <span class="o">}</span>,
+    <span class="s2">&quot;Test Logic Regs&quot;</span>: <span class="o">{</span>
+        <span class="s2">&quot;segment&quot;</span>: <span class="m">2</span>,
+        <span class="s2">&quot;values&quot;</span>: <span class="o">[</span> <span class="m">0</span>,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 <span class="o">]</span>
+    <span class="o">}</span>,
+    <span class="s2">&quot;RMII Registers&quot;</span>: <span class="o">{</span>
+        <span class="s2">&quot;segment&quot;</span>: <span class="m">3</span>,
+        <span class="s2">&quot;values&quot;</span>: <span class="o">[</span> <span class="m">0</span>,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 <span class="o">]</span>
+    <span class="o">}</span>,
+    ...
+    <span class="s2">&quot;Sem Registers&quot;</span>: <span class="o">{</span>
+        <span class="s2">&quot;segment&quot;</span>: <span class="m">50</span>,
+        <span class="s2">&quot;values&quot;</span>: <span class="o">[</span> <span class="m">0</span>,0,0,0 <span class="o">]</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+</pre></div>
+</div>
+<p>When the module parameter qlge_force_coredump is set to be true, the MPI
+RISC reset before coredumping. So coredumping will much longer since
+devlink tool has to wait for 5 secs for the resetting to be
+finished.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">QLogic QLGE 10Gb Ethernet device driver</a><ul>
+<li><a class="reference internal" href="#dump-kernel-data-structures-in-drgn">Dump kernel data structures in drgn</a></li>
+<li><a class="reference internal" href="#coredump-via-devlink">coredump via devlink</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/networking/device_drivers/qlogic/qlge.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/networking/device_drivers/qlogic/qlge.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

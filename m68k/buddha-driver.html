@@ -1,0 +1,301 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Amiga Buddha and Catweasel IDE Driver &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Feature status on m68k architecture" href="features.html" />
+    <link rel="prev" title="Command Line Options for Linux/m68k" href="kernel-options.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="amiga-buddha-and-catweasel-ide-driver">
+<h1>Amiga Buddha and Catweasel IDE Driver<a class="headerlink" href="#amiga-buddha-and-catweasel-ide-driver" title="Permalink to this headline">¶</a></h1>
+<p>The Amiga Buddha and Catweasel IDE Driver (part of ide.c) was written by
+Geert Uytterhoeven based on the following specifications:</p>
+<hr class="docutils" />
+<p>Register map of the Buddha IDE controller and the
+Buddha-part of the Catweasel Zorro-II version</p>
+<p>The Autoconfiguration has been implemented just as Commodore
+described  in  their  manuals, no tricks have been used (for
+example leaving some address lines out of the equations…).
+If you want to configure the board yourself (for example let
+a  Linux  kernel  configure the card), look at the Commodore
+Docs.  Reading the nibbles should give this information:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Vendor number: 4626 ($1212)
+product number: 0 (42 for Catweasel Z-II)
+Serial number: 0
+Rom-vector: $1000
+</pre></div>
+</div>
+<p>The  card  should be a Z-II board, size 64K, not for freemem
+list, Rom-Vektor is valid, no second Autoconfig-board on the
+same card, no space preference, supports “Shutup_forever”.</p>
+<p>Setting  the  base address should be done in two steps, just
+as  the Amiga Kickstart does:  The lower nibble of the 8-Bit
+address is written to $4a, then the whole Byte is written to
+$48, while it doesn’t matter how often you’re writing to $4a
+as  long as $48 is not touched.  After $48 has been written,
+the  whole card disappears from $e8 and is mapped to the new
+address just written.  Make sure $4a is written before $48,
+otherwise your chance is only 1:16 to find the board :-).</p>
+<p>The local memory-map is even active when mapped to $e8:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 75%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>$0-$7e</p></td>
+<td><p>Autokonfig-space, see Z-II docs.</p></td>
+</tr>
+<tr class="row-even"><td><p>$80-$7fd</p></td>
+<td><p>reserved</p></td>
+</tr>
+<tr class="row-odd"><td><p>$7fe</p></td>
+<td><p>Speed-select Register: Read &amp; Write
+(description see further down)</p></td>
+</tr>
+<tr class="row-even"><td><p>$800-$8ff</p></td>
+<td><p>IDE-Select 0 (Port 0, Register set 0)</p></td>
+</tr>
+<tr class="row-odd"><td><p>$900-$9ff</p></td>
+<td><p>IDE-Select 1 (Port 0, Register set 1)</p></td>
+</tr>
+<tr class="row-even"><td><p>$a00-$aff</p></td>
+<td><p>IDE-Select 2 (Port 1, Register set 0)</p></td>
+</tr>
+<tr class="row-odd"><td><p>$b00-$bff</p></td>
+<td><p>IDE-Select 3 (Port 1, Register set 1)</p></td>
+</tr>
+<tr class="row-even"><td><p>$c00-$cff</p></td>
+<td><p>IDE-Select 4 (Port 2, Register set 0,
+Catweasel only!)</p></td>
+</tr>
+<tr class="row-odd"><td><p>$d00-$dff</p></td>
+<td><p>IDE-Select 5 (Port 3, Register set 1,
+Catweasel only!)</p></td>
+</tr>
+<tr class="row-even"><td><p>$e00-$eff</p></td>
+<td><p>local expansion port, on Catweasel Z-II the
+Catweasel registers are also mapped here.
+Never touch, use multidisk.device!</p></td>
+</tr>
+<tr class="row-odd"><td><p>$f00</p></td>
+<td><p>read only, Byte-access: Bit 7 shows the
+level of the IRQ-line of IDE port 0.</p></td>
+</tr>
+<tr class="row-even"><td><p>$f01-$f3f</p></td>
+<td><p>mirror of $f00</p></td>
+</tr>
+<tr class="row-odd"><td><p>$f40</p></td>
+<td><p>read only, Byte-access: Bit 7 shows the
+level of the IRQ-line of IDE port 1.</p></td>
+</tr>
+<tr class="row-even"><td><p>$f41-$f7f</p></td>
+<td><p>mirror of $f40</p></td>
+</tr>
+<tr class="row-odd"><td><p>$f80</p></td>
+<td><p>read only, Byte-access: Bit 7 shows the
+level of the IRQ-line of IDE port 2.
+(Catweasel only!)</p></td>
+</tr>
+<tr class="row-even"><td><p>$f81-$fbf</p></td>
+<td><p>mirror of $f80</p></td>
+</tr>
+<tr class="row-odd"><td><p>$fc0</p></td>
+<td><p>write-only: Writing any value to this
+register enables IRQs to be passed from the
+IDE ports to the Zorro bus. This mechanism
+has been implemented to be compatible with
+harddisks that are either defective or have
+a buggy firmware and pull the IRQ line up
+while starting up. If interrupts would
+always be passed to the bus, the computer
+might not start up. Once enabled, this flag
+can not be disabled again. The level of the
+flag can not be determined by software
+(what for? Write to me if it’s necessary!).</p></td>
+</tr>
+<tr class="row-even"><td><p>$fc1-$fff</p></td>
+<td><p>mirror of $fc0</p></td>
+</tr>
+<tr class="row-odd"><td><p>$1000-$ffff</p></td>
+<td><p>Buddha-Rom with offset $1000 in the rom
+chip. The addresses $0 to $fff of the rom
+chip cannot be read. Rom is Byte-wide and
+mapped to even addresses.</p></td>
+</tr>
+</tbody>
+</table>
+<p>The  IDE ports issue an INT2.  You can read the level of the
+IRQ-lines  of  the  IDE-ports by reading from the three (two
+for  Buddha-only)  registers  $f00, $f40 and $f80.  This way
+more  than one I/O request can be handled and you can easily
+determine  what  driver  has  to serve the INT2.  Buddha and
+Catweasel  expansion  boards  can issue an INT6.  A separate
+memory  map  is available for the I/O module and the sysop’s
+I/O module.</p>
+<p>The IDE ports are fed by the address lines A2 to A4, just as
+the  Amiga  1200  and  Amiga  4000  IDE ports are.  This way
+existing  drivers  can be easily ported to Buddha.  A move.l
+polls  two  words  out of the same address of IDE port since
+every  word  is  mirrored  once.  movem is not possible, but
+it’s  not  necessary  either,  because  you can only speedup
+68000  systems  with  this  technique.   A 68020 system with
+fastmem is faster with move.l.</p>
+<p>If you’re using the mirrored registers of the IDE-ports with
+A6=1,  the Buddha doesn’t care about the speed that you have
+selected  in  the  speed  register (see further down).  With
+A6=1  (for example $840 for port 0, register set 0), a 780ns
+access  is being made.  These registers should be used for a
+command   access   to  the  harddisk/CD-Rom,  since  command
+accesses  are Byte-wide and have to be made slower according
+to the ATA-X3T9 manual.</p>
+<p>Now  for the speed-register:  The register is byte-wide, and
+only  the  upper  three  bits are used (Bits 7 to 5).  Bit 4
+must  always  be set to 1 to be compatible with later Buddha
+versions  (if  I’ll  ever  update this one).  I presume that
+I’ll  never use the lower four bits, but they have to be set
+to 1 by definition.</p>
+<p>The  values in this table have to be shifted 5 bits to the
+left and or’d with $1f (this sets the lower 5 bits).</p>
+<p>All  the timings have in common:  Select and IOR/IOW rise at
+the  same  time.   IOR  and  IOW have a propagation delay of
+about  30ns  to  the clocks on the Zorro bus, that’s why the
+values  are no multiple of 71.  One clock-cycle is 71ns long
+(exactly 70,5 at 14,18 Mhz on PAL systems).</p>
+<dl class="simple">
+<dt>value 0 (Default after reset)</dt><dd><p>497ns Select (7 clock cycles) , IOR/IOW after 172ns (2 clock cycles)
+(same timing as the Amiga 1200 does on it’s IDE port without
+accelerator card)</p>
+</dd>
+<dt>value 1</dt><dd><p>639ns Select (9 clock cycles), IOR/IOW after 243ns (3 clock cycles)</p>
+</dd>
+<dt>value 2</dt><dd><p>781ns Select (11 clock cycles), IOR/IOW after 314ns (4 clock cycles)</p>
+</dd>
+<dt>value 3</dt><dd><p>355ns Select (5 clock cycles), IOR/IOW after 101ns (1 clock cycle)</p>
+</dd>
+<dt>value 4</dt><dd><p>355ns Select (5 clock cycles), IOR/IOW after 172ns (2 clock cycles)</p>
+</dd>
+<dt>value 5</dt><dd><p>355ns Select (5 clock cycles), IOR/IOW after 243ns (3 clock cycles)</p>
+</dd>
+<dt>value 6</dt><dd><p>1065ns Select (15 clock cycles), IOR/IOW after 314ns (4 clock cycles)</p>
+</dd>
+<dt>value 7</dt><dd><p>355ns Select, (5 clock cycles), IOR/IOW after 101ns (1 clock cycle)</p>
+</dd>
+</dl>
+<p>When accessing IDE registers with A6=1 (for example $84x),
+the timing will always be mode 0 8-bit compatible, no matter
+what you have selected in the speed register:</p>
+<p>781ns select, IOR/IOW after 4 clock cycles (=314ns) aktive.</p>
+<p>All  the  timings with a very short select-signal (the 355ns
+fast  accesses)  depend  on the accelerator card used in the
+system:  Sometimes two more clock cycles are inserted by the
+bus  interface,  making  the  whole access 497ns long.  This
+doesn’t  affect  the  reliability  of the controller nor the
+performance  of  the  card,  since  this doesn’t happen very
+often.</p>
+<p>All  the  timings  are  calculated  and  only  confirmed  by
+measurements  that allowed me to count the clock cycles.  If
+the  system  is clocked by an oscillator other than 28,37516
+Mhz  (for  example  the  NTSC-frequency  28,63636 Mhz), each
+clock  cycle is shortened to a bit less than 70ns (not worth
+mentioning).   You  could think of a small performance boost
+by  overclocking  the  system,  but  you would either need a
+multisync  monitor,  or  a  graphics card, and your internal
+diskdrive would go crazy, that’s why you shouldn’t tune your
+Amiga this way.</p>
+<p>Giving  you  the  possibility  to  write  software  that  is
+compatible  with both the Buddha and the Catweasel Z-II, The
+Buddha  acts  just  like  a  Catweasel  Z-II  with no device
+connected  to  the  third  IDE-port.   The IRQ-register $f80
+always  shows a “no IRQ here” on the Buddha, and accesses to
+the  third  IDE  port  are  going into data’s Nirwana on the
+Buddha.</p>
+<p>Jens Schönfeld february 19th, 1997</p>
+<p>updated may 27th, 1997</p>
+<p>eMail: <a class="reference external" href="mailto:sysop&#37;&#52;&#48;nostlgic&#46;tng&#46;oche&#46;de">sysop<span>&#64;</span>nostlgic<span>&#46;</span>tng<span>&#46;</span>oche<span>&#46;</span>de</a></p>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/m68k/buddha-driver.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/m68k/buddha-driver.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

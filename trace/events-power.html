@@ -1,0 +1,199 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Subsystem Trace Points: power &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="NMI Trace Events" href="events-nmi.html" />
+    <link rel="prev" title="Subsystem Trace Points: kmem" href="events-kmem.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="subsystem-trace-points-power">
+<h1>Subsystem Trace Points: power<a class="headerlink" href="#subsystem-trace-points-power" title="Permalink to this headline">¶</a></h1>
+<p>The power tracing system captures events related to power transitions
+within the kernel. Broadly speaking there are three major subheadings:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Power state switch which reports events related to suspend (S-states),
+cpuidle (C-states) and cpufreq (P-states)</p></li>
+<li><p>System clock related changes</p></li>
+<li><p>Power domains related changes and transitions</p></li>
+</ul>
+</div></blockquote>
+<p>This document describes what each of the tracepoints is and why they
+might be useful.</p>
+<p>Cf. include/trace/events/power.h for the events definitions.</p>
+<section id="power-state-switch-events">
+<h2>1. Power state switch events<a class="headerlink" href="#power-state-switch-events" title="Permalink to this headline">¶</a></h2>
+<section id="trace-api">
+<h3>1.1 Trace API<a class="headerlink" href="#trace-api" title="Permalink to this headline">¶</a></h3>
+<p>A ‘cpu’ event class gathers the CPU-related events: cpuidle and
+cpufreq.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>cpu_idle              &quot;state=%lu cpu_id=%lu&quot;
+cpu_frequency         &quot;state=%lu cpu_id=%lu&quot;
+cpu_frequency_limits  &quot;min=%lu max=%lu cpu_id=%lu&quot;
+</pre></div>
+</div>
+<p>A suspend event is used to indicate the system going in and out of the
+suspend mode:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>machine_suspend               &quot;state=%lu&quot;
+</pre></div>
+</div>
+<p>Note: the value of ‘-1’ or ‘4294967295’ for state means an exit from the current state,
+i.e. trace_cpu_idle(4, smp_processor_id()) means that the system
+enters the idle state 4, while trace_cpu_idle(PWR_EVENT_EXIT, smp_processor_id())
+means that the system exits the previous idle state.</p>
+<p>The event which has ‘state=4294967295’ in the trace is very important to the user
+space tools which are using it to detect the end of the current state, and so to
+correctly draw the states diagrams and to calculate accurate statistics etc.</p>
+</section>
+</section>
+<section id="clocks-events">
+<h2>2. Clocks events<a class="headerlink" href="#clocks-events" title="Permalink to this headline">¶</a></h2>
+<p>The clock events are used for clock enable/disable and for
+clock rate change.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>clock_enable          &quot;%s state=%lu cpu_id=%lu&quot;
+clock_disable         &quot;%s state=%lu cpu_id=%lu&quot;
+clock_set_rate                &quot;%s state=%lu cpu_id=%lu&quot;
+</pre></div>
+</div>
+<p>The first parameter gives the clock name (e.g. “gpio1_iclk”).
+The second parameter is ‘1’ for enable, ‘0’ for disable, the target
+clock rate for set_rate.</p>
+</section>
+<section id="power-domains-events">
+<h2>3. Power domains events<a class="headerlink" href="#power-domains-events" title="Permalink to this headline">¶</a></h2>
+<p>The power domain events are used for power domains transitions</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>power_domain_target   &quot;%s state=%lu cpu_id=%lu&quot;
+</pre></div>
+</div>
+<p>The first parameter gives the power domain name (e.g. “mpu_pwrdm”).
+The second parameter is the power domain target state.</p>
+</section>
+<section id="pm-qos-events">
+<h2>4. PM QoS events<a class="headerlink" href="#pm-qos-events" title="Permalink to this headline">¶</a></h2>
+<p>The PM QoS events are used for QoS add/update/remove request and for
+target/flags update.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>pm_qos_update_target               &quot;action=%s prev_value=%d curr_value=%d&quot;
+pm_qos_update_flags                &quot;action=%s prev_value=0x%x curr_value=0x%x&quot;
+</pre></div>
+</div>
+<p>The first parameter gives the QoS action name (e.g. “ADD_REQ”).
+The second parameter is the previous QoS value.
+The third parameter is the current QoS value to update.</p>
+<p>There are also events used for device PM QoS add/update/remove request.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>dev_pm_qos_add_request             &quot;device=%s type=%s new_value=%d&quot;
+dev_pm_qos_update_request          &quot;device=%s type=%s new_value=%d&quot;
+dev_pm_qos_remove_request          &quot;device=%s type=%s new_value=%d&quot;
+</pre></div>
+</div>
+<p>The first parameter gives the device name which tries to add/update/remove
+QoS requests.
+The second parameter gives the request type (e.g. “DEV_PM_QOS_RESUME_LATENCY”).
+The third parameter is value to be added/updated/removed.</p>
+<p>And, there are events used for CPU latency QoS add/update/remove request.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>pm_qos_add_request        &quot;value=%d&quot;
+pm_qos_update_request     &quot;value=%d&quot;
+pm_qos_remove_request     &quot;value=%d&quot;
+</pre></div>
+</div>
+<p>The parameter is the value to be added/updated/removed.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Subsystem Trace Points: power</a><ul>
+<li><a class="reference internal" href="#power-state-switch-events">1. Power state switch events</a><ul>
+<li><a class="reference internal" href="#trace-api">1.1 Trace API</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#clocks-events">2. Clocks events</a></li>
+<li><a class="reference internal" href="#power-domains-events">3. Power domains events</a></li>
+<li><a class="reference internal" href="#pm-qos-events">4. PM QoS events</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/trace/events-power.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/trace/events-power.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

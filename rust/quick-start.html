@@ -1,0 +1,306 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Quick Start &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="General Information" href="general-information.html" />
+    <link rel="prev" title="Rust" href="index.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="quick-start">
+<h1>Quick Start<a class="headerlink" href="#quick-start" title="Permalink to this headline">¶</a></h1>
+<p>This document describes how to get started with kernel development in Rust.</p>
+<section id="requirements-building">
+<h2>Requirements: Building<a class="headerlink" href="#requirements-building" title="Permalink to this headline">¶</a></h2>
+<p>This section explains how to fetch the tools needed for building.</p>
+<p>Some of these requirements might be available from Linux distributions
+under names like <code class="docutils literal notranslate"><span class="pre">rustc</span></code>, <code class="docutils literal notranslate"><span class="pre">rust-src</span></code>, <code class="docutils literal notranslate"><span class="pre">rust-bindgen</span></code>, etc. However,
+at the time of writing, they are likely not to be recent enough unless
+the distribution tracks the latest releases.</p>
+<p>To easily check whether the requirements are met, the following target
+can be used:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>make LLVM=1 rustavailable
+</pre></div>
+</div>
+<p>This triggers the same logic used by Kconfig to determine whether
+<code class="docutils literal notranslate"><span class="pre">RUST_IS_AVAILABLE</span></code> should be enabled; but it also explains why not
+if that is the case.</p>
+<section id="rustc">
+<h3>rustc<a class="headerlink" href="#rustc" title="Permalink to this headline">¶</a></h3>
+<p>A particular version of the Rust compiler is required. Newer versions may or
+may not work because, for the moment, the kernel depends on some unstable
+Rust features.</p>
+<p>If <code class="docutils literal notranslate"><span class="pre">rustup</span></code> is being used, enter the checked out source code directory
+and run:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>rustup override set $(scripts/min-tool-version.sh rustc)
+</pre></div>
+</div>
+<p>Otherwise, fetch a standalone installer or install <code class="docutils literal notranslate"><span class="pre">rustup</span></code> from:</p>
+<blockquote>
+<div><p><a class="reference external" href="https://www.rust-lang.org">https://www.rust-lang.org</a></p>
+</div></blockquote>
+</section>
+<section id="rust-standard-library-source">
+<h3>Rust standard library source<a class="headerlink" href="#rust-standard-library-source" title="Permalink to this headline">¶</a></h3>
+<p>The Rust standard library source is required because the build system will
+cross-compile <code class="docutils literal notranslate"><span class="pre">core</span></code> and <code class="docutils literal notranslate"><span class="pre">alloc</span></code>.</p>
+<p>If <code class="docutils literal notranslate"><span class="pre">rustup</span></code> is being used, run:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>rustup component add rust-src
+</pre></div>
+</div>
+<p>The components are installed per toolchain, thus upgrading the Rust compiler
+version later on requires re-adding the component.</p>
+<p>Otherwise, if a standalone installer is used, the Rust repository may be cloned
+into the installation folder of the toolchain:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>git clone --recurse-submodules \
+        --branch $(scripts/min-tool-version.sh rustc) \
+        https://github.com/rust-lang/rust \
+        $(rustc --print sysroot)/lib/rustlib/src/rust
+</pre></div>
+</div>
+<p>In this case, upgrading the Rust compiler version later on requires manually
+updating this clone.</p>
+</section>
+<section id="libclang">
+<h3>libclang<a class="headerlink" href="#libclang" title="Permalink to this headline">¶</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">libclang</span></code> (part of LLVM) is used by <code class="docutils literal notranslate"><span class="pre">bindgen</span></code> to understand the C code
+in the kernel, which means LLVM needs to be installed; like when the kernel
+is compiled with <code class="docutils literal notranslate"><span class="pre">CC=clang</span></code> or <code class="docutils literal notranslate"><span class="pre">LLVM=1</span></code>.</p>
+<p>Linux distributions are likely to have a suitable one available, so it is
+best to check that first.</p>
+<p>There are also some binaries for several systems and architectures uploaded at:</p>
+<blockquote>
+<div><p><a class="reference external" href="https://releases.llvm.org/download.html">https://releases.llvm.org/download.html</a></p>
+</div></blockquote>
+<p>Otherwise, building LLVM takes quite a while, but it is not a complex process:</p>
+<blockquote>
+<div><p><a class="reference external" href="https://llvm.org/docs/GettingStarted.html#getting-the-source-code-and-building-llvm">https://llvm.org/docs/GettingStarted.html#getting-the-source-code-and-building-llvm</a></p>
+</div></blockquote>
+<p>Please see <a class="reference internal" href="../kbuild/llvm.html"><span class="doc">Building Linux with Clang/LLVM</span></a> for more information and further ways
+to fetch pre-built releases and distribution packages.</p>
+</section>
+<section id="bindgen">
+<h3>bindgen<a class="headerlink" href="#bindgen" title="Permalink to this headline">¶</a></h3>
+<p>The bindings to the C side of the kernel are generated at build time using
+the <code class="docutils literal notranslate"><span class="pre">bindgen</span></code> tool. A particular version is required.</p>
+<p>Install it via (note that this will download and build the tool from source):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>cargo install --locked --version $(scripts/min-tool-version.sh bindgen) bindgen
+</pre></div>
+</div>
+</section>
+</section>
+<section id="requirements-developing">
+<h2>Requirements: Developing<a class="headerlink" href="#requirements-developing" title="Permalink to this headline">¶</a></h2>
+<p>This section explains how to fetch the tools needed for developing. That is,
+they are not needed when just building the kernel.</p>
+<section id="rustfmt">
+<h3>rustfmt<a class="headerlink" href="#rustfmt" title="Permalink to this headline">¶</a></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">rustfmt</span></code> tool is used to automatically format all the Rust kernel code,
+including the generated C bindings (for details, please see
+<a class="reference internal" href="coding-guidelines.html"><span class="doc">Coding Guidelines</span></a>).</p>
+<p>If <code class="docutils literal notranslate"><span class="pre">rustup</span></code> is being used, its <code class="docutils literal notranslate"><span class="pre">default</span></code> profile already installs the tool,
+thus nothing needs to be done. If another profile is being used, the component
+can be installed manually:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>rustup component add rustfmt
+</pre></div>
+</div>
+<p>The standalone installers also come with <code class="docutils literal notranslate"><span class="pre">rustfmt</span></code>.</p>
+</section>
+<section id="clippy">
+<h3>clippy<a class="headerlink" href="#clippy" title="Permalink to this headline">¶</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">clippy</span></code> is a Rust linter. Running it provides extra warnings for Rust code.
+It can be run by passing <code class="docutils literal notranslate"><span class="pre">CLIPPY=1</span></code> to <code class="docutils literal notranslate"><span class="pre">make</span></code> (for details, please see
+<a class="reference internal" href="general-information.html"><span class="doc">General Information</span></a>).</p>
+<p>If <code class="docutils literal notranslate"><span class="pre">rustup</span></code> is being used, its <code class="docutils literal notranslate"><span class="pre">default</span></code> profile already installs the tool,
+thus nothing needs to be done. If another profile is being used, the component
+can be installed manually:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>rustup component add clippy
+</pre></div>
+</div>
+<p>The standalone installers also come with <code class="docutils literal notranslate"><span class="pre">clippy</span></code>.</p>
+</section>
+<section id="cargo">
+<h3>cargo<a class="headerlink" href="#cargo" title="Permalink to this headline">¶</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">cargo</span></code> is the Rust native build system. It is currently required to run
+the tests since it is used to build a custom standard library that contains
+the facilities provided by the custom <code class="docutils literal notranslate"><span class="pre">alloc</span></code> in the kernel. The tests can
+be run using the <code class="docutils literal notranslate"><span class="pre">rusttest</span></code> Make target.</p>
+<p>If <code class="docutils literal notranslate"><span class="pre">rustup</span></code> is being used, all the profiles already install the tool,
+thus nothing needs to be done.</p>
+<p>The standalone installers also come with <code class="docutils literal notranslate"><span class="pre">cargo</span></code>.</p>
+</section>
+<section id="rustdoc">
+<h3>rustdoc<a class="headerlink" href="#rustdoc" title="Permalink to this headline">¶</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">rustdoc</span></code> is the documentation tool for Rust. It generates pretty HTML
+documentation for Rust code (for details, please see
+<a class="reference internal" href="general-information.html"><span class="doc">General Information</span></a>).</p>
+<p><code class="docutils literal notranslate"><span class="pre">rustdoc</span></code> is also used to test the examples provided in documented Rust code
+(called doctests or documentation tests). The <code class="docutils literal notranslate"><span class="pre">rusttest</span></code> Make target uses
+this feature.</p>
+<p>If <code class="docutils literal notranslate"><span class="pre">rustup</span></code> is being used, all the profiles already install the tool,
+thus nothing needs to be done.</p>
+<p>The standalone installers also come with <code class="docutils literal notranslate"><span class="pre">rustdoc</span></code>.</p>
+</section>
+<section id="rust-analyzer">
+<h3>rust-analyzer<a class="headerlink" href="#rust-analyzer" title="Permalink to this headline">¶</a></h3>
+<p>The <a class="reference external" href="https://rust-analyzer.github.io/">rust-analyzer</a> language server can
+be used with many editors to enable syntax highlighting, completion, go to
+definition, and other features.</p>
+<p><code class="docutils literal notranslate"><span class="pre">rust-analyzer</span></code> needs a configuration file, <code class="docutils literal notranslate"><span class="pre">rust-project.json</span></code>, which
+can be generated by the <code class="docutils literal notranslate"><span class="pre">rust-analyzer</span></code> Make target.</p>
+</section>
+</section>
+<section id="configuration">
+<h2>Configuration<a class="headerlink" href="#configuration" title="Permalink to this headline">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">Rust</span> <span class="pre">support</span></code> (<code class="docutils literal notranslate"><span class="pre">CONFIG_RUST</span></code>) needs to be enabled in the <code class="docutils literal notranslate"><span class="pre">General</span> <span class="pre">setup</span></code>
+menu. The option is only shown if a suitable Rust toolchain is found (see
+above), as long as the other requirements are met. In turn, this will make
+visible the rest of options that depend on Rust.</p>
+<p>Afterwards, go to:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Kernel hacking
+    -&gt; Sample kernel code
+        -&gt; Rust samples
+</pre></div>
+</div>
+<p>And enable some sample modules either as built-in or as loadable.</p>
+</section>
+<section id="building">
+<h2>Building<a class="headerlink" href="#building" title="Permalink to this headline">¶</a></h2>
+<p>Building a kernel with a complete LLVM toolchain is the best supported setup
+at the moment. That is:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>make LLVM=1
+</pre></div>
+</div>
+<p>For architectures that do not support a full LLVM toolchain, use:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>make CC=clang
+</pre></div>
+</div>
+<p>Using GCC also works for some configurations, but it is very experimental at
+the moment.</p>
+</section>
+<section id="hacking">
+<h2>Hacking<a class="headerlink" href="#hacking" title="Permalink to this headline">¶</a></h2>
+<p>To dive deeper, take a look at the source code of the samples
+at <code class="docutils literal notranslate"><span class="pre">samples/rust/</span></code>, the Rust support code under <code class="docutils literal notranslate"><span class="pre">rust/</span></code> and
+the <code class="docutils literal notranslate"><span class="pre">Rust</span> <span class="pre">hacking</span></code> menu under <code class="docutils literal notranslate"><span class="pre">Kernel</span> <span class="pre">hacking</span></code>.</p>
+<p>If GDB/Binutils is used and Rust symbols are not getting demangled, the reason
+is the toolchain does not support Rust’s new v0 mangling scheme yet.
+There are a few ways out:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Install a newer release (GDB &gt;= 10.2, Binutils &gt;= 2.36).</p></li>
+<li><p>Some versions of GDB (e.g. vanilla GDB 10.1) are able to use
+the pre-demangled names embedded in the debug info (<code class="docutils literal notranslate"><span class="pre">CONFIG_DEBUG_INFO</span></code>).</p></li>
+</ul>
+</div></blockquote>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Quick Start</a><ul>
+<li><a class="reference internal" href="#requirements-building">Requirements: Building</a><ul>
+<li><a class="reference internal" href="#rustc">rustc</a></li>
+<li><a class="reference internal" href="#rust-standard-library-source">Rust standard library source</a></li>
+<li><a class="reference internal" href="#libclang">libclang</a></li>
+<li><a class="reference internal" href="#bindgen">bindgen</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#requirements-developing">Requirements: Developing</a><ul>
+<li><a class="reference internal" href="#rustfmt">rustfmt</a></li>
+<li><a class="reference internal" href="#clippy">clippy</a></li>
+<li><a class="reference internal" href="#cargo">cargo</a></li>
+<li><a class="reference internal" href="#rustdoc">rustdoc</a></li>
+<li><a class="reference internal" href="#rust-analyzer">rust-analyzer</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#configuration">Configuration</a></li>
+<li><a class="reference internal" href="#building">Building</a></li>
+<li><a class="reference internal" href="#hacking">Hacking</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/rust/quick-start.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/rust/quick-start.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

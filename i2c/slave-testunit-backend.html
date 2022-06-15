@@ -1,0 +1,172 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Linux I2C slave testunit backend &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="I2C Ten-bit Addresses" href="ten-bit-addresses.html" />
+    <link rel="prev" title="Linux I2C slave EEPROM backend" href="slave-eeprom-backend.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="linux-i2c-slave-testunit-backend">
+<h1>Linux I2C slave testunit backend<a class="headerlink" href="#linux-i2c-slave-testunit-backend" title="Permalink to this headline">¶</a></h1>
+<p>by Wolfram Sang &lt;<a class="reference external" href="mailto:wsa&#37;&#52;&#48;sang-engineering&#46;com">wsa<span>&#64;</span>sang-engineering<span>&#46;</span>com</a>&gt; in 2020</p>
+<p>This backend can be used to trigger test cases for I2C bus masters which
+require a remote device with certain capabilities (and which are usually not so
+easy to obtain). Examples include multi-master testing, and SMBus Host Notify
+testing. For some tests, the I2C slave controller must be able to switch
+between master and slave mode because it needs to send data, too.</p>
+<p>Note that this is a device for testing and debugging. It should not be enabled
+in a production build. And while there is some versioning and we try hard to
+keep backward compatibility, there is no stable ABI guaranteed!</p>
+<p>Instantiating the device is regular. Example for bus 0, address 0x30:</p>
+<p># echo “slave-testunit 0x1030” &gt; /sys/bus/i2c/devices/i2c-0/new_device</p>
+<p>After that, you will have a write-only device listening. Reads will just return
+an 8-bit version number of the testunit. When writing, the device consists of 4
+8-bit registers and, except for some “partial” commands, all registers must be
+written to start a testcase, i.e. you usually write 4 bytes to the device. The
+registers are:</p>
+<p>0x00 CMD   - which test to trigger
+0x01 DATAL - configuration byte 1 for the test
+0x02 DATAH - configuration byte 2 for the test
+0x03 DELAY - delay in n * 10ms until test is started</p>
+<p>Using ‘i2cset’ from the i2c-tools package, the generic command looks like:</p>
+<p># i2cset -y &lt;bus_num&gt; &lt;testunit_address&gt; &lt;CMD&gt; &lt;DATAL&gt; &lt;DATAH&gt; &lt;DELAY&gt; i</p>
+<p>DELAY is a generic parameter which will delay the execution of the test in CMD.
+While a command is running (including the delay), new commands will not be
+acknowledged. You need to wait until the old one is completed.</p>
+<p>The commands are described in the following section. An invalid command will
+result in the transfer not being acknowledged.</p>
+<section id="commands">
+<h2>Commands<a class="headerlink" href="#commands" title="Permalink to this headline">¶</a></h2>
+<p>0x00 NOOP (reserved for future use)</p>
+<dl class="simple">
+<dt>0x01 READ_BYTES (also needs master mode)</dt><dd><p>DATAL - address to read data from (lower 7 bits, highest bit currently unused)
+DATAH - number of bytes to read</p>
+</dd>
+</dl>
+<p>This is useful to test if your bus master driver is handling multi-master
+correctly. You can trigger the testunit to read bytes from another device on
+the bus. If the bus master under test also wants to access the bus at the same
+time, the bus will be busy. Example to read 128 bytes from device 0x50 after
+50ms of delay:</p>
+<p># i2cset -y 0 0x30 0x01 0x50 0x80 0x05 i</p>
+<dl class="simple">
+<dt>0x02 SMBUS_HOST_NOTIFY (also needs master mode)</dt><dd><p>DATAL - low byte of the status word to send
+DATAH - high byte of the status word to send</p>
+</dd>
+</dl>
+<p>This test will send an SMBUS_HOST_NOTIFY message to the host. Note that the
+status word is currently ignored in the Linux Kernel. Example to send a
+notification after 10ms:</p>
+<p># i2cset -y 0 0x30 0x02 0x42 0x64 0x01 i</p>
+<dl class="simple">
+<dt>0x03 SMBUS_BLOCK_PROC_CALL (partial command)</dt><dd><p>DATAL - must be ‘1’, i.e. one further byte will be written
+DATAH - number of bytes to be sent back
+DELAY - not applicable, partial command!</p>
+</dd>
+</dl>
+<p>This test will respond to a block process call as defined by the SMBus
+specification. The one data byte written specifies how many bytes will be sent
+back in the following read transfer. Note that in this read transfer, the
+testunit will prefix the length of the bytes to follow. So, if your host bus
+driver emulates SMBus calls like the majority does, it needs to support the
+I2C_M_RECV_LEN flag of an i2c_msg. This is a good testcase for it. The returned
+data consists of the length first, and then of an array of bytes from length-1
+to 0. Here is an example which emulates i2c_smbus_block_process_call() using
+i2ctransfer (you need i2c-tools v4.2 or later):</p>
+<p># i2ctransfer -y 0 <a class="reference external" href="mailto:w3&#37;&#52;&#48;0x30">w3<span>&#64;</span>0x30</a> 0x03 0x01 0x10 r?
+0x10 0x0f 0x0e 0x0d 0x0c 0x0b 0x0a 0x09 0x08 0x07 0x06 0x05 0x04 0x03 0x02 0x01 0x00</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Linux I2C slave testunit backend</a><ul>
+<li><a class="reference internal" href="#commands">Commands</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/i2c/slave-testunit-backend.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/i2c/slave-testunit-backend.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

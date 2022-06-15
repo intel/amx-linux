@@ -1,0 +1,214 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Special Usage Model of the ACPI Control Method Lid Device &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Low Power Idle Table (LPIT)" href="lpit.html" />
+    <link rel="prev" title="ACPI I2C Muxes" href="i2c-muxes.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="special-usage-model-of-the-acpi-control-method-lid-device">
+<h1>Special Usage Model of the ACPI Control Method Lid Device<a class="headerlink" href="#special-usage-model-of-the-acpi-control-method-lid-device" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">Copyright</dt>
+<dd class="field-odd"><p>© 2016, Intel Corporation</p>
+</dd>
+<dt class="field-even">Author</dt>
+<dd class="field-even"><p>Lv Zheng &lt;<a class="reference external" href="mailto:lv&#46;zheng&#37;&#52;&#48;intel&#46;com">lv<span>&#46;</span>zheng<span>&#64;</span>intel<span>&#46;</span>com</a>&gt;</p>
+</dd>
+</dl>
+<section id="abstract">
+<h2>Abstract<a class="headerlink" href="#abstract" title="Permalink to this headline">¶</a></h2>
+<p>Platforms containing lids convey lid state (open/close) to OSPMs
+using a control method lid device. To implement this, the AML tables issue
+Notify(lid_device, 0x80) to notify the OSPMs whenever the lid state has
+changed. The _LID control method for the lid device must be implemented to
+report the “current” state of the lid as either “opened” or “closed”.</p>
+<p>For most platforms, both the _LID method and the lid notifications are
+reliable. However, there are exceptions. In order to work with these
+exceptional buggy platforms, special restrictions and exceptions should be
+taken into account. This document describes the restrictions and the
+exceptions of the Linux ACPI lid device driver.</p>
+</section>
+<section id="restrictions-of-the-returning-value-of-the-lid-control-method">
+<h2>Restrictions of the returning value of the _LID control method<a class="headerlink" href="#restrictions-of-the-returning-value-of-the-lid-control-method" title="Permalink to this headline">¶</a></h2>
+<p>The _LID control method is described to return the “current” lid state.
+However the word of “current” has ambiguity, some buggy AML tables return
+the lid state upon the last lid notification instead of returning the lid
+state upon the last _LID evaluation. There won’t be difference when the
+_LID control method is evaluated during the runtime, the problem is its
+initial returning value. When the AML tables implement this control method
+with cached value, the initial returning value is likely not reliable.
+There are platforms always retun “closed” as initial lid state.</p>
+</section>
+<section id="restrictions-of-the-lid-state-change-notifications">
+<h2>Restrictions of the lid state change notifications<a class="headerlink" href="#restrictions-of-the-lid-state-change-notifications" title="Permalink to this headline">¶</a></h2>
+<p>There are buggy AML tables never notifying when the lid device state is
+changed to “opened”. Thus the “opened” notification is not guaranteed. But
+it is guaranteed that the AML tables always notify “closed” when the lid
+state is changed to “closed”. The “closed” notification is normally used to
+trigger some system power saving operations on Windows. Since it is fully
+tested, it is reliable from all AML tables.</p>
+</section>
+<section id="exceptions-for-the-userspace-users-of-the-acpi-lid-device-driver">
+<h2>Exceptions for the userspace users of the ACPI lid device driver<a class="headerlink" href="#exceptions-for-the-userspace-users-of-the-acpi-lid-device-driver" title="Permalink to this headline">¶</a></h2>
+<p>The ACPI button driver exports the lid state to the userspace via the
+following file:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/proc/acpi/button/lid/LID0/state
+</pre></div>
+</div>
+<p>This file actually calls the _LID control method described above. And given
+the previous explanation, it is not reliable enough on some platforms. So
+it is advised for the userspace program to not to solely rely on this file
+to determine the actual lid state.</p>
+<dl class="simple">
+<dt>The ACPI button driver emits the following input event to the userspace:</dt><dd><ul class="simple">
+<li><p>SW_LID</p></li>
+</ul>
+</dd>
+</dl>
+<p>The ACPI lid device driver is implemented to try to deliver the platform
+triggered events to the userspace. However, given the fact that the buggy
+firmware cannot make sure “opened”/”closed” events are paired, the ACPI
+button driver uses the following 3 modes in order not to trigger issues.</p>
+<p>If the userspace hasn’t been prepared to ignore the unreliable “opened”
+events and the unreliable initial state notification, Linux users can use
+the following kernel parameters to handle the possible issues:</p>
+<ol class="upperalpha">
+<li><p>button.lid_init_state=method:
+When this option is specified, the ACPI button driver reports the
+initial lid state using the returning value of the _LID control method
+and whether the “opened”/”closed” events are paired fully relies on the
+firmware implementation.</p>
+<p>This option can be used to fix some platforms where the returning value
+of the _LID control method is reliable but the initial lid state
+notification is missing.</p>
+<p>This option is the default behavior during the period the userspace
+isn’t ready to handle the buggy AML tables.</p>
+</li>
+<li><p>button.lid_init_state=open:
+When this option is specified, the ACPI button driver always reports the
+initial lid state as “opened” and whether the “opened”/”closed” events
+are paired fully relies on the firmware implementation.</p>
+<p>This may fix some platforms where the returning value of the _LID
+control method is not reliable and the initial lid state notification is
+missing.</p>
+</li>
+</ol>
+<p>If the userspace has been prepared to ignore the unreliable “opened” events
+and the unreliable initial state notification, Linux users should always
+use the following kernel parameter:</p>
+<ol class="upperalpha" start="3">
+<li><p>button.lid_init_state=ignore:
+When this option is specified, the ACPI button driver never reports the
+initial lid state and there is a compensation mechanism implemented to
+ensure that the reliable “closed” notifications can always be delivered
+to the userspace by always pairing “closed” input events with complement
+“opened” input events. But there is still no guarantee that the “opened”
+notifications can be delivered to the userspace when the lid is actually
+opens given that some AML tables do not send “opened” notifications
+reliably.</p>
+<p>In this mode, if everything is correctly implemented by the platform
+firmware, the old userspace programs should still work. Otherwise, the
+new userspace programs are required to work with the ACPI button driver.
+This option will be the default behavior after the userspace is ready to
+handle the buggy AML tables.</p>
+</li>
+</ol>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Special Usage Model of the ACPI Control Method Lid Device</a><ul>
+<li><a class="reference internal" href="#abstract">Abstract</a></li>
+<li><a class="reference internal" href="#restrictions-of-the-returning-value-of-the-lid-control-method">Restrictions of the returning value of the _LID control method</a></li>
+<li><a class="reference internal" href="#restrictions-of-the-lid-state-change-notifications">Restrictions of the lid state change notifications</a></li>
+<li><a class="reference internal" href="#exceptions-for-the-userspace-users-of-the-acpi-lid-device-driver">Exceptions for the userspace users of the ACPI lid device driver</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/firmware-guide/acpi/acpi-lid.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/firmware-guide/acpi/acpi-lid.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

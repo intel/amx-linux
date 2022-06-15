@@ -1,0 +1,1062 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>TTY Internals &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="MOXA Smartio/Industio Family Device Driver Installation Guide" href="moxa-smartio.html" />
+    <link rel="prev" title="TTY Buffer" href="tty_buffer.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="tty-internals">
+<h1>TTY Internals<a class="headerlink" href="#tty-internals" title="Permalink to this headline">¶</a></h1>
+<div class="contents local topic" id="contents">
+<ul class="simple">
+<li><p><a class="reference internal" href="#kopen" id="id1">Kopen</a></p></li>
+<li><p><a class="reference internal" href="#exported-internal-functions" id="id2">Exported Internal Functions</a></p></li>
+<li><p><a class="reference internal" href="#internal-functions" id="id3">Internal Functions</a></p></li>
+</ul>
+</div>
+<section id="kopen">
+<h2><a class="toc-backref" href="#id1">Kopen</a><a class="headerlink" href="#kopen" title="Permalink to this headline">¶</a></h2>
+<p>These functions serve for opening a TTY from the kernelspace:</p>
+<dl class="function">
+<dt id="c.tty_kclose">
+void <code class="sig-name descname">tty_kclose</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_kclose" title="Permalink to this definition">¶</a></dt>
+<dd><p>closes tty opened by tty_kopen</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty device</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Performs the final steps to release and free a tty device. It is the same as
+<a class="reference internal" href="#c.tty_release_struct" title="tty_release_struct"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_release_struct()</span></code></a> except that it also resets <code class="docutils literal notranslate"><span class="pre">TTY_PORT_KOPENED</span></code> flag on
+<strong>tty-&gt;port</strong>.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_kopen_exclusive">
+struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a> * <code class="sig-name descname">tty_kopen_exclusive</code><span class="sig-paren">(</span>dev_t<em> device</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_kopen_exclusive" title="Permalink to this definition">¶</a></dt>
+<dd><p>open a tty device for kernel</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">dev_t</span> <span class="pre">device</span></code></dt><dd><p>dev_t of device to open</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Opens tty exclusively for kernel. Performs the driver lookup, makes sure
+it’s not already opened and performs the first-time tty initialization.</p>
+<dl class="simple">
+<dt>Claims the global <code class="docutils literal notranslate"><span class="pre">tty_mutex</span></code> to serialize:</dt><dd><ul class="simple">
+<li><p>concurrent first-time tty initialization</p></li>
+<li><p>concurrent tty driver removal w/ lookup</p></li>
+<li><p>concurrent tty removal from driver table</p></li>
+</ul>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p>the locked initialized <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct"><code class="xref c c-type docutils literal notranslate"><span class="pre">tty_struct</span></code></a></p>
+</div>
+<dl class="function">
+<dt id="c.tty_kopen_shared">
+struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a> * <code class="sig-name descname">tty_kopen_shared</code><span class="sig-paren">(</span>dev_t<em> device</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_kopen_shared" title="Permalink to this definition">¶</a></dt>
+<dd><p>open a tty device for shared in-kernel use</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">dev_t</span> <span class="pre">device</span></code></dt><dd><p>dev_t of device to open</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Opens an already existing tty for in-kernel use. Compared to
+<a class="reference internal" href="#c.tty_kopen_exclusive" title="tty_kopen_exclusive"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_kopen_exclusive()</span></code></a> above it doesn’t ensure to be the only user.</p>
+<p>Locking: identical to tty_kopen() above.</p>
+</div>
+</section>
+<hr class="docutils" />
+<section id="exported-internal-functions">
+<h2><a class="toc-backref" href="#id2">Exported Internal Functions</a><a class="headerlink" href="#exported-internal-functions" title="Permalink to this headline">¶</a></h2>
+<dl class="function">
+<dt id="c.tty_dev_name_to_number">
+int <code class="sig-name descname">tty_dev_name_to_number</code><span class="sig-paren">(</span>const char<em> *name</em>, dev_t<em> *number</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_dev_name_to_number" title="Permalink to this definition">¶</a></dt>
+<dd><p>return dev_t for device name</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*name</span></code></dt><dd><p>user space name of device under /dev</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dev_t</span> <span class="pre">*number</span></code></dt><dd><p>pointer to dev_t that this function will populate</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This function converts device names like ttyS0 or ttyUSB1 into dev_t like
+(4, 64) or (188, 1). If no corresponding driver is registered then the
+function returns -<code class="docutils literal notranslate"><span class="pre">ENODEV</span></code>.</p>
+<dl class="simple">
+<dt>Locking: this acquires tty_mutex to protect the tty_drivers list from</dt><dd><p>being modified while we are traversing it, and makes sure to
+release it before exiting.</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.tty_release_struct">
+void <code class="sig-name descname">tty_release_struct</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em>, int<em> idx</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_release_struct" title="Permalink to this definition">¶</a></dt>
+<dd><p>release a tty struct</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">idx</span></code></dt><dd><p>index of the tty</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Performs the final steps to release and free a tty device. It is roughly the
+reverse of <a class="reference internal" href="#c.tty_init_dev" title="tty_init_dev"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_init_dev()</span></code></a>.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_get_icount">
+int <code class="sig-name descname">tty_get_icount</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em>, struct serial_icounter_struct<em> *icount</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_get_icount" title="Permalink to this definition">¶</a></dt>
+<dd><p>get tty statistics</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">serial_icounter_struct</span> <span class="pre">*icount</span></code></dt><dd><p>output parameter</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Gets a copy of the <strong>tty</strong>’s icount statistics.</p>
+<p>Locking: none (up to the driver)</p>
+</div>
+</section>
+<hr class="docutils" />
+<section id="internal-functions">
+<h2><a class="toc-backref" href="#id3">Internal Functions</a><a class="headerlink" href="#internal-functions" title="Permalink to this headline">¶</a></h2>
+<dl class="function">
+<dt id="c.free_tty_struct">
+void <code class="sig-name descname">free_tty_struct</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em><span class="sig-paren">)</span><a class="headerlink" href="#c.free_tty_struct" title="Permalink to this definition">¶</a></dt>
+<dd><p>free a disused tty</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty struct to free</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Free the write buffers, tty queue and tty memory itself.</p>
+<p>Locking: none. Must be called after tty is definitely unused</p>
+</div>
+<dl class="function">
+<dt id="c.tty_free_file">
+void <code class="sig-name descname">tty_free_file</code><span class="sig-paren">(</span>struct file<em> *file</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_free_file" title="Permalink to this definition">¶</a></dt>
+<dd><p>free file-&gt;private_data</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">file</span> <span class="pre">*file</span></code></dt><dd><p>to free private_data of</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This shall be used only for fail path handling when tty_add_file was not
+called yet.</p>
+</div>
+<dl class="function">
+<dt id="c.get_tty_driver">
+struct <a class="reference internal" href="tty_driver.html#c.tty_driver" title="tty_driver">tty_driver</a> * <code class="sig-name descname">get_tty_driver</code><span class="sig-paren">(</span>dev_t<em> device</em>, int<em> *index</em><span class="sig-paren">)</span><a class="headerlink" href="#c.get_tty_driver" title="Permalink to this definition">¶</a></dt>
+<dd><p>find device of a tty</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">dev_t</span> <span class="pre">device</span></code></dt><dd><p>device identifier</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">*index</span></code></dt><dd><p>returns the index of the tty</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This routine returns a tty driver structure, given a device number and also
+passes back the index number.</p>
+<p>Locking: caller must hold tty_mutex</p>
+</div>
+<dl class="function">
+<dt id="c.tty_release_redirect">
+struct file * <code class="sig-name descname">tty_release_redirect</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_release_redirect" title="Permalink to this definition">¶</a></dt>
+<dd><p>Release a redirect on a pty if present</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty device</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This is available to the pty code so if the master closes, if the slave is a
+redirect it can release the redirect.</p>
+</div>
+<dl class="function">
+<dt id="c.__tty_hangup">
+void <code class="sig-name descname">__tty_hangup</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em>, int<em> exit_session</em><span class="sig-paren">)</span><a class="headerlink" href="#c.__tty_hangup" title="Permalink to this definition">¶</a></dt>
+<dd><p>actual handler for hangup events</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">exit_session</span></code></dt><dd><p>if non-zero, signal all foreground group processes</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This can be called by a “kworker” kernel thread. That is process synchronous
+but doesn’t hold any locks, so we need to make sure we have the appropriate
+locks for what we’re doing.</p>
+<p>The hangup event clears any pending redirections onto the hung up device. It
+ensures future writes will error and it does the needed line discipline
+hangup and signal delivery. The tty object itself remains intact.</p>
+<dl>
+<dt>Locking:</dt><dd><ul class="simple">
+<li><p>BTM</p></li>
+</ul>
+<blockquote>
+<div><ul class="simple">
+<li><p>redirect lock for undoing redirection</p></li>
+<li><p>file list lock for manipulating list of ttys</p></li>
+<li><p>tty_ldiscs_lock from called functions</p></li>
+<li><p>termios_rwsem resetting termios data</p></li>
+<li><p>tasklist_lock to walk task list for hangup event</p></li>
+</ul>
+<blockquote>
+<div><ul class="simple">
+<li><p>-&gt;siglock to protect -&gt;signal/-&gt;sighand</p></li>
+</ul>
+</div></blockquote>
+</div></blockquote>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.tty_vhangup_self">
+void <code class="sig-name descname">tty_vhangup_self</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.tty_vhangup_self" title="Permalink to this definition">¶</a></dt>
+<dd><p>process vhangup for own ctty</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">void</span></code></dt><dd><p>no arguments</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Perform a vhangup on the current controlling tty</p>
+</div>
+<dl class="function">
+<dt id="c.tty_vhangup_session">
+void <code class="sig-name descname">tty_vhangup_session</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_vhangup_session" title="Permalink to this definition">¶</a></dt>
+<dd><p>hangup session leader exit</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty to hangup</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>The session leader is exiting and hanging up its controlling terminal.
+Every process in the foreground process group is signalled <code class="docutils literal notranslate"><span class="pre">SIGHUP</span></code>.</p>
+<p>We do this synchronously so that when the syscall returns the process is
+complete. That guarantee is necessary for security reasons.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_read">
+ssize_t <code class="sig-name descname">tty_read</code><span class="sig-paren">(</span>struct kiocb<em> *iocb</em>, struct iov_iter<em> *to</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_read" title="Permalink to this definition">¶</a></dt>
+<dd><p>read method for tty device files</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">kiocb</span> <span class="pre">*iocb</span></code></dt><dd><p>kernel I/O control block</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iov_iter</span> <span class="pre">*to</span></code></dt><dd><p>destination for the data read</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Perform the read system call function on this terminal device. Checks
+for hung up devices before calling the line discipline method.</p>
+<dl class="simple">
+<dt>Locking:</dt><dd><p>Locks the line discipline internally while needed. Multiple read calls
+may be outstanding in parallel.</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.tty_write_message">
+void <code class="sig-name descname">tty_write_message</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em>, char<em> *msg</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_write_message" title="Permalink to this definition">¶</a></dt>
+<dd><p>write a message to a certain tty, not just the console.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>the destination tty_struct</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">char</span> <span class="pre">*msg</span></code></dt><dd><p>the message to write</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This is used for messages that need to be redirected to a specific tty. We
+don’t put it into the syslog queue right now maybe in the future if really
+needed.</p>
+<p>We must still hold the BTM and test the CLOSING flag for the moment.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_write">
+ssize_t <code class="sig-name descname">tty_write</code><span class="sig-paren">(</span>struct kiocb<em> *iocb</em>, struct iov_iter<em> *from</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_write" title="Permalink to this definition">¶</a></dt>
+<dd><p>write method for tty device file</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">kiocb</span> <span class="pre">*iocb</span></code></dt><dd><p>kernel I/O control block</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iov_iter</span> <span class="pre">*from</span></code></dt><dd><p>iov_iter with data to write</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Write data to a tty device via the line discipline.</p>
+<dl class="simple">
+<dt>Locking:</dt><dd><p>Locks the line discipline as required
+Writes to the tty driver are serialized by the atomic_write_lock
+and are then processed in chunks to the device. The line
+discipline write method will not be invoked in parallel for
+each device.</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.tty_send_xchar">
+int <code class="sig-name descname">tty_send_xchar</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em>, char<em> ch</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_send_xchar" title="Permalink to this definition">¶</a></dt>
+<dd><p>send priority character</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>the tty to send to</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">char</span> <span class="pre">ch</span></code></dt><dd><p>xchar to send</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Send a high priority character to the tty even if stopped.</p>
+<p>Locking: none for xchar method, write ordering for write method.</p>
+</div>
+<dl class="function">
+<dt id="c.pty_line_name">
+void <code class="sig-name descname">pty_line_name</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_driver.html#c.tty_driver" title="tty_driver">tty_driver</a><em> *driver</em>, int<em> index</em>, char<em> *p</em><span class="sig-paren">)</span><a class="headerlink" href="#c.pty_line_name" title="Permalink to this definition">¶</a></dt>
+<dd><p>generate name for a pty</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_driver</span> <span class="pre">*driver</span></code></dt><dd><p>the tty driver in use</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">index</span></code></dt><dd><p>the minor number</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">char</span> <span class="pre">*p</span></code></dt><dd><p>output buffer of at least 6 bytes</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Generate a name from a <strong>driver</strong> reference and write it to the output buffer
+<strong>p</strong>.</p>
+<p>Locking: None</p>
+</div>
+<dl class="function">
+<dt id="c.tty_line_name">
+ssize_t <code class="sig-name descname">tty_line_name</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_driver.html#c.tty_driver" title="tty_driver">tty_driver</a><em> *driver</em>, int<em> index</em>, char<em> *p</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_line_name" title="Permalink to this definition">¶</a></dt>
+<dd><p>generate name for a tty</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_driver</span> <span class="pre">*driver</span></code></dt><dd><p>the tty driver in use</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">index</span></code></dt><dd><p>the minor number</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">char</span> <span class="pre">*p</span></code></dt><dd><p>output buffer of at least 7 bytes</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Generate a name from a <strong>driver</strong> reference and write it to the output buffer
+<strong>p</strong>.</p>
+<p>Locking: None</p>
+</div>
+<dl class="function">
+<dt id="c.tty_driver_lookup_tty">
+struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a> * <code class="sig-name descname">tty_driver_lookup_tty</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_driver.html#c.tty_driver" title="tty_driver">tty_driver</a><em> *driver</em>, struct file<em> *file</em>, int<em> idx</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_driver_lookup_tty" title="Permalink to this definition">¶</a></dt>
+<dd><p>find an existing tty, if any</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_driver</span> <span class="pre">*driver</span></code></dt><dd><p>the driver for the tty</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">file</span> <span class="pre">*file</span></code></dt><dd><p>file object</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">idx</span></code></dt><dd><p>the minor number</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p>the tty, if found. If not found, return <code class="docutils literal notranslate"><span class="pre">NULL</span></code> or ERR_PTR() if the
+driver lookup() method returns an error.</p>
+<p><strong>Description</strong></p>
+<p>Locking: tty_mutex must be held. If the tty is found, bump the tty kref.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_driver_install_tty">
+int <code class="sig-name descname">tty_driver_install_tty</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_driver.html#c.tty_driver" title="tty_driver">tty_driver</a><em> *driver</em>, struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_driver_install_tty" title="Permalink to this definition">¶</a></dt>
+<dd><p>install a tty entry in the driver</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_driver</span> <span class="pre">*driver</span></code></dt><dd><p>the driver for the tty</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>the tty</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Install a tty object into the driver tables. The <strong>tty-&gt;index</strong> field will be
+set by the time this is called. This method is responsible for ensuring any
+need additional structures are allocated and configured.</p>
+<p>Locking: tty_mutex for now</p>
+</div>
+<dl class="function">
+<dt id="c.tty_driver_remove_tty">
+void <code class="sig-name descname">tty_driver_remove_tty</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_driver.html#c.tty_driver" title="tty_driver">tty_driver</a><em> *driver</em>, struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_driver_remove_tty" title="Permalink to this definition">¶</a></dt>
+<dd><p>remove a tty from the driver tables</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_driver</span> <span class="pre">*driver</span></code></dt><dd><p>the driver for the tty</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty to remove</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Remove a tty object from the driver tables. The tty-&gt;index field will be set
+by the time this is called.</p>
+<p>Locking: tty_mutex for now</p>
+</div>
+<dl class="function">
+<dt id="c.tty_reopen">
+int <code class="sig-name descname">tty_reopen</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_reopen" title="Permalink to this definition">¶</a></dt>
+<dd><p>fast re-open of an open tty</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>the tty to open</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Re-opens on master ptys are not allowed and return -<code class="docutils literal notranslate"><span class="pre">EIO</span></code>.</p>
+<p>Locking: Caller must hold tty_lock</p>
+<p><strong>Return</strong></p>
+<p>0 on success, -errno on error.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_init_dev">
+struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a> * <code class="sig-name descname">tty_init_dev</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_driver.html#c.tty_driver" title="tty_driver">tty_driver</a><em> *driver</em>, int<em> idx</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_init_dev" title="Permalink to this definition">¶</a></dt>
+<dd><p>initialise a tty device</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_driver</span> <span class="pre">*driver</span></code></dt><dd><p>tty driver we are opening a device on</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">idx</span></code></dt><dd><p>device index</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Prepare a tty device. This may not be a “new” clean device but could also be
+an active device. The pty drivers require special handling because of this.</p>
+<dl class="simple">
+<dt>Locking:</dt><dd><p>The function is called under the tty_mutex, which protects us from the
+tty struct or driver itself going away.</p>
+</dd>
+</dl>
+<p>On exit the tty device has the line discipline attached and a reference
+count of 1. If a pair was created for pty/tty use and the other was a pty
+master then it too has a reference count of 1.</p>
+<p>WSH 06/09/97: Rewritten to remove races and properly clean up after a failed
+open. The new code protects the open with a mutex, so it’s really quite
+straightforward. The mutex locking can probably be relaxed for the (most
+common) case of reopening a tty.</p>
+<p><strong>Return</strong></p>
+<p>new tty structure</p>
+</div>
+<dl class="function">
+<dt id="c.tty_flush_works">
+void <code class="sig-name descname">tty_flush_works</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_flush_works" title="Permalink to this definition">¶</a></dt>
+<dd><p>flush all works of a tty/pty pair</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty device to flush works for (or either end of a pty pair)</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Sync flush all works belonging to <strong>tty</strong> (and the ‘other’ tty).</p>
+</div>
+<dl class="function">
+<dt id="c.release_one_tty">
+void <code class="sig-name descname">release_one_tty</code><span class="sig-paren">(</span>struct work_struct<em> *work</em><span class="sig-paren">)</span><a class="headerlink" href="#c.release_one_tty" title="Permalink to this definition">¶</a></dt>
+<dd><p>release tty structure memory</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">work_struct</span> <span class="pre">*work</span></code></dt><dd><p>work of tty we are obliterating</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Releases memory associated with a tty structure, and clears out the
+driver table slots. This function is called when a device is no longer
+in use. It also gets called when setup of a device fails.</p>
+<dl class="simple">
+<dt>Locking:</dt><dd><p>takes the file list lock internally when working on the list of ttys
+that the driver keeps.</p>
+</dd>
+</dl>
+<p>This method gets called from a work queue so that the driver private
+cleanup ops can sleep (needed for USB at least)</p>
+</div>
+<dl class="function">
+<dt id="c.release_tty">
+void <code class="sig-name descname">release_tty</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em>, int<em> idx</em><span class="sig-paren">)</span><a class="headerlink" href="#c.release_tty" title="Permalink to this definition">¶</a></dt>
+<dd><p>release tty structure memory</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty device release</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">idx</span></code></dt><dd><p>index of the tty device release</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Release both <strong>tty</strong> and a possible linked partner (think pty pair),
+and decrement the refcount of the backing module.</p>
+<dl class="simple">
+<dt>Locking:</dt><dd><p>tty_mutex
+takes the file list lock internally when working on the list of ttys
+that the driver keeps.</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.tty_release_checks">
+int <code class="sig-name descname">tty_release_checks</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em>, int<em> idx</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_release_checks" title="Permalink to this definition">¶</a></dt>
+<dd><p>check a tty before real release</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty to check</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">idx</span></code></dt><dd><p>index of the tty</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Performs some paranoid checking before true release of the <strong>tty</strong>. This is a
+no-op unless <code class="docutils literal notranslate"><span class="pre">TTY_PARANOIA_CHECK</span></code> is defined.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_release">
+int <code class="sig-name descname">tty_release</code><span class="sig-paren">(</span>struct inode<em> *inode</em>, struct file<em> *filp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_release" title="Permalink to this definition">¶</a></dt>
+<dd><p>vfs callback for close</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">inode</span> <span class="pre">*inode</span></code></dt><dd><p>inode of tty</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">file</span> <span class="pre">*filp</span></code></dt><dd><p>file pointer for handle to tty</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Called the last time each file handle is closed that references this tty.
+There may however be several such references.</p>
+<dl class="simple">
+<dt>Locking:</dt><dd><p>Takes BKL. See tty_release_dev().</p>
+</dd>
+</dl>
+<p>Even releasing the tty structures is a tricky business. We have to be very
+careful that the structures are all released at the same time, as interrupts
+might otherwise get the wrong pointers.</p>
+<p>WSH 09/09/97: rewritten to avoid some nasty race conditions that could
+lead to double frees or releasing memory still in use.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_open_current_tty">
+struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a> * <code class="sig-name descname">tty_open_current_tty</code><span class="sig-paren">(</span>dev_t<em> device</em>, struct file<em> *filp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_open_current_tty" title="Permalink to this definition">¶</a></dt>
+<dd><p>get locked tty of current task</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">dev_t</span> <span class="pre">device</span></code></dt><dd><p>device number</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">file</span> <span class="pre">*filp</span></code></dt><dd><p>file pointer to tty</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p>locked tty of the current task iff <strong>device</strong> is /dev/tty</p>
+<p><strong>Description</strong></p>
+<p>Performs a re-open of the current task’s controlling tty.</p>
+<p>We cannot return driver and index like for the other nodes because devpts
+will not work then. It expects inodes to be from devpts FS.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_lookup_driver">
+struct <a class="reference internal" href="tty_driver.html#c.tty_driver" title="tty_driver">tty_driver</a> * <code class="sig-name descname">tty_lookup_driver</code><span class="sig-paren">(</span>dev_t<em> device</em>, struct file<em> *filp</em>, int<em> *index</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_lookup_driver" title="Permalink to this definition">¶</a></dt>
+<dd><p>lookup a tty driver for a given device file</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">dev_t</span> <span class="pre">device</span></code></dt><dd><p>device number</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">file</span> <span class="pre">*filp</span></code></dt><dd><p>file pointer to tty</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">*index</span></code></dt><dd><p>index for the device in the <strong>return</strong> driver</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>If returned value is not erroneous, the caller is responsible to decrement
+the refcount by <a class="reference internal" href="tty_driver.html#c.tty_driver_kref_put" title="tty_driver_kref_put"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_driver_kref_put()</span></code></a>.</p>
+<p>Locking: <code class="docutils literal notranslate"><span class="pre">tty_mutex</span></code> protects <a class="reference internal" href="#c.get_tty_driver" title="get_tty_driver"><code class="xref c c-func docutils literal notranslate"><span class="pre">get_tty_driver()</span></code></a></p>
+<p><strong>Return</strong></p>
+<p>driver for this inode (with increased refcount)</p>
+</div>
+<dl class="function">
+<dt id="c.tty_open_by_driver">
+struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a> * <code class="sig-name descname">tty_open_by_driver</code><span class="sig-paren">(</span>dev_t<em> device</em>, struct file<em> *filp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_open_by_driver" title="Permalink to this definition">¶</a></dt>
+<dd><p>open a tty device</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">dev_t</span> <span class="pre">device</span></code></dt><dd><p>dev_t of device to open</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">file</span> <span class="pre">*filp</span></code></dt><dd><p>file pointer to tty</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Performs the driver lookup, checks for a reopen, or otherwise performs the
+first-time tty initialization.</p>
+<dl class="simple">
+<dt>Claims the global tty_mutex to serialize:</dt><dd><ul class="simple">
+<li><p>concurrent first-time tty initialization</p></li>
+<li><p>concurrent tty driver removal w/ lookup</p></li>
+<li><p>concurrent tty removal from driver table</p></li>
+</ul>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p>the locked initialized or re-opened <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct"><code class="xref c c-type docutils literal notranslate"><span class="pre">tty_struct</span></code></a></p>
+</div>
+<dl class="function">
+<dt id="c.tty_open">
+int <code class="sig-name descname">tty_open</code><span class="sig-paren">(</span>struct inode<em> *inode</em>, struct file<em> *filp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_open" title="Permalink to this definition">¶</a></dt>
+<dd><p>open a tty device</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">inode</span> <span class="pre">*inode</span></code></dt><dd><p>inode of device file</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">file</span> <span class="pre">*filp</span></code></dt><dd><p>file pointer to tty</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p><a class="reference internal" href="#c.tty_open" title="tty_open"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_open()</span></code></a> and <a class="reference internal" href="#c.tty_release" title="tty_release"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_release()</span></code></a> keep up the tty count that contains the number
+of opens done on a tty. We cannot use the inode-count, as different inodes
+might point to the same tty.</p>
+<p>Open-counting is needed for pty masters, as well as for keeping track of
+serial lines: DTR is dropped when the last close happens.
+(This is not done solely through tty-&gt;count, now.  - Ted 1/27/92)</p>
+<p>The termios state of a pty is reset on the first open so that settings don’t
+persist across reuse.</p>
+<dl class="simple">
+<dt>Locking:</dt><dd><ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">tty_mutex</span></code> protects tty, <a class="reference internal" href="#c.tty_lookup_driver" title="tty_lookup_driver"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_lookup_driver()</span></code></a> and <a class="reference internal" href="#c.tty_init_dev" title="tty_init_dev"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_init_dev()</span></code></a>.</p></li>
+<li><p><strong>tty-&gt;count</strong> should protect the rest.</p></li>
+<li><p>-&gt;siglock protects -&gt;signal/-&gt;sighand</p></li>
+</ul>
+</dd>
+</dl>
+<p><strong>Note</strong></p>
+<p>the tty_unlock/lock cases without a ref are only safe due to <code class="docutils literal notranslate"><span class="pre">tty_mutex</span></code></p>
+</div>
+<dl class="function">
+<dt id="c.tty_poll">
+__poll_t <code class="sig-name descname">tty_poll</code><span class="sig-paren">(</span>struct file<em> *filp</em>, poll_table<em> *wait</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_poll" title="Permalink to this definition">¶</a></dt>
+<dd><p>check tty status</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">file</span> <span class="pre">*filp</span></code></dt><dd><p>file being polled</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">poll_table</span> <span class="pre">*wait</span></code></dt><dd><p>poll wait structures to update</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Call the line discipline polling method to obtain the poll status of the
+device.</p>
+<p>Locking: locks called line discipline but ldisc poll method may be
+re-entered freely by other callers.</p>
+</div>
+<dl class="function">
+<dt id="c.tiocsti">
+int <code class="sig-name descname">tiocsti</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em>, char __user<em> *p</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tiocsti" title="Permalink to this definition">¶</a></dt>
+<dd><p>fake input character</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty to fake input into</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">char</span> <span class="pre">__user</span> <span class="pre">*p</span></code></dt><dd><p>pointer to character</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Fake input to a tty device. Does the necessary locking and input management.</p>
+<p>FIXME: does not honour flow control ??</p>
+<dl class="simple">
+<dt>Locking:</dt><dd><ul class="simple">
+<li><p>Called functions take tty_ldiscs_lock</p></li>
+<li><p>current-&gt;signal-&gt;tty check is safe without locks</p></li>
+</ul>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.tiocgwinsz">
+int <code class="sig-name descname">tiocgwinsz</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em>, struct winsize __user<em> *arg</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tiocgwinsz" title="Permalink to this definition">¶</a></dt>
+<dd><p>implement window query ioctl</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">winsize</span> <span class="pre">__user</span> <span class="pre">*arg</span></code></dt><dd><p>user buffer for result</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Copies the kernel idea of the window size into the user buffer.</p>
+<p>Locking: <strong>tty-&gt;winsize_mutex</strong> is taken to ensure the winsize data is
+consistent.</p>
+</div>
+<dl class="function">
+<dt id="c.tiocswinsz">
+int <code class="sig-name descname">tiocswinsz</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em>, struct winsize __user<em> *arg</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tiocswinsz" title="Permalink to this definition">¶</a></dt>
+<dd><p>implement window size set ioctl</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty side of tty</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">winsize</span> <span class="pre">__user</span> <span class="pre">*arg</span></code></dt><dd><p>user buffer for result</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Copies the user idea of the window size to the kernel. Traditionally this is
+just advisory information but for the Linux console it actually has driver
+level meaning and triggers a VC resize.</p>
+<dl class="simple">
+<dt>Locking:</dt><dd><p>Driver dependent. The default do_resize method takes the tty termios
+mutex and ctrl.lock. The console takes its own lock then calls into the
+default method.</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.tioccons">
+int <code class="sig-name descname">tioccons</code><span class="sig-paren">(</span>struct file<em> *file</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tioccons" title="Permalink to this definition">¶</a></dt>
+<dd><p>allow admin to move logical console</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">file</span> <span class="pre">*file</span></code></dt><dd><p>the file to become console</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Allow the administrator to move the redirected console device.</p>
+<p>Locking: uses redirect_lock to guard the redirect information</p>
+</div>
+<dl class="function">
+<dt id="c.tiocsetd">
+int <code class="sig-name descname">tiocsetd</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em>, int __user<em> *p</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tiocsetd" title="Permalink to this definition">¶</a></dt>
+<dd><p>set line discipline</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">__user</span> <span class="pre">*p</span></code></dt><dd><p>pointer to user data</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Set the line discipline according to user request.</p>
+<p>Locking: see <a class="reference internal" href="tty_ldisc.html#c.tty_set_ldisc" title="tty_set_ldisc"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_set_ldisc()</span></code></a>, this function is just a helper</p>
+</div>
+<dl class="function">
+<dt id="c.tiocgetd">
+int <code class="sig-name descname">tiocgetd</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em>, int __user<em> *p</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tiocgetd" title="Permalink to this definition">¶</a></dt>
+<dd><p>get line discipline</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">__user</span> <span class="pre">*p</span></code></dt><dd><p>pointer to user data</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Retrieves the line discipline id directly from the ldisc.</p>
+<p>Locking: waits for ldisc reference (in case the line discipline is changing
+or the <strong>tty</strong> is being hungup)</p>
+</div>
+<dl class="function">
+<dt id="c.send_break">
+int <code class="sig-name descname">send_break</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em>, unsigned int<em> duration</em><span class="sig-paren">)</span><a class="headerlink" href="#c.send_break" title="Permalink to this definition">¶</a></dt>
+<dd><p>performed time break</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>device to break on</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">duration</span></code></dt><dd><p>timeout in mS</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Perform a timed break on hardware that lacks its own driver level timed
+break functionality.</p>
+<dl class="simple">
+<dt>Locking:</dt><dd><p><strong>tty-&gt;atomic_write_lock</strong> serializes</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.tty_tiocmget">
+int <code class="sig-name descname">tty_tiocmget</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em>, int __user<em> *p</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_tiocmget" title="Permalink to this definition">¶</a></dt>
+<dd><p>get modem status</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">__user</span> <span class="pre">*p</span></code></dt><dd><p>pointer to result</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Obtain the modem status bits from the tty driver if the feature is
+supported. Return -<code class="docutils literal notranslate"><span class="pre">ENOTTY</span></code> if it is not available.</p>
+<p>Locking: none (up to the driver)</p>
+</div>
+<dl class="function">
+<dt id="c.tty_tiocmset">
+int <code class="sig-name descname">tty_tiocmset</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em>, unsigned int<em> cmd</em>, unsigned __user<em> *p</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_tiocmset" title="Permalink to this definition">¶</a></dt>
+<dd><p>set modem status</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">cmd</span></code></dt><dd><p>command - clear bits, set bits or set all</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">__user</span> <span class="pre">*p</span></code></dt><dd><p>pointer to desired bits</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Set the modem status bits from the tty driver if the feature
+is supported. Return -<code class="docutils literal notranslate"><span class="pre">ENOTTY</span></code> if it is not available.</p>
+<p>Locking: none (up to the driver)</p>
+</div>
+<dl class="function">
+<dt id="c.alloc_tty_struct">
+struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a> * <code class="sig-name descname">alloc_tty_struct</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_driver.html#c.tty_driver" title="tty_driver">tty_driver</a><em> *driver</em>, int<em> idx</em><span class="sig-paren">)</span><a class="headerlink" href="#c.alloc_tty_struct" title="Permalink to this definition">¶</a></dt>
+<dd><p>allocate a new tty</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_driver</span> <span class="pre">*driver</span></code></dt><dd><p>driver which will handle the returned tty</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">idx</span></code></dt><dd><p>minor of the tty</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This subroutine allocates and initializes a tty structure.</p>
+<p>Locking: none - <strong>tty</strong> in question is not exposed at this point</p>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">TTY Internals</a><ul>
+<li><a class="reference internal" href="#kopen">Kopen</a></li>
+<li><a class="reference internal" href="#exported-internal-functions">Exported Internal Functions</a></li>
+<li><a class="reference internal" href="#internal-functions">Internal Functions</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/tty/tty_internals.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/tty/tty_internals.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

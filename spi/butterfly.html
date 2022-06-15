@@ -1,0 +1,239 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>spi_butterfly - parport-to-butterfly adapter driver &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="PXA2xx SPI on SSP driver HOWTO" href="pxa2xx.html" />
+    <link rel="prev" title="SPI userspace API" href="spidev.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="spi-butterfly-parport-to-butterfly-adapter-driver">
+<h1>spi_butterfly - parport-to-butterfly adapter driver<a class="headerlink" href="#spi-butterfly-parport-to-butterfly-adapter-driver" title="Permalink to this headline">¶</a></h1>
+<p>This is a hardware and software project that includes building and using
+a parallel port adapter cable, together with an “AVR Butterfly” to run
+firmware for user interfacing and/or sensors.  A Butterfly is a $US20
+battery powered card with an AVR microcontroller and lots of goodies:
+sensors, LCD, flash, toggle stick, and more.  You can use AVR-GCC to
+develop firmware for this, and flash it using this adapter cable.</p>
+<p>You can make this adapter from an old printer cable and solder things
+directly to the Butterfly.  Or (if you have the parts and skills) you
+can come up with something fancier, providing circuit protection to the
+Butterfly and the printer port, or with a better power supply than two
+signal pins from the printer port.  Or for that matter, you can use
+similar cables to talk to many AVR boards, even a breadboard.</p>
+<p>This is more powerful than “ISP programming” cables since it lets kernel
+SPI protocol drivers interact with the AVR, and could even let the AVR
+issue interrupts to them.  Later, your protocol driver should work
+easily with a “real SPI controller”, instead of this bitbanger.</p>
+<p>The first cable connections will hook Linux up to one SPI bus, with the
+AVR and a DataFlash chip; and to the AVR reset line.  This is all you
+need to reflash the firmware, and the pins are the standard Atmel “ISP”
+connector pins (used also on non-Butterfly AVR boards).  On the parport
+side this is like “sp12” programming cables.</p>
+<blockquote>
+<div><table class="docutils align-default">
+<colgroup>
+<col style="width: 16%" />
+<col style="width: 34%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Signal</p></th>
+<th class="head"><p>Butterfly</p></th>
+<th class="head"><p>Parport (DB-25)</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>SCK</p></td>
+<td><p>J403.PB1/SCK</p></td>
+<td><p>pin 2/D0</p></td>
+</tr>
+<tr class="row-odd"><td><p>RESET</p></td>
+<td><p>J403.nRST</p></td>
+<td><p>pin 3/D1</p></td>
+</tr>
+<tr class="row-even"><td><p>VCC</p></td>
+<td><p>J403.VCC_EXT</p></td>
+<td><p>pin 8/D6</p></td>
+</tr>
+<tr class="row-odd"><td><p>MOSI</p></td>
+<td><p>J403.PB2/MOSI</p></td>
+<td><p>pin 9/D7</p></td>
+</tr>
+<tr class="row-even"><td><p>MISO</p></td>
+<td><p>J403.PB3/MISO</p></td>
+<td><p>pin 11/S7,nBUSY</p></td>
+</tr>
+<tr class="row-odd"><td><p>GND</p></td>
+<td><p>J403.GND</p></td>
+<td><p>pin 23/GND</p></td>
+</tr>
+</tbody>
+</table>
+</div></blockquote>
+<p>Then to let Linux master that bus to talk to the DataFlash chip, you must
+(a) flash new firmware that disables SPI (set PRR.2, and disable pullups
+by clearing PORTB.[0-3]); (b) configure the mtd_dataflash driver; and
+(c) cable in the chipselect.</p>
+<blockquote>
+<div><table class="docutils align-default">
+<colgroup>
+<col style="width: 16%" />
+<col style="width: 32%" />
+<col style="width: 51%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Signal</p></th>
+<th class="head"><p>Butterfly</p></th>
+<th class="head"><p>Parport (DB-25)</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>VCC</p></td>
+<td><p>J400.VCC_EXT</p></td>
+<td><p>pin 7/D5</p></td>
+</tr>
+<tr class="row-odd"><td><p>SELECT</p></td>
+<td><p>J400.PB0/nSS</p></td>
+<td><p>pin 17/C3,nSELECT</p></td>
+</tr>
+<tr class="row-even"><td><p>GND</p></td>
+<td><p>J400.GND</p></td>
+<td><p>pin 24/GND</p></td>
+</tr>
+</tbody>
+</table>
+</div></blockquote>
+<p>Or you could flash firmware making the AVR into an SPI slave (keeping the
+DataFlash in reset) and tweak the spi_butterfly driver to make it bind to
+the driver for your custom SPI-based protocol.</p>
+<p>The “USI” controller, using J405, can also be used for a second SPI bus.
+That would let you talk to the AVR using custom SPI-with-USI firmware,
+while letting either Linux or the AVR use the DataFlash.  There are plenty
+of spare parport pins to wire this one up, such as:</p>
+<blockquote>
+<div><table class="docutils align-default">
+<colgroup>
+<col style="width: 16%" />
+<col style="width: 34%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Signal</p></th>
+<th class="head"><p>Butterfly</p></th>
+<th class="head"><p>Parport (DB-25)</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>SCK</p></td>
+<td><p>J403.PE4/USCK</p></td>
+<td><p>pin 5/D3</p></td>
+</tr>
+<tr class="row-odd"><td><p>MOSI</p></td>
+<td><p>J403.PE5/DI</p></td>
+<td><p>pin 6/D4</p></td>
+</tr>
+<tr class="row-even"><td><p>MISO</p></td>
+<td><p>J403.PE6/DO</p></td>
+<td><p>pin 12/S5,nPAPEROUT</p></td>
+</tr>
+<tr class="row-odd"><td><p>GND</p></td>
+<td><p>J403.GND</p></td>
+<td><p>pin 22/GND</p></td>
+</tr>
+<tr class="row-even"><td><p>IRQ</p></td>
+<td><p>J402.PF4</p></td>
+<td><p>pin 10/S6,ACK</p></td>
+</tr>
+<tr class="row-odd"><td><p>GND</p></td>
+<td><p>J402.GND(P2)</p></td>
+<td><p>pin 25/GND</p></td>
+</tr>
+</tbody>
+</table>
+</div></blockquote>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/spi/butterfly.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/spi/butterfly.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

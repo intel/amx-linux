@@ -1,0 +1,175 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Probing devices in other D states than 0 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Intel INT3496 ACPI device extcon driver documentation" href="extcon-intel-int3496.html" />
+    <link rel="prev" title="ACPI video extensions" href="video_extension.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="probing-devices-in-other-d-states-than-0">
+<h1>Probing devices in other D states than 0<a class="headerlink" href="#probing-devices-in-other-d-states-than-0" title="Permalink to this headline">¶</a></h1>
+<section id="introduction">
+<h2>Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>In some cases it may be preferred to leave certain devices powered off for the
+entire system bootup if powering on these devices has adverse side effects,
+beyond just powering on the said device.</p>
+</section>
+<section id="how-it-works">
+<h2>How it works<a class="headerlink" href="#how-it-works" title="Permalink to this headline">¶</a></h2>
+<p>The _DSC (Device State for Configuration) object that evaluates to an integer
+may be used to tell Linux the highest allowed D state for a device during
+probe. The support for _DSC requires support from the kernel bus type if the
+bus driver normally sets the device in D0 state for probe.</p>
+<p>The downside of using _DSC is that as the device is not powered on, even if
+there’s a problem with the device, the driver likely probes just fine but the
+first user will find out the device doesn’t work, instead of a failure at probe
+time. This feature should thus be used sparingly.</p>
+<section id="i2c">
+<h3>I²C<a class="headerlink" href="#i2c" title="Permalink to this headline">¶</a></h3>
+<p>If an I²C driver indicates its support for this by setting the
+I2C_DRV_ACPI_WAIVE_D0_PROBE flag in <a class="reference internal" href="../../driver-api/i2c.html#c.i2c_driver" title="i2c_driver"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">i2c_driver</span></code></a>.flags field and the
+_DSC object evaluates to integer higher than the D state of the device,
+the device will not be powered on (put in D0 state) for probe.</p>
+</section>
+<section id="d-states">
+<h3>D states<a class="headerlink" href="#d-states" title="Permalink to this headline">¶</a></h3>
+<p>The D states and thus also the allowed values for _DSC are listed below. Refer
+to [1] for more information on device power states.</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Number  State   Description
+0       D0      Device fully powered on
+1       D1
+2       D2
+3       D3hot
+4       D3cold  Off
+</pre></div>
+</div>
+</section>
+</section>
+<section id="references">
+<h2>References<a class="headerlink" href="#references" title="Permalink to this headline">¶</a></h2>
+<p>[1] <a class="reference external" href="https://uefi.org/specifications/ACPI/6.4/02_Definition_of_Terms/Definition_of_Terms.html#device-power-state-definitions">https://uefi.org/specifications/ACPI/6.4/02_Definition_of_Terms/Definition_of_Terms.html#device-power-state-definitions</a></p>
+</section>
+<section id="example">
+<h2>Example<a class="headerlink" href="#example" title="Permalink to this headline">¶</a></h2>
+<p>An ASL example describing an ACPI device using _DSC object to tell Operating
+System the device should remain powered off during probe looks like this. Some
+objects not relevant from the example point of view have been omitted.</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>Device (CAM0)
+{
+        Name (_HID, &quot;SONY319A&quot;)
+        Name (_UID, Zero)
+        Name (_CRS, ResourceTemplate ()
+        {
+                I2cSerialBus(0x0020, ControllerInitiated, 0x00061A80,
+                             AddressingMode7Bit, &quot;\\_SB.PCI0.I2C0&quot;,
+                             0x00, ResourceConsumer)
+        })
+        Method (_DSC, 0, NotSerialized)
+        {
+                Return (0x4)
+        }
+}
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Probing devices in other D states than 0</a><ul>
+<li><a class="reference internal" href="#introduction">Introduction</a></li>
+<li><a class="reference internal" href="#how-it-works">How it works</a><ul>
+<li><a class="reference internal" href="#i2c">I²C</a></li>
+<li><a class="reference internal" href="#d-states">D states</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#references">References</a></li>
+<li><a class="reference internal" href="#example">Example</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/firmware-guide/acpi/non-d0-probe.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/firmware-guide/acpi/non-d0-probe.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

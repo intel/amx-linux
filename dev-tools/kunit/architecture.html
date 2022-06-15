@@ -1,0 +1,295 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>KUnit Architecture &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Running tests with kunit_tool" href="run_wrapper.html" />
+    <link rel="prev" title="Getting Started" href="start.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="kunit-architecture">
+<h1>KUnit Architecture<a class="headerlink" href="#kunit-architecture" title="Permalink to this headline">¶</a></h1>
+<p>The KUnit architecture is divided into two parts:</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="#in-kernel-testing-framework">In-Kernel Testing Framework</a></p></li>
+<li><p><a class="reference internal" href="#kunit-tool-command-line-test-harness">kunit_tool (Command-line Test Harness)</a></p></li>
+</ul>
+<section id="in-kernel-testing-framework">
+<h2>In-Kernel Testing Framework<a class="headerlink" href="#in-kernel-testing-framework" title="Permalink to this headline">¶</a></h2>
+<p>The kernel testing library supports KUnit tests written in C using
+KUnit. These KUnit tests are kernel code. KUnit performs the following
+tasks:</p>
+<ul class="simple">
+<li><p>Organizes tests</p></li>
+<li><p>Reports test results</p></li>
+<li><p>Provides test utilities</p></li>
+</ul>
+<section id="test-cases">
+<h3>Test Cases<a class="headerlink" href="#test-cases" title="Permalink to this headline">¶</a></h3>
+<p>The test case is the fundamental unit in KUnit. KUnit test cases are organised
+into suites. A KUnit test case is a function with type signature
+<code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">(*)(struct</span> <span class="pre">kunit</span> <span class="pre">*test)</span></code>. These test case functions are wrapped in a
+struct called <a class="reference internal" href="api/test.html#c.kunit_case" title="kunit_case"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">kunit_case</span></code></a>.</p>
+<p>Each KUnit test case receives a <code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">kunit</span></code> context object that tracks a
+running test. The KUnit assertion macros and other KUnit utilities use the
+<code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">kunit</span></code> context object. As an exception, there are two fields:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">-&gt;priv</span></code>: The setup functions can use it to store arbitrary test
+user data.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">-&gt;param_value</span></code>: It contains the parameter value which can be
+retrieved in the parameterized tests.</p></li>
+</ul>
+</section>
+<section id="test-suites">
+<h3>Test Suites<a class="headerlink" href="#test-suites" title="Permalink to this headline">¶</a></h3>
+<p>A KUnit suite includes a collection of test cases. The KUnit suites
+are represented by the <code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">kunit_suite</span></code>. For example:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="k">static</span><span class="w"> </span><span class="k">struct</span> <span class="nc">kunit_case</span><span class="w"> </span><span class="n">example_test_cases</span><span class="p">[]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="n">KUNIT_CASE</span><span class="p">(</span><span class="n">example_test_foo</span><span class="p">),</span><span class="w"></span>
+<span class="w">        </span><span class="n">KUNIT_CASE</span><span class="p">(</span><span class="n">example_test_bar</span><span class="p">),</span><span class="w"></span>
+<span class="w">        </span><span class="n">KUNIT_CASE</span><span class="p">(</span><span class="n">example_test_baz</span><span class="p">),</span><span class="w"></span>
+<span class="w">        </span><span class="p">{}</span><span class="w"></span>
+<span class="p">};</span><span class="w"></span>
+
+<span class="k">static</span><span class="w"> </span><span class="k">struct</span> <span class="nc">kunit_suite</span><span class="w"> </span><span class="n">example_test_suite</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="p">.</span><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;example&quot;</span><span class="p">,</span><span class="w"></span>
+<span class="w">        </span><span class="p">.</span><span class="n">init</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">example_test_init</span><span class="p">,</span><span class="w"></span>
+<span class="w">        </span><span class="p">.</span><span class="n">exit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">example_test_exit</span><span class="p">,</span><span class="w"></span>
+<span class="w">        </span><span class="p">.</span><span class="n">test_cases</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">example_test_cases</span><span class="p">,</span><span class="w"></span>
+<span class="p">};</span><span class="w"></span>
+<span class="n">kunit_test_suite</span><span class="p">(</span><span class="n">example_test_suite</span><span class="p">);</span><span class="w"></span>
+</pre></div>
+</div>
+<p>In the above example, the test suite <code class="docutils literal notranslate"><span class="pre">example_test_suite</span></code>, runs the
+test cases <code class="docutils literal notranslate"><span class="pre">example_test_foo</span></code>, <code class="docutils literal notranslate"><span class="pre">example_test_bar</span></code>, and
+<code class="docutils literal notranslate"><span class="pre">example_test_baz</span></code>. Before running the test, the <code class="docutils literal notranslate"><span class="pre">example_test_init</span></code>
+is called and after running the test, <code class="docutils literal notranslate"><span class="pre">example_test_exit</span></code> is called.
+The <code class="docutils literal notranslate"><span class="pre">kunit_test_suite(example_test_suite)</span></code> registers the test suite
+with the KUnit test framework.</p>
+</section>
+<section id="executor">
+<h3>Executor<a class="headerlink" href="#executor" title="Permalink to this headline">¶</a></h3>
+<p>The KUnit executor can list and run built-in KUnit tests on boot.
+The Test suites are stored in a linker section
+called <code class="docutils literal notranslate"><span class="pre">.kunit_test_suites</span></code>. For the code, see <code class="docutils literal notranslate"><span class="pre">KUNIT_TABLE()</span></code> macro
+definition in
+<a class="reference external" href="https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/include/asm-generic/vmlinux.lds.h?h=v6.0#n950">include/asm-generic/vmlinux.lds.h</a>.
+The linker section consists of an array of pointers to
+<code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">kunit_suite</span></code>, and is populated by the <code class="docutils literal notranslate"><span class="pre">kunit_test_suites()</span></code>
+macro. The KUnit executor iterates over the linker section array in order to
+run all the tests that are compiled into the kernel.</p>
+<figure class="align-default" id="id1">
+<img alt="KUnit Suite Memory" src="../../_images/kunit_suitememorydiagram.svg" /><figcaption>
+<p><span class="caption-text">KUnit Suite Memory Diagram</span><a class="headerlink" href="#id1" title="Permalink to this image">¶</a></p>
+</figcaption>
+</figure>
+<p>On the kernel boot, the KUnit executor uses the start and end addresses
+of this section to iterate over and run all tests. For the implementation of the
+executor, see
+<a class="reference external" href="https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/lib/kunit/executor.c">lib/kunit/executor.c</a>.
+When built as a module, the <code class="docutils literal notranslate"><span class="pre">kunit_test_suites()</span></code> macro defines a
+<code class="docutils literal notranslate"><span class="pre">module_init()</span></code> function, which runs all the tests in the compilation
+unit instead of utilizing the executor.</p>
+<p>In KUnit tests, some error classes do not affect other tests
+or parts of the kernel, each KUnit case executes in a separate thread
+context. See the <code class="docutils literal notranslate"><span class="pre">kunit_try_catch_run()</span></code> function in
+<a class="reference external" href="https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/lib/kunit/try-catch.c?h=v5.15#n58">lib/kunit/try-catch.c</a>.</p>
+</section>
+<section id="assertion-macros">
+<h3>Assertion Macros<a class="headerlink" href="#assertion-macros" title="Permalink to this headline">¶</a></h3>
+<p>KUnit tests verify state using expectations/assertions.
+All expectations/assertions are formatted as:
+<code class="docutils literal notranslate"><span class="pre">KUNIT_{EXPECT|ASSERT}_&lt;op&gt;[_MSG](kunit,</span> <span class="pre">property[,</span> <span class="pre">message])</span></code></p>
+<ul>
+<li><p><code class="docutils literal notranslate"><span class="pre">{EXPECT|ASSERT}</span></code> determines whether the check is an assertion or an
+expectation.
+In the event of a failure, the testing flow differs as follows:</p>
+<blockquote>
+<div><ul>
+<li><p>For expectations, the test is marked as failed and the failure is logged.</p></li>
+<li><p>Failing assertions, on the other hand, result in the test case being
+terminated immediately.</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Assertions call the function:
+<code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">__noreturn</span> <span class="pre">kunit_abort(struct</span> <span class="pre">kunit</span> <span class="pre">*)</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">kunit_abort</span></code> calls the function:
+<code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">__noreturn</span> <span class="pre">kunit_try_catch_throw(struct</span> <span class="pre">kunit_try_catch</span> <span class="pre">*try_catch)</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">kunit_try_catch_throw</span></code> calls the function:
+<code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">kthread_complete_and_exit(struct</span> <span class="pre">completion</span> <span class="pre">*,</span> <span class="pre">long)</span> <span class="pre">__noreturn;</span></code>
+and terminates the special thread context.</p></li>
+</ul>
+</div></blockquote>
+</li>
+</ul>
+</div></blockquote>
+</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">&lt;op&gt;</span></code> denotes a check with options: <code class="docutils literal notranslate"><span class="pre">TRUE</span></code> (supplied property
+has the boolean value “true”), <code class="docutils literal notranslate"><span class="pre">EQ</span></code> (two supplied properties are
+equal), <code class="docutils literal notranslate"><span class="pre">NOT_ERR_OR_NULL</span></code> (supplied pointer is not null and does not
+contain an “err” value).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">[_MSG]</span></code> prints a custom message on failure.</p></li>
+</ul>
+</section>
+<section id="test-result-reporting">
+<h3>Test Result Reporting<a class="headerlink" href="#test-result-reporting" title="Permalink to this headline">¶</a></h3>
+<p>KUnit prints the test results in KTAP format. KTAP is based on TAP14, see
+<a class="reference internal" href="../ktap.html"><span class="doc">The Kernel Test Anything Protocol (KTAP), version 1</span></a>.
+KTAP works with KUnit and Kselftest. The KUnit executor prints KTAP results to
+dmesg, and debugfs (if configured).</p>
+</section>
+<section id="parameterized-tests">
+<h3>Parameterized Tests<a class="headerlink" href="#parameterized-tests" title="Permalink to this headline">¶</a></h3>
+<p>Each KUnit parameterized test is associated with a collection of
+parameters. The test is invoked multiple times, once for each parameter
+value and the parameter is stored in the <code class="docutils literal notranslate"><span class="pre">param_value</span></code> field.
+The test case includes a <a class="reference internal" href="api/test.html#c.KUNIT_CASE_PARAM" title="KUNIT_CASE_PARAM"><code class="xref c c-func docutils literal notranslate"><span class="pre">KUNIT_CASE_PARAM()</span></code></a> macro that accepts a
+generator function. The generator function is passed the previous parameter
+and returns the next parameter. It also includes a macro for generating
+array-based common-case generators.</p>
+</section>
+</section>
+<section id="kunit-tool-command-line-test-harness">
+<h2>kunit_tool (Command-line Test Harness)<a class="headerlink" href="#kunit-tool-command-line-test-harness" title="Permalink to this headline">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">kunit_tool</span></code> is a Python script, found in <code class="docutils literal notranslate"><span class="pre">tools/testing/kunit/kunit.py</span></code>. It
+is used to configure, build, execute, parse test results and run all of the
+previous commands in correct order (i.e., configure, build, execute and parse).
+You have two options for running KUnit tests: either build the kernel with KUnit
+enabled and manually parse the results (see
+<a class="reference internal" href="run_manual.html"><span class="doc">Run Tests without kunit_tool</span></a>) or use <code class="docutils literal notranslate"><span class="pre">kunit_tool</span></code>
+(see <a class="reference internal" href="run_wrapper.html"><span class="doc">Running tests with kunit_tool</span></a>).</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">configure</span></code> command generates the kernel <code class="docutils literal notranslate"><span class="pre">.config</span></code> from a
+<code class="docutils literal notranslate"><span class="pre">.kunitconfig</span></code> file (and any architecture-specific options).
+The Python scripts available in <code class="docutils literal notranslate"><span class="pre">qemu_configs</span></code> folder
+(for example, <code class="docutils literal notranslate"><span class="pre">tools/testing/kunit/qemu</span> <span class="pre">configs/powerpc.py</span></code>) contains
+additional configuration options for specific architectures.
+It parses both the existing <code class="docutils literal notranslate"><span class="pre">.config</span></code> and the <code class="docutils literal notranslate"><span class="pre">.kunitconfig</span></code> files
+to ensure that <code class="docutils literal notranslate"><span class="pre">.config</span></code> is a superset of <code class="docutils literal notranslate"><span class="pre">.kunitconfig</span></code>.
+If not, it will combine the two and run <code class="docutils literal notranslate"><span class="pre">make</span> <span class="pre">olddefconfig</span></code> to regenerate
+the <code class="docutils literal notranslate"><span class="pre">.config</span></code> file. It then checks to see if <code class="docutils literal notranslate"><span class="pre">.config</span></code> has become a superset.
+This verifies that all the Kconfig dependencies are correctly specified in the
+file <code class="docutils literal notranslate"><span class="pre">.kunitconfig</span></code>. The <code class="docutils literal notranslate"><span class="pre">kunit_config.py</span></code> script contains the code for parsing
+Kconfigs. The code which runs <code class="docutils literal notranslate"><span class="pre">make</span> <span class="pre">olddefconfig</span></code> is part of the
+<code class="docutils literal notranslate"><span class="pre">kunit_kernel.py</span></code> script. You can invoke this command through:
+<code class="docutils literal notranslate"><span class="pre">./tools/testing/kunit/kunit.py</span> <span class="pre">config</span></code> and
+generate a <code class="docutils literal notranslate"><span class="pre">.config</span></code> file.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">build</span></code> runs <code class="docutils literal notranslate"><span class="pre">make</span></code> on the kernel tree with required options
+(depends on the architecture and some options, for example: build_dir)
+and reports any errors.
+To build a KUnit kernel from the current <code class="docutils literal notranslate"><span class="pre">.config</span></code>, you can use the
+<code class="docutils literal notranslate"><span class="pre">build</span></code> argument: <code class="docutils literal notranslate"><span class="pre">./tools/testing/kunit/kunit.py</span> <span class="pre">build</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">exec</span></code> command executes kernel results either directly (using
+User-mode Linux configuration), or through an emulator such
+as QEMU. It reads results from the log using standard
+output (stdout), and passes them to <code class="docutils literal notranslate"><span class="pre">parse</span></code> to be parsed.
+If you already have built a kernel with built-in KUnit tests,
+you can run the kernel and display the test results with the <code class="docutils literal notranslate"><span class="pre">exec</span></code>
+argument: <code class="docutils literal notranslate"><span class="pre">./tools/testing/kunit/kunit.py</span> <span class="pre">exec</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">parse</span></code> extracts the KTAP output from a kernel log, parses
+the test results, and prints a summary. For failed tests, any
+diagnostic output will be included.</p></li>
+</ul>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">KUnit Architecture</a><ul>
+<li><a class="reference internal" href="#in-kernel-testing-framework">In-Kernel Testing Framework</a><ul>
+<li><a class="reference internal" href="#test-cases">Test Cases</a></li>
+<li><a class="reference internal" href="#test-suites">Test Suites</a></li>
+<li><a class="reference internal" href="#executor">Executor</a></li>
+<li><a class="reference internal" href="#assertion-macros">Assertion Macros</a></li>
+<li><a class="reference internal" href="#test-result-reporting">Test Result Reporting</a></li>
+<li><a class="reference internal" href="#parameterized-tests">Parameterized Tests</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#kunit-tool-command-line-test-harness">kunit_tool (Command-line Test Harness)</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/dev-tools/kunit/architecture.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/dev-tools/kunit/architecture.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

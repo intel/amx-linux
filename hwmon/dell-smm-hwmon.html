@@ -1,0 +1,595 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Kernel driver dell-smm-hwmon &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Kernel driver dme1737" href="dme1737.html" />
+    <link rel="prev" title="Kernel driver da9055" href="da9055.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="kernel-driver-dell-smm-hwmon">
+<h1>Kernel driver dell-smm-hwmon<a class="headerlink" href="#kernel-driver-dell-smm-hwmon" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">Copyright</dt>
+<dd class="field-odd"><p>© 2002-2005 Massimo Dal Zotto &lt;<a class="reference external" href="mailto:dz&#37;&#52;&#48;debian&#46;org">dz<span>&#64;</span>debian<span>&#46;</span>org</a>&gt;</p>
+</dd>
+<dt class="field-even">Copyright</dt>
+<dd class="field-even"><p>© 2019 Giovanni Mascellani &lt;<a class="reference external" href="mailto:gio&#37;&#52;&#48;debian&#46;org">gio<span>&#64;</span>debian<span>&#46;</span>org</a>&gt;</p>
+</dd>
+</dl>
+<section id="description">
+<h2>Description<a class="headerlink" href="#description" title="Permalink to this headline">¶</a></h2>
+<p>On many Dell laptops the System Management Mode (SMM) BIOS can be
+queried for the status of fans and temperature sensors.  Userspace
+utilities like <code class="docutils literal notranslate"><span class="pre">sensors</span></code> can be used to return the readings. The
+userspace suite <a class="reference external" href="https://github.com/vitorafsr/i8kutils">i8kutils</a> can also be used to read the sensors and
+automatically adjust fan speed (please notice that it currently uses
+the deprecated <code class="docutils literal notranslate"><span class="pre">/proc/i8k</span></code> interface).</p>
+<blockquote>
+<div></div></blockquote>
+</section>
+<section id="sysfs-interface">
+<h2><code class="docutils literal notranslate"><span class="pre">sysfs</span></code> interface<a class="headerlink" href="#sysfs-interface" title="Permalink to this headline">¶</a></h2>
+<p>Temperature sensors and fans can be queried and set via the standard
+<code class="docutils literal notranslate"><span class="pre">hwmon</span></code> interface on <code class="docutils literal notranslate"><span class="pre">sysfs</span></code>, under the directory
+<code class="docutils literal notranslate"><span class="pre">/sys/class/hwmon/hwmonX</span></code> for some value of <code class="docutils literal notranslate"><span class="pre">X</span></code> (search for the
+<code class="docutils literal notranslate"><span class="pre">X</span></code> such that <code class="docutils literal notranslate"><span class="pre">/sys/class/hwmon/hwmonX/name</span></code> has content
+<code class="docutils literal notranslate"><span class="pre">dell_smm</span></code>). A number of other attributes can be read or written:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 40%" />
+<col style="width: 9%" />
+<col style="width: 51%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Name</p></th>
+<th class="head"><p>Perm</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>fan[1-3]_input</p></td>
+<td><p>RO</p></td>
+<td><p>Fan speed in RPM.</p></td>
+</tr>
+<tr class="row-odd"><td><p>fan[1-3]_label</p></td>
+<td><p>RO</p></td>
+<td><p>Fan label.</p></td>
+</tr>
+<tr class="row-even"><td><p>fan[1-3]_min</p></td>
+<td><p>RO</p></td>
+<td><p>Minimal Fan speed in RPM</p></td>
+</tr>
+<tr class="row-odd"><td><p>fan[1-3]_max</p></td>
+<td><p>RO</p></td>
+<td><p>Maximal Fan speed in RPM</p></td>
+</tr>
+<tr class="row-even"><td><p>fan[1-3]_target</p></td>
+<td><p>RO</p></td>
+<td><p>Expected Fan speed in RPM</p></td>
+</tr>
+<tr class="row-odd"><td><p>pwm[1-3]</p></td>
+<td><p>RW</p></td>
+<td><p>Control the fan PWM duty-cycle.</p></td>
+</tr>
+<tr class="row-even"><td><p>pwm1_enable</p></td>
+<td><p>WO</p></td>
+<td><p>Enable or disable automatic BIOS fan
+control (not supported on all laptops,
+see below for details).</p></td>
+</tr>
+<tr class="row-odd"><td><p>temp[1-10]_input</p></td>
+<td><p>RO</p></td>
+<td><p>Temperature reading in milli-degrees
+Celsius.</p></td>
+</tr>
+<tr class="row-even"><td><p>temp[1-10]_label</p></td>
+<td><p>RO</p></td>
+<td><p>Temperature sensor label.</p></td>
+</tr>
+</tbody>
+</table>
+<p>Due to the nature of the SMM interface, each pwmX attribute controls
+fan number X.</p>
+</section>
+<section id="disabling-automatic-bios-fan-control">
+<h2>Disabling automatic BIOS fan control<a class="headerlink" href="#disabling-automatic-bios-fan-control" title="Permalink to this headline">¶</a></h2>
+<p>On some laptops the BIOS automatically sets fan speed every few
+seconds. Therefore the fan speed set by mean of this driver is quickly
+overwritten.</p>
+<p>There is experimental support for disabling automatic BIOS fan
+control, at least on laptops where the corresponding SMM command is
+known, by writing the value <code class="docutils literal notranslate"><span class="pre">1</span></code> in the attribute <code class="docutils literal notranslate"><span class="pre">pwm1_enable</span></code>
+(writing <code class="docutils literal notranslate"><span class="pre">2</span></code> enables automatic BIOS control again). Even if you have
+more than one fan, all of them are set to either enabled or disabled
+automatic fan control at the same time and, notwithstanding the name,
+<code class="docutils literal notranslate"><span class="pre">pwm1_enable</span></code> sets automatic control for all fans.</p>
+<p>If <code class="docutils literal notranslate"><span class="pre">pwm1_enable</span></code> is not available, then it means that SMM codes for
+enabling and disabling automatic BIOS fan control are not whitelisted
+for your hardware. It is possible that codes that work for other
+laptops actually work for yours as well, or that you have to discover
+new codes.</p>
+<p>Check the list <code class="docutils literal notranslate"><span class="pre">i8k_whitelist_fan_control</span></code> in file
+<code class="docutils literal notranslate"><span class="pre">drivers/hwmon/dell-smm-hwmon.c</span></code> in the kernel tree: as a first
+attempt you can try to add your machine and use an already-known code
+pair. If, after recompiling the kernel, you see that <code class="docutils literal notranslate"><span class="pre">pwm1_enable</span></code>
+is present and works (i.e., you can manually control the fan speed),
+then please submit your finding as a kernel patch, so that other users
+can benefit from it. Please see
+<a class="reference internal" href="../process/submitting-patches.html#submittingpatches"><span class="std std-ref">Documentation/process/submitting-patches.rst</span></a>
+for information on submitting patches.</p>
+<p>If no known code works on your machine, you need to resort to do some
+probing, because unfortunately Dell does not publish datasheets for
+its SMM. You can experiment with the code in <a class="reference external" href="https://github.com/clopez/dellfan/">this repository</a> to
+probe the BIOS on your machine and discover the appropriate codes.</p>
+<blockquote>
+<div></div></blockquote>
+<p>Again, when you find new codes, we’d be happy to have your patches!</p>
+</section>
+<section id="thermal-interface">
+<h2><code class="docutils literal notranslate"><span class="pre">thermal</span></code> interface<a class="headerlink" href="#thermal-interface" title="Permalink to this headline">¶</a></h2>
+<p>The driver also exports the fans as thermal cooling devices with
+<code class="docutils literal notranslate"><span class="pre">type</span></code> set to <code class="docutils literal notranslate"><span class="pre">dell-smm-fan[1-3]</span></code>. This allows for easy fan control
+using one of the thermal governors.</p>
+</section>
+<section id="module-parameters">
+<h2>Module parameters<a class="headerlink" href="#module-parameters" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><dl class="simple">
+<dt>force:bool</dt><dd><p>Force loading without checking for supported
+models. (default: 0)</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>ignore_dmi:bool</dt><dd><p>Continue probing hardware even if DMI data does not
+match. (default: 0)</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>restricted:bool</dt><dd><p>Allow fan control only to processes with the
+<code class="docutils literal notranslate"><span class="pre">CAP_SYS_ADMIN</span></code> capability set or processes run
+as root when using the legacy <code class="docutils literal notranslate"><span class="pre">/proc/i8k</span></code>
+interface. In this case normal users will be able
+to read temperature and fan status but not to
+control the fan.  If your notebook is shared with
+other users and you don’t trust them you may want
+to use this option. (default: 1, only available
+with <code class="docutils literal notranslate"><span class="pre">CONFIG_I8K</span></code>)</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>power_status:bool</dt><dd><p>Report AC status in <code class="docutils literal notranslate"><span class="pre">/proc/i8k</span></code>. (default: 0,
+only available with <code class="docutils literal notranslate"><span class="pre">CONFIG_I8K</span></code>)</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>fan_mult:uint</dt><dd><p>Factor to multiply fan speed with. (default:
+autodetect)</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>fan_max:uint</dt><dd><p>Maximum configurable fan speed. (default:
+autodetect)</p>
+</dd>
+</dl>
+</li>
+</ul>
+</section>
+<section id="legacy-proc-interface">
+<h2>Legacy <code class="docutils literal notranslate"><span class="pre">/proc</span></code> interface<a class="headerlink" href="#legacy-proc-interface" title="Permalink to this headline">¶</a></h2>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>This interface is obsolete and deprecated and should not
+used in new applications. This interface is only
+available when kernel is compiled with option
+<code class="docutils literal notranslate"><span class="pre">CONFIG_I8K</span></code>.</p>
+</div>
+<p>The information provided by the kernel driver can be accessed by
+simply reading the <code class="docutils literal notranslate"><span class="pre">/proc/i8k</span></code> file. For example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ cat /proc/i8k
+1.0 A17 2J59L02 52 2 1 8040 6420 1 2
+</pre></div>
+</div>
+<p>The fields read from <code class="docutils literal notranslate"><span class="pre">/proc/i8k</span></code> are:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>1.0 A17 2J59L02 52 2 1 8040 6420 1 2
+|   |   |       |  | | |    |    | |
+|   |   |       |  | | |    |    | +------- 10. buttons status
+|   |   |       |  | | |    |    +--------- 9.  AC status
+|   |   |       |  | | |    +-------------- 8.  fan0 RPM
+|   |   |       |  | | +------------------- 7.  fan1 RPM
+|   |   |       |  | +--------------------- 6.  fan0 status
+|   |   |       |  +----------------------- 5.  fan1 status
+|   |   |       +-------------------------- 4.  temp0 reading (Celsius)
+|   |   +---------------------------------- 3.  Dell service tag (later known as &#39;serial number&#39;)
+|   +-------------------------------------- 2.  BIOS version
++------------------------------------------ 1.  /proc/i8k format version
+</pre></div>
+</div>
+<p>A negative value, for example -22, indicates that the BIOS doesn’t
+return the corresponding information. This is normal on some
+models/BIOSes.</p>
+<p>For performance reasons the <code class="docutils literal notranslate"><span class="pre">/proc/i8k</span></code> doesn’t report by default
+the AC status since this SMM call takes a long time to execute and is
+not really needed.  If you want to see the ac status in <code class="docutils literal notranslate"><span class="pre">/proc/i8k</span></code>
+you must explictitly enable this option by passing the
+<code class="docutils literal notranslate"><span class="pre">power_status=1</span></code> parameter to insmod. If AC status is not
+available -1 is printed instead.</p>
+<p>The driver provides also an ioctl interface which can be used to
+obtain the same information and to control the fan status. The ioctl
+interface can be accessed from C programs or from shell using the
+i8kctl utility. See the source file of <code class="docutils literal notranslate"><span class="pre">i8kutils</span></code> for more
+information on how to use the ioctl interface.</p>
+</section>
+<section id="smm-interface">
+<h2>SMM Interface<a class="headerlink" href="#smm-interface" title="Permalink to this headline">¶</a></h2>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>The SMM interface was reverse-engineered by trial-and-error
+since Dell did not provide any Documentation,
+please keep that in mind.</p>
+</div>
+<p>The driver uses the SMM interface to send commands to the system BIOS.
+This interface is normally used by Dell’s 32-bit diagnostic program or
+on newer notebook models by the buildin BIOS diagnostics.
+The SMM is triggered by writing to the special ioports <code class="docutils literal notranslate"><span class="pre">0xb2</span></code> and <code class="docutils literal notranslate"><span class="pre">0x84</span></code>,
+and may cause short hangs when the BIOS code is taking too long to
+execute.</p>
+<p>The SMM handler inside the system BIOS looks at the contents of the
+<code class="docutils literal notranslate"><span class="pre">eax</span></code>, <code class="docutils literal notranslate"><span class="pre">ebx</span></code>, <code class="docutils literal notranslate"><span class="pre">ecx</span></code>, <code class="docutils literal notranslate"><span class="pre">edx</span></code>, <code class="docutils literal notranslate"><span class="pre">esi</span></code> and <code class="docutils literal notranslate"><span class="pre">edi</span></code> registers.
+Each register has a special purpose:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 31%" />
+<col style="width: 69%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Register</p></th>
+<th class="head"><p>Purpose</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>eax</p></td>
+<td><p>Holds the command code before SMM,
+holds the first result after SMM.</p></td>
+</tr>
+<tr class="row-odd"><td><p>ebx</p></td>
+<td><p>Holds the arguments.</p></td>
+</tr>
+<tr class="row-even"><td><p>ecx</p></td>
+<td><p>Unknown, set to 0.</p></td>
+</tr>
+<tr class="row-odd"><td><p>edx</p></td>
+<td><p>Holds the second result after SMM.</p></td>
+</tr>
+<tr class="row-even"><td><p>esi</p></td>
+<td><p>Unknown, set to 0.</p></td>
+</tr>
+<tr class="row-odd"><td><p>edi</p></td>
+<td><p>Unknown, set to 0.</p></td>
+</tr>
+</tbody>
+</table>
+<p>The SMM handler can signal a failure by either:</p>
+<ul class="simple">
+<li><p>setting the lower sixteen bits of <code class="docutils literal notranslate"><span class="pre">eax</span></code> to <code class="docutils literal notranslate"><span class="pre">0xffff</span></code></p></li>
+<li><p>not modifying <code class="docutils literal notranslate"><span class="pre">eax</span></code> at all</p></li>
+<li><p>setting the carry flag</p></li>
+</ul>
+</section>
+<section id="smm-command-codes">
+<h2>SMM command codes<a class="headerlink" href="#smm-command-codes" title="Permalink to this headline">¶</a></h2>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 17%" />
+<col style="width: 27%" />
+<col style="width: 56%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Command Code</p></th>
+<th class="head"><p>Command Name</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">0x0025</span></code></p></td>
+<td><p>Get Fn key status</p></td>
+<td><p>Returns the Fn key pressed after SMM:</p>
+<ul class="simple">
+<li><p>9th bit in <code class="docutils literal notranslate"><span class="pre">eax</span></code> indicates Volume up</p></li>
+<li><p>10th bit in <code class="docutils literal notranslate"><span class="pre">eax</span></code> indicates Volume down</p></li>
+<li><p>both bits indicate Volume mute</p></li>
+</ul>
+</td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">0xa069</span></code></p></td>
+<td><p>Get power status</p></td>
+<td><p>Returns current power status after SMM:</p>
+<ul class="simple">
+<li><p>1st bit in <code class="docutils literal notranslate"><span class="pre">eax</span></code> indicates Battery connected</p></li>
+<li><p>3th bit in <code class="docutils literal notranslate"><span class="pre">eax</span></code> indicates AC connected</p></li>
+</ul>
+</td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">0x00a3</span></code></p></td>
+<td><p>Get fan state</p></td>
+<td><p>Returns current fan state after SMM:</p>
+<ul class="simple">
+<li><p>1st byte in <code class="docutils literal notranslate"><span class="pre">eax</span></code> holds the current
+fan state (0 - 2 or 3)</p></li>
+</ul>
+</td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">0x01a3</span></code></p></td>
+<td><p>Set fan state</p></td>
+<td><p>Sets the fan speed:</p>
+<ul class="simple">
+<li><p>1st byte in <code class="docutils literal notranslate"><span class="pre">ebx</span></code> holds the fan number</p></li>
+<li><p>2nd byte in <code class="docutils literal notranslate"><span class="pre">ebx</span></code> holds the desired
+fan state (0 - 2 or 3)</p></li>
+</ul>
+</td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">0x02a3</span></code></p></td>
+<td><p>Get fan speed</p></td>
+<td><p>Returns the current fan speed in RPM:</p>
+<ul class="simple">
+<li><p>1st byte in <code class="docutils literal notranslate"><span class="pre">ebx</span></code> holds the fan number</p></li>
+<li><p>1st word in <code class="docutils literal notranslate"><span class="pre">eax</span></code> holds the current
+fan speed in RPM (after SMM)</p></li>
+</ul>
+</td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">0x03a3</span></code></p></td>
+<td><p>Get fan type</p></td>
+<td><p>Returns the fan type:</p>
+<ul class="simple">
+<li><p>1st byte in <code class="docutils literal notranslate"><span class="pre">ebx</span></code> holds the fan number</p></li>
+<li><p>1st byte in <code class="docutils literal notranslate"><span class="pre">eax</span></code> holds the
+fan type (after SMM):</p>
+<ul>
+<li><p>5th bit indicates docking fan</p></li>
+<li><p>1 indicates Processor fan</p></li>
+<li><p>2 indicates Motherboard fan</p></li>
+<li><p>3 indicates Video fan</p></li>
+<li><p>4 indicates Power supply fan</p></li>
+<li><p>5 indicates Chipset fan</p></li>
+<li><p>6 indicates other fan type</p></li>
+</ul>
+</li>
+</ul>
+</td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">0x04a3</span></code></p></td>
+<td><p>Get nominal fan speed</p></td>
+<td><p>Returns the nominal RPM in each fan state:</p>
+<ul class="simple">
+<li><p>1st byte in <code class="docutils literal notranslate"><span class="pre">ebx</span></code> holds the fan number</p></li>
+<li><p>2nd byte in <code class="docutils literal notranslate"><span class="pre">ebx</span></code> holds the fan state
+in question (0 - 2 or 3)</p></li>
+<li><p>1st word in <code class="docutils literal notranslate"><span class="pre">eax</span></code> holds the nominal
+fan speed in RPM (after SMM)</p></li>
+</ul>
+</td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">0x05a3</span></code></p></td>
+<td><p>Get fan speed tolerance</p></td>
+<td><p>Returns the speed tolerance for each fan state:</p>
+<ul class="simple">
+<li><p>1st byte in <code class="docutils literal notranslate"><span class="pre">ebx</span></code> holds the fan number</p></li>
+<li><p>2nd byte in <code class="docutils literal notranslate"><span class="pre">ebx</span></code> holds the fan state
+in question (0 - 2 or 3)</p></li>
+<li><p>1st byte in <code class="docutils literal notranslate"><span class="pre">eax</span></code> returns the speed
+tolerance</p></li>
+</ul>
+</td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">0x10a3</span></code></p></td>
+<td><p>Get sensor temperature</p></td>
+<td><p>Returns the measured temperature:</p>
+<ul class="simple">
+<li><p>1st byte in <code class="docutils literal notranslate"><span class="pre">ebx</span></code> holds the sensor number</p></li>
+<li><p>1st byte in <code class="docutils literal notranslate"><span class="pre">eax</span></code> holds the measured
+temperature (after SMM)</p></li>
+</ul>
+</td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">0x11a3</span></code></p></td>
+<td><p>Get sensor type</p></td>
+<td><p>Returns the sensor type:</p>
+<ul class="simple">
+<li><p>1st byte in <code class="docutils literal notranslate"><span class="pre">ebx</span></code> holds the sensor number</p></li>
+<li><p>1st byte in <code class="docutils literal notranslate"><span class="pre">eax</span></code> holds the
+temperature type (after SMM):</p>
+<ul>
+<li><p>1 indicates CPU sensor</p></li>
+<li><p>2 indicates GPU sensor</p></li>
+<li><p>3 indicates SODIMM sensor</p></li>
+<li><p>4 indicates other sensor type</p></li>
+<li><p>5 indicates Ambient sensor</p></li>
+<li><p>6 indicates other sensor type</p></li>
+</ul>
+</li>
+</ul>
+</td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">0xfea3</span></code></p></td>
+<td><p>Get SMM signature</p></td>
+<td><p>Returns Dell signature if interface
+is supported (after SMM):</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">eax</span></code> holds 1145651527
+(0x44494147 or “DIAG”)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">edx</span></code> holds 1145392204
+(0x44454c4c or “DELL”)</p></li>
+</ul>
+</td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">0xffa3</span></code></p></td>
+<td><p>Get SMM signature</p></td>
+<td><p>Same as <code class="docutils literal notranslate"><span class="pre">0xfea3</span></code>, check both.</p></td>
+</tr>
+</tbody>
+</table>
+<p>There are additional commands for enabling (<code class="docutils literal notranslate"><span class="pre">0x31a3</span></code> or <code class="docutils literal notranslate"><span class="pre">0x35a3</span></code>) and
+disabling (<code class="docutils literal notranslate"><span class="pre">0x30a3</span></code> or <code class="docutils literal notranslate"><span class="pre">0x34a3</span></code>) automatic fan speed control.
+The commands are however causing severe sideeffects on many machines, so
+they are not used by default.</p>
+<p>On several machines (Inspiron 3505, Precision 490, Vostro 1720, …), the
+fans supports a 4th “magic” state, which signals the BIOS that automatic
+fan control should be enabled for a specific fan.
+However there are also some machines who do support a 4th regular fan state too,
+but in case of the “magic” state, the nominal RPM reported for this state is a
+placeholder value, which however is not always detectable.</p>
+</section>
+<section id="firmware-bugs">
+<h2>Firmware Bugs<a class="headerlink" href="#firmware-bugs" title="Permalink to this headline">¶</a></h2>
+<p>The SMM calls can behave erratic on some machines:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 76%" />
+<col style="width: 24%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Firmware Bug</p></th>
+<th class="head"><p>Affected Machines</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Reading of fan states return spurious errors.</p></td>
+<td><p>Precision 490</p></td>
+</tr>
+<tr class="row-odd"><td><p>Reading of fan types causes erratic fan behaviour.</p></td>
+<td><p>Studio XPS 8000</p>
+<p>Studio XPS 8100</p>
+<p>Inspiron 580</p>
+<p>Inspiron 3505</p>
+</td>
+</tr>
+<tr class="row-even"><td><p>Fan-related SMM calls take too long (about 500ms).</p></td>
+<td><p>Inspiron 7720</p>
+<p>Vostro 3360</p>
+<p>XPS 13 9333</p>
+<p>XPS 15 L502X</p>
+</td>
+</tr>
+</tbody>
+</table>
+<p>In case you experience similar issues on your Dell machine, please
+submit a bugreport on bugzilla to we can apply workarounds.</p>
+</section>
+<section id="limitations">
+<h2>Limitations<a class="headerlink" href="#limitations" title="Permalink to this headline">¶</a></h2>
+<p>The SMM calls can take too long to execute on some machines, causing
+short hangs and/or audio glitches.
+Also the fan state needs to be restored after suspend, as well as
+the automatic mode settings.
+When reading a temperature sensor, values above 127 degrees indicate
+a BIOS read error or a deactivated sensor.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Kernel driver dell-smm-hwmon</a><ul>
+<li><a class="reference internal" href="#description">Description</a></li>
+<li><a class="reference internal" href="#sysfs-interface"><code class="docutils literal notranslate"><span class="pre">sysfs</span></code> interface</a></li>
+<li><a class="reference internal" href="#disabling-automatic-bios-fan-control">Disabling automatic BIOS fan control</a></li>
+<li><a class="reference internal" href="#thermal-interface"><code class="docutils literal notranslate"><span class="pre">thermal</span></code> interface</a></li>
+<li><a class="reference internal" href="#module-parameters">Module parameters</a></li>
+<li><a class="reference internal" href="#legacy-proc-interface">Legacy <code class="docutils literal notranslate"><span class="pre">/proc</span></code> interface</a></li>
+<li><a class="reference internal" href="#smm-interface">SMM Interface</a></li>
+<li><a class="reference internal" href="#smm-command-codes">SMM command codes</a></li>
+<li><a class="reference internal" href="#firmware-bugs">Firmware Bugs</a></li>
+<li><a class="reference internal" href="#limitations">Limitations</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/hwmon/dell-smm-hwmon.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/hwmon/dell-smm-hwmon.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,381 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Asynchronous Transfers/Transforms API &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Asymmetric / Public-key Cryptography Key Type" href="asymmetric-keys.html" />
+    <link rel="prev" title="Kernel Crypto API Architecture" href="architecture.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="asynchronous-transfers-transforms-api">
+<h1>Asynchronous Transfers/Transforms API<a class="headerlink" href="#asynchronous-transfers-transforms-api" title="Permalink to this headline">¶</a></h1>
+<section id="introduction">
+<h2>1. Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>The async_tx API provides methods for describing a chain of asynchronous
+bulk memory transfers/transforms with support for inter-transactional
+dependencies.  It is implemented as a dmaengine client that smooths over
+the details of different hardware offload engine implementations.  Code
+that is written to the API can optimize for asynchronous operation and
+the API will fit the chain of operations to the available offload
+resources.</p>
+</section>
+<section id="genealogy">
+<h2>2.Genealogy<a class="headerlink" href="#genealogy" title="Permalink to this headline">¶</a></h2>
+<p>The API was initially designed to offload the memory copy and
+xor-parity-calculations of the md-raid5 driver using the offload engines
+present in the Intel(R) Xscale series of I/O processors.  It also built
+on the ‘dmaengine’ layer developed for offloading memory copies in the
+network stack using Intel(R) I/OAT engines.  The following design
+features surfaced as a result:</p>
+<ol class="arabic simple">
+<li><p>implicit synchronous path: users of the API do not need to know if
+the platform they are running on has offload capabilities.  The
+operation will be offloaded when an engine is available and carried out
+in software otherwise.</p></li>
+<li><p>cross channel dependency chains: the API allows a chain of dependent
+operations to be submitted, like xor-&gt;copy-&gt;xor in the raid5 case.  The
+API automatically handles cases where the transition from one operation
+to another implies a hardware channel switch.</p></li>
+<li><p>dmaengine extensions to support multiple clients and operation types
+beyond ‘memcpy’</p></li>
+</ol>
+</section>
+<section id="usage">
+<h2>3. Usage<a class="headerlink" href="#usage" title="Permalink to this headline">¶</a></h2>
+<section id="general-format-of-the-api">
+<h3>3.1 General format of the API<a class="headerlink" href="#general-format-of-the-api" title="Permalink to this headline">¶</a></h3>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct dma_async_tx_descriptor *
+async_&lt;operation&gt;(&lt;op specific parameters&gt;, struct async_submit ctl *submit)
+</pre></div>
+</div>
+</section>
+<section id="supported-operations">
+<h3>3.2 Supported operations<a class="headerlink" href="#supported-operations" title="Permalink to this headline">¶</a></h3>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 11%" />
+<col style="width: 89%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>memcpy</p></td>
+<td><p>memory copy between a source and a destination buffer</p></td>
+</tr>
+<tr class="row-even"><td><p>memset</p></td>
+<td><p>fill a destination buffer with a byte value</p></td>
+</tr>
+<tr class="row-odd"><td><p>xor</p></td>
+<td><p>xor a series of source buffers and write the result to a
+destination buffer</p></td>
+</tr>
+<tr class="row-even"><td><p>xor_val</p></td>
+<td><p>xor a series of source buffers and set a flag if the
+result is zero.  The implementation attempts to prevent
+writes to memory</p></td>
+</tr>
+<tr class="row-odd"><td><p>pq</p></td>
+<td><p>generate the p+q (raid6 syndrome) from a series of source buffers</p></td>
+</tr>
+<tr class="row-even"><td><p>pq_val</p></td>
+<td><p>validate that a p and or q buffer are in sync with a given series of
+sources</p></td>
+</tr>
+<tr class="row-odd"><td><p>datap</p></td>
+<td><p>(raid6_datap_recov) recover a raid6 data block and the p block
+from the given sources</p></td>
+</tr>
+<tr class="row-even"><td><p>2data</p></td>
+<td><p>(raid6_2data_recov) recover 2 raid6 data blocks from the given
+sources</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="descriptor-management">
+<h3>3.3 Descriptor management<a class="headerlink" href="#descriptor-management" title="Permalink to this headline">¶</a></h3>
+<p>The return value is non-NULL and points to a ‘descriptor’ when the operation
+has been queued to execute asynchronously.  Descriptors are recycled
+resources, under control of the offload engine driver, to be reused as
+operations complete.  When an application needs to submit a chain of
+operations it must guarantee that the descriptor is not automatically recycled
+before the dependency is submitted.  This requires that all descriptors be
+acknowledged by the application before the offload engine driver is allowed to
+recycle (or free) the descriptor.  A descriptor can be acked by one of the
+following methods:</p>
+<ol class="arabic simple">
+<li><p>setting the ASYNC_TX_ACK flag if no child operations are to be submitted</p></li>
+<li><p>submitting an unacknowledged descriptor as a dependency to another
+async_tx call will implicitly set the acknowledged state.</p></li>
+<li><p>calling async_tx_ack() on the descriptor.</p></li>
+</ol>
+</section>
+<section id="when-does-the-operation-execute">
+<h3>3.4 When does the operation execute?<a class="headerlink" href="#when-does-the-operation-execute" title="Permalink to this headline">¶</a></h3>
+<p>Operations do not immediately issue after return from the
+async_&lt;operation&gt; call.  Offload engine drivers batch operations to
+improve performance by reducing the number of mmio cycles needed to
+manage the channel.  Once a driver-specific threshold is met the driver
+automatically issues pending operations.  An application can force this
+event by calling async_tx_issue_pending_all().  This operates on all
+channels since the application has no knowledge of channel to operation
+mapping.</p>
+</section>
+<section id="when-does-the-operation-complete">
+<h3>3.5 When does the operation complete?<a class="headerlink" href="#when-does-the-operation-complete" title="Permalink to this headline">¶</a></h3>
+<p>There are two methods for an application to learn about the completion
+of an operation.</p>
+<ol class="arabic simple">
+<li><p>Call dma_wait_for_async_tx().  This call causes the CPU to spin while
+it polls for the completion of the operation.  It handles dependency
+chains and issuing pending operations.</p></li>
+<li><p>Specify a completion callback.  The callback routine runs in tasklet
+context if the offload engine driver supports interrupts, or it is
+called in application context if the operation is carried out
+synchronously in software.  The callback can be set in the call to
+async_&lt;operation&gt;, or when the application needs to submit a chain of
+unknown length it can use the async_trigger_callback() routine to set a
+completion interrupt/callback at the end of the chain.</p></li>
+</ol>
+</section>
+<section id="constraints">
+<h3>3.6 Constraints<a class="headerlink" href="#constraints" title="Permalink to this headline">¶</a></h3>
+<ol class="arabic simple">
+<li><p>Calls to async_&lt;operation&gt; are not permitted in IRQ context.  Other
+contexts are permitted provided constraint #2 is not violated.</p></li>
+<li><p>Completion callback routines cannot submit new operations.  This
+results in recursion in the synchronous case and spin_locks being
+acquired twice in the asynchronous case.</p></li>
+</ol>
+</section>
+<section id="example">
+<h3>3.7 Example<a class="headerlink" href="#example" title="Permalink to this headline">¶</a></h3>
+<p>Perform a xor-&gt;copy-&gt;xor operation where each operation depends on the
+result from the previous operation:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void callback(void *param)
+{
+        struct completion *cmp = param;
+
+        complete(cmp);
+}
+
+void run_xor_copy_xor(struct page **xor_srcs,
+                    int xor_src_cnt,
+                    struct page *xor_dest,
+                    size_t xor_len,
+                    struct page *copy_src,
+                    struct page *copy_dest,
+                    size_t copy_len)
+{
+        struct dma_async_tx_descriptor *tx;
+        addr_conv_t addr_conv[xor_src_cnt];
+        struct async_submit_ctl submit;
+        addr_conv_t addr_conv[NDISKS];
+        struct completion cmp;
+
+        init_async_submit(&amp;submit, ASYNC_TX_XOR_DROP_DST, NULL, NULL, NULL,
+                        addr_conv);
+        tx = async_xor(xor_dest, xor_srcs, 0, xor_src_cnt, xor_len, &amp;submit)
+
+        submit-&gt;depend_tx = tx;
+        tx = async_memcpy(copy_dest, copy_src, 0, 0, copy_len, &amp;submit);
+
+        init_completion(&amp;cmp);
+        init_async_submit(&amp;submit, ASYNC_TX_XOR_DROP_DST | ASYNC_TX_ACK, tx,
+                        callback, &amp;cmp, addr_conv);
+        tx = async_xor(xor_dest, xor_srcs, 0, xor_src_cnt, xor_len, &amp;submit);
+
+        async_tx_issue_pending_all();
+
+        wait_for_completion(&amp;cmp);
+}
+</pre></div>
+</div>
+<p>See include/linux/async_tx.h for more information on the flags.  See the
+ops_run_* and ops_complete_* routines in drivers/md/raid5.c for more
+implementation examples.</p>
+</section>
+</section>
+<section id="driver-development-notes">
+<h2>4. Driver Development Notes<a class="headerlink" href="#driver-development-notes" title="Permalink to this headline">¶</a></h2>
+<section id="conformance-points">
+<h3>4.1 Conformance points<a class="headerlink" href="#conformance-points" title="Permalink to this headline">¶</a></h3>
+<p>There are a few conformance points required in dmaengine drivers to
+accommodate assumptions made by applications using the async_tx API:</p>
+<ol class="arabic simple">
+<li><p>Completion callbacks are expected to happen in tasklet context</p></li>
+<li><p>dma_async_tx_descriptor fields are never manipulated in IRQ context</p></li>
+<li><p>Use async_tx_run_dependencies() in the descriptor clean up path to
+handle submission of dependent operations</p></li>
+</ol>
+</section>
+<section id="my-application-needs-exclusive-control-of-hardware-channels">
+<h3>4.2 “My application needs exclusive control of hardware channels”<a class="headerlink" href="#my-application-needs-exclusive-control-of-hardware-channels" title="Permalink to this headline">¶</a></h3>
+<p>Primarily this requirement arises from cases where a DMA engine driver
+is being used to support device-to-memory operations.  A channel that is
+performing these operations cannot, for many platform specific reasons,
+be shared.  For these cases the dma_request_channel() interface is
+provided.</p>
+<p>The interface is:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct dma_chan *dma_request_channel(dma_cap_mask_t mask,
+                                     dma_filter_fn filter_fn,
+                                     void *filter_param);
+</pre></div>
+</div>
+<p>Where dma_filter_fn is defined as:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>typedef bool (*dma_filter_fn)(struct dma_chan *chan, void *filter_param);
+</pre></div>
+</div>
+<p>When the optional ‘filter_fn’ parameter is set to NULL
+dma_request_channel simply returns the first channel that satisfies the
+capability mask.  Otherwise, when the mask parameter is insufficient for
+specifying the necessary channel, the filter_fn routine can be used to
+disposition the available channels in the system. The filter_fn routine
+is called once for each free channel in the system.  Upon seeing a
+suitable channel filter_fn returns DMA_ACK which flags that channel to
+be the return value from dma_request_channel.  A channel allocated via
+this interface is exclusive to the caller, until dma_release_channel()
+is called.</p>
+<p>The DMA_PRIVATE capability flag is used to tag dma devices that should
+not be used by the general-purpose allocator.  It can be set at
+initialization time if it is known that a channel will always be
+private.  Alternatively, it is set when dma_request_channel() finds an
+unused “public” channel.</p>
+<p>A couple caveats to note when implementing a driver and consumer:</p>
+<ol class="arabic simple">
+<li><p>Once a channel has been privately allocated it will no longer be
+considered by the general-purpose allocator even after a call to
+dma_release_channel().</p></li>
+<li><p>Since capabilities are specified at the device level a dma_device
+with multiple channels will either have all channels public, or all
+channels private.</p></li>
+</ol>
+</section>
+<section id="source">
+<h3>5. Source<a class="headerlink" href="#source" title="Permalink to this headline">¶</a></h3>
+<dl class="simple">
+<dt>include/linux/dmaengine.h:</dt><dd><p>core header file for DMA drivers and api users</p>
+</dd>
+<dt>drivers/dma/dmaengine.c:</dt><dd><p>offload engine channel management routines</p>
+</dd>
+<dt>drivers/dma/:</dt><dd><p>location for offload engine drivers</p>
+</dd>
+<dt>include/linux/async_tx.h:</dt><dd><p>core header file for the async_tx api</p>
+</dd>
+<dt>crypto/async_tx/async_tx.c:</dt><dd><p>async_tx interface to dmaengine and common code</p>
+</dd>
+<dt>crypto/async_tx/async_memcpy.c:</dt><dd><p>copy offload</p>
+</dd>
+<dt>crypto/async_tx/async_xor.c:</dt><dd><p>xor and xor zero sum offload</p>
+</dd>
+</dl>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Asynchronous Transfers/Transforms API</a><ul>
+<li><a class="reference internal" href="#introduction">1. Introduction</a></li>
+<li><a class="reference internal" href="#genealogy">2.Genealogy</a></li>
+<li><a class="reference internal" href="#usage">3. Usage</a><ul>
+<li><a class="reference internal" href="#general-format-of-the-api">3.1 General format of the API</a></li>
+<li><a class="reference internal" href="#supported-operations">3.2 Supported operations</a></li>
+<li><a class="reference internal" href="#descriptor-management">3.3 Descriptor management</a></li>
+<li><a class="reference internal" href="#when-does-the-operation-execute">3.4 When does the operation execute?</a></li>
+<li><a class="reference internal" href="#when-does-the-operation-complete">3.5 When does the operation complete?</a></li>
+<li><a class="reference internal" href="#constraints">3.6 Constraints</a></li>
+<li><a class="reference internal" href="#example">3.7 Example</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#driver-development-notes">4. Driver Development Notes</a><ul>
+<li><a class="reference internal" href="#conformance-points">4.1 Conformance points</a></li>
+<li><a class="reference internal" href="#my-application-needs-exclusive-control-of-hardware-channels">4.2 “My application needs exclusive control of hardware channels”</a></li>
+<li><a class="reference internal" href="#source">5. Source</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/crypto/async-tx-api.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/crypto/async-tx-api.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

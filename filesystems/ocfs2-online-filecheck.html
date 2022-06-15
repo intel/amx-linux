@@ -1,0 +1,200 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>OCFS2 file system - online file check &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Optimized MPEG Filesystem (OMFS)" href="omfs.html" />
+    <link rel="prev" title="OCFS2 filesystem" href="ocfs2.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="ocfs2-file-system-online-file-check">
+<h1>OCFS2 file system - online file check<a class="headerlink" href="#ocfs2-file-system-online-file-check" title="Permalink to this headline">¶</a></h1>
+<p>This document will describe OCFS2 online file check feature.</p>
+<section id="introduction">
+<h2>Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>OCFS2 is often used in high-availability systems. However, OCFS2 usually
+converts the filesystem to read-only when encounters an error. This may not be
+necessary, since turning the filesystem read-only would affect other running
+processes as well, decreasing availability.
+Then, a mount option (errors=continue) is introduced, which would return the
+-EIO errno to the calling process and terminate further processing so that the
+filesystem is not corrupted further. The filesystem is not converted to
+read-only, and the problematic file’s inode number is reported in the kernel
+log. The user can try to check/fix this file via online filecheck feature.</p>
+</section>
+<section id="scope">
+<h2>Scope<a class="headerlink" href="#scope" title="Permalink to this headline">¶</a></h2>
+<p>This effort is to check/fix small issues which may hinder day-to-day operations
+of a cluster filesystem by turning the filesystem read-only. The scope of
+checking/fixing is at the file level, initially for regular files and eventually
+to all files (including system files) of the filesystem.</p>
+<p>In case of directory to file links is incorrect, the directory inode is
+reported as erroneous.</p>
+<p>This feature is not suited for extravagant checks which involve dependency of
+other components of the filesystem, such as but not limited to, checking if the
+bits for file blocks in the allocation has been set. In case of such an error,
+the offline fsck should/would be recommended.</p>
+<p>Finally, such an operation/feature should not be automated lest the filesystem
+may end up with more damage than before the repair attempt. So, this has to
+be performed using user interaction and consent.</p>
+</section>
+<section id="user-interface">
+<h2>User interface<a class="headerlink" href="#user-interface" title="Permalink to this headline">¶</a></h2>
+<p>When there are errors in the OCFS2 filesystem, they are usually accompanied
+by the inode number which caused the error. This inode number would be the
+input to check/fix the file.</p>
+<p>There is a sysfs directory for each OCFS2 file system mounting:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/sys/fs/ocfs2/&lt;devname&gt;/filecheck
+</pre></div>
+</div>
+<p>Here, &lt;devname&gt; indicates the name of OCFS2 volume device which has been already
+mounted. The file above would accept inode numbers. This could be used to
+communicate with kernel space, tell which file(inode number) will be checked or
+fixed. Currently, three operations are supported, which includes checking
+inode, fixing inode and setting the size of result record history.</p>
+<ol class="arabic">
+<li><p>If you want to know what error exactly happened to &lt;inode&gt; before fixing, do:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># echo &quot;&lt;inode&gt;&quot; &gt; /sys/fs/ocfs2/&lt;devname&gt;/filecheck/check
+# cat /sys/fs/ocfs2/&lt;devname&gt;/filecheck/check
+</pre></div>
+</div>
+</li>
+</ol>
+<p>The output is like this:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>INO         DONE    ERROR
+39502               1       GENERATION
+
+&lt;INO&gt; lists the inode numbers.
+&lt;DONE&gt; indicates whether the operation has been finished.
+&lt;ERROR&gt; says what kind of errors was found. For the detailed error numbers,
+please refer to the file linux/fs/ocfs2/filecheck.h.
+</pre></div>
+</div>
+<ol class="arabic" start="2">
+<li><p>If you determine to fix this inode, do:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># echo &quot;&lt;inode&gt;&quot; &gt; /sys/fs/ocfs2/&lt;devname&gt;/filecheck/fix
+# cat /sys/fs/ocfs2/&lt;devname&gt;/filecheck/fix
+</pre></div>
+</div>
+</li>
+</ol>
+<p>The output is like this::</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>INO         DONE    ERROR
+39502               1       SUCCESS
+</pre></div>
+</div>
+<p>This time, the &lt;ERROR&gt; column indicates whether this fix is successful or not.</p>
+<p>3. The record cache is used to store the history of check/fix results. It’s
+default size is 10, and can be adjust between the range of 10 ~ 100. You can
+adjust the size like this:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># echo &quot;&lt;size&gt;&quot; &gt; /sys/fs/ocfs2/&lt;devname&gt;/filecheck/set
+</pre></div>
+</div>
+</section>
+<section id="fixing-stuff">
+<h2>Fixing stuff<a class="headerlink" href="#fixing-stuff" title="Permalink to this headline">¶</a></h2>
+<p>On receiving the inode, the filesystem would read the inode and the
+file metadata. In case of errors, the filesystem would fix the errors
+and report the problems it fixed in the kernel log. As a precautionary measure,
+the inode must first be checked for errors before performing a final fix.</p>
+<p>The inode and the result history will be maintained temporarily in a
+small linked list buffer which would contain the last (N) inodes
+fixed/checked, the detailed errors which were fixed/checked are printed in the
+kernel log.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">OCFS2 file system - online file check</a><ul>
+<li><a class="reference internal" href="#introduction">Introduction</a></li>
+<li><a class="reference internal" href="#scope">Scope</a></li>
+<li><a class="reference internal" href="#user-interface">User interface</a></li>
+<li><a class="reference internal" href="#fixing-stuff">Fixing stuff</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/filesystems/ocfs2-online-filecheck.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/filesystems/ocfs2-online-filecheck.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

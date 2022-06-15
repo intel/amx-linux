@@ -1,0 +1,156 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Suspend/Hibernation Notifiers &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Device Power Management Data Types" href="types.html" />
+    <link rel="prev" title="Device Power Management Basics" href="devices.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="suspend-hibernation-notifiers">
+<h1>Suspend/Hibernation Notifiers<a class="headerlink" href="#suspend-hibernation-notifiers" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">Copyright</dt>
+<dd class="field-odd"><p>© 2016 Intel Corporation</p>
+</dd>
+<dt class="field-even">Author</dt>
+<dd class="field-even"><p>Rafael J. Wysocki &lt;<a class="reference external" href="mailto:rafael&#46;j&#46;wysocki&#37;&#52;&#48;intel&#46;com">rafael<span>&#46;</span>j<span>&#46;</span>wysocki<span>&#64;</span>intel<span>&#46;</span>com</a>&gt;</p>
+</dd>
+</dl>
+<p>There are some operations that subsystems or drivers may want to carry out
+before hibernation/suspend or after restore/resume, but they require the system
+to be fully functional, so the drivers’ and subsystems’ <code class="docutils literal notranslate"><span class="pre">-&gt;suspend()</span></code> and
+<code class="docutils literal notranslate"><span class="pre">-&gt;resume()</span></code> or even <code class="docutils literal notranslate"><span class="pre">-&gt;prepare()</span></code> and <code class="docutils literal notranslate"><span class="pre">-&gt;complete()</span></code> callbacks are not
+suitable for this purpose.</p>
+<p>For example, device drivers may want to upload firmware to their devices after
+resume/restore, but they cannot do it by calling <a class="reference internal" href="../firmware/request_firmware.html#c.request_firmware" title="request_firmware"><code class="xref c c-func docutils literal notranslate"><span class="pre">request_firmware()</span></code></a>
+from their <code class="docutils literal notranslate"><span class="pre">-&gt;resume()</span></code> or <code class="docutils literal notranslate"><span class="pre">-&gt;complete()</span></code> callback routines (user land
+processes are frozen at these points).  The solution may be to load the firmware
+into memory before processes are frozen and upload it from there in the
+<code class="docutils literal notranslate"><span class="pre">-&gt;resume()</span></code> routine.  A suspend/hibernation notifier may be used for that.</p>
+<p>Subsystems or drivers having such needs can register suspend notifiers that
+will be called upon the following events by the PM core:</p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">PM_HIBERNATION_PREPARE</span></code></dt><dd><p>The system is going to hibernate, tasks will be frozen immediately. This
+is different from <code class="docutils literal notranslate"><span class="pre">PM_SUSPEND_PREPARE</span></code> below, because in this case
+additional work is done between the notifiers and the invocation of PM
+callbacks for the “freeze” transition.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">PM_POST_HIBERNATION</span></code></dt><dd><p>The system memory state has been restored from a hibernation image or an
+error occurred during hibernation.  Device restore callbacks have been
+executed and tasks have been thawed.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">PM_RESTORE_PREPARE</span></code></dt><dd><p>The system is going to restore a hibernation image.  If all goes well,
+the restored image kernel will issue a <code class="docutils literal notranslate"><span class="pre">PM_POST_HIBERNATION</span></code>
+notification.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">PM_POST_RESTORE</span></code></dt><dd><p>An error occurred during restore from hibernation.  Device restore
+callbacks have been executed and tasks have been thawed.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">PM_SUSPEND_PREPARE</span></code></dt><dd><p>The system is preparing for suspend.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">PM_POST_SUSPEND</span></code></dt><dd><p>The system has just resumed or an error occurred during suspend.  Device
+resume callbacks have been executed and tasks have been thawed.</p>
+</dd>
+</dl>
+<p>It is generally assumed that whatever the notifiers do for
+<code class="docutils literal notranslate"><span class="pre">PM_HIBERNATION_PREPARE</span></code>, should be undone for <code class="docutils literal notranslate"><span class="pre">PM_POST_HIBERNATION</span></code>.
+Analogously, operations carried out for <code class="docutils literal notranslate"><span class="pre">PM_SUSPEND_PREPARE</span></code> should be
+reversed for <code class="docutils literal notranslate"><span class="pre">PM_POST_SUSPEND</span></code>.</p>
+<p>Moreover, if one of the notifiers fails for the <code class="docutils literal notranslate"><span class="pre">PM_HIBERNATION_PREPARE</span></code> or
+<code class="docutils literal notranslate"><span class="pre">PM_SUSPEND_PREPARE</span></code> event, the notifiers that have already succeeded for that
+event will be called for <code class="docutils literal notranslate"><span class="pre">PM_POST_HIBERNATION</span></code> or <code class="docutils literal notranslate"><span class="pre">PM_POST_SUSPEND</span></code>,
+respectively.</p>
+<p>The hibernation and suspend notifiers are called with <code class="xref c c-data docutils literal notranslate"><span class="pre">pm_mutex</span></code> held.
+They are defined in the usual way, but their last argument is meaningless (it is
+always NULL).</p>
+<p>To register and/or unregister a suspend notifier use
+<code class="xref c c-func docutils literal notranslate"><span class="pre">register_pm_notifier()</span></code> and <code class="xref c c-func docutils literal notranslate"><span class="pre">unregister_pm_notifier()</span></code>,
+respectively (both defined in <code class="file docutils literal notranslate"><span class="pre">include/linux/suspend.h</span></code>).  If you don’t
+need to unregister the notifier, you can also use the <code class="xref c c-func docutils literal notranslate"><span class="pre">pm_notifier()</span></code>
+macro defined in <code class="file docutils literal notranslate"><span class="pre">include/linux/suspend.h</span></code>.</p>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/pm/notifiers.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/pm/notifiers.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

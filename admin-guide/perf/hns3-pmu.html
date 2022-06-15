@@ -1,0 +1,227 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>HNS3 Performance Monitoring Unit (PMU) &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Freescale i.MX8 DDR Performance Monitoring Unit (PMU)" href="imx-ddr.html" />
+    <link rel="prev" title="HiSilicon PCIe Performance Monitoring Unit (PMU)" href="hisi-pcie-pmu.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="hns3-performance-monitoring-unit-pmu">
+<h1>HNS3 Performance Monitoring Unit (PMU)<a class="headerlink" href="#hns3-performance-monitoring-unit-pmu" title="Permalink to this headline">¶</a></h1>
+<p>HNS3(HiSilicon network system 3) Performance Monitoring Unit (PMU) is an
+End Point device to collect performance statistics of HiSilicon SoC NIC.
+On Hip09, each SICL(Super I/O cluster) has one PMU device.</p>
+<p>HNS3 PMU supports collection of performance statistics such as bandwidth,
+latency, packet rate and interrupt rate.</p>
+<p>Each HNS3 PMU supports 8 hardware events.</p>
+<section id="hns3-pmu-driver">
+<h2>HNS3 PMU driver<a class="headerlink" href="#hns3-pmu-driver" title="Permalink to this headline">¶</a></h2>
+<p>The HNS3 PMU driver registers a perf PMU with the name of its sicl id.:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/sys/devices/hns3_pmu_sicl_&lt;sicl_id&gt;
+</pre></div>
+</div>
+<p>PMU driver provides description of available events, filter modes, format,
+identifier and cpumask in sysfs.</p>
+<p>The “events” directory describes the event code of all supported events
+shown in perf list.</p>
+<p>The “filtermode” directory describes the supported filter modes of each
+event.</p>
+<p>The “format” directory describes all formats of the config (events) and
+config1 (filter options) fields of the perf_event_attr structure.</p>
+<p>The “identifier” file shows version of PMU hardware device.</p>
+<p>The “bdf_min” and “bdf_max” files show the supported bdf range of each
+pmu device.</p>
+<p>The “hw_clk_freq” file shows the hardware clock frequency of each pmu
+device.</p>
+<p>Example usage of checking event code and subevent code:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$# cat /sys/devices/hns3_pmu_sicl_0/events/dly_tx_normal_to_mac_time
+config=0x00204
+$# cat /sys/devices/hns3_pmu_sicl_0/events/dly_tx_normal_to_mac_packet_num
+config=0x10204
+</pre></div>
+</div>
+<p>Each performance statistic has a pair of events to get two values to
+calculate real performance data in userspace.</p>
+<p>The bits 0~15 of config (here 0x0204) are the true hardware event code. If
+two events have same value of bits 0~15 of config, that means they are
+event pair. And the bit 16 of config indicates getting counter 0 or
+counter 1 of hardware event.</p>
+<p>After getting two values of event pair in usersapce, the formula of
+computation to calculate real performance data is::</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>counter 0 / counter 1
+</pre></div>
+</div>
+<p>Example usage of checking supported filter mode:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$# cat /sys/devices/hns3_pmu_sicl_0/filtermode/bw_ssu_rpu_byte_num
+filter mode supported: global/port/port-tc/func/func-queue/
+</pre></div>
+</div>
+<p>Example usage of perf:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$# perf list
+hns3_pmu_sicl_0/bw_ssu_rpu_byte_num/ [kernel PMU event]
+hns3_pmu_sicl_0/bw_ssu_rpu_time/     [kernel PMU event]
+------------------------------------------
+
+$# perf stat -g -e hns3_pmu_sicl_0/bw_ssu_rpu_byte_num,global=1/ -e hns3_pmu_sicl_0/bw_ssu_rpu_time,global=1/ -I 1000
+or
+$# perf stat -g -e hns3_pmu_sicl_0/config=0x00002,global=1/ -e hns3_pmu_sicl_0/config=0x10002,global=1/ -I 1000
+</pre></div>
+</div>
+<section id="filter-modes">
+<h3>Filter modes<a class="headerlink" href="#filter-modes" title="Permalink to this headline">¶</a></h3>
+<p>1. global mode
+PMU collect performance statistics for all HNS3 PCIe functions of IO DIE.
+Set the “global” filter option to 1 will enable this mode.
+Example usage of perf:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$# perf stat -a -e hns3_pmu_sicl_0/config=0x1020F,global=1/ -I 1000
+</pre></div>
+</div>
+<p>2. port mode
+PMU collect performance statistic of one whole physical port. The port id
+is same as mac id. The “tc” filter option must be set to 0xF in this mode,
+here tc stands for traffic class.</p>
+<p>Example usage of perf:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$# perf stat -a -e hns3_pmu_sicl_0/config=0x1020F,port=0,tc=0xF/ -I 1000
+</pre></div>
+</div>
+<p>3. port-tc mode
+PMU collect performance statistic of one tc of physical port. The port id
+is same as mac id. The “tc” filter option must be set to 0 ~ 7 in this
+mode.
+Example usage of perf:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$# perf stat -a -e hns3_pmu_sicl_0/config=0x1020F,port=0,tc=0/ -I 1000
+</pre></div>
+</div>
+<p>4. func mode
+PMU collect performance statistic of one PF/VF. The function id is BDF of
+PF/VF, its conversion formula:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>func = (bus &lt;&lt; 8) + (device &lt;&lt; 3) + (function)
+</pre></div>
+</div>
+<dl class="simple">
+<dt>for example:</dt><dd><p>BDF         func
+35:00.0    0x3500
+35:00.1    0x3501
+35:01.0    0x3508</p>
+</dd>
+</dl>
+<p>In this mode, the “queue” filter option must be set to 0xFFFF.
+Example usage of perf:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$# perf stat -a -e hns3_pmu_sicl_0/config=0x1020F,bdf=0x3500,queue=0xFFFF/ -I 1000
+</pre></div>
+</div>
+<p>5. func-queue mode
+PMU collect performance statistic of one queue of PF/VF. The function id
+is BDF of PF/VF, the “queue” filter option must be set to the exact queue
+id of function.
+Example usage of perf:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$# perf stat -a -e hns3_pmu_sicl_0/config=0x1020F,bdf=0x3500,queue=0/ -I 1000
+</pre></div>
+</div>
+<p>6. func-intr mode
+PMU collect performance statistic of one interrupt of PF/VF. The function
+id is BDF of PF/VF, the “intr” filter option must be set to the exact
+interrupt id of function.
+Example usage of perf:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$# perf stat -a -e hns3_pmu_sicl_0/config=0x00301,bdf=0x3500,intr=0/ -I 1000
+</pre></div>
+</div>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">HNS3 Performance Monitoring Unit (PMU)</a><ul>
+<li><a class="reference internal" href="#hns3-pmu-driver">HNS3 PMU driver</a><ul>
+<li><a class="reference internal" href="#filter-modes">Filter modes</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/admin-guide/perf/hns3-pmu.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/admin-guide/perf/hns3-pmu.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

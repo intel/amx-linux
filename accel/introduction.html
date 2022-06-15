@@ -1,0 +1,206 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Introduction &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Security Documentation" href="../security/index.html" />
+    <link rel="prev" title="Compute Accelerators" href="index.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="introduction">
+<h1>Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h1>
+<p>The Linux compute accelerators subsystem is designed to expose compute
+accelerators in a common way to user-space and provide a common set of
+functionality.</p>
+<p>These devices can be either stand-alone ASICs or IP blocks inside an SoC/GPU.
+Although these devices are typically designed to accelerate
+Machine-Learning (ML) and/or Deep-Learning (DL) computations, the accel layer
+is not limited to handling these types of accelerators.</p>
+<p>Typically, a compute accelerator will belong to one of the following
+categories:</p>
+<ul class="simple">
+<li><p>Edge AI - doing inference at an edge device. It can be an embedded ASIC/FPGA,
+or an IP inside a SoC (e.g. laptop web camera). These devices
+are typically configured using registers and can work with or without DMA.</p></li>
+<li><p>Inference data-center - single/multi user devices in a large server. This
+type of device can be stand-alone or an IP inside a SoC or a GPU. It will
+have on-board DRAM (to hold the DL topology), DMA engines and
+command submission queues (either kernel or user-space queues).
+It might also have an MMU to manage multiple users and might also enable
+virtualization (SR-IOV) to support multiple VMs on the same device. In
+addition, these devices will usually have some tools, such as profiler and
+debugger.</p></li>
+<li><p>Training data-center - Similar to Inference data-center cards, but typically
+have more computational power and memory b/w (e.g. HBM) and will likely have
+a method of scaling-up/out, i.e. connecting to other training cards inside
+the server or in other servers, respectively.</p></li>
+</ul>
+<p>All these devices typically have different runtime user-space software stacks,
+that are tailored-made to their h/w. In addition, they will also probably
+include a compiler to generate programs to their custom-made computational
+engines. Typically, the common layer in user-space will be the DL frameworks,
+such as PyTorch and TensorFlow.</p>
+<section id="sharing-code-with-drm">
+<h2>Sharing code with DRM<a class="headerlink" href="#sharing-code-with-drm" title="Permalink to this headline">¶</a></h2>
+<p>Because this type of devices can be an IP inside GPUs or have similar
+characteristics as those of GPUs, the accel subsystem will use the
+DRM subsystem’s code and functionality. i.e. the accel core code will
+be part of the DRM subsystem and an accel device will be a new type of DRM
+device.</p>
+<p>This will allow us to leverage the extensive DRM code-base and
+collaborate with DRM developers that have experience with this type of
+devices. In addition, new features that will be added for the accelerator
+drivers can be of use to GPU drivers as well.</p>
+</section>
+<section id="differentiation-from-gpus">
+<h2>Differentiation from GPUs<a class="headerlink" href="#differentiation-from-gpus" title="Permalink to this headline">¶</a></h2>
+<p>Because we want to prevent the extensive user-space graphic software stack
+from trying to use an accelerator as a GPU, the compute accelerators will be
+differentiated from GPUs by using a new major number and new device char files.</p>
+<p>Furthermore, the drivers will be located in a separate place in the kernel
+tree - drivers/accel/.</p>
+<p>The accelerator devices will be exposed to the user space with the dedicated
+261 major number and will have the following convention:</p>
+<ul class="simple">
+<li><p>device char files - /dev/accel/accel*</p></li>
+<li><p>sysfs             - /sys/class/accel/accel*/</p></li>
+<li><p>debugfs           - /sys/kernel/debug/accel/accel*/</p></li>
+</ul>
+</section>
+<section id="getting-started">
+<h2>Getting Started<a class="headerlink" href="#getting-started" title="Permalink to this headline">¶</a></h2>
+<p>First, read the DRM documentation at <a class="reference internal" href="../gpu/index.html"><span class="doc">Linux GPU Driver Developer’s Guide</span></a>.
+Not only it will explain how to write a new DRM driver but it will also
+contain all the information on how to contribute, the Code Of Conduct and
+what is the coding style/documentation. All of that is the same for the
+accel subsystem.</p>
+<p>Second, make sure the kernel is configured with CONFIG_DRM_ACCEL.</p>
+<p>To expose your device as an accelerator, two changes are needed to
+be done in your driver (as opposed to a standard DRM driver):</p>
+<ul class="simple">
+<li><p>Add the DRIVER_COMPUTE_ACCEL feature flag in your drm_driver’s
+driver_features field. It is important to note that this driver feature is
+mutually exclusive with DRIVER_RENDER and DRIVER_MODESET. Devices that want
+to expose both graphics and compute device char files should be handled by
+two drivers that are connected using the auxiliary bus framework.</p></li>
+<li><p>Change the open callback in your driver fops structure to accel_open().
+Alternatively, your driver can use DEFINE_DRM_ACCEL_FOPS macro to easily
+set the correct function operations pointers structure.</p></li>
+</ul>
+</section>
+<section id="external-references">
+<h2>External References<a class="headerlink" href="#external-references" title="Permalink to this headline">¶</a></h2>
+<section id="email-threads">
+<h3>email threads<a class="headerlink" href="#email-threads" title="Permalink to this headline">¶</a></h3>
+<ul class="simple">
+<li><p><a class="reference external" href="https://lkml.org/lkml/2022/7/31/83">Initial discussion on the New subsystem for acceleration devices</a> - Oded Gabbay (2022)</p></li>
+<li><p><a class="reference external" href="https://lkml.org/lkml/2022/10/22/544">patch-set to add the new subsystem</a> - Oded Gabbay (2022)</p></li>
+</ul>
+</section>
+<section id="conference-talks">
+<h3>Conference talks<a class="headerlink" href="#conference-talks" title="Permalink to this headline">¶</a></h3>
+<ul class="simple">
+<li><p><a class="reference external" href="https://airlied.blogspot.com/2022/09/accelerators-bof-outcomes-summary.html">LPC 2022 Accelerators BOF outcomes summary</a> - Dave Airlie (2022)</p></li>
+</ul>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Introduction</a><ul>
+<li><a class="reference internal" href="#sharing-code-with-drm">Sharing code with DRM</a></li>
+<li><a class="reference internal" href="#differentiation-from-gpus">Differentiation from GPUs</a></li>
+<li><a class="reference internal" href="#getting-started">Getting Started</a></li>
+<li><a class="reference internal" href="#external-references">External References</a><ul>
+<li><a class="reference internal" href="#email-threads">email threads</a></li>
+<li><a class="reference internal" href="#conference-talks">Conference talks</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/accel/introduction.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/accel/introduction.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

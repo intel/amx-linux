@@ -1,0 +1,187 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Upgrading BIOS using spi-intel &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="NAND Error-correction Code" href="nand_ecc.html" />
+    <link rel="prev" title="Memory Technology Device (MTD)" href="index.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="upgrading-bios-using-spi-intel">
+<h1>Upgrading BIOS using spi-intel<a class="headerlink" href="#upgrading-bios-using-spi-intel" title="Permalink to this headline">¶</a></h1>
+<p>Many Intel CPUs like Baytrail and Braswell include SPI serial flash host
+controller which is used to hold BIOS and other platform specific data.
+Since contents of the SPI serial flash is crucial for machine to function,
+it is typically protected by different hardware protection mechanisms to
+avoid accidental (or on purpose) overwrite of the content.</p>
+<p>Not all manufacturers protect the SPI serial flash, mainly because it
+allows upgrading the BIOS image directly from an OS.</p>
+<p>The spi-intel driver makes it possible to read and write the SPI serial
+flash, if certain protection bits are not set and locked. If it finds
+any of them set, the whole MTD device is made read-only to prevent
+partial overwrites. By default the driver exposes SPI serial flash
+contents as read-only but it can be changed from kernel command line,
+passing “spi_intel.writeable=1”.</p>
+<p>Please keep in mind that overwriting the BIOS image on SPI serial flash
+might render the machine unbootable and requires special equipment like
+Dediprog to revive. You have been warned!</p>
+<p>Below are the steps how to upgrade MinnowBoard MAX BIOS directly from
+Linux.</p>
+<blockquote>
+<div><ol class="arabic">
+<li><p>Download and extract the latest Minnowboard MAX BIOS SPI image
+[1]. At the time writing this the latest image is v92.</p></li>
+<li><p>Install mtd-utils package [2]. We need this in order to erase the SPI
+serial flash. Distros like Debian and Fedora have this prepackaged with
+name “mtd-utils”.</p></li>
+<li><p>Add “spi_intel.writeable=1” to the kernel command line and reboot
+the board (you can also reload the driver passing “writeable=1” as
+module parameter to modprobe).</p></li>
+<li><p>Once the board is up and running again, find the right MTD partition
+(it is named as “BIOS”):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># cat /proc/mtd
+dev:    size   erasesize  name
+mtd0: 00800000 00001000 &quot;BIOS&quot;
+</pre></div>
+</div>
+<p>So here it will be /dev/mtd0 but it may vary.</p>
+</li>
+<li><p>Make backup of the existing image first:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># dd if=/dev/mtd0ro of=bios.bak
+16384+0 records in
+16384+0 records out
+8388608 bytes (8.4 MB) copied, 10.0269 s, 837 kB/s
+</pre></div>
+</div>
+</li>
+<li><p>Verify the backup:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># sha1sum /dev/mtd0ro bios.bak
+fdbb011920572ca6c991377c4b418a0502668b73  /dev/mtd0ro
+fdbb011920572ca6c991377c4b418a0502668b73  bios.bak
+</pre></div>
+</div>
+<p>The SHA1 sums must match. Otherwise do not continue any further!</p>
+</li>
+<li><p>Erase the SPI serial flash. After this step, do not reboot the
+board! Otherwise it will not start anymore:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># flash_erase /dev/mtd0 0 0
+Erasing 4 Kibyte @ 7ff000 -- 100 % complete
+</pre></div>
+</div>
+</li>
+<li><p>Once completed without errors you can write the new BIOS image:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># dd if=MNW2MAX1.X64.0092.R01.1605221712.bin of=/dev/mtd0
+</pre></div>
+</div>
+</li>
+<li><p>Verify that the new content of the SPI serial flash matches the new
+BIOS image:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># sha1sum /dev/mtd0ro MNW2MAX1.X64.0092.R01.1605221712.bin
+9b4df9e4be2057fceec3a5529ec3d950836c87a2  /dev/mtd0ro
+9b4df9e4be2057fceec3a5529ec3d950836c87a2 MNW2MAX1.X64.0092.R01.1605221712.bin
+</pre></div>
+</div>
+<p>The SHA1 sums should match.</p>
+</li>
+<li><p>Now you can reboot your board and observe the new BIOS starting up
+properly.</p></li>
+</ol>
+</div></blockquote>
+<section id="references">
+<h2>References<a class="headerlink" href="#references" title="Permalink to this headline">¶</a></h2>
+<p>[1] <a class="reference external" href="https://firmware.intel.com/sites/default/files/MinnowBoard%2EMAX_%2EX64%2E92%2ER01%2Ezip">https://firmware.intel.com/sites/default/files/MinnowBoard%2EMAX_%2EX64%2E92%2ER01%2Ezip</a></p>
+<p>[2] <a class="reference external" href="http://www.linux-mtd.infradead.org/">http://www.linux-mtd.infradead.org/</a></p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Upgrading BIOS using spi-intel</a><ul>
+<li><a class="reference internal" href="#references">References</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/mtd/spi-intel.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/mtd/spi-intel.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

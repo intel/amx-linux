@@ -1,0 +1,327 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>基于DAMON的回收 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../../../" src="../../../../../_static/documentation_options.js"></script>
+    <script src="../../../../../_static/jquery.js"></script>
+    <script src="../../../../../_static/underscore.js"></script>
+    <script src="../../../../../_static/doctools.js"></script>
+    <script src="../../../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../search.html" />
+    <link rel="next" title="内核同页合并" href="../ksm.html" />
+    <link rel="prev" title="详细用法" href="usage.html" />
+   
+  <link rel="stylesheet" href="../../../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../../../admin-guide/mm/damon/reclaim.html"><span class="doc">DAMON-based Reclamation</span></a></p>
+</dd>
+<dt class="field-even">翻译</dt>
+<dd class="field-even"><p>司延腾 Yanteng Si &lt;<a class="reference external" href="mailto:siyanteng&#37;&#52;&#48;loongson&#46;cn">siyanteng<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+<dt class="field-odd">校译</dt>
+<dd class="field-odd"><p></p></dd>
+</dl>
+<section id="damon">
+<h1>基于DAMON的回收<a class="headerlink" href="#damon" title="Permalink to this headline">¶</a></h1>
+<p>基于DAMON的回收（DAMON_RECLAIM）是一个静态的内核模块，旨在用于轻度内存压力下的主动和轻
+量级的回收。它的目的不是取代基于LRU列表的页面回收，而是有选择地用于不同程度的内存压力和要
+求。</p>
+<section id="id1">
+<h2>哪些地方需要主动回收？<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>在一般的内存超量使用（over-committed systems，虚拟化相关术语）的系统上，主动回收冷页
+有助于节省内存和减少延迟高峰，这些延迟是由直接回收进程或kswapd的CPU消耗引起的，同时只产
+生最小的性能下降 <a class="footnote-reference brackets" href="#id8" id="id2">1</a> <a class="footnote-reference brackets" href="#id9" id="id3">2</a> 。</p>
+<p>基于空闲页报告 <a class="footnote-reference brackets" href="#id10" id="id4">3</a> 的内存过度承诺的虚拟化系统就是很好的例子。在这样的系统中，客户机
+向主机报告他们的空闲内存，而主机则将报告的内存重新分配给其他客户。因此，系统的内存得到了充
+分的利用。然而，客户可能不那么节省内存，主要是因为一些内核子系统和用户空间应用程序被设计为
+使用尽可能多的内存。然后，客户机可能只向主机报告少量的内存是空闲的，导致系统的内存利用率下降。
+在客户中运行主动回收可以缓解这个问题。</p>
+</section>
+<section id="id5">
+<h2>它是如何工作的？<a class="headerlink" href="#id5" title="Permalink to this headline">¶</a></h2>
+<p>DAMON_RECLAIM找到在特定时间内没有被访问的内存区域并分页。为了避免它在分页操作中消耗过多
+的CPU，可以配置一个速度限制。在这个速度限制下，它首先分页出那些没有被访问过的内存区域。系
+统管理员还可以配置在什么情况下这个方案应该自动激活和停用三个内存压力水位。</p>
+</section>
+<section id="id6">
+<h2>接口: 模块参数<a class="headerlink" href="#id6" title="Permalink to this headline">¶</a></h2>
+<p>要使用这个功能，你首先要确保你的系统运行在一个以 <code class="docutils literal notranslate"><span class="pre">CONFIG_DAMON_RECLAIM=y</span></code> 构建的内
+核上。</p>
+<p>为了让系统管理员启用或禁用它，并为给定的系统进行调整，DAMON_RECLAIM利用了模块参数。也就
+是说，你可以把 <code class="docutils literal notranslate"><span class="pre">damon_reclaim.&lt;parameter&gt;=&lt;value&gt;</span></code> 放在内核启动命令行上，或者把
+适当的值写入 <code class="docutils literal notranslate"><span class="pre">/sys/modules/damon_reclaim/parameters/&lt;parameter&gt;</span></code> 文件。</p>
+<p>注意，除 <code class="docutils literal notranslate"><span class="pre">启用</span></code> 外的参数值只在DAMON_RECLAIM启动时应用。因此，如果你想在运行时应用新
+的参数值，而DAMON_RECLAIM已经被启用，你应该通过 <code class="docutils literal notranslate"><span class="pre">启用</span></code> 的参数文件禁用和重新启用它。
+在重新启用之前，应将新的参数值写入适当的参数值中。</p>
+<p>下面是每个参数的描述。</p>
+<section id="enabled">
+<h3>enabled<a class="headerlink" href="#enabled" title="Permalink to this headline">¶</a></h3>
+<p>启用或禁用DAMON_RECLAIM。</p>
+<p>你可以通过把这个参数的值设置为 <code class="docutils literal notranslate"><span class="pre">Y</span></code> 来启用DAMON_RCLAIM，把它设置为 <code class="docutils literal notranslate"><span class="pre">N</span></code> 可以禁用
+DAMON_RECLAIM。注意，由于基于水位的激活条件，DAMON_RECLAIM不能进行真正的监测和回收。
+这一点请参考下面关于水位参数的描述。</p>
+</section>
+<section id="min-age">
+<h3>min_age<a class="headerlink" href="#min-age" title="Permalink to this headline">¶</a></h3>
+<p>识别冷内存区域的时间阈值，单位是微秒。</p>
+<p>如果一个内存区域在这个时间或更长的时间内没有被访问，DAMON_RECLAIM会将该区域识别为冷的，
+并回收它。</p>
+<p>默认为120秒。</p>
+</section>
+<section id="quota-ms">
+<h3>quota_ms<a class="headerlink" href="#quota-ms" title="Permalink to this headline">¶</a></h3>
+<p>回收的时间限制，以毫秒为单位。</p>
+<p>DAMON_RECLAIM 试图在一个时间窗口（quota_reset_interval_ms）内只使用到这个时间，以
+尝试回收冷页。这可以用来限制DAMON_RECLAIM的CPU消耗。如果该值为零，则该限制被禁用。</p>
+<p>默认为10ms。</p>
+</section>
+<section id="quota-sz">
+<h3>quota_sz<a class="headerlink" href="#quota-sz" title="Permalink to this headline">¶</a></h3>
+<p>回收的内存大小限制，单位为字节。</p>
+<p>DAMON_RECLAIM 收取在一个时间窗口（quota_reset_interval_ms）内试图回收的内存量，并
+使其不超过这个限制。这可以用来限制CPU和IO的消耗。如果该值为零，则限制被禁用。</p>
+<p>默认情况下是128 MiB。</p>
+</section>
+<section id="quota-reset-interval-ms">
+<h3>quota_reset_interval_ms<a class="headerlink" href="#quota-reset-interval-ms" title="Permalink to this headline">¶</a></h3>
+<p>时间/大小配额收取重置间隔，单位为毫秒。</p>
+<p>时间（quota_ms）和大小（quota_sz）的配额的目标重置间隔。也就是说，DAMON_RECLAIM在
+尝试回收‘不’超过quota_ms毫秒或quota_sz字节的内存。</p>
+<p>默认为1秒。</p>
+</section>
+<section id="wmarks-interval">
+<h3>wmarks_interval<a class="headerlink" href="#wmarks-interval" title="Permalink to this headline">¶</a></h3>
+<p>当DAMON_RECLAIM被启用但由于其水位规则而不活跃时，在检查水位之前的最小等待时间。</p>
+</section>
+<section id="wmarks-high">
+<h3>wmarks_high<a class="headerlink" href="#wmarks-high" title="Permalink to this headline">¶</a></h3>
+<p>高水位的可用内存率（每千字节）。</p>
+<p>如果系统的可用内存（以每千字节为单位）高于这个数值，DAMON_RECLAIM就会变得不活跃，所以
+它什么也不做，只是定期检查水位。</p>
+</section>
+<section id="wmarks-mid">
+<h3>wmarks_mid<a class="headerlink" href="#wmarks-mid" title="Permalink to this headline">¶</a></h3>
+<p>中间水位的可用内存率（每千字节）。</p>
+<p>如果系统的空闲内存（以每千字节为单位）在这个和低水位线之间，DAMON_RECLAIM就会被激活，
+因此开始监测和回收。</p>
+</section>
+<section id="wmarks-low">
+<h3>wmarks_low<a class="headerlink" href="#wmarks-low" title="Permalink to this headline">¶</a></h3>
+<p>低水位的可用内存率（每千字节）。</p>
+<p>如果系统的空闲内存（以每千字节为单位）低于这个数值，DAMON_RECLAIM就会变得不活跃，所以
+它除了定期检查水位外什么都不做。在这种情况下，系统会退回到基于LRU列表的页面粒度回收逻辑。</p>
+</section>
+<section id="sample-interval">
+<h3>sample_interval<a class="headerlink" href="#sample-interval" title="Permalink to this headline">¶</a></h3>
+<p>监测的采样间隔，单位是微秒。</p>
+<p>DAMON用于监测冷内存的采样间隔。更多细节请参考DAMON文档 (<a class="reference internal" href="usage.html"><span class="doc">详细用法</span></a>) 。</p>
+</section>
+<section id="aggr-interval">
+<h3>aggr_interval<a class="headerlink" href="#aggr-interval" title="Permalink to this headline">¶</a></h3>
+<p>监测的聚集间隔，单位是微秒。</p>
+<p>DAMON对冷内存监测的聚集间隔。更多细节请参考DAMON文档 (<a class="reference internal" href="usage.html"><span class="doc">详细用法</span></a>)。</p>
+</section>
+<section id="min-nr-regions">
+<h3>min_nr_regions<a class="headerlink" href="#min-nr-regions" title="Permalink to this headline">¶</a></h3>
+<p>监测区域的最小数量。</p>
+<p>DAMON用于冷内存监测的最小监测区域数。这可以用来设置监测质量的下限。但是，设
+置的太高可能会导致监测开销的增加。更多细节请参考DAMON文档 (<a class="reference internal" href="usage.html"><span class="doc">详细用法</span></a>) 。</p>
+</section>
+<section id="max-nr-regions">
+<h3>max_nr_regions<a class="headerlink" href="#max-nr-regions" title="Permalink to this headline">¶</a></h3>
+<p>监测区域的最大数量。</p>
+<p>DAMON用于冷内存监测的最大监测区域数。这可以用来设置监测开销的上限值。但是，
+设置得太低可能会导致监测质量不好。更多细节请参考DAMON文档 (<a class="reference internal" href="usage.html"><span class="doc">详细用法</span></a>) 。</p>
+</section>
+<section id="monitor-region-start">
+<h3>monitor_region_start<a class="headerlink" href="#monitor-region-start" title="Permalink to this headline">¶</a></h3>
+<p>目标内存区域的物理地址起点。</p>
+<p>DAMON_RECLAIM将对其进行工作的内存区域的起始物理地址。也就是说，DAMON_RECLAIM
+将在这个区域中找到冷的内存区域并进行回收。默认情况下，该区域使用最大系统内存区。</p>
+</section>
+<section id="monitor-region-end">
+<h3>monitor_region_end<a class="headerlink" href="#monitor-region-end" title="Permalink to this headline">¶</a></h3>
+<p>目标内存区域的结束物理地址。</p>
+<p>DAMON_RECLAIM将对其进行工作的内存区域的末端物理地址。也就是说，DAMON_RECLAIM将
+在这个区域内找到冷的内存区域并进行回收。默认情况下，该区域使用最大系统内存区。</p>
+</section>
+<section id="kdamond-pid">
+<h3>kdamond_pid<a class="headerlink" href="#kdamond-pid" title="Permalink to this headline">¶</a></h3>
+<p>DAMON线程的PID。</p>
+<p>如果DAMON_RECLAIM被启用，这将成为工作线程的PID。否则，为-1。</p>
+</section>
+<section id="nr-reclaim-tried-regions">
+<h3>nr_reclaim_tried_regions<a class="headerlink" href="#nr-reclaim-tried-regions" title="Permalink to this headline">¶</a></h3>
+<p>试图通过DAMON_RECLAIM回收的内存区域的数量。</p>
+</section>
+<section id="bytes-reclaim-tried-regions">
+<h3>bytes_reclaim_tried_regions<a class="headerlink" href="#bytes-reclaim-tried-regions" title="Permalink to this headline">¶</a></h3>
+<p>试图通过DAMON_RECLAIM回收的内存区域的总字节数。</p>
+</section>
+<section id="nr-reclaimed-regions">
+<h3>nr_reclaimed_regions<a class="headerlink" href="#nr-reclaimed-regions" title="Permalink to this headline">¶</a></h3>
+<p>通过DAMON_RECLAIM成功回收的内存区域的数量。</p>
+</section>
+<section id="bytes-reclaimed-regions">
+<h3>bytes_reclaimed_regions<a class="headerlink" href="#bytes-reclaimed-regions" title="Permalink to this headline">¶</a></h3>
+<p>通过DAMON_RECLAIM成功回收的内存区域的总字节数。</p>
+</section>
+<section id="nr-quota-exceeds">
+<h3>nr_quota_exceeds<a class="headerlink" href="#nr-quota-exceeds" title="Permalink to this headline">¶</a></h3>
+<p>超过时间/空间配额限制的次数。</p>
+</section>
+</section>
+<section id="id7">
+<h2>例子<a class="headerlink" href="#id7" title="Permalink to this headline">¶</a></h2>
+<p>下面的运行示例命令使DAMON_RECLAIM找到30秒或更长时间没有访问的内存区域并“回收”？
+为了避免DAMON_RECLAIM在分页操作中消耗过多的CPU时间，回收被限制在每秒1GiB以内。
+它还要求DAMON_RECLAIM在系统的可用内存率超过50%时不做任何事情，但如果它低于40%时
+就开始真正的工作。如果DAMON_RECLAIM没有取得进展，因此空闲内存率低于20%，它会要求
+DAMON_RECLAIM再次什么都不做，这样我们就可以退回到基于LRU列表的页面粒度回收了:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># cd /sys/modules/damon_reclaim/parameters
+# echo 30000000 &gt; min_age
+# echo $((1 * 1024 * 1024 * 1024)) &gt; quota_sz
+# echo 1000 &gt; quota_reset_interval_ms
+# echo 500 &gt; wmarks_high
+# echo 400 &gt; wmarks_mid
+# echo 200 &gt; wmarks_low
+# echo Y &gt; enabled
+</pre></div>
+</div>
+<dl class="footnote brackets">
+<dt class="label" id="id8"><span class="brackets"><a class="fn-backref" href="#id2">1</a></span></dt>
+<dd><p><a class="reference external" href="https://research.google/pubs/pub48551/">https://research.google/pubs/pub48551/</a></p>
+</dd>
+<dt class="label" id="id9"><span class="brackets"><a class="fn-backref" href="#id3">2</a></span></dt>
+<dd><p><a class="reference external" href="https://lwn.net/Articles/787611/">https://lwn.net/Articles/787611/</a></p>
+</dd>
+<dt class="label" id="id10"><span class="brackets"><a class="fn-backref" href="#id4">3</a></span></dt>
+<dd><p><a class="reference external" href="https://www.kernel.org/doc/html/latest/mm/free_page_reporting.html">https://www.kernel.org/doc/html/latest/mm/free_page_reporting.html</a></p>
+</dd>
+</dl>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">基于DAMON的回收</a><ul>
+<li><a class="reference internal" href="#id1">哪些地方需要主动回收？</a></li>
+<li><a class="reference internal" href="#id5">它是如何工作的？</a></li>
+<li><a class="reference internal" href="#id6">接口: 模块参数</a><ul>
+<li><a class="reference internal" href="#enabled">enabled</a></li>
+<li><a class="reference internal" href="#min-age">min_age</a></li>
+<li><a class="reference internal" href="#quota-ms">quota_ms</a></li>
+<li><a class="reference internal" href="#quota-sz">quota_sz</a></li>
+<li><a class="reference internal" href="#quota-reset-interval-ms">quota_reset_interval_ms</a></li>
+<li><a class="reference internal" href="#wmarks-interval">wmarks_interval</a></li>
+<li><a class="reference internal" href="#wmarks-high">wmarks_high</a></li>
+<li><a class="reference internal" href="#wmarks-mid">wmarks_mid</a></li>
+<li><a class="reference internal" href="#wmarks-low">wmarks_low</a></li>
+<li><a class="reference internal" href="#sample-interval">sample_interval</a></li>
+<li><a class="reference internal" href="#aggr-interval">aggr_interval</a></li>
+<li><a class="reference internal" href="#min-nr-regions">min_nr_regions</a></li>
+<li><a class="reference internal" href="#max-nr-regions">max_nr_regions</a></li>
+<li><a class="reference internal" href="#monitor-region-start">monitor_region_start</a></li>
+<li><a class="reference internal" href="#monitor-region-end">monitor_region_end</a></li>
+<li><a class="reference internal" href="#kdamond-pid">kdamond_pid</a></li>
+<li><a class="reference internal" href="#nr-reclaim-tried-regions">nr_reclaim_tried_regions</a></li>
+<li><a class="reference internal" href="#bytes-reclaim-tried-regions">bytes_reclaim_tried_regions</a></li>
+<li><a class="reference internal" href="#nr-reclaimed-regions">nr_reclaimed_regions</a></li>
+<li><a class="reference internal" href="#bytes-reclaimed-regions">bytes_reclaimed_regions</a></li>
+<li><a class="reference internal" href="#nr-quota-exceeds">nr_quota_exceeds</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id7">例子</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../../../_sources/translations/zh_CN/admin-guide/mm/damon/reclaim.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../../../_sources/translations/zh_CN/admin-guide/mm/damon/reclaim.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

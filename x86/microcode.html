@@ -1,0 +1,318 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>22. The Linux Microcode Loader &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="23. User Interface for Resource Control feature" href="resctrl.html" />
+    <link rel="prev" title="21. Microarchitectural Data Sampling (MDS) mitigation" href="mds.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="the-linux-microcode-loader">
+<h1><span class="section-number">22. </span>The Linux Microcode Loader<a class="headerlink" href="#the-linux-microcode-loader" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">Authors</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p>Fenghua Yu &lt;<a class="reference external" href="mailto:fenghua&#46;yu&#37;&#52;&#48;intel&#46;com">fenghua<span>&#46;</span>yu<span>&#64;</span>intel<span>&#46;</span>com</a>&gt;</p></li>
+<li><p>Borislav Petkov &lt;<a class="reference external" href="mailto:bp&#37;&#52;&#48;suse&#46;de">bp<span>&#64;</span>suse<span>&#46;</span>de</a>&gt;</p></li>
+<li><p>Ashok Raj &lt;<a class="reference external" href="mailto:ashok&#46;raj&#37;&#52;&#48;intel&#46;com">ashok<span>&#46;</span>raj<span>&#64;</span>intel<span>&#46;</span>com</a>&gt;</p></li>
+</ul>
+</dd>
+</dl>
+<p>The kernel has a x86 microcode loading facility which is supposed to
+provide microcode loading methods in the OS. Potential use cases are
+updating the microcode on platforms beyond the OEM End-Of-Life support,
+and updating the microcode on long-running systems without rebooting.</p>
+<p>The loader supports three loading methods:</p>
+<section id="early-load-microcode">
+<h2><span class="section-number">22.1. </span>Early load microcode<a class="headerlink" href="#early-load-microcode" title="Permalink to this headline">¶</a></h2>
+<p>The kernel can update microcode very early during boot. Loading
+microcode early can fix CPU issues before they are observed during
+kernel boot time.</p>
+<p>The microcode is stored in an initrd file. During boot, it is read from
+it and loaded into the CPU cores.</p>
+<p>The format of the combined initrd image is microcode in (uncompressed)
+cpio format followed by the (possibly compressed) initrd image. The
+loader parses the combined initrd image during boot.</p>
+<p>The microcode files in cpio name space are:</p>
+<dl class="simple">
+<dt>on Intel:</dt><dd><p>kernel/x86/microcode/GenuineIntel.bin</p>
+</dd>
+<dt>on AMD  :</dt><dd><p>kernel/x86/microcode/AuthenticAMD.bin</p>
+</dd>
+</dl>
+<p>During BSP (BootStrapping Processor) boot (pre-SMP), the kernel
+scans the microcode file in the initrd. If microcode matching the
+CPU is found, it will be applied in the BSP and later on in all APs
+(Application Processors).</p>
+<p>The loader also saves the matching microcode for the CPU in memory.
+Thus, the cached microcode patch is applied when CPUs resume from a
+sleep state.</p>
+<p>Here’s a crude example how to prepare an initrd with microcode (this is
+normally done automatically by the distribution, when recreating the
+initrd, so you don’t really have to do it yourself. It is documented
+here for future reference only).</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#!/bin/bash
+
+if [ -z &quot;$1&quot; ]; then
+    echo &quot;You need to supply an initrd file&quot;
+    exit 1
+fi
+
+INITRD=&quot;$1&quot;
+
+DSTDIR=kernel/x86/microcode
+TMPDIR=/tmp/initrd
+
+rm -rf $TMPDIR
+
+mkdir $TMPDIR
+cd $TMPDIR
+mkdir -p $DSTDIR
+
+if [ -d /lib/firmware/amd-ucode ]; then
+        cat /lib/firmware/amd-ucode/microcode_amd*.bin &gt; $DSTDIR/AuthenticAMD.bin
+fi
+
+if [ -d /lib/firmware/intel-ucode ]; then
+        cat /lib/firmware/intel-ucode/* &gt; $DSTDIR/GenuineIntel.bin
+fi
+
+find . | cpio -o -H newc &gt;../ucode.cpio
+cd ..
+mv $INITRD $INITRD.orig
+cat ucode.cpio $INITRD.orig &gt; $INITRD
+
+rm -rf $TMPDIR
+</pre></div>
+</div>
+<p>The system needs to have the microcode packages installed into
+/lib/firmware or you need to fixup the paths above if yours are
+somewhere else and/or you’ve downloaded them directly from the processor
+vendor’s site.</p>
+</section>
+<section id="late-loading">
+<h2><span class="section-number">22.2. </span>Late loading<a class="headerlink" href="#late-loading" title="Permalink to this headline">¶</a></h2>
+<p>You simply install the microcode packages your distro supplies and
+run:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># echo 1 &gt; /sys/devices/system/cpu/microcode/reload
+</pre></div>
+</div>
+<p>as root.</p>
+<p>The loading mechanism looks for microcode blobs in
+/lib/firmware/{intel-ucode,amd-ucode}. The default distro installation
+packages already put them there.</p>
+<p>Since kernel 5.19, late loading is not enabled by default.</p>
+<p>The /dev/cpu/microcode method has been removed in 5.19.</p>
+</section>
+<section id="why-is-late-loading-dangerous">
+<h2><span class="section-number">22.3. </span>Why is late loading dangerous?<a class="headerlink" href="#why-is-late-loading-dangerous" title="Permalink to this headline">¶</a></h2>
+<section id="synchronizing-all-cpus">
+<h3><span class="section-number">22.3.1. </span>Synchronizing all CPUs<a class="headerlink" href="#synchronizing-all-cpus" title="Permalink to this headline">¶</a></h3>
+<p>The microcode engine which receives the microcode update is shared
+between the two logical threads in a SMT system. Therefore, when
+the update is executed on one SMT thread of the core, the sibling
+“automatically” gets the update.</p>
+<p>Since the microcode can “simulate” MSRs too, while the microcode update
+is in progress, those simulated MSRs transiently cease to exist. This
+can result in unpredictable results if the SMT sibling thread happens to
+be in the middle of an access to such an MSR. The usual observation is
+that such MSR accesses cause #GPs to be raised to signal that former are
+not present.</p>
+<p>The disappearing MSRs are just one common issue which is being observed.
+Any other instruction that’s being patched and gets concurrently
+executed by the other SMT sibling, can also result in similar,
+unpredictable behavior.</p>
+<p>To eliminate this case, a stop_machine()-based CPU synchronization was
+introduced as a way to guarantee that all logical CPUs will not execute
+any code but just wait in a spin loop, polling an atomic variable.</p>
+<p>While this took care of device or external interrupts, IPIs including
+LVT ones, such as CMCI etc, it cannot address other special interrupts
+that can’t be shut off. Those are Machine Check (#MC), System Management
+(#SMI) and Non-Maskable interrupts (#NMI).</p>
+</section>
+<section id="machine-checks">
+<h3><span class="section-number">22.3.2. </span>Machine Checks<a class="headerlink" href="#machine-checks" title="Permalink to this headline">¶</a></h3>
+<p>Machine Checks (#MC) are non-maskable. There are two kinds of MCEs.
+Fatal un-recoverable MCEs and recoverable MCEs. While un-recoverable
+errors are fatal, recoverable errors can also happen in kernel context
+are also treated as fatal by the kernel.</p>
+<p>On certain Intel machines, MCEs are also broadcast to all threads in a
+system. If one thread is in the middle of executing WRMSR, a MCE will be
+taken at the end of the flow. Either way, they will wait for the thread
+performing the wrmsr(0x79) to rendezvous in the MCE handler and shutdown
+eventually if any of the threads in the system fail to check in to the
+MCE rendezvous.</p>
+<p>To be paranoid and get predictable behavior, the OS can choose to set
+MCG_STATUS.MCIP. Since MCEs can be at most one in a system, if an
+MCE was signaled, the above condition will promote to a system reset
+automatically. OS can turn off MCIP at the end of the update for that
+core.</p>
+</section>
+<section id="system-management-interrupt">
+<h3><span class="section-number">22.3.3. </span>System Management Interrupt<a class="headerlink" href="#system-management-interrupt" title="Permalink to this headline">¶</a></h3>
+<p>SMIs are also broadcast to all CPUs in the platform. Microcode update
+requests exclusive access to the core before writing to MSR 0x79. So if
+it does happen such that, one thread is in WRMSR flow, and the 2nd got
+an SMI, that thread will be stopped in the first instruction in the SMI
+handler.</p>
+<p>Since the secondary thread is stopped in the first instruction in SMI,
+there is very little chance that it would be in the middle of executing
+an instruction being patched. Plus OS has no way to stop SMIs from
+happening.</p>
+</section>
+<section id="non-maskable-interrupts">
+<h3><span class="section-number">22.3.4. </span>Non-Maskable Interrupts<a class="headerlink" href="#non-maskable-interrupts" title="Permalink to this headline">¶</a></h3>
+<p>When thread0 of a core is doing the microcode update, if thread1 is
+pulled into NMI, that can cause unpredictable behavior due to the
+reasons above.</p>
+<p>OS can choose a variety of methods to avoid running into this situation.</p>
+</section>
+<section id="is-the-microcode-suitable-for-late-loading">
+<h3><span class="section-number">22.3.5. </span>Is the microcode suitable for late loading?<a class="headerlink" href="#is-the-microcode-suitable-for-late-loading" title="Permalink to this headline">¶</a></h3>
+<p>Late loading is done when the system is fully operational and running
+real workloads. Late loading behavior depends on what the base patch on
+the CPU is before upgrading to the new patch.</p>
+<p>This is true for Intel CPUs.</p>
+<p>Consider, for example, a CPU has patch level 1 and the update is to
+patch level 3.</p>
+<p>Between patch1 and patch3, patch2 might have deprecated a software-visible
+feature.</p>
+<p>This is unacceptable if software is even potentially using that feature.
+For instance, say MSR_X is no longer available after an update,
+accessing that MSR will cause a #GP fault.</p>
+<p>Basically there is no way to declare a new microcode update suitable
+for late-loading. This is another one of the problems that caused late
+loading to be not enabled by default.</p>
+</section>
+</section>
+<section id="builtin-microcode">
+<h2><span class="section-number">22.4. </span>Builtin microcode<a class="headerlink" href="#builtin-microcode" title="Permalink to this headline">¶</a></h2>
+<p>The loader supports also loading of a builtin microcode supplied through
+the regular builtin firmware method CONFIG_EXTRA_FIRMWARE. Only 64-bit is
+currently supported.</p>
+<p>Here’s an example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>CONFIG_EXTRA_FIRMWARE=&quot;intel-ucode/06-3a-09 amd-ucode/microcode_amd_fam15h.bin&quot;
+CONFIG_EXTRA_FIRMWARE_DIR=&quot;/lib/firmware&quot;
+</pre></div>
+</div>
+<p>This basically means, you have the following tree structure locally:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/lib/firmware/
+|-- amd-ucode
+...
+|   |-- microcode_amd_fam15h.bin
+...
+|-- intel-ucode
+...
+|   |-- 06-3a-09
+...
+</pre></div>
+</div>
+<p>so that the build system can find those files and integrate them into
+the final kernel image. The early loader finds them and applies them.</p>
+<p>Needless to say, this method is not the most flexible one because it
+requires rebuilding the kernel each time updated microcode from the CPU
+vendor is available.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">22. The Linux Microcode Loader</a><ul>
+<li><a class="reference internal" href="#early-load-microcode">22.1. Early load microcode</a></li>
+<li><a class="reference internal" href="#late-loading">22.2. Late loading</a></li>
+<li><a class="reference internal" href="#why-is-late-loading-dangerous">22.3. Why is late loading dangerous?</a><ul>
+<li><a class="reference internal" href="#synchronizing-all-cpus">22.3.1. Synchronizing all CPUs</a></li>
+<li><a class="reference internal" href="#machine-checks">22.3.2. Machine Checks</a></li>
+<li><a class="reference internal" href="#system-management-interrupt">22.3.3. System Management Interrupt</a></li>
+<li><a class="reference internal" href="#non-maskable-interrupts">22.3.4. Non-Maskable Interrupts</a></li>
+<li><a class="reference internal" href="#is-the-microcode-suitable-for-late-loading">22.3.5. Is the microcode suitable for late loading?</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#builtin-microcode">22.4. Builtin microcode</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/x86/microcode.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/x86/microcode.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

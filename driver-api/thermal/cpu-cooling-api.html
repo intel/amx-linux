@@ -1,0 +1,205 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>CPU cooling APIs How To &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="CPU Idle Cooling" href="cpu-idle-cooling.html" />
+    <link rel="prev" title="Thermal" href="index.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="cpu-cooling-apis-how-to">
+<h1>CPU cooling APIs How To<a class="headerlink" href="#cpu-cooling-apis-how-to" title="Permalink to this headline">¶</a></h1>
+<p>Written by Amit Daniel Kachhap &lt;<a class="reference external" href="mailto:amit&#46;kachhap&#37;&#52;&#48;linaro&#46;org">amit<span>&#46;</span>kachhap<span>&#64;</span>linaro<span>&#46;</span>org</a>&gt;</p>
+<p>Updated: 6 Jan 2015</p>
+<p>Copyright (c)  2012 Samsung Electronics Co., Ltd(<a class="reference external" href="http://www.samsung.com">http://www.samsung.com</a>)</p>
+<section id="introduction">
+<h2>0. Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>The generic cpu cooling(freq clipping) provides registration/unregistration APIs
+to the caller. The binding of the cooling devices to the trip point is left for
+the user. The registration APIs returns the cooling device pointer.</p>
+</section>
+<section id="cpu-cooling-apis">
+<h2>1. cpu cooling APIs<a class="headerlink" href="#cpu-cooling-apis" title="Permalink to this headline">¶</a></h2>
+<section id="cpufreq-registration-unregistration-apis">
+<h3>1.1 cpufreq registration/unregistration APIs<a class="headerlink" href="#cpufreq-registration-unregistration-apis" title="Permalink to this headline">¶</a></h3>
+<blockquote>
+<div><blockquote>
+<div><div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct thermal_cooling_device
+*cpufreq_cooling_register(struct cpumask *clip_cpus)
+</pre></div>
+</div>
+<p>This interface function registers the cpufreq cooling device with the name
+“thermal-cpufreq-%x”. This api can support multiple instances of cpufreq
+cooling devices.</p>
+</div></blockquote>
+<dl>
+<dt>clip_cpus:</dt><dd><blockquote>
+<div><p>cpumask of cpus where the frequency constraints will happen.</p>
+</div></blockquote>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct thermal_cooling_device
+*of_cpufreq_cooling_register(struct cpufreq_policy *policy)
+</pre></div>
+</div>
+<p>This interface function registers the cpufreq cooling device with
+the name “thermal-cpufreq-%x” linking it with a device tree node, in
+order to bind it via the thermal DT code. This api can support multiple
+instances of cpufreq cooling devices.</p>
+<dl class="simple">
+<dt>policy:</dt><dd><p>CPUFreq policy.</p>
+</dd>
+</dl>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void cpufreq_cooling_unregister(struct thermal_cooling_device *cdev)
+</pre></div>
+</div>
+<p>This interface function unregisters the “thermal-cpufreq-%x” cooling device.</p>
+<p>cdev: Cooling device pointer which has to be unregistered.</p>
+</dd>
+</dl>
+</div></blockquote>
+</section>
+</section>
+<section id="power-models">
+<h2>2. Power models<a class="headerlink" href="#power-models" title="Permalink to this headline">¶</a></h2>
+<p>The power API registration functions provide a simple power model for
+CPUs.  The current power is calculated as dynamic power (static power isn’t
+supported currently).  This power model requires that the operating-points of
+the CPUs are registered using the kernel’s opp library and the
+<cite>cpufreq_frequency_table</cite> is assigned to the <cite><a class="reference internal" href="../infrastructure.html#c.device" title="device"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span></code></a></cite> of the
+cpu.  If you are using CONFIG_CPUFREQ_DT then the
+<cite>cpufreq_frequency_table</cite> should already be assigned to the cpu
+device.</p>
+<p>The dynamic power consumption of a processor depends on many factors.
+For a given processor implementation the primary factors are:</p>
+<ul class="simple">
+<li><p>The time the processor spends running, consuming dynamic power, as
+compared to the time in idle states where dynamic consumption is
+negligible.  Herein we refer to this as ‘utilisation’.</p></li>
+<li><p>The voltage and frequency levels as a result of DVFS.  The DVFS
+level is a dominant factor governing power consumption.</p></li>
+<li><p>In running time the ‘execution’ behaviour (instruction types, memory
+access patterns and so forth) causes, in most cases, a second order
+variation.  In pathological cases this variation can be significant,
+but typically it is of a much lesser impact than the factors above.</p></li>
+</ul>
+<p>A high level dynamic power consumption model may then be represented as:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Pdyn = f(run) * Voltage^2 * Frequency * Utilisation
+</pre></div>
+</div>
+<p>f(run) here represents the described execution behaviour and its
+result has a units of Watts/Hz/Volt^2 (this often expressed in
+mW/MHz/uVolt^2)</p>
+<p>The detailed behaviour for f(run) could be modelled on-line.  However,
+in practice, such an on-line model has dependencies on a number of
+implementation specific processor support and characterisation
+factors.  Therefore, in initial implementation that contribution is
+represented as a constant coefficient.  This is a simplification
+consistent with the relative contribution to overall power variation.</p>
+<p>In this simplified representation our model becomes:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Pdyn = Capacitance * Voltage^2 * Frequency * Utilisation
+</pre></div>
+</div>
+<p>Where <cite>capacitance</cite> is a constant that represents an indicative
+running time dynamic power coefficient in fundamental units of
+mW/MHz/uVolt^2.  Typical values for mobile CPUs might lie in range
+from 100 to 500.  For reference, the approximate values for the SoC in
+ARM’s Juno Development Platform are 530 for the Cortex-A57 cluster and
+140 for the Cortex-A53 cluster.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">CPU cooling APIs How To</a><ul>
+<li><a class="reference internal" href="#introduction">0. Introduction</a></li>
+<li><a class="reference internal" href="#cpu-cooling-apis">1. cpu cooling APIs</a><ul>
+<li><a class="reference internal" href="#cpufreq-registration-unregistration-apis">1.1 cpufreq registration/unregistration APIs</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#power-models">2. Power models</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/thermal/cpu-cooling-api.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/thermal/cpu-cooling-api.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

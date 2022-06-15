@@ -1,0 +1,561 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Kernel driver asc7621 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Kernel driver aspeed-pwm-tacho" href="aspeed-pwm-tacho.html" />
+    <link rel="prev" title="Kernel driver asb100" href="asb100.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="kernel-driver-asc7621">
+<h1>Kernel driver asc7621<a class="headerlink" href="#kernel-driver-asc7621" title="Permalink to this headline">¶</a></h1>
+<p>Supported chips:</p>
+<blockquote>
+<div><p>Andigilog aSC7621 and aSC7621a</p>
+<p>Prefix: ‘asc7621’</p>
+<p>Addresses scanned: I2C 0x2c, 0x2d, 0x2e</p>
+<p>Datasheet: <a class="reference external" href="http://www.fairview5.com/linux/asc7621/asc7621.pdf">http://www.fairview5.com/linux/asc7621/asc7621.pdf</a></p>
+</div></blockquote>
+<dl class="simple">
+<dt>Author:</dt><dd><p>George Joseph</p>
+</dd>
+</dl>
+<p>Description provided by Dave Pivin &#64; Andigilog:</p>
+<p>Andigilog has both the PECI and pre-PECI versions of the Heceta-6, as
+Intel calls them. Heceta-6e has high frequency PWM and Heceta-6p has
+added PECI and a 4th thermal zone. The Andigilog aSC7611 is the
+Heceta-6e part and aSC7621 is the Heceta-6p part. They are both in
+volume production, shipping to Intel and their subs.</p>
+<p>We have enhanced both parts relative to the governing Intel
+specification. First enhancement is temperature reading resolution. We
+have used registers below 20h for vendor-specific functions in addition
+to those in the Intel-specified vendor range.</p>
+<p>Our conversion process produces a result that is reported as two bytes.
+The fan speed control uses this finer value to produce a “step-less” fan
+PWM output. These two bytes are “read-locked” to guarantee that once a
+high or low byte is read, the other byte is locked-in until after the
+next read of any register. So to get an atomic reading, read high or low
+byte, then the very next read should be the opposite byte. Our data
+sheet says 10-bits of resolution, although you may find the lower bits
+are active, they are not necessarily reliable or useful externally. We
+chose not to mask them.</p>
+<p>We employ significant filtering that is user tunable as described in the
+data sheet. Our temperature reports and fan PWM outputs are very smooth
+when compared to the competition, in addition to the higher resolution
+temperature reports. The smoother PWM output does not require user
+intervention.</p>
+<p>We offer GPIO features on the former VID pins. These are open-drain
+outputs or inputs and may be used as general purpose I/O or as alarm
+outputs that are based on temperature limits. These are in 19h and 1Ah.</p>
+<p>We offer flexible mapping of temperature readings to thermal zones. Any
+temperature may be mapped to any zone, which has a default assignment
+that follows Intel’s specs.</p>
+<p>Since there is a fan to zone assignment that allows for the “hotter” of
+a set of zones to control the PWM of an individual fan, but there is no
+indication to the user, we have added an indicator that shows which zone
+is currently controlling the PWM for a given fan. This is in register
+00h.</p>
+<p>Both remote diode temperature readings may be given an offset value such
+that the reported reading as well as the temperature used to determine
+PWM may be offset for system calibration purposes.</p>
+<p>PECI Extended configuration allows for having more than two domains per
+PECI address and also provides an enabling function for each PECI
+address. One could use our flexible zone assignment to have a zone
+assigned to up to 4 PECI addresses. This is not possible in the default
+Intel configuration. This would be useful in multi-CPU systems with
+individual fans on each that would benefit from individual fan control.
+This is in register 0Eh.</p>
+<p>The tachometer measurement system is flexible and able to adapt to many
+fan types. We can also support pulse-stretched PWM so that 3-wire fans
+may be used. These characteristics are in registers 04h to 07h.</p>
+<p>Finally, we have added a tach disable function that turns off the tach
+measurement system for individual tachs in order to save power. That is
+in register 75h.</p>
+<hr class="docutils" />
+<section id="asc7621-product-description">
+<h2>aSC7621 Product Description<a class="headerlink" href="#asc7621-product-description" title="Permalink to this headline">¶</a></h2>
+<p>The aSC7621 has a two wire digital interface compatible with SMBus 2.0.
+Using a 10-bit ADC, the aSC7621 measures the temperature of two remote diode
+connected transistors as well as its own die. Support for Platform
+Environmental Control Interface (PECI) is included.</p>
+<p>Using temperature information from these four zones, an automatic fan speed
+control algorithm is employed to minimize acoustic impact while achieving
+recommended CPU temperature under varying operational loads.</p>
+<p>To set fan speed, the aSC7621 has three independent pulse width modulation
+(PWM) outputs that are controlled by one, or a combination of three,
+temperature zones. Both high- and low-frequency PWM ranges are supported.</p>
+<p>The aSC7621 also includes a digital filter that can be invoked to smooth
+temperature readings for better control of fan speed and minimum acoustic
+impact.</p>
+<p>The aSC7621 has tachometer inputs to measure fan speed on up to four fans.
+Limit and status registers for all measured values are included to alert
+the system host that any measurements are outside of programmed limits
+via status registers.</p>
+<p>System voltages of VCCP, 2.5V, 3.3V, 5.0V, and 12V motherboard power are
+monitored efficiently with internal scaling resistors.</p>
+<section id="features">
+<h3>Features<a class="headerlink" href="#features" title="Permalink to this headline">¶</a></h3>
+<ul class="simple">
+<li><p>Supports PECI interface and monitors internal and remote thermal diodes</p></li>
+<li><p>2-wire, SMBus 2.0 compliant, serial interface</p></li>
+<li><p>10-bit ADC</p></li>
+<li><p>Monitors VCCP, 2.5V, 3.3V, 5.0V, and 12V motherboard/processor supplies</p></li>
+<li><p>Programmable autonomous fan control based on temperature readings</p></li>
+<li><p>Noise filtering of temperature reading for fan speed control</p></li>
+<li><p>0.25C digital temperature sensor resolution</p></li>
+<li><p>3 PWM fan speed control outputs for 2-, 3- or 4-wire fans and up to 4 fan
+tachometer inputs</p></li>
+<li><p>Enhanced measured temperature to Temperature Zone assignment.</p></li>
+<li><p>Provides high and low PWM frequency ranges</p></li>
+<li><p>3 GPIO pins for custom use</p></li>
+<li><p>24-Lead QSOP package</p></li>
+</ul>
+</section>
+</section>
+<section id="configuration-notes">
+<h2>Configuration Notes<a class="headerlink" href="#configuration-notes" title="Permalink to this headline">¶</a></h2>
+<p>Except where noted below, the sysfs entries created by this driver follow
+the standards defined in “sysfs-interface”.</p>
+<dl>
+<dt>temp1_source</dt><dd><table class="docutils align-default">
+<colgroup>
+<col style="width: 2%" />
+<col style="width: 98%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>0</p></td>
+<td><p>(default) peci_legacy = 0, Remote 1 Temperature
+peci_legacy = 1, PECI Processor Temperature 0</p></td>
+</tr>
+<tr class="row-even"><td><p>1</p></td>
+<td><p>Remote 1 Temperature</p></td>
+</tr>
+<tr class="row-odd"><td><p>2</p></td>
+<td><p>Remote 2 Temperature</p></td>
+</tr>
+<tr class="row-even"><td><p>3</p></td>
+<td><p>Internal Temperature</p></td>
+</tr>
+<tr class="row-odd"><td><p>4</p></td>
+<td><p>PECI Processor Temperature 0</p></td>
+</tr>
+<tr class="row-even"><td><p>5</p></td>
+<td><p>PECI Processor Temperature 1</p></td>
+</tr>
+<tr class="row-odd"><td><p>6</p></td>
+<td><p>PECI Processor Temperature 2</p></td>
+</tr>
+<tr class="row-even"><td><p>7</p></td>
+<td><p>PECI Processor Temperature 3</p></td>
+</tr>
+</tbody>
+</table>
+</dd>
+<dt>temp2_source</dt><dd><table class="docutils align-default">
+<colgroup>
+<col style="width: 2%" />
+<col style="width: 98%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>0</p></td>
+<td><p>(default) Internal Temperature</p></td>
+</tr>
+<tr class="row-even"><td><p>1</p></td>
+<td><p>Remote 1 Temperature</p></td>
+</tr>
+<tr class="row-odd"><td><p>2</p></td>
+<td><p>Remote 2 Temperature</p></td>
+</tr>
+<tr class="row-even"><td><p>3</p></td>
+<td><p>Internal Temperature</p></td>
+</tr>
+<tr class="row-odd"><td><p>4</p></td>
+<td><p>PECI Processor Temperature 0</p></td>
+</tr>
+<tr class="row-even"><td><p>5</p></td>
+<td><p>PECI Processor Temperature 1</p></td>
+</tr>
+<tr class="row-odd"><td><p>6</p></td>
+<td><p>PECI Processor Temperature 2</p></td>
+</tr>
+<tr class="row-even"><td><p>7</p></td>
+<td><p>PECI Processor Temperature 3</p></td>
+</tr>
+</tbody>
+</table>
+</dd>
+<dt>temp3_source</dt><dd><table class="docutils align-default">
+<colgroup>
+<col style="width: 2%" />
+<col style="width: 98%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>0</p></td>
+<td><p>(default) Remote 2 Temperature</p></td>
+</tr>
+<tr class="row-even"><td><p>1</p></td>
+<td><p>Remote 1 Temperature</p></td>
+</tr>
+<tr class="row-odd"><td><p>2</p></td>
+<td><p>Remote 2 Temperature</p></td>
+</tr>
+<tr class="row-even"><td><p>3</p></td>
+<td><p>Internal Temperature</p></td>
+</tr>
+<tr class="row-odd"><td><p>4</p></td>
+<td><p>PECI Processor Temperature 0</p></td>
+</tr>
+<tr class="row-even"><td><p>5</p></td>
+<td><p>PECI Processor Temperature 1</p></td>
+</tr>
+<tr class="row-odd"><td><p>6</p></td>
+<td><p>PECI Processor Temperature 2</p></td>
+</tr>
+<tr class="row-even"><td><p>7</p></td>
+<td><p>PECI Processor Temperature 3</p></td>
+</tr>
+</tbody>
+</table>
+</dd>
+<dt>temp4_source</dt><dd><table class="docutils align-default">
+<colgroup>
+<col style="width: 2%" />
+<col style="width: 98%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>0</p></td>
+<td><p>(default) peci_legacy = 0, PECI Processor Temperature 0
+peci_legacy = 1, Remote 1 Temperature</p></td>
+</tr>
+<tr class="row-even"><td><p>1</p></td>
+<td><p>Remote 1 Temperature</p></td>
+</tr>
+<tr class="row-odd"><td><p>2</p></td>
+<td><p>Remote 2 Temperature</p></td>
+</tr>
+<tr class="row-even"><td><p>3</p></td>
+<td><p>Internal Temperature</p></td>
+</tr>
+<tr class="row-odd"><td><p>4</p></td>
+<td><p>PECI Processor Temperature 0</p></td>
+</tr>
+<tr class="row-even"><td><p>5</p></td>
+<td><p>PECI Processor Temperature 1</p></td>
+</tr>
+<tr class="row-odd"><td><p>6</p></td>
+<td><p>PECI Processor Temperature 2</p></td>
+</tr>
+<tr class="row-even"><td><p>7</p></td>
+<td><p>PECI Processor Temperature 3</p></td>
+</tr>
+</tbody>
+</table>
+</dd>
+<dt>temp[1-4]_smoothing_enable / temp[1-4]_smoothing_time</dt><dd><p>Smooths spikes in temp readings caused by noise.
+Valid values in milliseconds are:</p>
+<ul class="simple">
+<li><p>35000</p></li>
+<li><p>17600</p></li>
+<li><p>11800</p></li>
+<li><p>7000</p></li>
+<li><p>4400</p></li>
+<li><p>3000</p></li>
+<li><p>1600</p></li>
+<li><p>800</p></li>
+</ul>
+</dd>
+<dt>temp[1-4]_crit</dt><dd><p>When the corresponding zone temperature reaches this value,
+ALL pwm outputs will got to 100%.</p>
+</dd>
+<dt>temp[5-8]_input / temp[5-8]_enable</dt><dd><p>The aSC7621 can also read temperatures provided by the processor
+via the PECI bus.  Usually these are “core” temps and are relative
+to the point where the automatic thermal control circuit starts
+throttling.  This means that these are usually negative numbers.</p>
+</dd>
+<dt>pwm[1-3]_enable</dt><dd><table class="docutils align-default">
+<colgroup>
+<col style="width: 21%" />
+<col style="width: 79%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>0</p></td>
+<td><p>Fan off.</p></td>
+</tr>
+<tr class="row-even"><td><p>1</p></td>
+<td><p>Fan on manual control.</p></td>
+</tr>
+<tr class="row-odd"><td><p>2</p></td>
+<td><p>Fan on automatic control and will run at the minimum pwm
+if the temperature for the zone is below the minimum.</p></td>
+</tr>
+<tr class="row-even"><td><p>3</p></td>
+<td><p>Fan on automatic control but will be off if the
+temperature for the zone is below the minimum.</p></td>
+</tr>
+<tr class="row-odd"><td><p>4-254</p></td>
+<td><p>Ignored.</p></td>
+</tr>
+<tr class="row-even"><td><p>255</p></td>
+<td><p>Fan on full.</p></td>
+</tr>
+</tbody>
+</table>
+</dd>
+<dt>pwm[1-3]_auto_channels</dt><dd><p>Bitmap as described in sysctl-interface with the following
+exceptions…</p>
+<p>Only the following combination of zones (and their corresponding masks)
+are valid:</p>
+<ul>
+<li><p>1</p></li>
+<li><p>2</p></li>
+<li><p>3</p></li>
+<li><p>2,3</p></li>
+<li><p>1,2,3</p></li>
+<li><p>4</p></li>
+<li><p>1,2,3,4</p></li>
+<li><p>Special values:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 8%" />
+<col style="width: 92%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>0</p></td>
+<td><p>Disabled.</p></td>
+</tr>
+<tr class="row-even"><td><p>16</p></td>
+<td><p>Fan on manual control.</p></td>
+</tr>
+<tr class="row-odd"><td><p>31</p></td>
+<td><p>Fan on full.</p></td>
+</tr>
+</tbody>
+</table>
+</li>
+</ul>
+</dd>
+<dt>pwm[1-3]_invert</dt><dd><p>When set, inverts the meaning of pwm[1-3].
+i.e.  when pwm = 0, the fan will be on full and
+when pwm = 255 the fan will be off.</p>
+</dd>
+<dt>pwm[1-3]_freq</dt><dd><p>PWM frequency in Hz
+Valid values in Hz are:</p>
+<ul class="simple">
+<li><p>10</p></li>
+<li><p>15</p></li>
+<li><p>23</p></li>
+<li><p>30  (default)</p></li>
+<li><p>38</p></li>
+<li><p>47</p></li>
+<li><p>62</p></li>
+<li><p>94</p></li>
+<li><p>23000</p></li>
+<li><p>24000</p></li>
+<li><p>25000</p></li>
+<li><p>26000</p></li>
+<li><p>27000</p></li>
+<li><p>28000</p></li>
+<li><p>29000</p></li>
+<li><p>30000</p></li>
+</ul>
+<p>Setting any other value will be ignored.</p>
+</dd>
+<dt>peci_enable</dt><dd><p>Enables or disables PECI</p>
+</dd>
+<dt>peci_avg</dt><dd><p>Input filter average time.</p>
+<ul class="simple">
+<li><p>0     0 Sec. (no Smoothing) (default)</p></li>
+<li><p>1     0.25 Sec.</p></li>
+<li><p>2     0.5 Sec.</p></li>
+<li><p>3     1.0 Sec.</p></li>
+<li><p>4     2.0 Sec.</p></li>
+<li><p>5     4.0 Sec.</p></li>
+<li><p>6     8.0 Sec.</p></li>
+<li><p>7     0.0 Sec.</p></li>
+</ul>
+</dd>
+<dt>peci_legacy</dt><dd><table class="docutils align-default">
+<colgroup>
+<col style="width: 2%" />
+<col style="width: 98%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>0</p></td>
+<td><p>Standard Mode (default)
+Remote Diode 1 reading is associated with
+Temperature Zone 1, PECI is associated with
+Zone 4</p></td>
+</tr>
+<tr class="row-even"><td><p>1</p></td>
+<td><p>Legacy Mode
+PECI is associated with Temperature Zone 1,
+Remote Diode 1 is associated with Zone 4</p></td>
+</tr>
+</tbody>
+</table>
+</dd>
+<dt>peci_diode</dt><dd><p>Diode filter</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 5%" />
+<col style="width: 95%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>0</p></td>
+<td><p>0.25 Sec.</p></td>
+</tr>
+<tr class="row-even"><td><p>1</p></td>
+<td><p>1.1 Sec.</p></td>
+</tr>
+<tr class="row-odd"><td><p>2</p></td>
+<td><p>2.4 Sec.  (default)</p></td>
+</tr>
+<tr class="row-even"><td><p>3</p></td>
+<td><p>3.4 Sec.</p></td>
+</tr>
+<tr class="row-odd"><td><p>4</p></td>
+<td><p>5.0 Sec.</p></td>
+</tr>
+<tr class="row-even"><td><p>5</p></td>
+<td><p>6.8 Sec.</p></td>
+</tr>
+<tr class="row-odd"><td><p>6</p></td>
+<td><p>10.2 Sec.</p></td>
+</tr>
+<tr class="row-even"><td><p>7</p></td>
+<td><p>16.4 Sec.</p></td>
+</tr>
+</tbody>
+</table>
+</dd>
+<dt>peci_4domain</dt><dd><p>Four domain enable</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 2%" />
+<col style="width: 98%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>0</p></td>
+<td><p>1 or 2 Domains for enabled processors (default)</p></td>
+</tr>
+<tr class="row-even"><td><p>1</p></td>
+<td><p>3 or 4 Domains for enabled processors</p></td>
+</tr>
+</tbody>
+</table>
+</dd>
+<dt>peci_domain</dt><dd><p>Domain</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 2%" />
+<col style="width: 98%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>0</p></td>
+<td><p>Processor contains a single domain (0)   (default)</p></td>
+</tr>
+<tr class="row-even"><td><p>1</p></td>
+<td><p>Processor contains two domains (0,1)</p></td>
+</tr>
+</tbody>
+</table>
+</dd>
+</dl>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Kernel driver asc7621</a><ul>
+<li><a class="reference internal" href="#asc7621-product-description">aSC7621 Product Description</a><ul>
+<li><a class="reference internal" href="#features">Features</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#configuration-notes">Configuration Notes</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/hwmon/asc7621.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/hwmon/asc7621.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,207 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>AArch64 Linux 中擴展的活動監控單元 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="ARM64中的 HugeTLBpage" href="hugetlbpage.html" />
+    <link rel="prev" title="ARM64 架構" href="index.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是爲讓中文讀者更容易閱讀和理解，而不是作爲一個分支。因此，
+如果您對此文件有任何意見或改動，請先嘗試更新原始英文文件。如果要更改或
+修正某處翻譯文件，請將意見或補丁發送給維護者（聯繫方式見下）。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您發現本文檔與原始文件有任何不同或者有翻譯問題，請聯繫該文件的譯者，
+或者發送電子郵件給胡皓文以獲取幫助：&lt;<a class="reference external" href="mailto:src&#46;res&#37;&#52;&#48;email&#46;cn">src<span>&#46;</span>res<span>&#64;</span>email<span>&#46;</span>cn</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../arm64/amu.html#amu-index"><span class="std std-ref">Documentation/arm64/amu.rst</span></a></p>
+</dd>
+</dl>
+<dl class="simple">
+<dt>Translator: Bailu Lin &lt;<a class="reference external" href="mailto:bailu&#46;lin&#37;&#52;&#48;vivo&#46;com">bailu<span>&#46;</span>lin<span>&#64;</span>vivo<span>&#46;</span>com</a>&gt;</dt><dd><p>Hu Haowen &lt;<a class="reference external" href="mailto:src&#46;res&#37;&#52;&#48;email&#46;cn">src<span>&#46;</span>res<span>&#64;</span>email<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+</dl>
+<section id="aarch64-linux">
+<h1>AArch64 Linux 中擴展的活動監控單元<a class="headerlink" href="#aarch64-linux" title="Permalink to this headline">¶</a></h1>
+<p>作者: Ionela Voinescu &lt;<a class="reference external" href="mailto:ionela&#46;voinescu&#37;&#52;&#48;arm&#46;com">ionela<span>&#46;</span>voinescu<span>&#64;</span>arm<span>&#46;</span>com</a>&gt;</p>
+<p>日期: 2019-09-10</p>
+<p>本文檔簡要描述了 AArch64 Linux 支持的活動監控單元的規範。</p>
+<section id="id1">
+<h2>架構總述<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>活動監控是 ARMv8.4 CPU 架構引入的一個可選擴展特性。</p>
+<p>活動監控單元(在每個 CPU 中實現)爲系統管理提供了性能計數器。既可以通
+過系統寄存器的方式訪問計數器，同時也支持外部內存映射的方式訪問計數器。</p>
+<p>AMUv1 架構實現了一個由4個固定的64位事件計數器組成的計數器組。</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>CPU 周期計數器：同 CPU 的頻率增長</p></li>
+<li><p>常量計數器：同固定的系統時鐘頻率增長</p></li>
+<li><p>淘汰指令計數器: 同每次架構指令執行增長</p></li>
+<li><p>內存停頓周期計數器：計算由在時鐘域內的最後一級緩存中未命中而引起
+的指令調度停頓周期數</p></li>
+</ul>
+</div></blockquote>
+<p>當處於 WFI 或者 WFE 狀態時，計數器不會增長。</p>
+<p>AMU 架構提供了一個高達16位的事件計數器空間，未來新的 AMU 版本中可能
+用它來實現新增的事件計數器。</p>
+<p>另外，AMUv1 實現了一個多達16個64位輔助事件計數器的計數器組。</p>
+<p>冷復位時所有的計數器會清零。</p>
+</section>
+<section id="id2">
+<h2>基本支持<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>內核可以安全地運行在支持 AMU 和不支持 AMU 的 CPU 組合中。
+因此，當配置 CONFIG_ARM64_AMU_EXTN 後我們無條件使能後續
+(secondary or hotplugged) CPU 檢測和使用這個特性。</p>
+<p>當在 CPU 上檢測到該特性時，我們會標記爲特性可用但是不能保證計數器的功能，
+僅表明有擴展屬性。</p>
+<p>固件(代碼運行在高異常級別，例如 arm-tf )需支持以下功能：</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>提供低異常級別(EL2 和 EL1)訪問 AMU 寄存器的能力。</p></li>
+<li><p>使能計數器。如果未使能，它的值應爲 0。</p></li>
+<li><p>在從電源關閉狀態啓動 CPU 前或後保存或者恢復計數器。</p></li>
+</ul>
+</div></blockquote>
+<p>當使用使能了該特性的內核啓動但固件損壞時，訪問計數器寄存器可能會遭遇
+panic 或者死鎖。即使未發現這些症狀，計數器寄存器返回的數據結果並不一
+定能反映真實情況。通常，計數器會返回 0，表明他們未被使能。</p>
+<p>如果固件沒有提供適當的支持最好關閉 CONFIG_ARM64_AMU_EXTN。
+值得注意的是，出於安全原因，不要繞過 AMUSERRENR_EL0 設置而捕獲從
+EL0(用戶空間) 訪問 EL1(內核空間)。 因此，固件應該確保訪問 AMU寄存器
+不會困在 EL2或EL3。</p>
+<p>AMUv1 的固定計數器可以通過如下系統寄存器訪問：</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>SYS_AMEVCNTR0_CORE_EL0</p></li>
+<li><p>SYS_AMEVCNTR0_CONST_EL0</p></li>
+<li><p>SYS_AMEVCNTR0_INST_RET_EL0</p></li>
+<li><p>SYS_AMEVCNTR0_MEM_STALL_EL0</p></li>
+</ul>
+</div></blockquote>
+<p>特定輔助計數器可以通過 SYS_AMEVCNTR1_EL0(n) 訪問，其中n介於0到15。</p>
+<p>詳細信息定義在目錄：arch/arm64/include/asm/sysreg.h。</p>
+</section>
+<section id="id3">
+<h2>用戶空間訪問<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h2>
+<p>由於以下原因，當前禁止從用戶空間訪問 AMU 的寄存器：</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>安全因數：可能會暴露處於安全模式執行的代碼信息。</p></li>
+<li><p>意願：AMU 是用於系統管理的。</p></li>
+</ul>
+</div></blockquote>
+<p>同樣，該功能對用戶空間不可見。</p>
+</section>
+<section id="id4">
+<h2>虛擬化<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h2>
+<p>由於以下原因，當前禁止從 KVM 客戶端的用戶空間(EL0)和內核空間(EL1)
+訪問 AMU 的寄存器：</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>安全因數：可能會暴露給其他客戶端或主機端執行的代碼信息。</p></li>
+</ul>
+</div></blockquote>
+<p>任何試圖訪問 AMU 寄存器的行爲都會觸發一個註冊在客戶端的未定義異常。</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">AArch64 Linux 中擴展的活動監控單元</a><ul>
+<li><a class="reference internal" href="#id1">架構總述</a></li>
+<li><a class="reference internal" href="#id2">基本支持</a></li>
+<li><a class="reference internal" href="#id3">用戶空間訪問</a></li>
+<li><a class="reference internal" href="#id4">虛擬化</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_TW/arm64/amu.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_TW/arm64/amu.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,181 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Kernel driver i2c-mux-gpio &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Linux I2C Sysfs" href="../i2c-sysfs.html" />
+    <link rel="prev" title="I2C muxes and complex topologies" href="../i2c-topology.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="kernel-driver-i2c-mux-gpio">
+<h1>Kernel driver i2c-mux-gpio<a class="headerlink" href="#kernel-driver-i2c-mux-gpio" title="Permalink to this headline">¶</a></h1>
+<p>Author: Peter Korsgaard &lt;<a class="reference external" href="mailto:peter&#46;korsgaard&#37;&#52;&#48;barco&#46;com">peter<span>&#46;</span>korsgaard<span>&#64;</span>barco<span>&#46;</span>com</a>&gt;</p>
+<section id="description">
+<h2>Description<a class="headerlink" href="#description" title="Permalink to this headline">¶</a></h2>
+<p>i2c-mux-gpio is an i2c mux driver providing access to I2C bus segments
+from a master I2C bus and a hardware MUX controlled through GPIO pins.</p>
+<p>E.G.:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span> ----------              ----------  Bus segment 1   - - - - -
+|          | SCL/SDA    |          |-------------- |           |
+|          |------------|          |
+|          |            |          | Bus segment 2 |           |
+|  Linux   | GPIO 1..N  |   MUX    |---------------   Devices
+|          |------------|          |               |           |
+|          |            |          | Bus segment M
+|          |            |          |---------------|           |
+ ----------              ----------                  - - - - -
+</pre></div>
+</div>
+<p>SCL/SDA of the master I2C bus is multiplexed to bus segment 1..M
+according to the settings of the GPIO pins 1..N.</p>
+</section>
+<section id="usage">
+<h2>Usage<a class="headerlink" href="#usage" title="Permalink to this headline">¶</a></h2>
+<p>i2c-mux-gpio uses the platform bus, so you need to provide a struct
+platform_device with the platform_data pointing to a struct
+i2c_mux_gpio_platform_data with the I2C adapter number of the master
+bus, the number of bus segments to create and the GPIO pins used
+to control it. See include/linux/platform_data/i2c-mux-gpio.h for details.</p>
+<p>E.G. something like this for a MUX providing 4 bus segments
+controlled through 3 GPIO pins:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#include &lt;linux/platform_data/i2c-mux-gpio.h&gt;
+#include &lt;linux/platform_device.h&gt;
+
+static const unsigned myboard_gpiomux_gpios[] = {
+      AT91_PIN_PC26, AT91_PIN_PC25, AT91_PIN_PC24
+};
+
+static const unsigned myboard_gpiomux_values[] = {
+      0, 1, 2, 3
+};
+
+static struct i2c_mux_gpio_platform_data myboard_i2cmux_data = {
+      .parent         = 1,
+      .base_nr        = 2, /* optional */
+      .values         = myboard_gpiomux_values,
+      .n_values       = ARRAY_SIZE(myboard_gpiomux_values),
+      .gpios          = myboard_gpiomux_gpios,
+      .n_gpios        = ARRAY_SIZE(myboard_gpiomux_gpios),
+      .idle           = 4, /* optional */
+};
+
+static struct platform_device myboard_i2cmux = {
+      .name           = &quot;i2c-mux-gpio&quot;,
+      .id             = 0,
+      .dev            = {
+              .platform_data  = &amp;myboard_i2cmux_data,
+      },
+};
+</pre></div>
+</div>
+<p>If you don’t know the absolute GPIO pin numbers at registration time,
+you can instead provide a chip name (.chip_name) and relative GPIO pin
+numbers, and the i2c-mux-gpio driver will do the work for you,
+including deferred probing if the GPIO chip isn’t immediately
+available.</p>
+</section>
+<section id="device-registration">
+<h2>Device Registration<a class="headerlink" href="#device-registration" title="Permalink to this headline">¶</a></h2>
+<p>When registering your i2c-mux-gpio device, you should pass the number
+of any GPIO pin it uses as the device ID. This guarantees that every
+instance has a different ID.</p>
+<p>Alternatively, if you don’t need a stable device name, you can simply
+pass PLATFORM_DEVID_AUTO as the device ID, and the platform core will
+assign a dynamic ID to your device. If you do not know the absolute
+GPIO pin numbers at registration time, this is even the only option.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Kernel driver i2c-mux-gpio</a><ul>
+<li><a class="reference internal" href="#description">Description</a></li>
+<li><a class="reference internal" href="#usage">Usage</a></li>
+<li><a class="reference internal" href="#device-registration">Device Registration</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/i2c/muxes/i2c-mux-gpio.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/i2c/muxes/i2c-mux-gpio.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

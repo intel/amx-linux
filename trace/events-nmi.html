@@ -1,0 +1,143 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>NMI Trace Events &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="MSR Trace Events" href="events-msr.html" />
+    <link rel="prev" title="Subsystem Trace Points: power" href="events-power.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="nmi-trace-events">
+<h1>NMI Trace Events<a class="headerlink" href="#nmi-trace-events" title="Permalink to this headline">¶</a></h1>
+<p>These events normally show up here:</p>
+<blockquote>
+<div><p>/sys/kernel/debug/tracing/events/nmi</p>
+</div></blockquote>
+<section id="nmi-handler">
+<h2>nmi_handler<a class="headerlink" href="#nmi-handler" title="Permalink to this headline">¶</a></h2>
+<p>You might want to use this tracepoint if you suspect that your
+NMI handlers are hogging large amounts of CPU time.  The kernel
+will warn if it sees long-running handlers:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>INFO: NMI handler took too long to run: 9.207 msecs
+</pre></div>
+</div>
+<p>and this tracepoint will allow you to drill down and get some
+more details.</p>
+<p>Let’s say you suspect that perf_event_nmi_handler() is causing
+you some problems and you only want to trace that handler
+specifically.  You need to find its address:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ grep perf_event_nmi_handler /proc/kallsyms
+ffffffff81625600 t perf_event_nmi_handler
+</pre></div>
+</div>
+<p>Let’s also say you are only interested in when that function is
+really hogging a lot of CPU time, like a millisecond at a time.
+Note that the kernel’s output is in milliseconds, but the input
+to the filter is in nanoseconds!  You can filter on ‘delta_ns’:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>cd /sys/kernel/debug/tracing/events/nmi/nmi_handler
+echo &#39;handler==0xffffffff81625600 &amp;&amp; delta_ns&gt;1000000&#39; &gt; filter
+echo 1 &gt; enable
+</pre></div>
+</div>
+<p>Your output would then look like:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ cat /sys/kernel/debug/tracing/trace_pipe
+&lt;idle&gt;-0     [000] d.h3   505.397558: nmi_handler: perf_event_nmi_handler() delta_ns: 3236765 handled: 1
+&lt;idle&gt;-0     [000] d.h3   505.805893: nmi_handler: perf_event_nmi_handler() delta_ns: 3174234 handled: 1
+&lt;idle&gt;-0     [000] d.h3   506.158206: nmi_handler: perf_event_nmi_handler() delta_ns: 3084642 handled: 1
+&lt;idle&gt;-0     [000] d.h3   506.334346: nmi_handler: perf_event_nmi_handler() delta_ns: 3080351 handled: 1
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">NMI Trace Events</a><ul>
+<li><a class="reference internal" href="#nmi-handler">nmi_handler</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/trace/events-nmi.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/trace/events-nmi.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

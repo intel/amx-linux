@@ -1,0 +1,721 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>7.7. i.MX Video Capture Driver &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="7.8. i.MX7 Video Capture Driver" href="imx7.html" />
+    <link rel="prev" title="7.6. The Samsung S5P/Exynos4 FIMC driver" href="fimc.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="i-mx-video-capture-driver">
+<h1><span class="section-number">7.7. </span>i.MX Video Capture Driver<a class="headerlink" href="#i-mx-video-capture-driver" title="Permalink to this headline">¶</a></h1>
+<section id="introduction">
+<h2><span class="section-number">7.7.1. </span>Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>The Freescale i.MX5/6 contains an Image Processing Unit (IPU), which
+handles the flow of image frames to and from capture devices and
+display devices.</p>
+<p>For image capture, the IPU contains the following internal subunits:</p>
+<ul class="simple">
+<li><p>Image DMA Controller (IDMAC)</p></li>
+<li><p>Camera Serial Interface (CSI)</p></li>
+<li><p>Image Converter (IC)</p></li>
+<li><p>Sensor Multi-FIFO Controller (SMFC)</p></li>
+<li><p>Image Rotator (IRT)</p></li>
+<li><p>Video De-Interlacing or Combining Block (VDIC)</p></li>
+</ul>
+<p>The IDMAC is the DMA controller for transfer of image frames to and from
+memory. Various dedicated DMA channels exist for both video capture and
+display paths. During transfer, the IDMAC is also capable of vertical
+image flip, 8x8 block transfer (see IRT description), pixel component
+re-ordering (for example UYVY to YUYV) within the same colorspace, and
+packed &lt;–&gt; planar conversion. The IDMAC can also perform a simple
+de-interlacing by interweaving even and odd lines during transfer
+(without motion compensation which requires the VDIC).</p>
+<p>The CSI is the backend capture unit that interfaces directly with
+camera sensors over Parallel, BT.656/1120, and MIPI CSI-2 buses.</p>
+<p>The IC handles color-space conversion, resizing (downscaling and
+upscaling), horizontal flip, and 90/270 degree rotation operations.</p>
+<p>There are three independent “tasks” within the IC that can carry out
+conversions concurrently: pre-process encoding, pre-process viewfinder,
+and post-processing. Within each task, conversions are split into three
+sections: downsizing section, main section (upsizing, flip, colorspace
+conversion, and graphics plane combining), and rotation section.</p>
+<p>The IPU time-shares the IC task operations. The time-slice granularity
+is one burst of eight pixels in the downsizing section, one image line
+in the main processing section, one image frame in the rotation section.</p>
+<p>The SMFC is composed of four independent FIFOs that each can transfer
+captured frames from sensors directly to memory concurrently via four
+IDMAC channels.</p>
+<p>The IRT carries out 90 and 270 degree image rotation operations. The
+rotation operation is carried out on 8x8 pixel blocks at a time. This
+operation is supported by the IDMAC which handles the 8x8 block transfer
+along with block reordering, in coordination with vertical flip.</p>
+<p>The VDIC handles the conversion of interlaced video to progressive, with
+support for different motion compensation modes (low, medium, and high
+motion). The deinterlaced output frames from the VDIC can be sent to the
+IC pre-process viewfinder task for further conversions. The VDIC also
+contains a Combiner that combines two image planes, with alpha blending
+and color keying.</p>
+<p>In addition to the IPU internal subunits, there are also two units
+outside the IPU that are also involved in video capture on i.MX:</p>
+<ul class="simple">
+<li><p>MIPI CSI-2 Receiver for camera sensors with the MIPI CSI-2 bus
+interface. This is a Synopsys DesignWare core.</p></li>
+<li><p>Two video multiplexers for selecting among multiple sensor inputs
+to send to a CSI.</p></li>
+</ul>
+<p>For more info, refer to the latest versions of the i.MX5/6 reference
+manuals <a class="footnote-reference brackets" href="#f1" id="id1">1</a> and <a class="footnote-reference brackets" href="#f2" id="id2">2</a>.</p>
+</section>
+<section id="features">
+<h2><span class="section-number">7.7.2. </span>Features<a class="headerlink" href="#features" title="Permalink to this headline">¶</a></h2>
+<p>Some of the features of this driver include:</p>
+<ul class="simple">
+<li><p>Many different pipelines can be configured via media controller API,
+that correspond to the hardware video capture pipelines supported in
+the i.MX.</p></li>
+<li><p>Supports parallel, BT.565, and MIPI CSI-2 interfaces.</p></li>
+<li><p>Concurrent independent streams, by configuring pipelines to multiple
+video capture interfaces using independent entities.</p></li>
+<li><p>Scaling, color-space conversion, horizontal and vertical flip, and
+image rotation via IC task subdevs.</p></li>
+<li><p>Many pixel formats supported (RGB, packed and planar YUV, partial
+planar YUV).</p></li>
+<li><p>The VDIC subdev supports motion compensated de-interlacing, with three
+motion compensation modes: low, medium, and high motion. Pipelines are
+defined that allow sending frames to the VDIC subdev directly from the
+CSI. There is also support in the future for sending frames to the
+VDIC from memory buffers via a output/mem2mem devices.</p></li>
+<li><p>Includes a Frame Interval Monitor (FIM) that can correct vertical sync
+problems with the ADV718x video decoders.</p></li>
+</ul>
+</section>
+<section id="topology">
+<h2><span class="section-number">7.7.3. </span>Topology<a class="headerlink" href="#topology" title="Permalink to this headline">¶</a></h2>
+<p>The following shows the media topologies for the i.MX6Q SabreSD and
+i.MX6Q SabreAuto. Refer to these diagrams in the entity descriptions
+in the next section.</p>
+<p>The i.MX5/6 topologies can differ upstream from the IPUv3 CSI video
+multiplexers, but the internal IPUv3 topology downstream from there
+is common to all i.MX5/6 platforms. For example, the SabreSD, with the
+MIPI CSI-2 OV5640 sensor, requires the i.MX6 MIPI CSI-2 receiver. But
+the SabreAuto has only the ADV7180 decoder on a parallel bt.656 bus, and
+therefore does not require the MIPI CSI-2 receiver, so it is missing in
+its graph.</p>
+<figure class="align-center" id="id3">
+<img alt="Diagram of the i.MX6Q SabreSD media pipeline topology" src="../../_images/imx6q-sabresd.svg" /><figcaption>
+<p><span class="caption-text">Media pipeline graph on i.MX6Q SabreSD</span><a class="headerlink" href="#id3" title="Permalink to this image">¶</a></p>
+</figcaption>
+</figure>
+<figure class="align-center" id="id4">
+<img alt="Diagram of the i.MX6Q SabreAuto media pipeline topology" src="../../_images/imx6q-sabreauto.svg" /><figcaption>
+<p><span class="caption-text">Media pipeline graph on i.MX6Q SabreAuto</span><a class="headerlink" href="#id4" title="Permalink to this image">¶</a></p>
+</figcaption>
+</figure>
+</section>
+<section id="entities">
+<h2><span class="section-number">7.7.4. </span>Entities<a class="headerlink" href="#entities" title="Permalink to this headline">¶</a></h2>
+</section>
+<section id="imx6-mipi-csi2">
+<h2><span class="section-number">7.7.5. </span>imx6-mipi-csi2<a class="headerlink" href="#imx6-mipi-csi2" title="Permalink to this headline">¶</a></h2>
+<p>This is the MIPI CSI-2 receiver entity. It has one sink pad to receive
+the MIPI CSI-2 stream (usually from a MIPI CSI-2 camera sensor). It has
+four source pads, corresponding to the four MIPI CSI-2 demuxed virtual
+channel outputs. Multiple source pads can be enabled to independently
+stream from multiple virtual channels.</p>
+<p>This entity actually consists of two sub-blocks. One is the MIPI CSI-2
+core. This is a Synopsys Designware MIPI CSI-2 core. The other sub-block
+is a “CSI-2 to IPU gasket”. The gasket acts as a demultiplexer of the
+four virtual channels streams, providing four separate parallel buses
+containing each virtual channel that are routed to CSIs or video
+multiplexers as described below.</p>
+<p>On i.MX6 solo/dual-lite, all four virtual channel buses are routed to
+two video multiplexers. Both CSI0 and CSI1 can receive any virtual
+channel, as selected by the video multiplexers.</p>
+<p>On i.MX6 Quad, virtual channel 0 is routed to IPU1-CSI0 (after selected
+by a video mux), virtual channels 1 and 2 are hard-wired to IPU1-CSI1
+and IPU2-CSI0, respectively, and virtual channel 3 is routed to
+IPU2-CSI1 (again selected by a video mux).</p>
+</section>
+<section id="ipux-csiy-mux">
+<h2><span class="section-number">7.7.6. </span>ipuX_csiY_mux<a class="headerlink" href="#ipux-csiy-mux" title="Permalink to this headline">¶</a></h2>
+<p>These are the video multiplexers. They have two or more sink pads to
+select from either camera sensors with a parallel interface, or from
+MIPI CSI-2 virtual channels from imx6-mipi-csi2 entity. They have a
+single source pad that routes to a CSI (ipuX_csiY entities).</p>
+<p>On i.MX6 solo/dual-lite, there are two video mux entities. One sits
+in front of IPU1-CSI0 to select between a parallel sensor and any of
+the four MIPI CSI-2 virtual channels (a total of five sink pads). The
+other mux sits in front of IPU1-CSI1, and again has five sink pads to
+select between a parallel sensor and any of the four MIPI CSI-2 virtual
+channels.</p>
+<p>On i.MX6 Quad, there are two video mux entities. One sits in front of
+IPU1-CSI0 to select between a parallel sensor and MIPI CSI-2 virtual
+channel 0 (two sink pads). The other mux sits in front of IPU2-CSI1 to
+select between a parallel sensor and MIPI CSI-2 virtual channel 3 (two
+sink pads).</p>
+</section>
+<section id="ipux-csiy">
+<h2><span class="section-number">7.7.7. </span>ipuX_csiY<a class="headerlink" href="#ipux-csiy" title="Permalink to this headline">¶</a></h2>
+<p>These are the CSI entities. They have a single sink pad receiving from
+either a video mux or from a MIPI CSI-2 virtual channel as described
+above.</p>
+<p>This entity has two source pads. The first source pad can link directly
+to the ipuX_vdic entity or the ipuX_ic_prp entity, using hardware links
+that require no IDMAC memory buffer transfer.</p>
+<p>When the direct source pad is routed to the ipuX_ic_prp entity, frames
+from the CSI can be processed by one or both of the IC pre-processing
+tasks.</p>
+<p>When the direct source pad is routed to the ipuX_vdic entity, the VDIC
+will carry out motion-compensated de-interlace using “high motion” mode
+(see description of ipuX_vdic entity).</p>
+<p>The second source pad sends video frames directly to memory buffers
+via the SMFC and an IDMAC channel, bypassing IC pre-processing. This
+source pad is routed to a capture device node, with a node name of the
+format “ipuX_csiY capture”.</p>
+<p>Note that since the IDMAC source pad makes use of an IDMAC channel,
+pixel reordering within the same colorspace can be carried out by the
+IDMAC channel. For example, if the CSI sink pad is receiving in UYVY
+order, the capture device linked to the IDMAC source pad can capture
+in YUYV order. Also, if the CSI sink pad is receiving a packed YUV
+format, the capture device can capture a planar YUV format such as
+YUV420.</p>
+<p>The IDMAC channel at the IDMAC source pad also supports simple
+interweave without motion compensation, which is activated if the source
+pad’s field type is sequential top-bottom or bottom-top, and the
+requested capture interface field type is set to interlaced (t-b, b-t,
+or unqualified interlaced). The capture interface will enforce the same
+field order as the source pad field order (interlaced-bt if source pad
+is seq-bt, interlaced-tb if source pad is seq-tb).</p>
+<p>For events produced by ipuX_csiY, see ref:<cite>imx_api_ipuX_csiY</cite>.</p>
+</section>
+<section id="cropping-in-ipux-csiy">
+<h2><span class="section-number">7.7.8. </span>Cropping in ipuX_csiY<a class="headerlink" href="#cropping-in-ipux-csiy" title="Permalink to this headline">¶</a></h2>
+<p>The CSI supports cropping the incoming raw sensor frames. This is
+implemented in the ipuX_csiY entities at the sink pad, using the
+crop selection subdev API.</p>
+<p>The CSI also supports fixed divide-by-two downscaling independently in
+width and height. This is implemented in the ipuX_csiY entities at
+the sink pad, using the compose selection subdev API.</p>
+<p>The output rectangle at the ipuX_csiY source pad is the same as
+the compose rectangle at the sink pad. So the source pad rectangle
+cannot be negotiated, it must be set using the compose selection
+API at sink pad (if /2 downscale is desired, otherwise source pad
+rectangle is equal to incoming rectangle).</p>
+<p>To give an example of crop and /2 downscale, this will crop a
+1280x960 input frame to 640x480, and then /2 downscale in both
+dimensions to 320x240 (assumes ipu1_csi0 is linked to ipu1_csi0_mux):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>media-ctl -V &quot;&#39;ipu1_csi0_mux&#39;:2[fmt:UYVY2X8/1280x960]&quot;
+media-ctl -V &quot;&#39;ipu1_csi0&#39;:0[crop:(0,0)/640x480]&quot;
+media-ctl -V &quot;&#39;ipu1_csi0&#39;:0[compose:(0,0)/320x240]&quot;
+</pre></div>
+</div>
+</section>
+<section id="frame-skipping-in-ipux-csiy">
+<h2><span class="section-number">7.7.9. </span>Frame Skipping in ipuX_csiY<a class="headerlink" href="#frame-skipping-in-ipux-csiy" title="Permalink to this headline">¶</a></h2>
+<p>The CSI supports frame rate decimation, via frame skipping. Frame
+rate decimation is specified by setting the frame intervals at
+sink and source pads. The ipuX_csiY entity then applies the best
+frame skip setting to the CSI to achieve the desired frame rate
+at the source pad.</p>
+<p>The following example reduces an assumed incoming 60 Hz frame
+rate by half at the IDMAC output source pad:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>media-ctl -V &quot;&#39;ipu1_csi0&#39;:0[fmt:UYVY2X8/640x480@1/60]&quot;
+media-ctl -V &quot;&#39;ipu1_csi0&#39;:2[fmt:UYVY2X8/640x480@1/30]&quot;
+</pre></div>
+</div>
+</section>
+<section id="frame-interval-monitor-in-ipux-csiy">
+<h2><span class="section-number">7.7.10. </span>Frame Interval Monitor in ipuX_csiY<a class="headerlink" href="#frame-interval-monitor-in-ipux-csiy" title="Permalink to this headline">¶</a></h2>
+<p>See ref:<cite>imx_api_FIM</cite>.</p>
+</section>
+<section id="ipux-vdic">
+<h2><span class="section-number">7.7.11. </span>ipuX_vdic<a class="headerlink" href="#ipux-vdic" title="Permalink to this headline">¶</a></h2>
+<p>The VDIC carries out motion compensated de-interlacing, with three
+motion compensation modes: low, medium, and high motion. The mode is
+specified with the menu control V4L2_CID_DEINTERLACING_MODE. The VDIC
+has two sink pads and a single source pad.</p>
+<p>The direct sink pad receives from an ipuX_csiY direct pad. With this
+link the VDIC can only operate in high motion mode.</p>
+<p>When the IDMAC sink pad is activated, it receives from an output
+or mem2mem device node. With this pipeline, the VDIC can also operate
+in low and medium modes, because these modes require receiving
+frames from memory buffers. Note that an output or mem2mem device
+is not implemented yet, so this sink pad currently has no links.</p>
+<p>The source pad routes to the IC pre-processing entity ipuX_ic_prp.</p>
+</section>
+<section id="ipux-ic-prp">
+<h2><span class="section-number">7.7.12. </span>ipuX_ic_prp<a class="headerlink" href="#ipux-ic-prp" title="Permalink to this headline">¶</a></h2>
+<p>This is the IC pre-processing entity. It acts as a router, routing
+data from its sink pad to one or both of its source pads.</p>
+<p>This entity has a single sink pad. The sink pad can receive from the
+ipuX_csiY direct pad, or from ipuX_vdic.</p>
+<p>This entity has two source pads. One source pad routes to the
+pre-process encode task entity (ipuX_ic_prpenc), the other to the
+pre-process viewfinder task entity (ipuX_ic_prpvf). Both source pads
+can be activated at the same time if the sink pad is receiving from
+ipuX_csiY. Only the source pad to the pre-process viewfinder task entity
+can be activated if the sink pad is receiving from ipuX_vdic (frames
+from the VDIC can only be processed by the pre-process viewfinder task).</p>
+</section>
+<section id="ipux-ic-prpenc">
+<h2><span class="section-number">7.7.13. </span>ipuX_ic_prpenc<a class="headerlink" href="#ipux-ic-prpenc" title="Permalink to this headline">¶</a></h2>
+<p>This is the IC pre-processing encode entity. It has a single sink
+pad from ipuX_ic_prp, and a single source pad. The source pad is
+routed to a capture device node, with a node name of the format
+“ipuX_ic_prpenc capture”.</p>
+<p>This entity performs the IC pre-process encode task operations:
+color-space conversion, resizing (downscaling and upscaling),
+horizontal and vertical flip, and 90/270 degree rotation. Flip
+and rotation are provided via standard V4L2 controls.</p>
+<p>Like the ipuX_csiY IDMAC source, this entity also supports simple
+de-interlace without motion compensation, and pixel reordering.</p>
+</section>
+<section id="ipux-ic-prpvf">
+<h2><span class="section-number">7.7.14. </span>ipuX_ic_prpvf<a class="headerlink" href="#ipux-ic-prpvf" title="Permalink to this headline">¶</a></h2>
+<p>This is the IC pre-processing viewfinder entity. It has a single sink
+pad from ipuX_ic_prp, and a single source pad. The source pad is routed
+to a capture device node, with a node name of the format
+“ipuX_ic_prpvf capture”.</p>
+<p>This entity is identical in operation to ipuX_ic_prpenc, with the same
+resizing and CSC operations and flip/rotation controls. It will receive
+and process de-interlaced frames from the ipuX_vdic if ipuX_ic_prp is
+receiving from ipuX_vdic.</p>
+<p>Like the ipuX_csiY IDMAC source, this entity supports simple
+interweaving without motion compensation. However, note that if the
+ipuX_vdic is included in the pipeline (ipuX_ic_prp is receiving from
+ipuX_vdic), it’s not possible to use interweave in ipuX_ic_prpvf,
+since the ipuX_vdic has already carried out de-interlacing (with
+motion compensation) and therefore the field type output from
+ipuX_vdic can only be none (progressive).</p>
+</section>
+<section id="capture-pipelines">
+<h2><span class="section-number">7.7.15. </span>Capture Pipelines<a class="headerlink" href="#capture-pipelines" title="Permalink to this headline">¶</a></h2>
+<p>The following describe the various use-cases supported by the pipelines.</p>
+<p>The links shown do not include the backend sensor, video mux, or mipi
+csi-2 receiver links. This depends on the type of sensor interface
+(parallel or mipi csi-2). So these pipelines begin with:</p>
+<p>sensor -&gt; ipuX_csiY_mux -&gt; …</p>
+<p>for parallel sensors, or:</p>
+<p>sensor -&gt; imx6-mipi-csi2 -&gt; (ipuX_csiY_mux) -&gt; …</p>
+<p>for mipi csi-2 sensors. The imx6-mipi-csi2 receiver may need to route
+to the video mux (ipuX_csiY_mux) before sending to the CSI, depending
+on the mipi csi-2 virtual channel, hence ipuX_csiY_mux is shown in
+parenthesis.</p>
+</section>
+<section id="unprocessed-video-capture">
+<h2><span class="section-number">7.7.16. </span>Unprocessed Video Capture:<a class="headerlink" href="#unprocessed-video-capture" title="Permalink to this headline">¶</a></h2>
+<p>Send frames directly from sensor to camera device interface node, with
+no conversions, via ipuX_csiY IDMAC source pad:</p>
+<p>-&gt; ipuX_csiY:2 -&gt; ipuX_csiY capture</p>
+</section>
+<section id="ic-direct-conversions">
+<h2><span class="section-number">7.7.17. </span>IC Direct Conversions:<a class="headerlink" href="#ic-direct-conversions" title="Permalink to this headline">¶</a></h2>
+<p>This pipeline uses the preprocess encode entity to route frames directly
+from the CSI to the IC, to carry out scaling up to 1024x1024 resolution,
+CSC, flipping, and image rotation:</p>
+<p>-&gt; ipuX_csiY:1 -&gt; 0:ipuX_ic_prp:1 -&gt; 0:ipuX_ic_prpenc:1 -&gt; ipuX_ic_prpenc capture</p>
+</section>
+<section id="motion-compensated-de-interlace">
+<h2><span class="section-number">7.7.18. </span>Motion Compensated De-interlace:<a class="headerlink" href="#motion-compensated-de-interlace" title="Permalink to this headline">¶</a></h2>
+<p>This pipeline routes frames from the CSI direct pad to the VDIC entity to
+support motion-compensated de-interlacing (high motion mode only),
+scaling up to 1024x1024, CSC, flip, and rotation:</p>
+<p>-&gt; ipuX_csiY:1 -&gt; 0:ipuX_vdic:2 -&gt; 0:ipuX_ic_prp:2 -&gt; 0:ipuX_ic_prpvf:1 -&gt; ipuX_ic_prpvf capture</p>
+</section>
+<section id="usage-notes">
+<h2><span class="section-number">7.7.19. </span>Usage Notes<a class="headerlink" href="#usage-notes" title="Permalink to this headline">¶</a></h2>
+<p>To aid in configuration and for backward compatibility with V4L2
+applications that access controls only from video device nodes, the
+capture device interfaces inherit controls from the active entities
+in the current pipeline, so controls can be accessed either directly
+from the subdev or from the active capture device interface. For
+example, the FIM controls are available either from the ipuX_csiY
+subdevs or from the active capture device.</p>
+<p>The following are specific usage notes for the Sabre* reference
+boards:</p>
+</section>
+<section id="i-mx6q-sabrelite-with-ov5642-and-ov5640">
+<h2><span class="section-number">7.7.20. </span>i.MX6Q SabreLite with OV5642 and OV5640<a class="headerlink" href="#i-mx6q-sabrelite-with-ov5642-and-ov5640" title="Permalink to this headline">¶</a></h2>
+<p>This platform requires the OmniVision OV5642 module with a parallel
+camera interface, and the OV5640 module with a MIPI CSI-2
+interface. Both modules are available from Boundary Devices:</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://boundarydevices.com/product/nit6x_5mp">https://boundarydevices.com/product/nit6x_5mp</a></p></li>
+<li><p><a class="reference external" href="https://boundarydevices.com/product/nit6x_5mp_mipi">https://boundarydevices.com/product/nit6x_5mp_mipi</a></p></li>
+</ul>
+<p>Note that if only one camera module is available, the other sensor
+node can be disabled in the device tree.</p>
+<p>The OV5642 module is connected to the parallel bus input on the i.MX
+internal video mux to IPU1 CSI0. It’s i2c bus connects to i2c bus 2.</p>
+<p>The MIPI CSI-2 OV5640 module is connected to the i.MX internal MIPI CSI-2
+receiver, and the four virtual channel outputs from the receiver are
+routed as follows: vc0 to the IPU1 CSI0 mux, vc1 directly to IPU1 CSI1,
+vc2 directly to IPU2 CSI0, and vc3 to the IPU2 CSI1 mux. The OV5640 is
+also connected to i2c bus 2 on the SabreLite, therefore the OV5642 and
+OV5640 must not share the same i2c slave address.</p>
+<p>The following basic example configures unprocessed video capture
+pipelines for both sensors. The OV5642 is routed to ipu1_csi0, and
+the OV5640, transmitting on MIPI CSI-2 virtual channel 1 (which is
+imx6-mipi-csi2 pad 2), is routed to ipu1_csi1. Both sensors are
+configured to output 640x480, and the OV5642 outputs YUYV2X8, the
+OV5640 UYVY2X8:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># Setup links for OV5642
+media-ctl -l &quot;&#39;ov5642 1-0042&#39;:0 -&gt; &#39;ipu1_csi0_mux&#39;:1[1]&quot;
+media-ctl -l &quot;&#39;ipu1_csi0_mux&#39;:2 -&gt; &#39;ipu1_csi0&#39;:0[1]&quot;
+media-ctl -l &quot;&#39;ipu1_csi0&#39;:2 -&gt; &#39;ipu1_csi0 capture&#39;:0[1]&quot;
+# Setup links for OV5640
+media-ctl -l &quot;&#39;ov5640 1-0040&#39;:0 -&gt; &#39;imx6-mipi-csi2&#39;:0[1]&quot;
+media-ctl -l &quot;&#39;imx6-mipi-csi2&#39;:2 -&gt; &#39;ipu1_csi1&#39;:0[1]&quot;
+media-ctl -l &quot;&#39;ipu1_csi1&#39;:2 -&gt; &#39;ipu1_csi1 capture&#39;:0[1]&quot;
+# Configure pads for OV5642 pipeline
+media-ctl -V &quot;&#39;ov5642 1-0042&#39;:0 [fmt:YUYV2X8/640x480 field:none]&quot;
+media-ctl -V &quot;&#39;ipu1_csi0_mux&#39;:2 [fmt:YUYV2X8/640x480 field:none]&quot;
+media-ctl -V &quot;&#39;ipu1_csi0&#39;:2 [fmt:AYUV32/640x480 field:none]&quot;
+# Configure pads for OV5640 pipeline
+media-ctl -V &quot;&#39;ov5640 1-0040&#39;:0 [fmt:UYVY2X8/640x480 field:none]&quot;
+media-ctl -V &quot;&#39;imx6-mipi-csi2&#39;:2 [fmt:UYVY2X8/640x480 field:none]&quot;
+media-ctl -V &quot;&#39;ipu1_csi1&#39;:2 [fmt:AYUV32/640x480 field:none]&quot;
+</pre></div>
+</div>
+<p>Streaming can then begin independently on the capture device nodes
+“ipu1_csi0 capture” and “ipu1_csi1 capture”. The v4l2-ctl tool can
+be used to select any supported YUV pixelformat on the capture device
+nodes, including planar.</p>
+</section>
+<section id="i-mx6q-sabreauto-with-adv7180-decoder">
+<h2><span class="section-number">7.7.21. </span>i.MX6Q SabreAuto with ADV7180 decoder<a class="headerlink" href="#i-mx6q-sabreauto-with-adv7180-decoder" title="Permalink to this headline">¶</a></h2>
+<p>On the i.MX6Q SabreAuto, an on-board ADV7180 SD decoder is connected to the
+parallel bus input on the internal video mux to IPU1 CSI0.</p>
+<p>The following example configures a pipeline to capture from the ADV7180
+video decoder, assuming NTSC 720x480 input signals, using simple
+interweave (unconverted and without motion compensation). The adv7180
+must output sequential or alternating fields (field type ‘seq-bt’ for
+NTSC, or ‘alternate’):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># Setup links
+media-ctl -l &quot;&#39;adv7180 3-0021&#39;:0 -&gt; &#39;ipu1_csi0_mux&#39;:1[1]&quot;
+media-ctl -l &quot;&#39;ipu1_csi0_mux&#39;:2 -&gt; &#39;ipu1_csi0&#39;:0[1]&quot;
+media-ctl -l &quot;&#39;ipu1_csi0&#39;:2 -&gt; &#39;ipu1_csi0 capture&#39;:0[1]&quot;
+# Configure pads
+media-ctl -V &quot;&#39;adv7180 3-0021&#39;:0 [fmt:UYVY2X8/720x480 field:seq-bt]&quot;
+media-ctl -V &quot;&#39;ipu1_csi0_mux&#39;:2 [fmt:UYVY2X8/720x480]&quot;
+media-ctl -V &quot;&#39;ipu1_csi0&#39;:2 [fmt:AYUV32/720x480]&quot;
+# Configure &quot;ipu1_csi0 capture&quot; interface (assumed at /dev/video4)
+v4l2-ctl -d4 --set-fmt-video=field=interlaced_bt
+</pre></div>
+</div>
+<p>Streaming can then begin on /dev/video4. The v4l2-ctl tool can also be
+used to select any supported YUV pixelformat on /dev/video4.</p>
+<p>This example configures a pipeline to capture from the ADV7180
+video decoder, assuming PAL 720x576 input signals, with Motion
+Compensated de-interlacing. The adv7180 must output sequential or
+alternating fields (field type ‘seq-tb’ for PAL, or ‘alternate’).</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># Setup links
+media-ctl -l &quot;&#39;adv7180 3-0021&#39;:0 -&gt; &#39;ipu1_csi0_mux&#39;:1[1]&quot;
+media-ctl -l &quot;&#39;ipu1_csi0_mux&#39;:2 -&gt; &#39;ipu1_csi0&#39;:0[1]&quot;
+media-ctl -l &quot;&#39;ipu1_csi0&#39;:1 -&gt; &#39;ipu1_vdic&#39;:0[1]&quot;
+media-ctl -l &quot;&#39;ipu1_vdic&#39;:2 -&gt; &#39;ipu1_ic_prp&#39;:0[1]&quot;
+media-ctl -l &quot;&#39;ipu1_ic_prp&#39;:2 -&gt; &#39;ipu1_ic_prpvf&#39;:0[1]&quot;
+media-ctl -l &quot;&#39;ipu1_ic_prpvf&#39;:1 -&gt; &#39;ipu1_ic_prpvf capture&#39;:0[1]&quot;
+# Configure pads
+media-ctl -V &quot;&#39;adv7180 3-0021&#39;:0 [fmt:UYVY2X8/720x576 field:seq-tb]&quot;
+media-ctl -V &quot;&#39;ipu1_csi0_mux&#39;:2 [fmt:UYVY2X8/720x576]&quot;
+media-ctl -V &quot;&#39;ipu1_csi0&#39;:1 [fmt:AYUV32/720x576]&quot;
+media-ctl -V &quot;&#39;ipu1_vdic&#39;:2 [fmt:AYUV32/720x576 field:none]&quot;
+media-ctl -V &quot;&#39;ipu1_ic_prp&#39;:2 [fmt:AYUV32/720x576 field:none]&quot;
+media-ctl -V &quot;&#39;ipu1_ic_prpvf&#39;:1 [fmt:AYUV32/720x576 field:none]&quot;
+# Configure &quot;ipu1_ic_prpvf capture&quot; interface (assumed at /dev/video2)
+v4l2-ctl -d2 --set-fmt-video=field=none
+</pre></div>
+</div>
+<p>Streaming can then begin on /dev/video2. The v4l2-ctl tool can also be
+used to select any supported YUV pixelformat on /dev/video2.</p>
+<p>This platform accepts Composite Video analog inputs to the ADV7180 on
+Ain1 (connector J42).</p>
+</section>
+<section id="i-mx6dl-sabreauto-with-adv7180-decoder">
+<h2><span class="section-number">7.7.22. </span>i.MX6DL SabreAuto with ADV7180 decoder<a class="headerlink" href="#i-mx6dl-sabreauto-with-adv7180-decoder" title="Permalink to this headline">¶</a></h2>
+<p>On the i.MX6DL SabreAuto, an on-board ADV7180 SD decoder is connected to the
+parallel bus input on the internal video mux to IPU1 CSI0.</p>
+<p>The following example configures a pipeline to capture from the ADV7180
+video decoder, assuming NTSC 720x480 input signals, using simple
+interweave (unconverted and without motion compensation). The adv7180
+must output sequential or alternating fields (field type ‘seq-bt’ for
+NTSC, or ‘alternate’):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># Setup links
+media-ctl -l &quot;&#39;adv7180 4-0021&#39;:0 -&gt; &#39;ipu1_csi0_mux&#39;:4[1]&quot;
+media-ctl -l &quot;&#39;ipu1_csi0_mux&#39;:5 -&gt; &#39;ipu1_csi0&#39;:0[1]&quot;
+media-ctl -l &quot;&#39;ipu1_csi0&#39;:2 -&gt; &#39;ipu1_csi0 capture&#39;:0[1]&quot;
+# Configure pads
+media-ctl -V &quot;&#39;adv7180 4-0021&#39;:0 [fmt:UYVY2X8/720x480 field:seq-bt]&quot;
+media-ctl -V &quot;&#39;ipu1_csi0_mux&#39;:5 [fmt:UYVY2X8/720x480]&quot;
+media-ctl -V &quot;&#39;ipu1_csi0&#39;:2 [fmt:AYUV32/720x480]&quot;
+# Configure &quot;ipu1_csi0 capture&quot; interface (assumed at /dev/video0)
+v4l2-ctl -d0 --set-fmt-video=field=interlaced_bt
+</pre></div>
+</div>
+<p>Streaming can then begin on /dev/video0. The v4l2-ctl tool can also be
+used to select any supported YUV pixelformat on /dev/video0.</p>
+<p>This example configures a pipeline to capture from the ADV7180
+video decoder, assuming PAL 720x576 input signals, with Motion
+Compensated de-interlacing. The adv7180 must output sequential or
+alternating fields (field type ‘seq-tb’ for PAL, or ‘alternate’).</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># Setup links
+media-ctl -l &quot;&#39;adv7180 4-0021&#39;:0 -&gt; &#39;ipu1_csi0_mux&#39;:4[1]&quot;
+media-ctl -l &quot;&#39;ipu1_csi0_mux&#39;:5 -&gt; &#39;ipu1_csi0&#39;:0[1]&quot;
+media-ctl -l &quot;&#39;ipu1_csi0&#39;:1 -&gt; &#39;ipu1_vdic&#39;:0[1]&quot;
+media-ctl -l &quot;&#39;ipu1_vdic&#39;:2 -&gt; &#39;ipu1_ic_prp&#39;:0[1]&quot;
+media-ctl -l &quot;&#39;ipu1_ic_prp&#39;:2 -&gt; &#39;ipu1_ic_prpvf&#39;:0[1]&quot;
+media-ctl -l &quot;&#39;ipu1_ic_prpvf&#39;:1 -&gt; &#39;ipu1_ic_prpvf capture&#39;:0[1]&quot;
+# Configure pads
+media-ctl -V &quot;&#39;adv7180 4-0021&#39;:0 [fmt:UYVY2X8/720x576 field:seq-tb]&quot;
+media-ctl -V &quot;&#39;ipu1_csi0_mux&#39;:5 [fmt:UYVY2X8/720x576]&quot;
+media-ctl -V &quot;&#39;ipu1_csi0&#39;:1 [fmt:AYUV32/720x576]&quot;
+media-ctl -V &quot;&#39;ipu1_vdic&#39;:2 [fmt:AYUV32/720x576 field:none]&quot;
+media-ctl -V &quot;&#39;ipu1_ic_prp&#39;:2 [fmt:AYUV32/720x576 field:none]&quot;
+media-ctl -V &quot;&#39;ipu1_ic_prpvf&#39;:1 [fmt:AYUV32/720x576 field:none]&quot;
+# Configure &quot;ipu1_ic_prpvf capture&quot; interface (assumed at /dev/video2)
+v4l2-ctl -d2 --set-fmt-video=field=none
+</pre></div>
+</div>
+<p>Streaming can then begin on /dev/video2. The v4l2-ctl tool can also be
+used to select any supported YUV pixelformat on /dev/video2.</p>
+<p>This platform accepts Composite Video analog inputs to the ADV7180 on
+Ain1 (connector J42).</p>
+</section>
+<section id="i-mx6q-sabresd-with-mipi-csi-2-ov5640">
+<h2><span class="section-number">7.7.23. </span>i.MX6Q SabreSD with MIPI CSI-2 OV5640<a class="headerlink" href="#i-mx6q-sabresd-with-mipi-csi-2-ov5640" title="Permalink to this headline">¶</a></h2>
+<p>Similarly to i.MX6Q SabreLite, the i.MX6Q SabreSD supports a parallel
+interface OV5642 module on IPU1 CSI0, and a MIPI CSI-2 OV5640
+module. The OV5642 connects to i2c bus 1 and the OV5640 to i2c bus 2.</p>
+<p>The device tree for SabreSD includes OF graphs for both the parallel
+OV5642 and the MIPI CSI-2 OV5640, but as of this writing only the MIPI
+CSI-2 OV5640 has been tested, so the OV5642 node is currently disabled.
+The OV5640 module connects to MIPI connector J5. The NXP part number
+for the OV5640 module that connects to the SabreSD board is H120729.</p>
+<p>The following example configures unprocessed video capture pipeline to
+capture from the OV5640, transmitting on MIPI CSI-2 virtual channel 0:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># Setup links
+media-ctl -l &quot;&#39;ov5640 1-003c&#39;:0 -&gt; &#39;imx6-mipi-csi2&#39;:0[1]&quot;
+media-ctl -l &quot;&#39;imx6-mipi-csi2&#39;:1 -&gt; &#39;ipu1_csi0_mux&#39;:0[1]&quot;
+media-ctl -l &quot;&#39;ipu1_csi0_mux&#39;:2 -&gt; &#39;ipu1_csi0&#39;:0[1]&quot;
+media-ctl -l &quot;&#39;ipu1_csi0&#39;:2 -&gt; &#39;ipu1_csi0 capture&#39;:0[1]&quot;
+# Configure pads
+media-ctl -V &quot;&#39;ov5640 1-003c&#39;:0 [fmt:UYVY2X8/640x480]&quot;
+media-ctl -V &quot;&#39;imx6-mipi-csi2&#39;:1 [fmt:UYVY2X8/640x480]&quot;
+media-ctl -V &quot;&#39;ipu1_csi0_mux&#39;:0 [fmt:UYVY2X8/640x480]&quot;
+media-ctl -V &quot;&#39;ipu1_csi0&#39;:0 [fmt:AYUV32/640x480]&quot;
+</pre></div>
+</div>
+<p>Streaming can then begin on “ipu1_csi0 capture” node. The v4l2-ctl
+tool can be used to select any supported pixelformat on the capture
+device node.</p>
+<p>To determine what is the /dev/video node correspondent to
+“ipu1_csi0 capture”:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>media-ctl -e &quot;ipu1_csi0 capture&quot;
+/dev/video0
+</pre></div>
+</div>
+<p>/dev/video0 is the streaming element in this case.</p>
+<p>Starting the streaming via v4l2-ctl:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>v4l2-ctl --stream-mmap -d /dev/video0
+</pre></div>
+</div>
+<p>Starting the streaming via Gstreamer and sending the content to the display:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>gst-launch-1.0 v4l2src device=/dev/video0 ! kmssink
+</pre></div>
+</div>
+<p>The following example configures a direct conversion pipeline to capture
+from the OV5640, transmitting on MIPI CSI-2 virtual channel 0. It also
+shows colorspace conversion and scaling at IC output.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># Setup links
+media-ctl -l &quot;&#39;ov5640 1-003c&#39;:0 -&gt; &#39;imx6-mipi-csi2&#39;:0[1]&quot;
+media-ctl -l &quot;&#39;imx6-mipi-csi2&#39;:1 -&gt; &#39;ipu1_csi0_mux&#39;:0[1]&quot;
+media-ctl -l &quot;&#39;ipu1_csi0_mux&#39;:2 -&gt; &#39;ipu1_csi0&#39;:0[1]&quot;
+media-ctl -l &quot;&#39;ipu1_csi0&#39;:1 -&gt; &#39;ipu1_ic_prp&#39;:0[1]&quot;
+media-ctl -l &quot;&#39;ipu1_ic_prp&#39;:1 -&gt; &#39;ipu1_ic_prpenc&#39;:0[1]&quot;
+media-ctl -l &quot;&#39;ipu1_ic_prpenc&#39;:1 -&gt; &#39;ipu1_ic_prpenc capture&#39;:0[1]&quot;
+# Configure pads
+media-ctl -V &quot;&#39;ov5640 1-003c&#39;:0 [fmt:UYVY2X8/640x480]&quot;
+media-ctl -V &quot;&#39;imx6-mipi-csi2&#39;:1 [fmt:UYVY2X8/640x480]&quot;
+media-ctl -V &quot;&#39;ipu1_csi0_mux&#39;:2 [fmt:UYVY2X8/640x480]&quot;
+media-ctl -V &quot;&#39;ipu1_csi0&#39;:1 [fmt:AYUV32/640x480]&quot;
+media-ctl -V &quot;&#39;ipu1_ic_prp&#39;:1 [fmt:AYUV32/640x480]&quot;
+media-ctl -V &quot;&#39;ipu1_ic_prpenc&#39;:1 [fmt:ARGB8888_1X32/800x600]&quot;
+# Set a format at the capture interface
+v4l2-ctl -d /dev/video1 --set-fmt-video=pixelformat=RGB3
+</pre></div>
+</div>
+<p>Streaming can then begin on “ipu1_ic_prpenc capture” node.</p>
+<p>To determine what is the /dev/video node correspondent to
+“ipu1_ic_prpenc capture”:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>media-ctl -e &quot;ipu1_ic_prpenc capture&quot;
+/dev/video1
+</pre></div>
+</div>
+<p>/dev/video1 is the streaming element in this case.</p>
+<p>Starting the streaming via v4l2-ctl:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>v4l2-ctl --stream-mmap -d /dev/video1
+</pre></div>
+</div>
+<p>Starting the streaming via Gstreamer and sending the content to the display:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>gst-launch-1.0 v4l2src device=/dev/video1 ! kmssink
+</pre></div>
+</div>
+</section>
+<section id="known-issues">
+<h2><span class="section-number">7.7.24. </span>Known Issues<a class="headerlink" href="#known-issues" title="Permalink to this headline">¶</a></h2>
+<ol class="arabic simple">
+<li><p>When using 90 or 270 degree rotation control at capture resolutions
+near the IC resizer limit of 1024x1024, and combined with planar
+pixel formats (YUV420, YUV422p), frame capture will often fail with
+no end-of-frame interrupts from the IDMAC channel. To work around
+this, use lower resolution and/or packed formats (YUYV, RGB3, etc.)
+when 90 or 270 rotations are needed.</p></li>
+</ol>
+</section>
+<section id="file-list">
+<h2><span class="section-number">7.7.25. </span>File list<a class="headerlink" href="#file-list" title="Permalink to this headline">¶</a></h2>
+<p>drivers/staging/media/imx/
+include/media/imx.h
+include/linux/imx-media.h</p>
+</section>
+<section id="references">
+<h2><span class="section-number">7.7.26. </span>References<a class="headerlink" href="#references" title="Permalink to this headline">¶</a></h2>
+<dl class="footnote brackets">
+<dt class="label" id="f1"><span class="brackets"><a class="fn-backref" href="#id1">1</a></span></dt>
+<dd><p><a class="reference external" href="http://www.nxp.com/assets/documents/data/en/reference-manuals/IMX6DQRM.pdf">http://www.nxp.com/assets/documents/data/en/reference-manuals/IMX6DQRM.pdf</a></p>
+</dd>
+<dt class="label" id="f2"><span class="brackets"><a class="fn-backref" href="#id2">2</a></span></dt>
+<dd><p><a class="reference external" href="http://www.nxp.com/assets/documents/data/en/reference-manuals/IMX6SDLRM.pdf">http://www.nxp.com/assets/documents/data/en/reference-manuals/IMX6SDLRM.pdf</a></p>
+</dd>
+</dl>
+</section>
+<section id="authors">
+<h2><span class="section-number">7.7.27. </span>Authors<a class="headerlink" href="#authors" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p>Steve Longerbeam &lt;<a class="reference external" href="mailto:steve_longerbeam&#37;&#52;&#48;mentor&#46;com">steve_longerbeam<span>&#64;</span>mentor<span>&#46;</span>com</a>&gt;</p></li>
+<li><p>Philipp Zabel &lt;<a class="reference external" href="mailto:kernel&#37;&#52;&#48;pengutronix&#46;de">kernel<span>&#64;</span>pengutronix<span>&#46;</span>de</a>&gt;</p></li>
+<li><p>Russell King &lt;<a class="reference external" href="mailto:linux&#37;&#52;&#48;armlinux&#46;org&#46;uk">linux<span>&#64;</span>armlinux<span>&#46;</span>org<span>&#46;</span>uk</a>&gt;</p></li>
+</ul>
+<p>Copyright (C) 2012-2017 Mentor Graphics Inc.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">7.7. i.MX Video Capture Driver</a><ul>
+<li><a class="reference internal" href="#introduction">7.7.1. Introduction</a></li>
+<li><a class="reference internal" href="#features">7.7.2. Features</a></li>
+<li><a class="reference internal" href="#topology">7.7.3. Topology</a></li>
+<li><a class="reference internal" href="#entities">7.7.4. Entities</a></li>
+<li><a class="reference internal" href="#imx6-mipi-csi2">7.7.5. imx6-mipi-csi2</a></li>
+<li><a class="reference internal" href="#ipux-csiy-mux">7.7.6. ipuX_csiY_mux</a></li>
+<li><a class="reference internal" href="#ipux-csiy">7.7.7. ipuX_csiY</a></li>
+<li><a class="reference internal" href="#cropping-in-ipux-csiy">7.7.8. Cropping in ipuX_csiY</a></li>
+<li><a class="reference internal" href="#frame-skipping-in-ipux-csiy">7.7.9. Frame Skipping in ipuX_csiY</a></li>
+<li><a class="reference internal" href="#frame-interval-monitor-in-ipux-csiy">7.7.10. Frame Interval Monitor in ipuX_csiY</a></li>
+<li><a class="reference internal" href="#ipux-vdic">7.7.11. ipuX_vdic</a></li>
+<li><a class="reference internal" href="#ipux-ic-prp">7.7.12. ipuX_ic_prp</a></li>
+<li><a class="reference internal" href="#ipux-ic-prpenc">7.7.13. ipuX_ic_prpenc</a></li>
+<li><a class="reference internal" href="#ipux-ic-prpvf">7.7.14. ipuX_ic_prpvf</a></li>
+<li><a class="reference internal" href="#capture-pipelines">7.7.15. Capture Pipelines</a></li>
+<li><a class="reference internal" href="#unprocessed-video-capture">7.7.16. Unprocessed Video Capture:</a></li>
+<li><a class="reference internal" href="#ic-direct-conversions">7.7.17. IC Direct Conversions:</a></li>
+<li><a class="reference internal" href="#motion-compensated-de-interlace">7.7.18. Motion Compensated De-interlace:</a></li>
+<li><a class="reference internal" href="#usage-notes">7.7.19. Usage Notes</a></li>
+<li><a class="reference internal" href="#i-mx6q-sabrelite-with-ov5642-and-ov5640">7.7.20. i.MX6Q SabreLite with OV5642 and OV5640</a></li>
+<li><a class="reference internal" href="#i-mx6q-sabreauto-with-adv7180-decoder">7.7.21. i.MX6Q SabreAuto with ADV7180 decoder</a></li>
+<li><a class="reference internal" href="#i-mx6dl-sabreauto-with-adv7180-decoder">7.7.22. i.MX6DL SabreAuto with ADV7180 decoder</a></li>
+<li><a class="reference internal" href="#i-mx6q-sabresd-with-mipi-csi-2-ov5640">7.7.23. i.MX6Q SabreSD with MIPI CSI-2 OV5640</a></li>
+<li><a class="reference internal" href="#known-issues">7.7.24. Known Issues</a></li>
+<li><a class="reference internal" href="#file-list">7.7.25. File list</a></li>
+<li><a class="reference internal" href="#references">7.7.26. References</a></li>
+<li><a class="reference internal" href="#authors">7.7.27. Authors</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/admin-guide/media/imx.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/admin-guide/media/imx.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

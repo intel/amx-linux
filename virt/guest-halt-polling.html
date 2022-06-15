@@ -1,0 +1,177 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Guest halt polling &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Nitro Enclaves" href="ne_overview.html" />
+    <link rel="prev" title="Paravirt_ops" href="paravirt_ops.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="guest-halt-polling">
+<h1>Guest halt polling<a class="headerlink" href="#guest-halt-polling" title="Permalink to this headline">¶</a></h1>
+<p>The cpuidle_haltpoll driver, with the haltpoll governor, allows
+the guest vcpus to poll for a specified amount of time before
+halting.</p>
+<p>This provides the following benefits to host side polling:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>The POLL flag is set while polling is performed, which allows
+a remote vCPU to avoid sending an IPI (and the associated
+cost of handling the IPI) when performing a wakeup.</p></li>
+<li><p>The VM-exit cost can be avoided.</p></li>
+</ol>
+</div></blockquote>
+<p>The downside of guest side polling is that polling is performed
+even with other runnable tasks in the host.</p>
+<p>The basic logic as follows: A global value, guest_halt_poll_ns,
+is configured by the user, indicating the maximum amount of
+time polling is allowed. This value is fixed.</p>
+<p>Each vcpu has an adjustable guest_halt_poll_ns
+(“per-cpu guest_halt_poll_ns”), which is adjusted by the algorithm
+in response to events (explained below).</p>
+<section id="module-parameters">
+<h2>Module Parameters<a class="headerlink" href="#module-parameters" title="Permalink to this headline">¶</a></h2>
+<p>The haltpoll governor has 5 tunable module parameters:</p>
+<ol class="arabic simple">
+<li><p>guest_halt_poll_ns:</p></li>
+</ol>
+<p>Maximum amount of time, in nanoseconds, that polling is
+performed before halting.</p>
+<p>Default: 200000</p>
+<ol class="arabic simple" start="2">
+<li><p>guest_halt_poll_shrink:</p></li>
+</ol>
+<p>Division factor used to shrink per-cpu guest_halt_poll_ns when
+wakeup event occurs after the global guest_halt_poll_ns.</p>
+<p>Default: 2</p>
+<ol class="arabic simple" start="3">
+<li><p>guest_halt_poll_grow:</p></li>
+</ol>
+<p>Multiplication factor used to grow per-cpu guest_halt_poll_ns
+when event occurs after per-cpu guest_halt_poll_ns
+but before global guest_halt_poll_ns.</p>
+<p>Default: 2</p>
+<ol class="arabic simple" start="4">
+<li><p>guest_halt_poll_grow_start:</p></li>
+</ol>
+<p>The per-cpu guest_halt_poll_ns eventually reaches zero
+in case of an idle system. This value sets the initial
+per-cpu guest_halt_poll_ns when growing. This can
+be increased from 10000, to avoid misses during the initial
+growth stage:</p>
+<p>10k, 20k, 40k, … (example assumes guest_halt_poll_grow=2).</p>
+<p>Default: 50000</p>
+<ol class="arabic simple" start="5">
+<li><p>guest_halt_poll_allow_shrink:</p></li>
+</ol>
+<p>Bool parameter which allows shrinking. Set to N
+to avoid it (per-cpu guest_halt_poll_ns will remain
+high once achieves global guest_halt_poll_ns value).</p>
+<p>Default: Y</p>
+<p>The module parameters can be set from the debugfs files in:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/sys/module/haltpoll/parameters/
+</pre></div>
+</div>
+</section>
+<section id="further-notes">
+<h2>Further Notes<a class="headerlink" href="#further-notes" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p>Care should be taken when setting the guest_halt_poll_ns parameter as a
+large value has the potential to drive the cpu usage to 100% on a machine
+which would be almost entirely idle otherwise.</p></li>
+</ul>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Guest halt polling</a><ul>
+<li><a class="reference internal" href="#module-parameters">Module Parameters</a></li>
+<li><a class="reference internal" href="#further-notes">Further Notes</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/virt/guest-halt-polling.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/virt/guest-halt-polling.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

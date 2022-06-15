@@ -1,0 +1,315 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>英特尔全路径（OPA）虚拟网络接口控制器（VNIC） &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../infiniband/opa_vnic.html"><span class="doc">Intel Omni-Path (OPA) Virtual Network Interface Controller (VNIC)</span></a></p>
+</dd>
+<dt class="field-even">翻译</dt>
+<dd class="field-even"><p>司延腾 Yanteng Si &lt;<a class="reference external" href="mailto:siyanteng&#37;&#52;&#48;loongson&#46;cn">siyanteng<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+<dt class="field-odd">校译</dt>
+<dd class="field-odd"><p>王普宇 Puyu Wang &lt;<a class="reference external" href="mailto:realpuyuwang&#37;&#52;&#48;gmail&#46;com">realpuyuwang<span>&#64;</span>gmail<span>&#46;</span>com</a>&gt;
+时奎亮 Alex Shi &lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;</p>
+</dd>
+</dl>
+<section id="opa-vnic">
+<span id="cn-infiniband-opa-vnic"></span><h1>英特尔全路径（OPA）虚拟网络接口控制器（VNIC）<a class="headerlink" href="#opa-vnic" title="Permalink to this headline">¶</a></h1>
+<p>英特尔全路径（OPA）虚拟网络接口控制器（VNIC）功能通过封装HFI节点之间的以
+太网数据包，支持Omni-Path结构上的以太网功能。</p>
+<section id="id1">
+<h2>体系结构<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>Omni-Path封装的以太网数据包的交换模式涉及Omni-Path结构拓扑上覆盖的一个或
+多个虚拟以太网交换机。Omni-Path结构上的HFI节点的一个子集被允许在特定的虚
+拟以太网交换机上交换封装的以太网数据包。虚拟以太网交换机是通过配置结构上的
+HFI节点实现的逻辑抽象，用于生成和处理报头。在最简单的配置中，整个结构的所有
+HFI节点通过一个虚拟以太网交换机交换封装的以太网数据包。一个虚拟以太网交换机，
+实际上是一个独立的以太网网络。该配置由以太网管理器（EM）执行，它是可信的结
+构管理器（FM）应用程序的一部分。HFI节点可以有多个VNIC，每个连接到不同的虚
+拟以太网交换机。下图介绍了两个虚拟以太网交换机与两个HFI节点的情况:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>                             +-------------------+
+                             |      子网/        |
+                             |     以太网        |
+                             |      管理         |
+                             +-------------------+
+                                /          /
+                              /           /
+                            /            /
+                          /             /
++-----------------------------+  +------------------------------+
+|     虚拟以太网切换          |  |      虚拟以太网切换          |
+|  +---------+    +---------+ |  | +---------+    +---------+   |
+|  | VPORT   |    |  VPORT  | |  | |  VPORT  |    |  VPORT  |   |
++--+---------+----+---------+-+  +-+---------+----+---------+---+
+         |                 \        /                 |
+         |                   \    /                   |
+         |                     \/                     |
+         |                    /  \                    |
+         |                  /      \                  |
+     +-----------+------------+  +-----------+------------+
+     |   VNIC    |    VNIC    |  |    VNIC   |    VNIC    |
+     +-----------+------------+  +-----------+------------+
+     |          HFI           |  |          HFI           |
+     +------------------------+  +------------------------+
+</pre></div>
+</div>
+<p>Omni-Path封装的以太网数据包格式如下所述。</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 38%" />
+<col style="width: 62%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>位</p></th>
+<th class="head"><p>域</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Quad Word 0:</p></td>
+<td></td>
+</tr>
+<tr class="row-odd"><td><p>0-19</p></td>
+<td><p>SLID (低20位)</p></td>
+</tr>
+<tr class="row-even"><td><p>20-30</p></td>
+<td><p>长度 (以四字为单位)</p></td>
+</tr>
+<tr class="row-odd"><td><p>31</p></td>
+<td><p>BECN 位</p></td>
+</tr>
+<tr class="row-even"><td><p>32-51</p></td>
+<td><p>DLID (低20位)</p></td>
+</tr>
+<tr class="row-odd"><td><p>52-56</p></td>
+<td><p>SC (服务级别)</p></td>
+</tr>
+<tr class="row-even"><td><p>57-59</p></td>
+<td><p>RC (路由控制)</p></td>
+</tr>
+<tr class="row-odd"><td><p>60</p></td>
+<td><p>FECN 位</p></td>
+</tr>
+<tr class="row-even"><td><p>61-62</p></td>
+<td><p>L2 (=10, 16B 格式)</p></td>
+</tr>
+<tr class="row-odd"><td><p>63</p></td>
+<td><p>LT (=1, 链路传输头 Flit)</p></td>
+</tr>
+<tr class="row-even"><td><p>Quad Word 1:</p></td>
+<td></td>
+</tr>
+<tr class="row-odd"><td><p>0-7</p></td>
+<td><p>L4 type (=0x78 ETHERNET)</p></td>
+</tr>
+<tr class="row-even"><td><p>8-11</p></td>
+<td><p>SLID[23:20]</p></td>
+</tr>
+<tr class="row-odd"><td><p>12-15</p></td>
+<td><p>DLID[23:20]</p></td>
+</tr>
+<tr class="row-even"><td><p>16-31</p></td>
+<td><p>PKEY</p></td>
+</tr>
+<tr class="row-odd"><td><p>32-47</p></td>
+<td><p>熵</p></td>
+</tr>
+<tr class="row-even"><td><p>48-63</p></td>
+<td><p>保留</p></td>
+</tr>
+<tr class="row-odd"><td><p>Quad Word 2:</p></td>
+<td></td>
+</tr>
+<tr class="row-even"><td><p>0-15</p></td>
+<td><p>保留</p></td>
+</tr>
+<tr class="row-odd"><td><p>16-31</p></td>
+<td><p>L4 头</p></td>
+</tr>
+<tr class="row-even"><td><p>32-63</p></td>
+<td><p>以太网数据包</p></td>
+</tr>
+<tr class="row-odd"><td><p>Quad Words 3 to N-1:</p></td>
+<td></td>
+</tr>
+<tr class="row-even"><td><p>0-63</p></td>
+<td><p>以太网数据包 (pad拓展)</p></td>
+</tr>
+<tr class="row-odd"><td><p>Quad Word N (last):</p></td>
+<td></td>
+</tr>
+<tr class="row-even"><td><p>0-23</p></td>
+<td><p>以太网数据包 (pad拓展)</p></td>
+</tr>
+<tr class="row-odd"><td><p>24-55</p></td>
+<td><p>ICRC</p></td>
+</tr>
+<tr class="row-even"><td><p>56-61</p></td>
+<td><p>尾</p></td>
+</tr>
+<tr class="row-odd"><td><p>62-63</p></td>
+<td><p>LT (=01, 链路传输尾 Flit)</p></td>
+</tr>
+</tbody>
+</table>
+<p>以太网数据包在传输端被填充，以确保VNIC OPA数据包是四字对齐的。“尾”字段
+包含填充的字节数。在接收端，“尾”字段被读取，在将数据包向上传递到网络堆
+栈之前，填充物被移除（与ICRC、尾和OPA头一起）。</p>
+<p>L4头字段包含VNIC端口所属的虚拟以太网交换机ID。在接收端，该字段用于将收
+到的VNIC数据包去多路复用到不同的VNIC端口。</p>
+</section>
+<section id="id2">
+<h2>驱动设计<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>英特尔OPA VNIC的软件设计如下图所示。OPA VNIC功能有一个依赖于硬件的部分
+和一个独立于硬件的部分。</p>
+<p>对IB设备分配和释放RDMA netdev设备的支持已经被加入。RDMA netdev支持与
+网络堆栈的对接，从而创建标准的网络接口。OPA_VNIC是一个RDMA netdev设备
+类型。</p>
+<p>依赖于HW的VNIC功能是HFI1驱动的一部分。它实现了分配和释放OPA_VNIC RDMA
+netdev的动作。它涉及VNIC功能的HW资源分配/管理。它与网络堆栈接口并实现所
+需的net_device_ops功能。它在传输路径中期待Omni-Path封装的以太网数据包，
+并提供对它们的HW访问。在将数据包向上传递到网络堆栈之前，它把Omni-Path头
+从接收的数据包中剥离。它还实现了RDMA netdev控制操作。</p>
+<p>OPA VNIC模块实现了独立于硬件的VNIC功能。它由两部分组成。VNIC以太网管理
+代理（VEMA）作为一个IB客户端向IB核心注册，并与IB MAD栈接口。它与以太网
+管理器（EM）和VNIC netdev交换管理信息。VNIC netdev部分分配和释放OPA_VNIC
+RDMA netdev设备。它在需要时覆盖由依赖HW的VNIC驱动设置的net_device_ops函数，
+以适应任何控制操作。它还处理以太网数据包的封装，在传输路径中使用Omni-Path头。
+对于每个VNIC接口，封装所需的信息是由EM通过VEMA MAD接口配置的。它还通过调用
+RDMA netdev控制操作将任何控制信息传递给依赖于HW的驱动程序:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>+-------------------+ +----------------------+
+|                   | |       Linux          |
+|     IB MAD        | |       网络           |
+|                   | |       栈             |
++-------------------+ +----------------------+
+         |               |          |
+         |               |          |
++----------------------------+      |
+|                            |      |
+|      OPA VNIC 模块         |      |
+|  (OPA VNIC RDMA Netdev     |      |
+|     &amp; EMA 函数)            |      |
+|                            |      |
++----------------------------+      |
+            |                       |
+            |                       |
+   +------------------+             |
+   |     IB 核心      |             |
+   +------------------+             |
+            |                       |
+            |                       |
++--------------------------------------------+
+|                                            |
+|      HFI1 驱动和 VNIC 支持                 |
+|                                            |
++--------------------------------------------+
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">英特尔全路径（OPA）虚拟网络接口控制器（VNIC）</a><ul>
+<li><a class="reference internal" href="#id1">体系结构</a></li>
+<li><a class="reference internal" href="#id2">驱动设计</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/infiniband/opa_vnic.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/infiniband/opa_vnic.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

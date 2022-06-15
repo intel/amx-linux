@@ -1,0 +1,349 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Firmware Upload API &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Other Firmware Interfaces" href="other_interfaces.html" />
+    <link rel="prev" title="request_firmware API" href="request_firmware.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="firmware-upload-api">
+<h1>Firmware Upload API<a class="headerlink" href="#firmware-upload-api" title="Permalink to this headline">¶</a></h1>
+<p>A device driver that registers with the firmware loader will expose
+persistent sysfs nodes to enable users to initiate firmware updates for
+that device.  It is the responsibility of the device driver and/or the
+device itself to perform any validation on the data received. Firmware
+upload uses the same <em>loading</em> and <em>data</em> sysfs files described in the
+documentation for firmware fallback. It also adds additional sysfs files
+to provide status on the transfer of the firmware image to the device.</p>
+<section id="register-for-firmware-upload">
+<h2>Register for firmware upload<a class="headerlink" href="#register-for-firmware-upload" title="Permalink to this headline">¶</a></h2>
+<p>A device driver registers for firmware upload by calling
+<a class="reference internal" href="#c.firmware_upload_register" title="firmware_upload_register"><code class="xref c c-func docutils literal notranslate"><span class="pre">firmware_upload_register()</span></code></a>. Among the parameter list is a name to
+identify the device under /sys/class/firmware. A user may initiate a
+firmware upload by echoing a 1 to the <em>loading</em> sysfs file for the target
+device. Next, the user writes the firmware image to the <em>data</em> sysfs
+file. After writing the firmware data, the user echos 0 to the <em>loading</em>
+sysfs file to signal completion. Echoing 0 to <em>loading</em> also triggers the
+transfer of the firmware to the lower-lever device driver in the context
+of a kernel worker thread.</p>
+<p>To use the firmware upload API, write a driver that implements a set of
+ops.  The probe function calls <a class="reference internal" href="#c.firmware_upload_register" title="firmware_upload_register"><code class="xref c c-func docutils literal notranslate"><span class="pre">firmware_upload_register()</span></code></a> and the remove
+function calls <a class="reference internal" href="#c.firmware_upload_unregister" title="firmware_upload_unregister"><code class="xref c c-func docutils literal notranslate"><span class="pre">firmware_upload_unregister()</span></code></a> such as:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>static const struct fw_upload_ops m10bmc_ops = {
+        .prepare = m10bmc_sec_prepare,
+        .write = m10bmc_sec_write,
+        .poll_complete = m10bmc_sec_poll_complete,
+        .cancel = m10bmc_sec_cancel,
+        .cleanup = m10bmc_sec_cleanup,
+};
+
+static int m10bmc_sec_probe(struct platform_device *pdev)
+{
+        const char *fw_name, *truncate;
+        struct m10bmc_sec *sec;
+        struct fw_upload *fwl;
+        unsigned int len;
+
+        sec = devm_kzalloc(&amp;pdev-&gt;dev, sizeof(*sec), GFP_KERNEL);
+        if (!sec)
+                return -ENOMEM;
+
+        sec-&gt;dev = &amp;pdev-&gt;dev;
+        sec-&gt;m10bmc = dev_get_drvdata(pdev-&gt;dev.parent);
+        dev_set_drvdata(&amp;pdev-&gt;dev, sec);
+
+        fw_name = dev_name(sec-&gt;dev);
+        truncate = strstr(fw_name, &quot;.auto&quot;);
+        len = (truncate) ? truncate - fw_name : strlen(fw_name);
+        sec-&gt;fw_name = kmemdup_nul(fw_name, len, GFP_KERNEL);
+
+        fwl = firmware_upload_register(sec-&gt;dev, sec-&gt;fw_name, &amp;m10bmc_ops, sec);
+        if (IS_ERR(fwl)) {
+                dev_err(sec-&gt;dev, &quot;Firmware Upload driver failed to start\n&quot;);
+                kfree(sec-&gt;fw_name);
+                return PTR_ERR(fwl);
+        }
+
+        sec-&gt;fwl = fwl;
+        return 0;
+}
+
+static int m10bmc_sec_remove(struct platform_device *pdev)
+{
+        struct m10bmc_sec *sec = dev_get_drvdata(&amp;pdev-&gt;dev);
+
+        firmware_upload_unregister(sec-&gt;fwl);
+        kfree(sec-&gt;fw_name);
+        return 0;
+}
+</pre></div>
+</div>
+<section id="firmware-upload-register">
+<h3>firmware_upload_register<a class="headerlink" href="#firmware-upload-register" title="Permalink to this headline">¶</a></h3>
+<dl class="function">
+<dt id="c.firmware_upload_register">
+struct fw_upload * <code class="sig-name descname">firmware_upload_register</code><span class="sig-paren">(</span>struct module<em> *module</em>, struct <a class="reference internal" href="../infrastructure.html#c.device" title="device">device</a><em> *parent</em>, const char<em> *name</em>, const struct <a class="reference internal" href="#c.fw_upload_ops" title="fw_upload_ops">fw_upload_ops</a><em> *ops</em>, void<em> *dd_handle</em><span class="sig-paren">)</span><a class="headerlink" href="#c.firmware_upload_register" title="Permalink to this definition">¶</a></dt>
+<dd><p>register for the firmware upload sysfs API</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">module</span> <span class="pre">*module</span></code></dt><dd><p>kernel module of this device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*parent</span></code></dt><dd><p>parent device instantiating firmware upload</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*name</span></code></dt><dd><p>firmware name to be associated with this device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">struct</span> <span class="pre">fw_upload_ops</span> <span class="pre">*ops</span></code></dt><dd><p>pointer to structure of firmware upload ops</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*dd_handle</span></code></dt><dd><p>pointer to parent driver private data</p>
+<p><strong>name</strong> must be unique among all users of firmware upload. The firmware
+sysfs files for this device will be found at /sys/class/firmware/<strong>name</strong>.</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p>struct fw_upload pointer or ERR_PTR()</p>
+</div>
+</section>
+<section id="firmware-upload-unregister">
+<h3>firmware_upload_unregister<a class="headerlink" href="#firmware-upload-unregister" title="Permalink to this headline">¶</a></h3>
+<dl class="function">
+<dt id="c.firmware_upload_unregister">
+void <code class="sig-name descname">firmware_upload_unregister</code><span class="sig-paren">(</span>struct fw_upload<em> *fw_upload</em><span class="sig-paren">)</span><a class="headerlink" href="#c.firmware_upload_unregister" title="Permalink to this definition">¶</a></dt>
+<dd><p>Unregister firmware upload interface</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">fw_upload</span> <span class="pre">*fw_upload</span></code></dt><dd><p>pointer to struct fw_upload</p>
+</dd>
+</dl>
+</div>
+</section>
+<section id="firmware-upload-ops">
+<h3>Firmware Upload Ops<a class="headerlink" href="#firmware-upload-ops" title="Permalink to this headline">¶</a></h3>
+<dl class="type">
+<dt id="c.fw_upload_ops">
+struct <code class="sig-name descname">fw_upload_ops</code><a class="headerlink" href="#c.fw_upload_ops" title="Permalink to this definition">¶</a></dt>
+<dd><p>device specific operations to support firmware upload</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct fw_upload_ops {
+    enum fw_upload_err (*prepare)(struct fw_upload *fw_upload, const u8 *data, u32 size);
+    enum fw_upload_err (*write)(struct fw_upload *fw_upload,const u8 *data, u32 offset, u32 size, u32 *written);
+    enum fw_upload_err (*poll_complete)(struct fw_upload *fw_upload);
+    void (*cancel)(struct fw_upload *fw_upload);
+    void (*cleanup)(struct fw_upload *fw_upload);
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">prepare</span></code></dt><dd><p>Required: Prepare secure update</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">write</span></code></dt><dd><p>Required: The write() op receives the remaining
+size to be written and must return the actual
+size written or a negative error code. The write()
+op will be called repeatedly until all data is
+written.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">poll_complete</span></code></dt><dd><p>Required: Check for the completion of the
+HW authentication/programming process.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">cancel</span></code></dt><dd><p>Required: Request cancellation of update. This op
+is called from the context of a different kernel
+thread, so race conditions need to be considered.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">cleanup</span></code></dt><dd><p>Optional: Complements the prepare()
+function and is called at the completion
+of the update, on success or failure, if the
+prepare function succeeded.</p>
+</dd>
+</dl>
+</div>
+</section>
+<section id="firmware-upload-progress-codes">
+<h3>Firmware Upload Progress Codes<a class="headerlink" href="#firmware-upload-progress-codes" title="Permalink to this headline">¶</a></h3>
+<p>The following progress codes are used internally by the firmware loader.
+Corresponding strings are reported through the status sysfs node that
+is described below and are documented in the ABI documentation.</p>
+<dl class="type">
+<dt id="c.fw_upload_prog">
+enum <code class="sig-name descname">fw_upload_prog</code><a class="headerlink" href="#c.fw_upload_prog" title="Permalink to this definition">¶</a></dt>
+<dd><p>firmware upload progress codes</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Constants</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">FW_UPLOAD_PROG_IDLE</span></code></dt><dd><p>there is no firmware upload in progress</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">FW_UPLOAD_PROG_RECEIVING</span></code></dt><dd><p>worker thread is receiving firmware data</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">FW_UPLOAD_PROG_PREPARING</span></code></dt><dd><p>target device is preparing for firmware upload</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">FW_UPLOAD_PROG_TRANSFERRING</span></code></dt><dd><p>data is being copied to the device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">FW_UPLOAD_PROG_PROGRAMMING</span></code></dt><dd><p>device is performing the firmware update</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">FW_UPLOAD_PROG_MAX</span></code></dt><dd><p>Maximum progress code marker</p>
+</dd>
+</dl>
+</div>
+</section>
+<section id="firmware-upload-error-codes">
+<h3>Firmware Upload Error Codes<a class="headerlink" href="#firmware-upload-error-codes" title="Permalink to this headline">¶</a></h3>
+<p>The following error codes may be returned by the driver ops in case of
+failure:</p>
+<dl class="type">
+<dt id="c.fw_upload_err">
+enum <code class="sig-name descname">fw_upload_err</code><a class="headerlink" href="#c.fw_upload_err" title="Permalink to this definition">¶</a></dt>
+<dd><p>firmware upload error codes</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Constants</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">FW_UPLOAD_ERR_NONE</span></code></dt><dd><p>returned to indicate success</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">FW_UPLOAD_ERR_HW_ERROR</span></code></dt><dd><p>error signalled by hardware, see kernel log</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">FW_UPLOAD_ERR_TIMEOUT</span></code></dt><dd><p>SW timed out on handshake with HW/firmware</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">FW_UPLOAD_ERR_CANCELED</span></code></dt><dd><p>upload was cancelled by the user</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">FW_UPLOAD_ERR_BUSY</span></code></dt><dd><p>there is an upload operation already in progress</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">FW_UPLOAD_ERR_INVALID_SIZE</span></code></dt><dd><p>invalid firmware image size</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">FW_UPLOAD_ERR_RW_ERROR</span></code></dt><dd><p>read or write to HW failed, see kernel log</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">FW_UPLOAD_ERR_WEAROUT</span></code></dt><dd><p>FLASH device is approaching wear-out, wait &amp; retry</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">FW_UPLOAD_ERR_MAX</span></code></dt><dd><p>Maximum error code marker</p>
+</dd>
+</dl>
+</div>
+</section>
+</section>
+<section id="sysfs-attributes">
+<h2>Sysfs Attributes<a class="headerlink" href="#sysfs-attributes" title="Permalink to this headline">¶</a></h2>
+<p>In addition to the <em>loading</em> and <em>data</em> sysfs files, there are additional
+sysfs files to monitor the status of the data transfer to the target
+device and to determine the final pass/fail status of the transfer.
+Depending on the device and the size of the firmware image, a firmware
+update could take milliseconds or minutes.</p>
+<p>The additional sysfs files are:</p>
+<ul class="simple">
+<li><p>status - provides an indication of the progress of a firmware update</p></li>
+<li><p>error - provides error information for a failed firmware update</p></li>
+<li><p>remaining_size - tracks the data transfer portion of an update</p></li>
+<li><p>cancel - echo 1 to this file to cancel the update</p></li>
+</ul>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Firmware Upload API</a><ul>
+<li><a class="reference internal" href="#register-for-firmware-upload">Register for firmware upload</a><ul>
+<li><a class="reference internal" href="#firmware-upload-register">firmware_upload_register</a></li>
+<li><a class="reference internal" href="#firmware-upload-unregister">firmware_upload_unregister</a></li>
+<li><a class="reference internal" href="#firmware-upload-ops">Firmware Upload Ops</a></li>
+<li><a class="reference internal" href="#firmware-upload-progress-codes">Firmware Upload Progress Codes</a></li>
+<li><a class="reference internal" href="#firmware-upload-error-codes">Firmware Upload Error Codes</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#sysfs-attributes">Sysfs Attributes</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/firmware/fw_upload.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/firmware/fw_upload.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

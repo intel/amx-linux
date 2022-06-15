@@ -1,0 +1,229 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>DRM client usage stats &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="DRM Driver uAPI" href="driver-uapi.html" />
+    <link rel="prev" title="Userland interfaces" href="drm-uapi.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="drm-client-usage-stats">
+<span id="id1"></span><h1>DRM client usage stats<a class="headerlink" href="#drm-client-usage-stats" title="Permalink to this headline">¶</a></h1>
+<p>DRM drivers can choose to export partly standardised text output via the
+<cite>fops-&gt;show_fdinfo()</cite> as part of the driver specific file operations registered
+in the <cite><a class="reference internal" href="drm-internals.html#c.drm_driver" title="drm_driver"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">drm_driver</span></code></a></cite> object registered with the DRM core.</p>
+<p>One purpose of this output is to enable writing as generic as practicaly
+feasible <cite>top(1)</cite> like userspace monitoring tools.</p>
+<p>Given the differences between various DRM drivers the specification of the
+output is split between common and driver specific parts. Having said that,
+wherever possible effort should still be made to standardise as much as
+possible.</p>
+<section id="file-format-specification">
+<h2>File format specification<a class="headerlink" href="#file-format-specification" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p>File shall contain one key value pair per one line of text.</p></li>
+<li><p>Colon character (<cite>:</cite>) must be used to delimit keys and values.</p></li>
+<li><p>All keys shall be prefixed with <cite>drm-</cite>.</p></li>
+<li><p>Whitespace between the delimiter and first non-whitespace character shall be
+ignored when parsing.</p></li>
+<li><p>Neither keys or values are allowed to contain whitespace characters.</p></li>
+<li><p>Numerical key value pairs can end with optional unit string.</p></li>
+<li><p>Data type of the value is fixed as defined in the specification.</p></li>
+</ul>
+<section id="key-types">
+<h3>Key types<a class="headerlink" href="#key-types" title="Permalink to this headline">¶</a></h3>
+<ol class="arabic simple">
+<li><p>Mandatory, fully standardised.</p></li>
+<li><p>Optional, fully standardised.</p></li>
+<li><p>Driver specific.</p></li>
+</ol>
+</section>
+<section id="data-types">
+<h3>Data types<a class="headerlink" href="#data-types" title="Permalink to this headline">¶</a></h3>
+<ul class="simple">
+<li><p>&lt;uint&gt; - Unsigned integer without defining the maximum value.</p></li>
+<li><p>&lt;str&gt; - String excluding any above defined reserved characters or whitespace.</p></li>
+</ul>
+</section>
+<section id="mandatory-fully-standardised-keys">
+<h3>Mandatory fully standardised keys<a class="headerlink" href="#mandatory-fully-standardised-keys" title="Permalink to this headline">¶</a></h3>
+<ul class="simple">
+<li><p>drm-driver: &lt;str&gt;</p></li>
+</ul>
+<p>String shall contain the name this driver registered as via the respective
+<cite><a class="reference internal" href="drm-internals.html#c.drm_driver" title="drm_driver"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">drm_driver</span></code></a></cite> data structure.</p>
+</section>
+<section id="optional-fully-standardised-keys">
+<h3>Optional fully standardised keys<a class="headerlink" href="#optional-fully-standardised-keys" title="Permalink to this headline">¶</a></h3>
+<ul class="simple">
+<li><p>drm-pdev: &lt;aaaa:bb.cc.d&gt;</p></li>
+</ul>
+<p>For PCI devices this should contain the PCI slot address of the device in
+question.</p>
+<ul class="simple">
+<li><p>drm-client-id: &lt;uint&gt;</p></li>
+</ul>
+<p>Unique value relating to the open DRM file descriptor used to distinguish
+duplicated and shared file descriptors. Conceptually the value should map 1:1
+to the in kernel representation of <cite><a class="reference internal" href="drm-internals.html#c.drm_file" title="drm_file"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">drm_file</span></code></a></cite> instances.</p>
+<p>Uniqueness of the value shall be either globally unique, or unique within the
+scope of each device, in which case <cite>drm-pdev</cite> shall be present as well.</p>
+<p>Userspace should make sure to not double account any usage statistics by using
+the above described criteria in order to associate data to individual clients.</p>
+<ul class="simple">
+<li><p>drm-engine-&lt;str&gt;: &lt;uint&gt; ns</p></li>
+</ul>
+<p>GPUs usually contain multiple execution engines. Each shall be given a stable
+and unique name (str), with possible values documented in the driver specific
+documentation.</p>
+<p>Value shall be in specified time units which the respective GPU engine spent
+busy executing workloads belonging to this client.</p>
+<p>Values are not required to be constantly monotonic if it makes the driver
+implementation easier, but are required to catch up with the previously reported
+larger value within a reasonable period. Upon observing a value lower than what
+was previously read, userspace is expected to stay with that larger previous
+value until a monotonic update is seen.</p>
+<ul class="simple">
+<li><p>drm-engine-capacity-&lt;str&gt;: &lt;uint&gt;</p></li>
+</ul>
+<p>Engine identifier string must be the same as the one specified in the
+drm-engine-&lt;str&gt; tag and shall contain a greater than zero number in case the
+exported engine corresponds to a group of identical hardware engines.</p>
+<p>In the absence of this tag parser shall assume capacity of one. Zero capacity
+is not allowed.</p>
+<ul class="simple">
+<li><p>drm-memory-&lt;str&gt;: &lt;uint&gt; [KiB|MiB]</p></li>
+</ul>
+<p>Each possible memory type which can be used to store buffer objects by the
+GPU in question shall be given a stable and unique name to be returned as the
+string here.</p>
+<p>Value shall reflect the amount of storage currently consumed by the buffer
+object belong to this client, in the respective memory region.</p>
+<p>Default unit shall be bytes with optional unit specifiers of ‘KiB’ or ‘MiB’
+indicating kibi- or mebi-bytes.</p>
+<ul class="simple">
+<li><p>drm-cycles-&lt;str&gt; &lt;uint&gt;</p></li>
+</ul>
+<p>Engine identifier string must be the same as the one specified in the
+drm-engine-&lt;str&gt; tag and shall contain the number of busy cycles for the given
+engine.</p>
+<p>Values are not required to be constantly monotonic if it makes the driver
+implementation easier, but are required to catch up with the previously reported
+larger value within a reasonable period. Upon observing a value lower than what
+was previously read, userspace is expected to stay with that larger previous
+value until a monotonic update is seen.</p>
+<ul class="simple">
+<li><p>drm-maxfreq-&lt;str&gt; &lt;uint&gt; [Hz|MHz|KHz]</p></li>
+</ul>
+<p>Engine identifier string must be the same as the one specified in the
+drm-engine-&lt;str&gt; tag and shall contain the maximum frequency for the given
+engine.  Taken together with drm-cycles-&lt;str&gt;, this can be used to calculate
+percentage utilization of the engine, whereas drm-engine-&lt;str&gt; only reflects
+time active without considering what frequency the engine is operating as a
+percentage of it’s maximum frequency.</p>
+</section>
+</section>
+<section id="driver-specific-implementations">
+<h2>Driver specific implementations<a class="headerlink" href="#driver-specific-implementations" title="Permalink to this headline">¶</a></h2>
+<p><a class="reference internal" href="i915.html#i915-usage-stats"><span class="std std-ref">i915 DRM client usage stats implementation</span></a></p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">DRM client usage stats</a><ul>
+<li><a class="reference internal" href="#file-format-specification">File format specification</a><ul>
+<li><a class="reference internal" href="#key-types">Key types</a></li>
+<li><a class="reference internal" href="#data-types">Data types</a></li>
+<li><a class="reference internal" href="#mandatory-fully-standardised-keys">Mandatory fully standardised keys</a></li>
+<li><a class="reference internal" href="#optional-fully-standardised-keys">Optional fully standardised keys</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#driver-specific-implementations">Driver specific implementations</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/gpu/drm-usage-stats.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/gpu/drm-usage-stats.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

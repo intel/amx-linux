@@ -1,0 +1,188 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Linux Directory Notification &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Fiemap Ioctl" href="fiemap.html" />
+    <link rel="prev" title="The Devpts Filesystem" href="devpts.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="linux-directory-notification">
+<h1>Linux Directory Notification<a class="headerlink" href="#linux-directory-notification" title="Permalink to this headline">¶</a></h1>
+<blockquote>
+<div><p>Stephen Rothwell &lt;<a class="reference external" href="mailto:sfr&#37;&#52;&#48;canb&#46;auug&#46;org&#46;au">sfr<span>&#64;</span>canb<span>&#46;</span>auug<span>&#46;</span>org<span>&#46;</span>au</a>&gt;</p>
+</div></blockquote>
+<p>The intention of directory notification is to allow user applications
+to be notified when a directory, or any of the files in it, are changed.
+The basic mechanism involves the application registering for notification
+on a directory using a fcntl(2) call and the notifications themselves
+being delivered using signals.</p>
+<p>The application decides which “events” it wants to be notified about.
+The currently defined events are:</p>
+<blockquote>
+<div><table class="docutils align-default">
+<colgroup>
+<col style="width: 15%" />
+<col style="width: 85%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>DN_ACCESS</p></td>
+<td><p>A file in the directory was accessed (read)</p></td>
+</tr>
+<tr class="row-even"><td><p>DN_MODIFY</p></td>
+<td><p>A file in the directory was modified (write,truncate)</p></td>
+</tr>
+<tr class="row-odd"><td><p>DN_CREATE</p></td>
+<td><p>A file was created in the directory</p></td>
+</tr>
+<tr class="row-even"><td><p>DN_DELETE</p></td>
+<td><p>A file was unlinked from directory</p></td>
+</tr>
+<tr class="row-odd"><td><p>DN_RENAME</p></td>
+<td><p>A file in the directory was renamed</p></td>
+</tr>
+<tr class="row-even"><td><p>DN_ATTRIB</p></td>
+<td><p>A file in the directory had its attributes
+changed (chmod,chown)</p></td>
+</tr>
+</tbody>
+</table>
+</div></blockquote>
+<p>Usually, the application must reregister after each notification, but
+if DN_MULTISHOT is or’ed with the event mask, then the registration will
+remain until explicitly removed (by registering for no events).</p>
+<p>By default, SIGIO will be delivered to the process and no other useful
+information.  However, if the F_SETSIG fcntl(2) call is used to let the
+kernel know which signal to deliver, a siginfo structure will be passed to
+the signal handler and the si_fd member of that structure will contain the
+file descriptor associated with the directory in which the event occurred.</p>
+<p>Preferably the application will choose one of the real time signals
+(SIGRTMIN + &lt;n&gt;) so that the notifications may be queued.  This is
+especially important if DN_MULTISHOT is specified.  Note that SIGRTMIN
+is often blocked, so it is better to use (at least) SIGRTMIN + 1.</p>
+<section id="implementation-expectations-features-and-bugs">
+<h2>Implementation expectations (features and bugs :-))<a class="headerlink" href="#implementation-expectations-features-and-bugs" title="Permalink to this headline">¶</a></h2>
+<p>The notification should work for any local access to files even if the
+actual file system is on a remote server.  This implies that remote
+access to files served by local user mode servers should be notified.
+Also, remote accesses to files served by a local kernel NFS server should
+be notified.</p>
+<p>In order to make the impact on the file system code as small as possible,
+the problem of hard links to files has been ignored.  So if a file (x)
+exists in two directories (a and b) then a change to the file using the
+name “a/x” should be notified to a program expecting notifications on
+directory “a”, but will not be notified to one expecting notifications on
+directory “b”.</p>
+<p>Also, files that are unlinked, will still cause notifications in the
+last directory that they were linked to.</p>
+</section>
+<section id="configuration">
+<h2>Configuration<a class="headerlink" href="#configuration" title="Permalink to this headline">¶</a></h2>
+<p>Dnotify is controlled via the CONFIG_DNOTIFY configuration option.  When
+disabled, fcntl(fd, F_NOTIFY, …) will return -EINVAL.</p>
+</section>
+<section id="example">
+<h2>Example<a class="headerlink" href="#example" title="Permalink to this headline">¶</a></h2>
+<p>See tools/testing/selftests/filesystems/dnotify_test.c for an example.</p>
+</section>
+<section id="note">
+<h2>NOTE<a class="headerlink" href="#note" title="Permalink to this headline">¶</a></h2>
+<p>Beginning with Linux 2.6.13, dnotify has been replaced by inotify.
+See <a class="reference internal" href="inotify.html"><span class="doc">Inotify - A Powerful yet Simple File Change Notification System</span></a> for more information on it.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Linux Directory Notification</a><ul>
+<li><a class="reference internal" href="#implementation-expectations-features-and-bugs">Implementation expectations (features and bugs :-))</a></li>
+<li><a class="reference internal" href="#configuration">Configuration</a></li>
+<li><a class="reference internal" href="#example">Example</a></li>
+<li><a class="reference internal" href="#note">NOTE</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/filesystems/dnotify.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/filesystems/dnotify.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

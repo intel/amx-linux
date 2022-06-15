@@ -1,0 +1,282 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>LED Transient Trigger &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="USB port LED trigger" href="ledtrig-usbport.html" />
+    <link rel="prev" title="One-shot LED Trigger" href="ledtrig-oneshot.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="led-transient-trigger">
+<h1>LED Transient Trigger<a class="headerlink" href="#led-transient-trigger" title="Permalink to this headline">¶</a></h1>
+<p>The leds timer trigger does not currently have an interface to activate
+a one shot timer. The current support allows for setting two timers, one for
+specifying how long a state to be on, and the second for how long the state
+to be off. The delay_on value specifies the time period an LED should stay
+in on state, followed by a delay_off value that specifies how long the LED
+should stay in off state. The on and off cycle repeats until the trigger
+gets deactivated. There is no provision for one time activation to implement
+features that require an on or off state to be held just once and then stay in
+the original state forever.</p>
+<p>Without one shot timer interface, user space can still use timer trigger to
+set a timer to hold a state, however when user space application crashes or
+goes away without deactivating the timer, the hardware will be left in that
+state permanently.</p>
+<p>Transient trigger addresses the need for one shot timer activation. The
+transient trigger can be enabled and disabled just like the other leds
+triggers.</p>
+<p>When an led class device driver registers itself, it can specify all leds
+triggers it supports and a default trigger. During registration, activation
+routine for the default trigger gets called. During registration of an led
+class device, the LED state does not change.</p>
+<p>When the driver unregisters, deactivation routine for the currently active
+trigger will be called, and LED state is changed to LED_OFF.</p>
+<p>Driver suspend changes the LED state to LED_OFF and resume doesn’t change
+the state. Please note that there is no explicit interaction between the
+suspend and resume actions and the currently enabled trigger. LED state
+changes are suspended while the driver is in suspend state. Any timers
+that are active at the time driver gets suspended, continue to run, without
+being able to actually change the LED state. Once driver is resumed, triggers
+start functioning again.</p>
+<p>LED state changes are controlled using brightness which is a common led
+class device property. When brightness is set to 0 from user space via
+echo 0 &gt; brightness, it will result in deactivating the current trigger.</p>
+<p>Transient trigger uses standard register and unregister interfaces. During
+trigger registration, for each led class device that specifies this trigger
+as its default trigger, trigger activation routine will get called. During
+registration, the LED state does not change, unless there is another trigger
+active, in which case LED state changes to LED_OFF.</p>
+<p>During trigger unregistration, LED state gets changed to LED_OFF.</p>
+<p>Transient trigger activation routine doesn’t change the LED state. It
+creates its properties and does its initialization. Transient trigger
+deactivation routine, will cancel any timer that is active before it cleans
+up and removes the properties it created. It will restore the LED state to
+non-transient state. When driver gets suspended, irrespective of the transient
+state, the LED state changes to LED_OFF.</p>
+<p>Transient trigger can be enabled and disabled from user space on led class
+devices, that support this trigger as shown below:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>echo transient &gt; trigger
+echo none &gt; trigger
+</pre></div>
+</div>
+<dl class="simple">
+<dt>NOTE:</dt><dd><p>Add a new property trigger state to control the state.</p>
+</dd>
+</dl>
+<p>This trigger exports three properties, activate, state, and duration. When
+transient trigger is activated these properties are set to default values.</p>
+<ul>
+<li><p>duration allows setting timer value in msecs. The initial value is 0.</p></li>
+<li><p>activate allows activating and deactivating the timer specified by
+duration as needed. The initial and default value is 0.  This will allow
+duration to be set after trigger activation.</p></li>
+<li><p>state allows user to specify a transient state to be held for the specified
+duration.</p>
+<blockquote>
+<div><dl>
+<dt>activate</dt><dd><ul>
+<li><p>one shot timer activate mechanism.
+1 when activated, 0 when deactivated.
+default value is zero when transient trigger is enabled,
+to allow duration to be set.</p>
+<p>activate state indicates a timer with a value of specified
+duration running.
+deactivated state indicates that there is no active timer
+running.</p>
+</li>
+</ul>
+</dd>
+<dt>duration</dt><dd><ul class="simple">
+<li><p>one shot timer value. When activate is set, duration value
+is used to start a timer that runs once. This value doesn’t
+get changed by the trigger unless user does a set via
+echo new_value &gt; duration</p></li>
+</ul>
+</dd>
+<dt>state</dt><dd><ul class="simple">
+<li><p>transient state to be held. It has two values 0 or 1. 0 maps
+to LED_OFF and 1 maps to LED_FULL. The specified state is
+held for the duration of the one shot timer and then the
+state gets changed to the non-transient state which is the
+inverse of transient state.
+If state = LED_FULL, when the timer runs out the state will
+go back to LED_OFF.
+If state = LED_OFF, when the timer runs out the state will
+go back to LED_FULL.
+Please note that current LED state is not checked prior to
+changing the state to the specified state.
+Driver could map these values to inverted depending on the
+default states it defines for the LED in its brightness_set()
+interface which is called from the led brightness_set()
+interfaces to control the LED state.</p></li>
+</ul>
+</dd>
+</dl>
+</div></blockquote>
+</li>
+</ul>
+<p>When timer expires activate goes back to deactivated state, duration is left
+at the set value to be used when activate is set at a future time. This will
+allow user app to set the time once and activate it to run it once for the
+specified value as needed. When timer expires, state is restored to the
+non-transient state which is the inverse of the transient state:</p>
+<blockquote>
+<div><table class="docutils align-default">
+<colgroup>
+<col style="width: 27%" />
+<col style="width: 73%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>echo 1 &gt; activate</p></td>
+<td><p>starts timer = duration when duration is not 0.</p></td>
+</tr>
+<tr class="row-even"><td><p>echo 0 &gt; activate</p></td>
+<td><p>cancels currently running timer.</p></td>
+</tr>
+<tr class="row-odd"><td><p>echo n &gt; duration</p></td>
+<td><p>stores timer value to be used upon next
+activate. Currently active timer if
+any, continues to run for the specified time.</p></td>
+</tr>
+<tr class="row-even"><td><p>echo 0 &gt; duration</p></td>
+<td><p>stores timer value to be used upon next
+activate. Currently active timer if any,
+continues to run for the specified time.</p></td>
+</tr>
+<tr class="row-odd"><td><p>echo 1 &gt; state</p></td>
+<td><p>stores desired transient state LED_FULL to be
+held for the specified duration.</p></td>
+</tr>
+<tr class="row-even"><td><p>echo 0 &gt; state</p></td>
+<td><p>stores desired transient state LED_OFF to be
+held for the specified duration.</p></td>
+</tr>
+</tbody>
+</table>
+</div></blockquote>
+<section id="what-is-not-supported">
+<h2>What is not supported<a class="headerlink" href="#what-is-not-supported" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p>Timer activation is one shot and extending and/or shortening the timer
+is not supported.</p></li>
+</ul>
+</section>
+<section id="examples">
+<h2>Examples<a class="headerlink" href="#examples" title="Permalink to this headline">¶</a></h2>
+<p>use-case 1:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>echo transient &gt; trigger
+echo n &gt; duration
+echo 1 &gt; state
+</pre></div>
+</div>
+<p>repeat the following step as needed:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>echo 1 &gt; activate - start timer = duration to run once
+echo 1 &gt; activate - start timer = duration to run once
+echo none &gt; trigger
+</pre></div>
+</div>
+<p>This trigger is intended to be used for the following example use cases:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Use of LED by user space app as activity indicator.</p></li>
+<li><p>Use of LED by user space app as a kind of watchdog indicator – as
+long as the app is alive, it can keep the LED illuminated, if it dies
+the LED will be extinguished automatically.</p></li>
+<li><p>Use by any user space app that needs a transient GPIO output.</p></li>
+</ul>
+</div></blockquote>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">LED Transient Trigger</a><ul>
+<li><a class="reference internal" href="#what-is-not-supported">What is not supported</a></li>
+<li><a class="reference internal" href="#examples">Examples</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/leds/ledtrig-transient.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/leds/ledtrig-transient.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

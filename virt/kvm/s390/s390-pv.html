@@ -1,0 +1,207 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>s390 (IBM Z) Ultravisor and Protected VMs &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="s390 (IBM Z) Boot/IPL of Protected VMs" href="s390-pv-boot.html" />
+    <link rel="prev" title="The s390 DIAGNOSE call on KVM" href="s390-diag.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="s390-ibm-z-ultravisor-and-protected-vms">
+<h1>s390 (IBM Z) Ultravisor and Protected VMs<a class="headerlink" href="#s390-ibm-z-ultravisor-and-protected-vms" title="Permalink to this headline">¶</a></h1>
+<section id="summary">
+<h2>Summary<a class="headerlink" href="#summary" title="Permalink to this headline">¶</a></h2>
+<p>Protected virtual machines (PVM) are KVM VMs that do not allow KVM to
+access VM state like guest memory or guest registers. Instead, the
+PVMs are mostly managed by a new entity called Ultravisor (UV). The UV
+provides an API that can be used by PVMs and KVM to request management
+actions.</p>
+<p>Each guest starts in non-protected mode and then may make a request to
+transition into protected mode. On transition, KVM registers the guest
+and its VCPUs with the Ultravisor and prepares everything for running
+it.</p>
+<p>The Ultravisor will secure and decrypt the guest’s boot memory
+(i.e. kernel/initrd). It will safeguard state changes like VCPU
+starts/stops and injected interrupts while the guest is running.</p>
+<p>As access to the guest’s state, such as the SIE state description, is
+normally needed to be able to run a VM, some changes have been made in
+the behavior of the SIE instruction. A new format 4 state description
+has been introduced, where some fields have different meanings for a
+PVM. SIE exits are minimized as much as possible to improve speed and
+reduce exposed guest state.</p>
+</section>
+<section id="interrupt-injection">
+<h2>Interrupt injection<a class="headerlink" href="#interrupt-injection" title="Permalink to this headline">¶</a></h2>
+<p>Interrupt injection is safeguarded by the Ultravisor. As KVM doesn’t
+have access to the VCPUs’ lowcores, injection is handled via the
+format 4 state description.</p>
+<p>Machine check, external, IO and restart interruptions each can be
+injected on SIE entry via a bit in the interrupt injection control
+field (offset 0x54). If the guest cpu is not enabled for the interrupt
+at the time of injection, a validity interception is recognized. The
+format 4 state description contains fields in the interception data
+block where data associated with the interrupt can be transported.</p>
+<p>Program and Service Call exceptions have another layer of
+safeguarding; they can only be injected for instructions that have
+been intercepted into KVM. The exceptions need to be a valid outcome
+of an instruction emulation by KVM, e.g. we can never inject a
+addressing exception as they are reported by SIE since KVM has no
+access to the guest memory.</p>
+</section>
+<section id="mask-notification-interceptions">
+<h2>Mask notification interceptions<a class="headerlink" href="#mask-notification-interceptions" title="Permalink to this headline">¶</a></h2>
+<p>KVM cannot intercept lctl(g) and lpsw(e) anymore in order to be
+notified when a PVM enables a certain class of interrupt.  As a
+replacement, two new interception codes have been introduced: One
+indicating that the contents of CRs 0, 6, or 14 have been changed,
+indicating different interruption subclasses; and one indicating that
+PSW bit 13 has been changed, indicating that a machine check
+intervention was requested and those are now enabled.</p>
+</section>
+<section id="instruction-emulation">
+<h2>Instruction emulation<a class="headerlink" href="#instruction-emulation" title="Permalink to this headline">¶</a></h2>
+<p>With the format 4 state description for PVMs, the SIE instruction already
+interprets more instructions than it does with format 2. It is not able
+to interpret every instruction, but needs to hand some tasks to KVM;
+therefore, the SIE and the ultravisor safeguard emulation inputs and outputs.</p>
+<p>The control structures associated with SIE provide the Secure
+Instruction Data Area (SIDA), the Interception Parameters (IP) and the
+Secure Interception General Register Save Area.  Guest GRs and most of
+the instruction data, such as I/O data structures, are filtered.
+Instruction data is copied to and from the SIDA when needed.  Guest
+GRs are put into / retrieved from the Secure Interception General
+Register Save Area.</p>
+<p>Only GR values needed to emulate an instruction will be copied into this
+save area and the real register numbers will be hidden.</p>
+<p>The Interception Parameters state description field still contains
+the bytes of the instruction text, but with pre-set register values
+instead of the actual ones. I.e. each instruction always uses the same
+instruction text, in order not to leak guest instruction text.
+This also implies that the register content that a guest had in r&lt;n&gt;
+may be in r&lt;m&gt; from the hypervisor’s point of view.</p>
+<p>The Secure Instruction Data Area contains instruction storage
+data. Instruction data, i.e. data being referenced by an instruction
+like the SCCB for sclp, is moved via the SIDA. When an instruction is
+intercepted, the SIE will only allow data and program interrupts for
+this instruction to be moved to the guest via the two data areas
+discussed before. Other data is either ignored or results in validity
+interceptions.</p>
+</section>
+<section id="instruction-emulation-interceptions">
+<h2>Instruction emulation interceptions<a class="headerlink" href="#instruction-emulation-interceptions" title="Permalink to this headline">¶</a></h2>
+<p>There are two types of SIE secure instruction intercepts: the normal
+and the notification type. Normal secure instruction intercepts will
+make the guest pending for instruction completion of the intercepted
+instruction type, i.e. on SIE entry it is attempted to complete
+emulation of the instruction with the data provided by KVM. That might
+be a program exception or instruction completion.</p>
+<p>The notification type intercepts inform KVM about guest environment
+changes due to guest instruction interpretation. Such an interception
+is recognized, for example, for the store prefix instruction to provide
+the new lowcore location. On SIE reentry, any KVM data in the data areas
+is ignored and execution continues as if the guest instruction had
+completed. For that reason KVM is not allowed to inject a program
+interrupt.</p>
+</section>
+<section id="links">
+<h2>Links<a class="headerlink" href="#links" title="Permalink to this headline">¶</a></h2>
+<p><a class="reference external" href="https://static.sched.com/hosted_files/kvmforum2019/3b/ibm_protected_vms_s390x.pdf">KVM Forum 2019 presentation</a></p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">s390 (IBM Z) Ultravisor and Protected VMs</a><ul>
+<li><a class="reference internal" href="#summary">Summary</a></li>
+<li><a class="reference internal" href="#interrupt-injection">Interrupt injection</a></li>
+<li><a class="reference internal" href="#mask-notification-interceptions">Mask notification interceptions</a></li>
+<li><a class="reference internal" href="#instruction-emulation">Instruction emulation</a></li>
+<li><a class="reference internal" href="#instruction-emulation-interceptions">Instruction emulation interceptions</a></li>
+<li><a class="reference internal" href="#links">Links</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/virt/kvm/s390/s390-pv.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/virt/kvm/s390/s390-pv.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

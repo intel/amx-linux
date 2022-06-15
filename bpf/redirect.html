@@ -1,0 +1,203 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Redirect &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="USB support" href="../usb/index.html" />
+    <link rel="prev" title="BPF LLVM Relocations" href="llvm_reloc.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="redirect">
+<h1>Redirect<a class="headerlink" href="#redirect" title="Permalink to this headline">¶</a></h1>
+<section id="xdp-redirect">
+<h2>XDP_REDIRECT<a class="headerlink" href="#xdp-redirect" title="Permalink to this headline">¶</a></h2>
+<section id="supported-maps">
+<h3>Supported maps<a class="headerlink" href="#supported-maps" title="Permalink to this headline">¶</a></h3>
+<p>XDP_REDIRECT works with the following map types:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_DEVMAP</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_DEVMAP_HASH</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_CPUMAP</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_XSKMAP</span></code></p></li>
+</ul>
+<p>For more information on these maps, please see the specific map documentation.</p>
+</section>
+<section id="process">
+<h3>Process<a class="headerlink" href="#process" title="Permalink to this headline">¶</a></h3>
+<p>XDP_REDIRECT works by a three-step process, implemented in the functions
+below:</p>
+<ol class="arabic simple">
+<li><p>The bpf_redirect() and bpf_redirect_map() helpers will lookup the target
+of the redirect and store it (along with some other metadata) in a per-CPU
+struct bpf_redirect_info.</p></li>
+<li><p>When the program returns the XDP_REDIRECT return code, the driver will
+call xdp_do_redirect() which will use the information in struct
+bpf_redirect_info to actually enqueue the frame into a map type-specific
+bulk queue structure.</p></li>
+<li><p>Before exiting its NAPI poll loop, the driver will call xdp_do_flush(),
+which will flush all the different bulk queues, thus completing the
+redirect.</p></li>
+</ol>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Not all drivers support transmitting frames after a redirect, and for
+those that do, not all of them support non-linear frames. Non-linear xdp
+bufs/frames are bufs/frames that contain more than one fragment.</p>
+</div>
+</section>
+<section id="debugging-packet-drops">
+<h3>Debugging packet drops<a class="headerlink" href="#debugging-packet-drops" title="Permalink to this headline">¶</a></h3>
+<p>Silent packet drops for XDP_REDIRECT can be debugged using:</p>
+<ul class="simple">
+<li><p>bpf_trace</p></li>
+<li><p>perf_record</p></li>
+</ul>
+<section id="bpf-trace">
+<h4>bpf_trace<a class="headerlink" href="#bpf-trace" title="Permalink to this headline">¶</a></h4>
+<p>The following bpftrace command can be used to capture and count all XDP tracepoints:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>sudo bpftrace -e &#39;tracepoint:xdp:* { @cnt[probe] = count(); }&#39;
+Attaching 12 probes...
+^C
+
+@cnt[tracepoint:xdp:mem_connect]: 18
+@cnt[tracepoint:xdp:mem_disconnect]: 18
+@cnt[tracepoint:xdp:xdp_exception]: 19605
+@cnt[tracepoint:xdp:xdp_devmap_xmit]: 1393604
+@cnt[tracepoint:xdp:xdp_redirect]: 22292200
+</pre></div>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The various xdp tracepoints can be found in <code class="docutils literal notranslate"><span class="pre">source/include/trace/events/xdp.h</span></code></p>
+</div>
+<p>The following bpftrace command can be used to extract the <code class="docutils literal notranslate"><span class="pre">ERRNO</span></code> being returned as
+part of the err parameter:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>sudo bpftrace -e \
+&#39;tracepoint:xdp:xdp_redirect*_err {@redir_errno[-args-&gt;err] = count();}
+tracepoint:xdp:xdp_devmap_xmit {@devmap_errno[-args-&gt;err] = count();}&#39;
+</pre></div>
+</div>
+</section>
+<section id="perf-record">
+<h4>perf record<a class="headerlink" href="#perf-record" title="Permalink to this headline">¶</a></h4>
+<p>The perf tool also supports recording tracepoints:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>perf record -a -e xdp:xdp_redirect_err \
+    -e xdp:xdp_redirect_map_err \
+    -e xdp:xdp_exception \
+    -e xdp:xdp_devmap_xmit
+</pre></div>
+</div>
+<section id="references">
+<h5>References<a class="headerlink" href="#references" title="Permalink to this headline">¶</a></h5>
+<ul class="simple">
+<li><p><a class="reference external" href="https://github.com/xdp-project/xdp-tutorial/tree/master/tracing02-xdp-monitor">https://github.com/xdp-project/xdp-tutorial/tree/master/tracing02-xdp-monitor</a></p></li>
+</ul>
+</section>
+</section>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Redirect</a><ul>
+<li><a class="reference internal" href="#xdp-redirect">XDP_REDIRECT</a><ul>
+<li><a class="reference internal" href="#supported-maps">Supported maps</a></li>
+<li><a class="reference internal" href="#process">Process</a></li>
+<li><a class="reference internal" href="#debugging-packet-drops">Debugging packet drops</a><ul>
+<li><a class="reference internal" href="#bpf-trace">bpf_trace</a></li>
+<li><a class="reference internal" href="#perf-record">perf record</a><ul>
+<li><a class="reference internal" href="#references">References</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/bpf/redirect.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/bpf/redirect.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

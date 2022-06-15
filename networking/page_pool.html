@@ -1,0 +1,322 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Page Pool API &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="PHY Abstraction Layer" href="phy.html" />
+    <link rel="prev" title="NET_FAILOVER" href="net_failover.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="page-pool-api">
+<h1>Page Pool API<a class="headerlink" href="#page-pool-api" title="Permalink to this headline">¶</a></h1>
+<p>The page_pool allocator is optimized for the XDP mode that uses one frame
+per-page, but it can fallback on the regular page allocator APIs.</p>
+<p>Basic use involves replacing <a class="reference internal" href="../core-api/mm-api.html#c.alloc_pages" title="alloc_pages"><code class="xref c c-func docutils literal notranslate"><span class="pre">alloc_pages()</span></code></a> calls with the
+page_pool_alloc_pages() call.  Drivers should use page_pool_dev_alloc_pages()
+replacing dev_alloc_pages().</p>
+<p>API keeps track of inflight pages, in order to let API user know
+when it is safe to free a page_pool object.  Thus, API users
+must run page_pool_release_page() when a page is leaving the page_pool or
+call page_pool_put_page() where appropriate in order to maintain correct
+accounting.</p>
+<p>API user must call page_pool_put_page() once on a page, as it
+will either recycle the page, or in case of refcnt &gt; 1, it will
+release the DMA mapping and inflight state accounting.</p>
+<section id="architecture-overview">
+<h2>Architecture overview<a class="headerlink" href="#architecture-overview" title="Permalink to this headline">¶</a></h2>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>+------------------+
+|       Driver     |
++------------------+
+        ^
+        |
+        |
+        |
+        v
++--------------------------------------------+
+|                request memory              |
++--------------------------------------------+
+    ^                                  ^
+    |                                  |
+    | Pool empty                       | Pool has entries
+    |                                  |
+    v                                  v
++-----------------------+     +------------------------+
+| alloc (and map) pages |     |  get page from cache   |
++-----------------------+     +------------------------+
+                                ^                    ^
+                                |                    |
+                                | cache available    | No entries, refill
+                                |                    | from ptr-ring
+                                |                    |
+                                v                    v
+                      +-----------------+     +------------------+
+                      |   Fast cache    |     |  ptr-ring cache  |
+                      +-----------------+     +------------------+
+</pre></div>
+</div>
+</section>
+<section id="api-interface">
+<h2>API interface<a class="headerlink" href="#api-interface" title="Permalink to this headline">¶</a></h2>
+<p>The number of pools created <strong>must</strong> match the number of hardware queues
+unless hardware restrictions make that impossible. This would otherwise beat the
+purpose of page pool, which is allocate pages fast from cache without locking.
+This lockless guarantee naturally comes from running under a NAPI softirq.
+The protection doesn’t strictly have to be NAPI, any guarantee that allocating
+a page will cause no race conditions is enough.</p>
+<ul class="simple">
+<li><dl class="simple">
+<dt>page_pool_create(): Create a pool.</dt><dd><ul>
+<li><p>flags:      PP_FLAG_DMA_MAP, PP_FLAG_DMA_SYNC_DEV</p></li>
+<li><p>order:      2^order pages on allocation</p></li>
+<li><p>pool_size:  size of the ptr_ring</p></li>
+<li><p>nid:        preferred NUMA node for allocation</p></li>
+<li><p>dev:        <a class="reference internal" href="../driver-api/infrastructure.html#c.device" title="device"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span></code></a>. Used on DMA operations</p></li>
+<li><p>dma_dir:    DMA direction</p></li>
+<li><p>max_len:    max DMA sync memory size</p></li>
+<li><p>offset:     DMA address offset</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><p>page_pool_put_page(): The outcome of this depends on the page refcnt. If the
+driver bumps the refcnt &gt; 1 this will unmap the page. If the page refcnt is 1
+the allocator owns the page and will try to recycle it in one of the pool
+caches. If PP_FLAG_DMA_SYNC_DEV is set, the page will be synced for_device
+using dma_sync_single_range_for_device().</p></li>
+<li><p>page_pool_put_full_page(): Similar to page_pool_put_page(), but will DMA sync
+for the entire memory area configured in area pool-&gt;max_len.</p></li>
+<li><p>page_pool_recycle_direct(): Similar to page_pool_put_full_page() but caller
+must guarantee safe context (e.g NAPI), since it will recycle the page
+directly into the pool fast cache.</p></li>
+<li><p>page_pool_release_page(): Unmap the page (if mapped) and account for it on
+inflight counters.</p></li>
+<li><p>page_pool_dev_alloc_pages(): Get a page from the page allocator or page_pool
+caches.</p></li>
+<li><p>page_pool_get_dma_addr(): Retrieve the stored DMA address.</p></li>
+<li><p>page_pool_get_dma_dir(): Retrieve the stored DMA direction.</p></li>
+<li><p>page_pool_put_page_bulk(): Tries to refill a number of pages into the
+ptr_ring cache holding ptr_ring producer lock. If the ptr_ring is full,
+page_pool_put_page_bulk() will release leftover pages to the page allocator.
+page_pool_put_page_bulk() is suitable to be run inside the driver NAPI tx
+completion loop for the XDP_REDIRECT use case.
+Please note the caller must not use data area after running
+page_pool_put_page_bulk(), as this function overwrites it.</p></li>
+<li><p>page_pool_get_stats(): Retrieve statistics about the page_pool. This API
+is only available if the kernel has been configured with
+<code class="docutils literal notranslate"><span class="pre">CONFIG_PAGE_POOL_STATS=y</span></code>. A pointer to a caller allocated <code class="docutils literal notranslate"><span class="pre">struct</span>
+<span class="pre">page_pool_stats</span></code> structure is passed to this API which is filled in. The
+caller can then report those stats to the user (perhaps via ethtool,
+debugfs, etc.). See below for an example usage of this API.</p></li>
+</ul>
+<section id="stats-api-and-structures">
+<h3>Stats API and structures<a class="headerlink" href="#stats-api-and-structures" title="Permalink to this headline">¶</a></h3>
+<p>If the kernel is configured with <code class="docutils literal notranslate"><span class="pre">CONFIG_PAGE_POOL_STATS=y</span></code>, the API
+<code class="docutils literal notranslate"><span class="pre">page_pool_get_stats()</span></code> and structures described below are available. It
+takes a  pointer to a <code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">page_pool</span></code> and a pointer to a <code class="docutils literal notranslate"><span class="pre">struct</span>
+<span class="pre">page_pool_stats</span></code> allocated by the caller.</p>
+<p>The API will fill in the provided <code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">page_pool_stats</span></code> with
+statistics about the page_pool.</p>
+<p>The stats structure has the following fields:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct page_pool_stats {
+    struct page_pool_alloc_stats alloc_stats;
+    struct page_pool_recycle_stats recycle_stats;
+};
+</pre></div>
+</div>
+<dl class="simple">
+<dt>The <code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">page_pool_alloc_stats</span></code> has the following fields:</dt><dd><ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">fast</span></code>: successful fast path allocations</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">slow</span></code>: slow path order-0 allocations</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">slow_high_order</span></code>: slow path high order allocations</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">empty</span></code>: ptr ring is empty, so a slow path allocation was forced.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">refill</span></code>: an allocation which triggered a refill of the cache</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">waive</span></code>: pages obtained from the ptr ring that cannot be added to
+the cache due to a NUMA mismatch.</p></li>
+</ul>
+</dd>
+<dt>The <code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">page_pool_recycle_stats</span></code> has the following fields:</dt><dd><ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">cached</span></code>: recycling placed page in the page pool cache</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">cache_full</span></code>: page pool cache was full</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ring</span></code>: page placed into the ptr ring</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ring_full</span></code>: page released from page pool because the ptr ring was full</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">released_refcnt</span></code>: page released (and not recycled) because refcnt &gt; 1</p></li>
+</ul>
+</dd>
+</dl>
+</section>
+</section>
+<section id="coding-examples">
+<h2>Coding examples<a class="headerlink" href="#coding-examples" title="Permalink to this headline">¶</a></h2>
+<section id="registration">
+<h3>Registration<a class="headerlink" href="#registration" title="Permalink to this headline">¶</a></h3>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cm">/* Page pool registration */</span><span class="w"></span>
+<span class="k">struct</span> <span class="nc">page_pool_params</span><span class="w"> </span><span class="n">pp_params</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="p">};</span><span class="w"></span>
+<span class="k">struct</span> <span class="nc">xdp_rxq_info</span><span class="w"> </span><span class="n">xdp_rxq</span><span class="p">;</span><span class="w"></span>
+<span class="kt">int</span><span class="w"> </span><span class="n">err</span><span class="p">;</span><span class="w"></span>
+
+<span class="n">pp_params</span><span class="p">.</span><span class="n">order</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"></span>
+<span class="cm">/* internal DMA mapping in page_pool */</span><span class="w"></span>
+<span class="n">pp_params</span><span class="p">.</span><span class="n">flags</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">PP_FLAG_DMA_MAP</span><span class="p">;</span><span class="w"></span>
+<span class="n">pp_params</span><span class="p">.</span><span class="n">pool_size</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DESC_NUM</span><span class="p">;</span><span class="w"></span>
+<span class="n">pp_params</span><span class="p">.</span><span class="n">nid</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">NUMA_NO_NODE</span><span class="p">;</span><span class="w"></span>
+<span class="n">pp_params</span><span class="p">.</span><span class="n">dev</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">priv</span><span class="o">-&gt;</span><span class="n">dev</span><span class="p">;</span><span class="w"></span>
+<span class="n">pp_params</span><span class="p">.</span><span class="n">dma_dir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">xdp_prog</span><span class="w"> </span><span class="o">?</span><span class="w"> </span><span class="nl">DMA_BIDIRECTIONAL</span> <span class="p">:</span><span class="w"> </span><span class="n">DMA_FROM_DEVICE</span><span class="p">;</span><span class="w"></span>
+<span class="n">page_pool</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">page_pool_create</span><span class="p">(</span><span class="o">&amp;</span><span class="n">pp_params</span><span class="p">);</span><span class="w"></span>
+
+<span class="n">err</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">xdp_rxq_info_reg</span><span class="p">(</span><span class="o">&amp;</span><span class="n">xdp_rxq</span><span class="p">,</span><span class="w"> </span><span class="n">ndev</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span><span class="w"></span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">err</span><span class="p">)</span><span class="w"></span>
+<span class="w">    </span><span class="k">goto</span><span class="w"> </span><span class="n">err_out</span><span class="p">;</span><span class="w"></span>
+
+<span class="n">err</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">xdp_rxq_info_reg_mem_model</span><span class="p">(</span><span class="o">&amp;</span><span class="n">xdp_rxq</span><span class="p">,</span><span class="w"> </span><span class="n">MEM_TYPE_PAGE_POOL</span><span class="p">,</span><span class="w"> </span><span class="n">page_pool</span><span class="p">);</span><span class="w"></span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">err</span><span class="p">)</span><span class="w"></span>
+<span class="w">    </span><span class="k">goto</span><span class="w"> </span><span class="n">err_out</span><span class="p">;</span><span class="w"></span>
+</pre></div>
+</div>
+</section>
+<section id="napi-poller">
+<h3>NAPI poller<a class="headerlink" href="#napi-poller" title="Permalink to this headline">¶</a></h3>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cm">/* NAPI Rx poller */</span><span class="w"></span>
+<span class="k">enum</span><span class="w"> </span><span class="n">dma_data_direction</span><span class="w"> </span><span class="n">dma_dir</span><span class="p">;</span><span class="w"></span>
+
+<span class="n">dma_dir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">page_pool_get_dma_dir</span><span class="p">(</span><span class="n">dring</span><span class="o">-&gt;</span><span class="n">page_pool</span><span class="p">);</span><span class="w"></span>
+<span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="n">done</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">budget</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">some</span><span class="w"> </span><span class="n">error</span><span class="p">)</span><span class="w"></span>
+<span class="w">        </span><span class="n">page_pool_recycle_direct</span><span class="p">(</span><span class="n">page_pool</span><span class="p">,</span><span class="w"> </span><span class="n">page</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">packet_is_xdp</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="nl">XDP_DROP</span><span class="p">:</span><span class="w"></span>
+<span class="w">            </span><span class="n">page_pool_recycle_direct</span><span class="p">(</span><span class="n">page_pool</span><span class="p">,</span><span class="w"> </span><span class="n">page</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">(</span><span class="n">packet_is_skb</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="n">page_pool_release_page</span><span class="p">(</span><span class="n">page_pool</span><span class="p">,</span><span class="w"> </span><span class="n">page</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="n">new_page</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">page_pool_dev_alloc_pages</span><span class="p">(</span><span class="n">page_pool</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+</section>
+<section id="stats">
+<h3>Stats<a class="headerlink" href="#stats" title="Permalink to this headline">¶</a></h3>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cp">#ifdef CONFIG_PAGE_POOL_STATS</span>
+<span class="cm">/* retrieve stats */</span><span class="w"></span>
+<span class="k">struct</span> <span class="nc">page_pool_stats</span><span class="w"> </span><span class="n">stats</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="p">};</span><span class="w"></span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">page_pool_get_stats</span><span class="p">(</span><span class="n">page_pool</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">stats</span><span class="p">))</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="cm">/* perhaps the driver reports statistics with ethool */</span><span class="w"></span>
+<span class="w">        </span><span class="n">ethtool_print_allocation_stats</span><span class="p">(</span><span class="o">&amp;</span><span class="n">stats</span><span class="p">.</span><span class="n">alloc_stats</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="n">ethtool_print_recycle_stats</span><span class="p">(</span><span class="o">&amp;</span><span class="n">stats</span><span class="p">.</span><span class="n">recycle_stats</span><span class="p">);</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+<span class="cp">#endif</span>
+</pre></div>
+</div>
+</section>
+<section id="driver-unload">
+<h3>Driver unload<a class="headerlink" href="#driver-unload" title="Permalink to this headline">¶</a></h3>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cm">/* Driver unload */</span><span class="w"></span>
+<span class="n">page_pool_put_full_page</span><span class="p">(</span><span class="n">page_pool</span><span class="p">,</span><span class="w"> </span><span class="n">page</span><span class="p">,</span><span class="w"> </span><span class="nb">false</span><span class="p">);</span><span class="w"></span>
+<span class="n">xdp_rxq_info_unreg</span><span class="p">(</span><span class="o">&amp;</span><span class="n">xdp_rxq</span><span class="p">);</span><span class="w"></span>
+</pre></div>
+</div>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Page Pool API</a><ul>
+<li><a class="reference internal" href="#architecture-overview">Architecture overview</a></li>
+<li><a class="reference internal" href="#api-interface">API interface</a><ul>
+<li><a class="reference internal" href="#stats-api-and-structures">Stats API and structures</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#coding-examples">Coding examples</a><ul>
+<li><a class="reference internal" href="#registration">Registration</a></li>
+<li><a class="reference internal" href="#napi-poller">NAPI poller</a></li>
+<li><a class="reference internal" href="#stats">Stats</a></li>
+<li><a class="reference internal" href="#driver-unload">Driver unload</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/networking/page_pool.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/networking/page_pool.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

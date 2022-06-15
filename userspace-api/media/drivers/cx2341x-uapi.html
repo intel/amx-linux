@@ -1,0 +1,257 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>3. The cx2341x driver &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="4. DW100 dewarp driver" href="dw100.html" />
+    <link rel="prev" title="2. MIPI CCS camera sensor driver" href="ccs.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="the-cx2341x-driver">
+<h1><span class="section-number">3. </span>The cx2341x driver<a class="headerlink" href="#the-cx2341x-driver" title="Permalink to this headline">¶</a></h1>
+<section id="non-compressed-file-format">
+<h2><span class="section-number">3.1. </span>Non-compressed file format<a class="headerlink" href="#non-compressed-file-format" title="Permalink to this headline">¶</a></h2>
+<p>The cx23416 can produce (and the cx23415 can also read) raw YUV output. The
+format of a YUV frame is 16x16 linear tiled NV12 (V4L2_PIX_FMT_NV12_16L16).</p>
+<p>The format is YUV 4:2:0 which uses 1 Y byte per pixel and 1 U and V byte per
+four pixels.</p>
+<p>The data is encoded as two macroblock planes, the first containing the Y
+values, the second containing UV macroblocks.</p>
+<p>The Y plane is divided into blocks of 16x16 pixels from left to right
+and from top to bottom. Each block is transmitted in turn, line-by-line.</p>
+<p>So the first 16 bytes are the first line of the top-left block, the
+second 16 bytes are the second line of the top-left block, etc. After
+transmitting this block the first line of the block on the right to the
+first block is transmitted, etc.</p>
+<p>The UV plane is divided into blocks of 16x8 UV values going from left
+to right, top to bottom. Each block is transmitted in turn, line-by-line.</p>
+<p>So the first 16 bytes are the first line of the top-left block and
+contain 8 UV value pairs (16 bytes in total). The second 16 bytes are the
+second line of 8 UV pairs of the top-left block, etc. After transmitting
+this block the first line of the block on the right to the first block is
+transmitted, etc.</p>
+<p>The code below is given as an example on how to convert V4L2_PIX_FMT_NV12_16L16
+to separate Y, U and V planes. This code assumes frames of 720x576 (PAL) pixels.</p>
+<p>The width of a frame is always 720 pixels, regardless of the actual specified
+width.</p>
+<p>If the height is not a multiple of 32 lines, then the captured video is
+missing macroblocks at the end and is unusable. So the height must be a
+multiple of 32.</p>
+<section id="raw-format-c-example">
+<h3><span class="section-number">3.1.1. </span>Raw format c example<a class="headerlink" href="#raw-format-c-example" title="Permalink to this headline">¶</a></h3>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;stdio.h&gt;</span><span class="cp"></span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;stdlib.h&gt;</span><span class="cp"></span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;string.h&gt;</span><span class="cp"></span>
+
+<span class="k">static</span><span class="w"> </span><span class="kt">unsigned</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="n">frame</span><span class="p">[</span><span class="mi">576</span><span class="o">*</span><span class="mi">720</span><span class="o">*</span><span class="mi">3</span><span class="o">/</span><span class="mi">2</span><span class="p">];</span><span class="w"></span>
+<span class="k">static</span><span class="w"> </span><span class="kt">unsigned</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="n">framey</span><span class="p">[</span><span class="mi">576</span><span class="o">*</span><span class="mi">720</span><span class="p">];</span><span class="w"></span>
+<span class="k">static</span><span class="w"> </span><span class="kt">unsigned</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="n">frameu</span><span class="p">[</span><span class="mi">576</span><span class="o">*</span><span class="mi">720</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mi">4</span><span class="p">];</span><span class="w"></span>
+<span class="k">static</span><span class="w"> </span><span class="kt">unsigned</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="n">framev</span><span class="p">[</span><span class="mi">576</span><span class="o">*</span><span class="mi">720</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mi">4</span><span class="p">];</span><span class="w"></span>
+
+<span class="k">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">de_macro_y</span><span class="p">(</span><span class="kt">unsigned</span><span class="w"> </span><span class="kt">char</span><span class="o">*</span><span class="w"> </span><span class="n">dst</span><span class="p">,</span><span class="w"> </span><span class="kt">unsigned</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="o">*</span><span class="n">src</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">dstride</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">w</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">h</span><span class="p">)</span><span class="w"></span>
+<span class="p">{</span><span class="w"></span>
+<span class="kt">unsigned</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">y</span><span class="p">,</span><span class="w"> </span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="n">i</span><span class="p">;</span><span class="w"></span>
+
+<span class="c1">// descramble Y plane</span>
+<span class="c1">// dstride = 720 = w</span>
+<span class="c1">// The Y plane is divided into blocks of 16x16 pixels</span>
+<span class="c1">// Each block in transmitted in turn, line-by-line.</span>
+<span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">y</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">h</span><span class="p">;</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="mi">16</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">w</span><span class="p">;</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="mi">16</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">16</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">                </span><span class="n">memcpy</span><span class="p">(</span><span class="n">dst</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="p">(</span><span class="n">y</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">i</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">dstride</span><span class="p">,</span><span class="w"> </span><span class="n">src</span><span class="p">,</span><span class="w"> </span><span class="mi">16</span><span class="p">);</span><span class="w"></span>
+<span class="w">                </span><span class="n">src</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="mi">16</span><span class="p">;</span><span class="w"></span>
+<span class="w">        </span><span class="p">}</span><span class="w"></span>
+<span class="w">        </span><span class="p">}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+
+<span class="k">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">de_macro_uv</span><span class="p">(</span><span class="kt">unsigned</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="o">*</span><span class="n">dstu</span><span class="p">,</span><span class="w"> </span><span class="kt">unsigned</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="o">*</span><span class="n">dstv</span><span class="p">,</span><span class="w"> </span><span class="kt">unsigned</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="o">*</span><span class="n">src</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">dstride</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">w</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">h</span><span class="p">)</span><span class="w"></span>
+<span class="p">{</span><span class="w"></span>
+<span class="kt">unsigned</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">y</span><span class="p">,</span><span class="w"> </span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="n">i</span><span class="p">;</span><span class="w"></span>
+
+<span class="c1">// descramble U/V plane</span>
+<span class="c1">// dstride = 720 / 2 = w</span>
+<span class="c1">// The U/V values are interlaced (UVUV...).</span>
+<span class="c1">// Again, the UV plane is divided into blocks of 16x16 UV values.</span>
+<span class="c1">// Each block in transmitted in turn, line-by-line.</span>
+<span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">y</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">h</span><span class="p">;</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="mi">16</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">w</span><span class="p">;</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="mi">8</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">16</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">                </span><span class="kt">int</span><span class="w"> </span><span class="n">idx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="p">(</span><span class="n">y</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">i</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">dstride</span><span class="p">;</span><span class="w"></span>
+
+<span class="w">                </span><span class="n">dstu</span><span class="p">[</span><span class="n">idx</span><span class="o">+</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">src</span><span class="p">[</span><span class="mi">0</span><span class="p">];</span><span class="w">  </span><span class="n">dstv</span><span class="p">[</span><span class="n">idx</span><span class="o">+</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">src</span><span class="p">[</span><span class="mi">1</span><span class="p">];</span><span class="w"></span>
+<span class="w">                </span><span class="n">dstu</span><span class="p">[</span><span class="n">idx</span><span class="o">+</span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">src</span><span class="p">[</span><span class="mi">2</span><span class="p">];</span><span class="w">  </span><span class="n">dstv</span><span class="p">[</span><span class="n">idx</span><span class="o">+</span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">src</span><span class="p">[</span><span class="mi">3</span><span class="p">];</span><span class="w"></span>
+<span class="w">                </span><span class="n">dstu</span><span class="p">[</span><span class="n">idx</span><span class="o">+</span><span class="mi">2</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">src</span><span class="p">[</span><span class="mi">4</span><span class="p">];</span><span class="w">  </span><span class="n">dstv</span><span class="p">[</span><span class="n">idx</span><span class="o">+</span><span class="mi">2</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">src</span><span class="p">[</span><span class="mi">5</span><span class="p">];</span><span class="w"></span>
+<span class="w">                </span><span class="n">dstu</span><span class="p">[</span><span class="n">idx</span><span class="o">+</span><span class="mi">3</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">src</span><span class="p">[</span><span class="mi">6</span><span class="p">];</span><span class="w">  </span><span class="n">dstv</span><span class="p">[</span><span class="n">idx</span><span class="o">+</span><span class="mi">3</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">src</span><span class="p">[</span><span class="mi">7</span><span class="p">];</span><span class="w"></span>
+<span class="w">                </span><span class="n">dstu</span><span class="p">[</span><span class="n">idx</span><span class="o">+</span><span class="mi">4</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">src</span><span class="p">[</span><span class="mi">8</span><span class="p">];</span><span class="w">  </span><span class="n">dstv</span><span class="p">[</span><span class="n">idx</span><span class="o">+</span><span class="mi">4</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">src</span><span class="p">[</span><span class="mi">9</span><span class="p">];</span><span class="w"></span>
+<span class="w">                </span><span class="n">dstu</span><span class="p">[</span><span class="n">idx</span><span class="o">+</span><span class="mi">5</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">src</span><span class="p">[</span><span class="mi">10</span><span class="p">];</span><span class="w"> </span><span class="n">dstv</span><span class="p">[</span><span class="n">idx</span><span class="o">+</span><span class="mi">5</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">src</span><span class="p">[</span><span class="mi">11</span><span class="p">];</span><span class="w"></span>
+<span class="w">                </span><span class="n">dstu</span><span class="p">[</span><span class="n">idx</span><span class="o">+</span><span class="mi">6</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">src</span><span class="p">[</span><span class="mi">12</span><span class="p">];</span><span class="w"> </span><span class="n">dstv</span><span class="p">[</span><span class="n">idx</span><span class="o">+</span><span class="mi">6</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">src</span><span class="p">[</span><span class="mi">13</span><span class="p">];</span><span class="w"></span>
+<span class="w">                </span><span class="n">dstu</span><span class="p">[</span><span class="n">idx</span><span class="o">+</span><span class="mi">7</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">src</span><span class="p">[</span><span class="mi">14</span><span class="p">];</span><span class="w"> </span><span class="n">dstv</span><span class="p">[</span><span class="n">idx</span><span class="o">+</span><span class="mi">7</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">src</span><span class="p">[</span><span class="mi">15</span><span class="p">];</span><span class="w"></span>
+<span class="w">                </span><span class="n">src</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="mi">16</span><span class="p">;</span><span class="w"></span>
+<span class="w">        </span><span class="p">}</span><span class="w"></span>
+<span class="w">        </span><span class="p">}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+
+<span class="cm">/*************************************************************************/</span><span class="w"></span>
+<span class="kt">int</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">argc</span><span class="p">,</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="o">**</span><span class="n">argv</span><span class="p">)</span><span class="w"></span>
+<span class="p">{</span><span class="w"></span>
+<span class="kt">FILE</span><span class="w"> </span><span class="o">*</span><span class="n">fin</span><span class="p">;</span><span class="w"></span>
+<span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="p">;</span><span class="w"></span>
+
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">argc</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="n">fin</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">stdin</span><span class="p">;</span><span class="w"></span>
+<span class="k">else</span><span class="w"> </span><span class="n">fin</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">fopen</span><span class="p">(</span><span class="n">argv</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span><span class="w"> </span><span class="s">&quot;r&quot;</span><span class="p">);</span><span class="w"></span>
+
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">fin</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="nb">NULL</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="n">fprintf</span><span class="p">(</span><span class="n">stderr</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;cannot open input</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="n">exit</span><span class="p">(</span><span class="mi">-1</span><span class="p">);</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+<span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="n">fread</span><span class="p">(</span><span class="n">frame</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">frame</span><span class="p">),</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">fin</span><span class="p">)</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="n">de_macro_y</span><span class="p">(</span><span class="n">framey</span><span class="p">,</span><span class="w"> </span><span class="n">frame</span><span class="p">,</span><span class="w"> </span><span class="mi">720</span><span class="p">,</span><span class="w"> </span><span class="mi">720</span><span class="p">,</span><span class="w"> </span><span class="mi">576</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="n">de_macro_uv</span><span class="p">(</span><span class="n">frameu</span><span class="p">,</span><span class="w"> </span><span class="n">framev</span><span class="p">,</span><span class="w"> </span><span class="n">frame</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">720</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">576</span><span class="p">,</span><span class="w"> </span><span class="mi">720</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">720</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">576</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mi">2</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="n">fwrite</span><span class="p">(</span><span class="n">framey</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">framey</span><span class="p">),</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">stdout</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="n">fwrite</span><span class="p">(</span><span class="n">framev</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">framev</span><span class="p">),</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">stdout</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="n">fwrite</span><span class="p">(</span><span class="n">frameu</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">frameu</span><span class="p">),</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">stdout</span><span class="p">);</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+<span class="n">fclose</span><span class="p">(</span><span class="n">fin</span><span class="p">);</span><span class="w"></span>
+<span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="format-of-embedded-v4l2-mpeg-stream-vbi-fmt-ivtv-vbi-data">
+<h2><span class="section-number">3.2. </span>Format of embedded V4L2_MPEG_STREAM_VBI_FMT_IVTV VBI data<a class="headerlink" href="#format-of-embedded-v4l2-mpeg-stream-vbi-fmt-ivtv-vbi-data" title="Permalink to this headline">¶</a></h2>
+<p>Author: Hans Verkuil &lt;<a class="reference external" href="mailto:hverkuil&#37;&#52;&#48;xs4all&#46;nl">hverkuil<span>&#64;</span>xs4all<span>&#46;</span>nl</a>&gt;</p>
+<p>This section describes the V4L2_MPEG_STREAM_VBI_FMT_IVTV format of the VBI data
+embedded in an MPEG-2 program stream. This format is in part dictated by some
+hardware limitations of the ivtv driver (the driver for the Conexant cx23415/6
+chips), in particular a maximum size for the VBI data. Anything longer is cut
+off when the MPEG stream is played back through the cx23415.</p>
+<p>The advantage of this format is it is very compact and that all VBI data for
+all lines can be stored while still fitting within the maximum allowed size.</p>
+<p>The stream ID of the VBI data is 0xBD. The maximum size of the embedded data is
+4 + 43 * 36, which is 4 bytes for a header and 2 * 18 VBI lines with a 1 byte
+header and a 42 bytes payload each. Anything beyond this limit is cut off by
+the cx23415/6 firmware. Besides the data for the VBI lines we also need 36 bits
+for a bitmask determining which lines are captured and 4 bytes for a magic cookie,
+signifying that this data package contains V4L2_MPEG_STREAM_VBI_FMT_IVTV VBI data.
+If all lines are used, then there is no longer room for the bitmask. To solve this
+two different magic numbers were introduced:</p>
+<p>‘itv0’: After this magic number two unsigned longs follow. Bits 0-17 of the first
+unsigned long denote which lines of the first field are captured. Bits 18-31 of
+the first unsigned long and bits 0-3 of the second unsigned long are used for the
+second field.</p>
+<p>‘ITV0’: This magic number assumes all VBI lines are captured, i.e. it implicitly
+implies that the bitmasks are 0xffffffff and 0xf.</p>
+<p>After these magic cookies (and the 8 byte bitmask in case of cookie ‘itv0’) the
+captured VBI lines start:</p>
+<p>For each line the least significant 4 bits of the first byte contain the data type.
+Possible values are shown in the table below. The payload is in the following 42
+bytes.</p>
+<p>Here is the list of possible data types:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cp">#define IVTV_SLICED_TYPE_TELETEXT       0x1     </span><span class="c1">// Teletext (uses lines 6-22 for PAL)</span>
+<span class="cp">#define IVTV_SLICED_TYPE_CC             0x4     </span><span class="c1">// Closed Captions (line 21 NTSC)</span>
+<span class="cp">#define IVTV_SLICED_TYPE_WSS            0x5     </span><span class="c1">// Wide Screen Signal (line 23 PAL)</span>
+<span class="cp">#define IVTV_SLICED_TYPE_VPS            0x7     </span><span class="c1">// Video Programming System (PAL) (line 16)</span>
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">3. The cx2341x driver</a><ul>
+<li><a class="reference internal" href="#non-compressed-file-format">3.1. Non-compressed file format</a><ul>
+<li><a class="reference internal" href="#raw-format-c-example">3.1.1. Raw format c example</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#format-of-embedded-v4l2-mpeg-stream-vbi-fmt-ivtv-vbi-data">3.2. Format of embedded V4L2_MPEG_STREAM_VBI_FMT_IVTV VBI data</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/userspace-api/media/drivers/cx2341x-uapi.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/userspace-api/media/drivers/cx2341x-uapi.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

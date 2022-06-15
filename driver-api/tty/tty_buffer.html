@@ -1,0 +1,496 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>TTY Buffer &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="TTY Internals" href="tty_internals.html" />
+    <link rel="prev" title="TTY Line Discipline" href="tty_ldisc.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="tty-buffer">
+<h1>TTY Buffer<a class="headerlink" href="#tty-buffer" title="Permalink to this headline">¶</a></h1>
+<div class="contents local topic" id="contents">
+<ul class="simple">
+<li><p><a class="reference internal" href="#flip-buffer-management" id="id1">Flip Buffer Management</a></p></li>
+<li><p><a class="reference internal" href="#other-functions" id="id2">Other Functions</a></p></li>
+<li><p><a class="reference internal" href="#buffer-locking" id="id3">Buffer Locking</a></p></li>
+<li><p><a class="reference internal" href="#internal-functions" id="id4">Internal Functions</a></p></li>
+</ul>
+</div>
+<p>Here, we document functions for taking care of tty buffer and their flipping.
+Drivers are supposed to fill the buffer by one of those functions below and
+then flip the buffer, so that the data are passed to <a class="reference internal" href="tty_ldisc.html"><span class="doc">line discipline</span></a> for further processing.</p>
+<section id="flip-buffer-management">
+<h2><a class="toc-backref" href="#id1">Flip Buffer Management</a><a class="headerlink" href="#flip-buffer-management" title="Permalink to this headline">¶</a></h2>
+<dl class="function">
+<dt id="c.tty_insert_flip_string_fixed_flag">
+int <code class="sig-name descname">tty_insert_flip_string_fixed_flag</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_port.html#c.tty_port" title="tty_port">tty_port</a><em> *port</em>, const unsigned char<em> *chars</em>, char<em> flag</em>, size_t<em> size</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_insert_flip_string_fixed_flag" title="Permalink to this definition">¶</a></dt>
+<dd><p>add characters to the tty buffer</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>tty port</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">unsigned</span> <span class="pre">char</span> <span class="pre">*chars</span></code></dt><dd><p>characters</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">char</span> <span class="pre">flag</span></code></dt><dd><p>flag value for each character</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">size_t</span> <span class="pre">size</span></code></dt><dd><p>size</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Queue a series of bytes to the tty buffering. All the characters passed are
+marked with the supplied flag.</p>
+<p><strong>Return</strong></p>
+<p>the number added.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_insert_flip_string_flags">
+int <code class="sig-name descname">tty_insert_flip_string_flags</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_port.html#c.tty_port" title="tty_port">tty_port</a><em> *port</em>, const unsigned char<em> *chars</em>, const char<em> *flags</em>, size_t<em> size</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_insert_flip_string_flags" title="Permalink to this definition">¶</a></dt>
+<dd><p>add characters to the tty buffer</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>tty port</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">unsigned</span> <span class="pre">char</span> <span class="pre">*chars</span></code></dt><dd><p>characters</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*flags</span></code></dt><dd><p>flag bytes</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">size_t</span> <span class="pre">size</span></code></dt><dd><p>size</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Queue a series of bytes to the tty buffering. For each character the flags
+array indicates the status of the character.</p>
+<p><strong>Return</strong></p>
+<p>the number added.</p>
+</div>
+<dl class="function">
+<dt id="c.__tty_insert_flip_char">
+int <code class="sig-name descname">__tty_insert_flip_char</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_port.html#c.tty_port" title="tty_port">tty_port</a><em> *port</em>, unsigned char<em> ch</em>, char<em> flag</em><span class="sig-paren">)</span><a class="headerlink" href="#c.__tty_insert_flip_char" title="Permalink to this definition">¶</a></dt>
+<dd><p>add one character to the tty buffer</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>tty port</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">char</span> <span class="pre">ch</span></code></dt><dd><p>character</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">char</span> <span class="pre">flag</span></code></dt><dd><p>flag byte</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Queue a single byte <strong>ch</strong> to the tty buffering, with an optional flag. This is
+the slow path of tty_insert_flip_char().</p>
+</div>
+<dl class="function">
+<dt id="c.tty_prepare_flip_string">
+int <code class="sig-name descname">tty_prepare_flip_string</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_port.html#c.tty_port" title="tty_port">tty_port</a><em> *port</em>, unsigned char<em> **chars</em>, size_t<em> size</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_prepare_flip_string" title="Permalink to this definition">¶</a></dt>
+<dd><p>make room for characters</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>tty port</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">char</span> <span class="pre">**chars</span></code></dt><dd><p>return pointer for character write area</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">size_t</span> <span class="pre">size</span></code></dt><dd><p>desired size</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Prepare a block of space in the buffer for data.</p>
+<p>This is used for drivers that need their own block copy routines into the
+buffer. There is no guarantee the buffer is a DMA target!</p>
+<p><strong>Return</strong></p>
+<p>the length available and buffer pointer (<strong>chars</strong>) to the space which
+is now allocated and accounted for as ready for normal characters.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_ldisc_receive_buf">
+int <code class="sig-name descname">tty_ldisc_receive_buf</code><span class="sig-paren">(</span>struct tty_ldisc<em> *ld</em>, const unsigned char<em> *p</em>, const char<em> *f</em>, int<em> count</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_ldisc_receive_buf" title="Permalink to this definition">¶</a></dt>
+<dd><p>forward data to line discipline</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_ldisc</span> <span class="pre">*ld</span></code></dt><dd><p>line discipline to process input</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">unsigned</span> <span class="pre">char</span> <span class="pre">*p</span></code></dt><dd><p>char buffer</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*f</span></code></dt><dd><p><code class="docutils literal notranslate"><span class="pre">TTY_NORMAL</span></code>, <code class="docutils literal notranslate"><span class="pre">TTY_BREAK</span></code>, etc. flags buffer</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">count</span></code></dt><dd><p>number of bytes to process</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Callers other than <a class="reference internal" href="#c.flush_to_ldisc" title="flush_to_ldisc"><code class="xref c c-func docutils literal notranslate"><span class="pre">flush_to_ldisc()</span></code></a> need to exclude the kworker from
+concurrent use of the line discipline, see paste_selection().</p>
+<p><strong>Return</strong></p>
+<p>the number of bytes processed.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_flip_buffer_push">
+void <code class="sig-name descname">tty_flip_buffer_push</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_port.html#c.tty_port" title="tty_port">tty_port</a><em> *port</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_flip_buffer_push" title="Permalink to this definition">¶</a></dt>
+<dd><p>push terminal buffers</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>tty port to push</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Queue a push of the terminal flip buffers to the line discipline. Can be
+called from IRQ/atomic context.</p>
+<p>In the event of the queue being busy for flipping the work will be held off
+and retried later.</p>
+</div>
+</section>
+<hr class="docutils" />
+<section id="other-functions">
+<h2><a class="toc-backref" href="#id2">Other Functions</a><a class="headerlink" href="#other-functions" title="Permalink to this headline">¶</a></h2>
+<dl class="function">
+<dt id="c.tty_buffer_space_avail">
+unsigned int <code class="sig-name descname">tty_buffer_space_avail</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_port.html#c.tty_port" title="tty_port">tty_port</a><em> *port</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_buffer_space_avail" title="Permalink to this definition">¶</a></dt>
+<dd><p>return unused buffer space</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>tty port owning the flip buffer</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p>the # of bytes which can be written by the driver without reaching
+the buffer limit.</p>
+<p><strong>Note</strong></p>
+<p>this does not guarantee that memory is available to write the returned
+# of bytes (use <a class="reference internal" href="#c.tty_prepare_flip_string" title="tty_prepare_flip_string"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_prepare_flip_string()</span></code></a> to pre-allocate if memory
+guarantee is required).</p>
+</div>
+<dl class="function">
+<dt id="c.tty_buffer_set_limit">
+int <code class="sig-name descname">tty_buffer_set_limit</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_port.html#c.tty_port" title="tty_port">tty_port</a><em> *port</em>, int<em> limit</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_buffer_set_limit" title="Permalink to this definition">¶</a></dt>
+<dd><p>change the tty buffer memory limit</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>tty port to change</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">limit</span></code></dt><dd><p>memory limit to set</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Change the tty buffer memory limit.</p>
+<p>Must be called before the other tty buffer functions are used.</p>
+</div>
+</section>
+<hr class="docutils" />
+<section id="buffer-locking">
+<h2><a class="toc-backref" href="#id3">Buffer Locking</a><a class="headerlink" href="#buffer-locking" title="Permalink to this headline">¶</a></h2>
+<p>These are used only in special circumstances. Avoid them.</p>
+<dl class="function">
+<dt id="c.tty_buffer_lock_exclusive">
+void <code class="sig-name descname">tty_buffer_lock_exclusive</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_port.html#c.tty_port" title="tty_port">tty_port</a><em> *port</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_buffer_lock_exclusive" title="Permalink to this definition">¶</a></dt>
+<dd><p>gain exclusive access to buffer</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>tty port owning the flip buffer</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Guarantees safe use of the <a class="reference internal" href="tty_ldisc.html#c.tty_ldisc_ops" title="tty_ldisc_ops"><code class="xref c c-type docutils literal notranslate"><span class="pre">tty_ldisc_ops.receive_buf()</span></code></a> method by excluding
+the buffer work and any pending flush from using the flip buffer. Data can
+continue to be added concurrently to the flip buffer from the driver side.</p>
+<p>See also <a class="reference internal" href="#c.tty_buffer_unlock_exclusive" title="tty_buffer_unlock_exclusive"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_buffer_unlock_exclusive()</span></code></a>.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_buffer_unlock_exclusive">
+void <code class="sig-name descname">tty_buffer_unlock_exclusive</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_port.html#c.tty_port" title="tty_port">tty_port</a><em> *port</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_buffer_unlock_exclusive" title="Permalink to this definition">¶</a></dt>
+<dd><p>release exclusive access</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>tty port owning the flip buffer</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>The buffer work is restarted if there is data in the flip buffer.</p>
+<p>See also <a class="reference internal" href="#c.tty_buffer_lock_exclusive" title="tty_buffer_lock_exclusive"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_buffer_lock_exclusive()</span></code></a>.</p>
+</div>
+</section>
+<hr class="docutils" />
+<section id="internal-functions">
+<h2><a class="toc-backref" href="#id4">Internal Functions</a><a class="headerlink" href="#internal-functions" title="Permalink to this headline">¶</a></h2>
+<dl class="function">
+<dt id="c.tty_buffer_free_all">
+void <code class="sig-name descname">tty_buffer_free_all</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_port.html#c.tty_port" title="tty_port">tty_port</a><em> *port</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_buffer_free_all" title="Permalink to this definition">¶</a></dt>
+<dd><p>free buffers used by a tty</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>tty port to free from</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Remove all the buffers pending on a tty whether queued with data or in the
+free ring. Must be called when the tty is no longer in use.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_buffer_alloc">
+struct tty_buffer * <code class="sig-name descname">tty_buffer_alloc</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_port.html#c.tty_port" title="tty_port">tty_port</a><em> *port</em>, size_t<em> size</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_buffer_alloc" title="Permalink to this definition">¶</a></dt>
+<dd><p>allocate a tty buffer</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>tty port</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">size_t</span> <span class="pre">size</span></code></dt><dd><p>desired size (characters)</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Allocate a new tty buffer to hold the desired number of characters. We
+round our buffers off in 256 character chunks to get better allocation
+behaviour.</p>
+<p><strong>Return</strong></p>
+<p><code class="docutils literal notranslate"><span class="pre">NULL</span></code> if out of memory or the allocation would exceed the per
+device queue.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_buffer_free">
+void <code class="sig-name descname">tty_buffer_free</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_port.html#c.tty_port" title="tty_port">tty_port</a><em> *port</em>, struct tty_buffer<em> *b</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_buffer_free" title="Permalink to this definition">¶</a></dt>
+<dd><p>free a tty buffer</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>tty port owning the buffer</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_buffer</span> <span class="pre">*b</span></code></dt><dd><p>the buffer to free</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Free a tty buffer, or add it to the free list according to our internal
+strategy.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_buffer_flush">
+void <code class="sig-name descname">tty_buffer_flush</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em>, struct tty_ldisc<em> *ld</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_buffer_flush" title="Permalink to this definition">¶</a></dt>
+<dd><p>flush full tty buffers</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty to flush</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_ldisc</span> <span class="pre">*ld</span></code></dt><dd><p>optional ldisc ptr (must be referenced)</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Flush all the buffers containing receive data. If <strong>ld</strong> != <code class="docutils literal notranslate"><span class="pre">NULL</span></code>, flush the
+ldisc input buffer.</p>
+<p>Locking: takes buffer lock to ensure single-threaded flip buffer ‘consumer’.</p>
+</div>
+<dl class="function">
+<dt id="c.__tty_buffer_request_room">
+int <code class="sig-name descname">__tty_buffer_request_room</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_port.html#c.tty_port" title="tty_port">tty_port</a><em> *port</em>, size_t<em> size</em>, bool<em> flags</em><span class="sig-paren">)</span><a class="headerlink" href="#c.__tty_buffer_request_room" title="Permalink to this definition">¶</a></dt>
+<dd><p>grow tty buffer if needed</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>tty port</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">size_t</span> <span class="pre">size</span></code></dt><dd><p>size desired</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">bool</span> <span class="pre">flags</span></code></dt><dd><p>buffer has to store flags along character data</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Make at least <strong>size</strong> bytes of linear space available for the tty buffer.</p>
+<p>Will change over to a new buffer if the current buffer is encoded as
+<code class="docutils literal notranslate"><span class="pre">TTY_NORMAL</span></code> (so has no flags buffer) and the new buffer requires a flags
+buffer.</p>
+<p><strong>Return</strong></p>
+<p>the size we managed to find.</p>
+</div>
+<dl class="function">
+<dt id="c.flush_to_ldisc">
+void <code class="sig-name descname">flush_to_ldisc</code><span class="sig-paren">(</span>struct work_struct<em> *work</em><span class="sig-paren">)</span><a class="headerlink" href="#c.flush_to_ldisc" title="Permalink to this definition">¶</a></dt>
+<dd><p>flush data from buffer to ldisc</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">work_struct</span> <span class="pre">*work</span></code></dt><dd><p>tty structure passed from work queue.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This routine is called out of the software interrupt to flush data from the
+buffer chain to the line discipline.</p>
+<p>The receive_buf() method is single threaded for each tty instance.</p>
+<p>Locking: takes buffer lock to ensure single-threaded flip buffer ‘consumer’.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_insert_flip_string_and_push_buffer">
+int <code class="sig-name descname">tty_insert_flip_string_and_push_buffer</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_port.html#c.tty_port" title="tty_port">tty_port</a><em> *port</em>, const unsigned char<em> *chars</em>, size_t<em> size</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_insert_flip_string_and_push_buffer" title="Permalink to this definition">¶</a></dt>
+<dd><p>add characters to the tty buffer and push</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>tty port</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">unsigned</span> <span class="pre">char</span> <span class="pre">*chars</span></code></dt><dd><p>characters</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">size_t</span> <span class="pre">size</span></code></dt><dd><p>size</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>The function combines tty_insert_flip_string() and <a class="reference internal" href="#c.tty_flip_buffer_push" title="tty_flip_buffer_push"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_flip_buffer_push()</span></code></a>
+with the exception of properly holding the <strong>port-&gt;lock</strong>.</p>
+<p>To be used only internally (by pty currently).</p>
+<p><strong>Return</strong></p>
+<p>the number added.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_buffer_init">
+void <code class="sig-name descname">tty_buffer_init</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_port.html#c.tty_port" title="tty_port">tty_port</a><em> *port</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_buffer_init" title="Permalink to this definition">¶</a></dt>
+<dd><p>prepare a tty buffer structure</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>tty port to initialise</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Set up the initial state of the buffer management for a tty device. Must be
+called before the other tty buffer functions are used.</p>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">TTY Buffer</a><ul>
+<li><a class="reference internal" href="#flip-buffer-management">Flip Buffer Management</a></li>
+<li><a class="reference internal" href="#other-functions">Other Functions</a></li>
+<li><a class="reference internal" href="#buffer-locking">Buffer Locking</a></li>
+<li><a class="reference internal" href="#internal-functions">Internal Functions</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/tty/tty_buffer.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/tty/tty_buffer.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,597 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Audio Stream in SoundWire &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="SoundWire Error Handling" href="error_handling.html" />
+    <link rel="prev" title="SoundWire Subsystem Summary" href="summary.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="audio-stream-in-soundwire">
+<h1>Audio Stream in SoundWire<a class="headerlink" href="#audio-stream-in-soundwire" title="Permalink to this headline">¶</a></h1>
+<p>An audio stream is a logical or virtual connection created between</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>System memory buffer(s) and Codec(s)</p></li>
+<li><p>DSP memory buffer(s) and Codec(s)</p></li>
+<li><p>FIFO(s) and Codec(s)</p></li>
+<li><p>Codec(s) and Codec(s)</p></li>
+</ol>
+</div></blockquote>
+<p>which is typically driven by a DMA(s) channel through the data link. An
+audio stream contains one or more channels of data. All channels within
+stream must have same sample rate and same sample size.</p>
+<p>Assume a stream with two channels (Left &amp; Right) is opened using SoundWire
+interface. Below are some ways a stream can be represented in SoundWire.</p>
+<p>Stream Sample in memory (System memory, DSP memory or FIFOs)</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>-------------------------
+| L | R | L | R | L | R |
+-------------------------
+</pre></div>
+</div>
+<p>Example 1: Stereo Stream with L and R channels is rendered from Master to
+Slave. Both Master and Slave is using single port.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>+---------------+                    Clock Signal  +---------------+
+|    Master     +----------------------------------+     Slave     |
+|   Interface   |                                  |   Interface   |
+|               |                                  |       1       |
+|               |                     Data Signal  |               |
+|    L  +  R    +----------------------------------+    L  +  R    |
+|     (Data)    |     Data Direction               |     (Data)    |
++---------------+  +-----------------------&gt;       +---------------+
+</pre></div>
+</div>
+<p>Example 2: Stereo Stream with L and R channels is captured from Slave to
+Master. Both Master and Slave is using single port.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>+---------------+                    Clock Signal  +---------------+
+|    Master     +----------------------------------+     Slave     |
+|   Interface   |                                  |   Interface   |
+|               |                                  |       1       |
+|               |                     Data Signal  |               |
+|    L  +  R    +----------------------------------+    L  +  R    |
+|     (Data)    |     Data Direction               |     (Data)    |
++---------------+  &lt;-----------------------+       +---------------+
+</pre></div>
+</div>
+<p>Example 3: Stereo Stream with L and R channels is rendered by Master. Each
+of the L and R channel is received by two different Slaves. Master and both
+Slaves are using single port.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>+---------------+                    Clock Signal  +---------------+
+|    Master     +---------+------------------------+     Slave     |
+|   Interface   |         |                        |   Interface   |
+|               |         |                        |       1       |
+|               |         |           Data Signal  |               |
+|    L  +  R    +---+------------------------------+       L       |
+|     (Data)    |   |     |    Data Direction      |     (Data)    |
++---------------+   |     |   +-------------&gt;      +---------------+
+                    |     |
+                    |     |
+                    |     |                        +---------------+
+                    |     +----------------------&gt; |     Slave     |
+                    |                              |   Interface   |
+                    |                              |       2       |
+                    |                              |               |
+                    +----------------------------&gt; |       R       |
+                                                   |     (Data)    |
+                                                   +---------------+
+</pre></div>
+</div>
+<p>Example 4: Stereo Stream with L and R channels is rendered by
+Master. Both of the L and R channels are received by two different
+Slaves. Master and both Slaves are using single port handling
+L+R. Each Slave device processes the L + R data locally, typically
+based on static configuration or dynamic orientation, and may drive
+one or more speakers.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>+---------------+                    Clock Signal  +---------------+
+|    Master     +---------+------------------------+     Slave     |
+|   Interface   |         |                        |   Interface   |
+|               |         |                        |       1       |
+|               |         |           Data Signal  |               |
+|    L  +  R    +---+------------------------------+     L + R     |
+|     (Data)    |   |     |    Data Direction      |     (Data)    |
++---------------+   |     |   +-------------&gt;      +---------------+
+                    |     |
+                    |     |
+                    |     |                        +---------------+
+                    |     +----------------------&gt; |     Slave     |
+                    |                              |   Interface   |
+                    |                              |       2       |
+                    |                              |               |
+                    +----------------------------&gt; |     L + R     |
+                                                   |     (Data)    |
+                                                   +---------------+
+</pre></div>
+</div>
+<p>Example 5: Stereo Stream with L and R channel is rendered by two different
+Ports of the Master and is received by only single Port of the Slave
+interface.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>+--------------------+
+|                    |
+|     +--------------+                             +----------------+
+|     |             ||                             |                |
+|     |  Data Port  ||  L Channel                  |                |
+|     |      1      |------------+                 |                |
+|     |  L Channel  ||           |                 +-----+----+     |
+|     |   (Data)    ||           |   L + R Channel ||    Data |     |
+| Master  +----------+           | +---+---------&gt; ||    Port |     |
+| Interface          |           |                 ||     1   |     |
+|     +--------------+           |                 ||         |     |
+|     |             ||           |                 +----------+     |
+|     |  Data Port  |------------+                 |                |
+|     |      2      ||  R Channel                  |     Slave      |
+|     |  R Channel  ||                             |   Interface    |
+|     |   (Data)    ||                             |       1        |
+|     +--------------+         Clock Signal        |     L  +  R    |
+|                    +---------------------------&gt; |      (Data)    |
++--------------------+                             |                |
+                                                   +----------------+
+</pre></div>
+</div>
+<p>Example 6: Stereo Stream with L and R channel is rendered by 2 Masters, each
+rendering one channel, and is received by two different Slaves, each
+receiving one channel. Both Masters and both Slaves are using single port.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>+---------------+                    Clock Signal  +---------------+
+|    Master     +----------------------------------+     Slave     |
+|   Interface   |                                  |   Interface   |
+|       1       |                                  |       1       |
+|               |                     Data Signal  |               |
+|       L       +----------------------------------+       L       |
+|     (Data)    |     Data Direction               |     (Data)    |
++---------------+  +-----------------------&gt;       +---------------+
+
++---------------+                    Clock Signal  +---------------+
+|    Master     +----------------------------------+     Slave     |
+|   Interface   |                                  |   Interface   |
+|       2       |                                  |       2       |
+|               |                     Data Signal  |               |
+|       R       +----------------------------------+       R       |
+|     (Data)    |     Data Direction               |     (Data)    |
++---------------+  +-----------------------&gt;       +---------------+
+</pre></div>
+</div>
+<p>Example 7: Stereo Stream with L and R channel is rendered by 2
+Masters, each rendering both channels. Each Slave receives L + R. This
+is the same application as Example 4 but with Slaves placed on
+separate links.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>+---------------+                    Clock Signal  +---------------+
+|    Master     +----------------------------------+     Slave     |
+|   Interface   |                                  |   Interface   |
+|       1       |                                  |       1       |
+|               |                     Data Signal  |               |
+|     L + R     +----------------------------------+     L + R     |
+|     (Data)    |     Data Direction               |     (Data)    |
++---------------+  +-----------------------&gt;       +---------------+
+
++---------------+                    Clock Signal  +---------------+
+|    Master     +----------------------------------+     Slave     |
+|   Interface   |                                  |   Interface   |
+|       2       |                                  |       2       |
+|               |                     Data Signal  |               |
+|     L + R     +----------------------------------+     L + R     |
+|     (Data)    |     Data Direction               |     (Data)    |
++---------------+  +-----------------------&gt;       +---------------+
+</pre></div>
+</div>
+<p>Example 8: 4-channel Stream is rendered by 2 Masters, each rendering a
+2 channels. Each Slave receives 2 channels.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>+---------------+                    Clock Signal  +---------------+
+|    Master     +----------------------------------+     Slave     |
+|   Interface   |                                  |   Interface   |
+|       1       |                                  |       1       |
+|               |                     Data Signal  |               |
+|    L1 + R1    +----------------------------------+    L1 + R1    |
+|     (Data)    |     Data Direction               |     (Data)    |
++---------------+  +-----------------------&gt;       +---------------+
+
++---------------+                    Clock Signal  +---------------+
+|    Master     +----------------------------------+     Slave     |
+|   Interface   |                                  |   Interface   |
+|       2       |                                  |       2       |
+|               |                     Data Signal  |               |
+|     L2 + R2   +----------------------------------+    L2 + R2    |
+|     (Data)    |     Data Direction               |     (Data)    |
++---------------+  +-----------------------&gt;       +---------------+
+</pre></div>
+</div>
+<p>Note1: In multi-link cases like above, to lock, one would acquire a global
+lock and then go on locking bus instances. But, in this case the caller
+framework(ASoC DPCM) guarantees that stream operations on a card are
+always serialized. So, there is no race condition and hence no need for
+global lock.</p>
+<p>Note2: A Slave device may be configured to receive all channels
+transmitted on a link for a given Stream (Example 4) or just a subset
+of the data (Example 3). The configuration of the Slave device is not
+handled by a SoundWire subsystem API, but instead by the
+snd_soc_dai_set_tdm_slot() API. The platform or machine driver will
+typically configure which of the slots are used. For Example 4, the
+same slots would be used by all Devices, while for Example 3 the Slave
+Device1 would use e.g. Slot 0 and Slave device2 slot 1.</p>
+<p>Note3: Multiple Sink ports can extract the same information for the
+same bitSlots in the SoundWire frame, however multiple Source ports
+shall be configured with different bitSlot configurations. This is the
+same limitation as with I2S/PCM TDM usages.</p>
+<section id="soundwire-stream-management-flow">
+<h2>SoundWire Stream Management flow<a class="headerlink" href="#soundwire-stream-management-flow" title="Permalink to this headline">¶</a></h2>
+<section id="stream-definitions">
+<h3>Stream definitions<a class="headerlink" href="#stream-definitions" title="Permalink to this headline">¶</a></h3>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>Current stream: This is classified as the stream on which operation has
+to be performed like prepare, enable, disable, de-prepare etc.</p></li>
+<li><p>Active stream: This is classified as the stream which is already active
+on Bus other than current stream. There can be multiple active streams
+on the Bus.</p></li>
+</ol>
+</div></blockquote>
+<p>SoundWire Bus manages stream operations for each stream getting
+rendered/captured on the SoundWire Bus. This section explains Bus operations
+done for each of the stream allocated/released on Bus. Following are the
+stream states maintained by the Bus for each of the audio stream.</p>
+</section>
+<section id="soundwire-stream-states">
+<h3>SoundWire stream states<a class="headerlink" href="#soundwire-stream-states" title="Permalink to this headline">¶</a></h3>
+<p>Below shows the SoundWire stream states and state transition diagram.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>+-----------+     +------------+     +----------+     +----------+
+| ALLOCATED +----&gt;| CONFIGURED +----&gt;| PREPARED +----&gt;| ENABLED  |
+|   STATE   |     |    STATE   |     |  STATE   |     |  STATE   |
++-----------+     +------------+     +---+--+---+     +----+-----+
+                                         ^  ^              ^
+                                         |  |              |
+                                       __|  |___________   |
+                                      |                 |  |
+                                      v                 |  v
+         +----------+           +-----+------+        +-+--+-----+
+         | RELEASED |&lt;----------+ DEPREPARED |&lt;-------+ DISABLED |
+         |  STATE   |           |   STATE    |        |  STATE   |
+         +----------+           +------------+        +----------+
+</pre></div>
+</div>
+<p>NOTE: State transitions between <code class="docutils literal notranslate"><span class="pre">SDW_STREAM_ENABLED</span></code> and
+<code class="docutils literal notranslate"><span class="pre">SDW_STREAM_DISABLED</span></code> are only relevant when then INFO_PAUSE flag is
+supported at the ALSA/ASoC level. Likewise the transition between
+<code class="docutils literal notranslate"><span class="pre">SDW_DISABLED_STATE</span></code> and <code class="docutils literal notranslate"><span class="pre">SDW_PREPARED_STATE</span></code> depends on the
+INFO_RESUME flag.</p>
+<p>NOTE2: The framework implements basic state transition checks, but
+does not e.g. check if a transition from DISABLED to ENABLED is valid
+on a specific platform. Such tests need to be added at the ALSA/ASoC
+level.</p>
+</section>
+<section id="stream-state-operations">
+<h3>Stream State Operations<a class="headerlink" href="#stream-state-operations" title="Permalink to this headline">¶</a></h3>
+<p>Below section explains the operations done by the Bus on Master(s) and
+Slave(s) as part of stream state transitions.</p>
+<section id="sdw-stream-allocated">
+<h4>SDW_STREAM_ALLOCATED<a class="headerlink" href="#sdw-stream-allocated" title="Permalink to this headline">¶</a></h4>
+<p>Allocation state for stream. This is the entry state
+of the stream. Operations performed before entering in this state:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>A stream runtime is allocated for the stream. This stream
+runtime is used as a reference for all the operations performed
+on the stream.</p></li>
+<li><p>The resources required for holding stream runtime information are
+allocated and initialized. This holds all stream related information
+such as stream type (PCM/PDM) and parameters, Master and Slave
+interface associated with the stream, stream state etc.</p></li>
+</ol>
+</div></blockquote>
+<p>After all above operations are successful, stream state is set to
+<code class="docutils literal notranslate"><span class="pre">SDW_STREAM_ALLOCATED</span></code>.</p>
+<p>Bus implements below API for allocate a stream which needs to be called once
+per stream. From ASoC DPCM framework, this stream state maybe linked to
+.startup() operation.</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">int</span><span class="w"> </span><span class="nf">sdw_alloc_stream</span><span class="p">(</span><span class="kt">char</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">stream_name</span><span class="p">);</span><span class="w"></span>
+</pre></div>
+</div>
+<p>The SoundWire core provides a sdw_startup_stream() helper function,
+typically called during a dailink .startup() callback, which performs
+stream allocation and sets the stream pointer for all DAIs
+connected to a stream.</p>
+</section>
+<section id="sdw-stream-configured">
+<h4>SDW_STREAM_CONFIGURED<a class="headerlink" href="#sdw-stream-configured" title="Permalink to this headline">¶</a></h4>
+<p>Configuration state of stream. Operations performed before entering in
+this state:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>The resources allocated for stream information in SDW_STREAM_ALLOCATED
+state are updated here. This includes stream parameters, Master(s)
+and Slave(s) runtime information associated with current stream.</p></li>
+<li><p>All the Master(s) and Slave(s) associated with current stream provide
+the port information to Bus which includes port numbers allocated by
+Master(s) and Slave(s) for current stream and their channel mask.</p></li>
+</ol>
+</div></blockquote>
+<p>After all above operations are successful, stream state is set to
+<code class="docutils literal notranslate"><span class="pre">SDW_STREAM_CONFIGURED</span></code>.</p>
+<p>Bus implements below APIs for CONFIG state which needs to be called by
+the respective Master(s) and Slave(s) associated with stream. These APIs can
+only be invoked once by respective Master(s) and Slave(s). From ASoC DPCM
+framework, this stream state is linked to .hw_params() operation.</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">int</span><span class="w"> </span><span class="nf">sdw_stream_add_master</span><span class="p">(</span><span class="k">struct</span> <span class="nc">sdw_bus</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">bus</span><span class="p">,</span><span class="w"></span>
+<span class="w">              </span><span class="k">struct</span> <span class="nc">sdw_stream_config</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">stream_config</span><span class="p">,</span><span class="w"></span>
+<span class="w">              </span><span class="k">struct</span> <span class="nc">sdw_ports_config</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">ports_config</span><span class="p">,</span><span class="w"></span>
+<span class="w">              </span><span class="k">struct</span> <span class="nc">sdw_stream_runtime</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">stream</span><span class="p">);</span><span class="w"></span>
+
+<span class="kt">int</span><span class="w"> </span><span class="nf">sdw_stream_add_slave</span><span class="p">(</span><span class="k">struct</span> <span class="nc">sdw_slave</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">slave</span><span class="p">,</span><span class="w"></span>
+<span class="w">              </span><span class="k">struct</span> <span class="nc">sdw_stream_config</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">stream_config</span><span class="p">,</span><span class="w"></span>
+<span class="w">              </span><span class="k">struct</span> <span class="nc">sdw_ports_config</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">ports_config</span><span class="p">,</span><span class="w"></span>
+<span class="w">              </span><span class="k">struct</span> <span class="nc">sdw_stream_runtime</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">stream</span><span class="p">);</span><span class="w"></span>
+</pre></div>
+</div>
+</section>
+<section id="sdw-stream-prepared">
+<h4>SDW_STREAM_PREPARED<a class="headerlink" href="#sdw-stream-prepared" title="Permalink to this headline">¶</a></h4>
+<p>Prepare state of stream. Operations performed before entering in this state:</p>
+<blockquote>
+<div><ol class="arabic simple" start="0">
+<li><p>Steps 1 and 2 are omitted in the case of a resume operation,
+where the bus bandwidth is known.</p></li>
+<li><p>Bus parameters such as bandwidth, frame shape, clock frequency,
+are computed based on current stream as well as already active
+stream(s) on Bus. Re-computation is required to accommodate current
+stream on the Bus.</p></li>
+<li><p>Transport and port parameters of all Master(s) and Slave(s) port(s) are
+computed for the current as well as already active stream based on frame
+shape and clock frequency computed in step 1.</p></li>
+<li><p>Computed Bus and transport parameters are programmed in Master(s) and
+Slave(s) registers. The banked registers programming is done on the
+alternate bank (bank currently unused). Port(s) are enabled for the
+already active stream(s) on the alternate bank (bank currently unused).
+This is done in order to not disrupt already active stream(s).</p></li>
+<li><p>Once all the values are programmed, Bus initiates switch to alternate
+bank where all new values programmed gets into effect.</p></li>
+<li><p>Ports of Master(s) and Slave(s) for current stream are prepared by
+programming PrepareCtrl register.</p></li>
+</ol>
+</div></blockquote>
+<p>After all above operations are successful, stream state is set to
+<code class="docutils literal notranslate"><span class="pre">SDW_STREAM_PREPARED</span></code>.</p>
+<p>Bus implements below API for PREPARE state which needs to be called
+once per stream. From ASoC DPCM framework, this stream state is linked
+to .prepare() operation. Since the .trigger() operations may not
+follow the .prepare(), a direct transition from
+<code class="docutils literal notranslate"><span class="pre">SDW_STREAM_PREPARED</span></code> to <code class="docutils literal notranslate"><span class="pre">SDW_STREAM_DEPREPARED</span></code> is allowed.</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">int</span><span class="w"> </span><span class="nf">sdw_prepare_stream</span><span class="p">(</span><span class="k">struct</span> <span class="nc">sdw_stream_runtime</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">stream</span><span class="p">);</span><span class="w"></span>
+</pre></div>
+</div>
+</section>
+<section id="sdw-stream-enabled">
+<h4>SDW_STREAM_ENABLED<a class="headerlink" href="#sdw-stream-enabled" title="Permalink to this headline">¶</a></h4>
+<p>Enable state of stream. The data port(s) are enabled upon entering this state.
+Operations performed before entering in this state:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>All the values computed in SDW_STREAM_PREPARED state are programmed
+in alternate bank (bank currently unused). It includes programming of
+already active stream(s) as well.</p></li>
+<li><p>All the Master(s) and Slave(s) port(s) for the current stream are
+enabled on alternate bank (bank currently unused) by programming
+ChannelEn register.</p></li>
+<li><p>Once all the values are programmed, Bus initiates switch to alternate
+bank where all new values programmed gets into effect and port(s)
+associated with current stream are enabled.</p></li>
+</ol>
+</div></blockquote>
+<p>After all above operations are successful, stream state is set to
+<code class="docutils literal notranslate"><span class="pre">SDW_STREAM_ENABLED</span></code>.</p>
+<p>Bus implements below API for ENABLE state which needs to be called once per
+stream. From ASoC DPCM framework, this stream state is linked to
+.trigger() start operation.</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">int</span><span class="w"> </span><span class="nf">sdw_enable_stream</span><span class="p">(</span><span class="k">struct</span> <span class="nc">sdw_stream_runtime</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">stream</span><span class="p">);</span><span class="w"></span>
+</pre></div>
+</div>
+</section>
+<section id="sdw-stream-disabled">
+<h4>SDW_STREAM_DISABLED<a class="headerlink" href="#sdw-stream-disabled" title="Permalink to this headline">¶</a></h4>
+<p>Disable state of stream. The data port(s) are disabled upon exiting this state.
+Operations performed before entering in this state:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>All the Master(s) and Slave(s) port(s) for the current stream are
+disabled on alternate bank (bank currently unused) by programming
+ChannelEn register.</p></li>
+<li><p>All the current configuration of Bus and active stream(s) are programmed
+into alternate bank (bank currently unused).</p></li>
+<li><p>Once all the values are programmed, Bus initiates switch to alternate
+bank where all new values programmed gets into effect and port(s) associated
+with current stream are disabled.</p></li>
+</ol>
+</div></blockquote>
+<p>After all above operations are successful, stream state is set to
+<code class="docutils literal notranslate"><span class="pre">SDW_STREAM_DISABLED</span></code>.</p>
+<p>Bus implements below API for DISABLED state which needs to be called once
+per stream. From ASoC DPCM framework, this stream state is linked to
+.trigger() stop operation.</p>
+<p>When the INFO_PAUSE flag is supported, a direct transition to
+<code class="docutils literal notranslate"><span class="pre">SDW_STREAM_ENABLED</span></code> is allowed.</p>
+<p>For resume operations where ASoC will use the .prepare() callback, the
+stream can transition from <code class="docutils literal notranslate"><span class="pre">SDW_STREAM_DISABLED</span></code> to
+<code class="docutils literal notranslate"><span class="pre">SDW_STREAM_PREPARED</span></code>, with all required settings restored but
+without updating the bandwidth and bit allocation.</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">int</span><span class="w"> </span><span class="nf">sdw_disable_stream</span><span class="p">(</span><span class="k">struct</span> <span class="nc">sdw_stream_runtime</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">stream</span><span class="p">);</span><span class="w"></span>
+</pre></div>
+</div>
+</section>
+<section id="sdw-stream-deprepared">
+<h4>SDW_STREAM_DEPREPARED<a class="headerlink" href="#sdw-stream-deprepared" title="Permalink to this headline">¶</a></h4>
+<p>De-prepare state of stream. Operations performed before entering in this
+state:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>All the port(s) of Master(s) and Slave(s) for current stream are
+de-prepared by programming PrepareCtrl register.</p></li>
+<li><p>The payload bandwidth of current stream is reduced from the total
+bandwidth requirement of bus and new parameters calculated and
+applied by performing bank switch etc.</p></li>
+</ol>
+</div></blockquote>
+<p>After all above operations are successful, stream state is set to
+<code class="docutils literal notranslate"><span class="pre">SDW_STREAM_DEPREPARED</span></code>.</p>
+<p>Bus implements below API for DEPREPARED state which needs to be called
+once per stream. ALSA/ASoC do not have a concept of ‘deprepare’, and
+the mapping from this stream state to ALSA/ASoC operation may be
+implementation specific.</p>
+<p>When the INFO_PAUSE flag is supported, the stream state is linked to
+the .hw_free() operation - the stream is not deprepared on a
+TRIGGER_STOP.</p>
+<p>Other implementations may transition to the <code class="docutils literal notranslate"><span class="pre">SDW_STREAM_DEPREPARED</span></code>
+state on TRIGGER_STOP, should they require a transition through the
+<code class="docutils literal notranslate"><span class="pre">SDW_STREAM_PREPARED</span></code> state.</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">int</span><span class="w"> </span><span class="nf">sdw_deprepare_stream</span><span class="p">(</span><span class="k">struct</span> <span class="nc">sdw_stream_runtime</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">stream</span><span class="p">);</span><span class="w"></span>
+</pre></div>
+</div>
+</section>
+<section id="sdw-stream-released">
+<h4>SDW_STREAM_RELEASED<a class="headerlink" href="#sdw-stream-released" title="Permalink to this headline">¶</a></h4>
+<p>Release state of stream. Operations performed before entering in this state:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>Release port resources for all Master(s) and Slave(s) port(s)
+associated with current stream.</p></li>
+<li><p>Release Master(s) and Slave(s) runtime resources associated with
+current stream.</p></li>
+<li><p>Release stream runtime resources associated with current stream.</p></li>
+</ol>
+</div></blockquote>
+<p>After all above operations are successful, stream state is set to
+<code class="docutils literal notranslate"><span class="pre">SDW_STREAM_RELEASED</span></code>.</p>
+<p>Bus implements below APIs for RELEASE state which needs to be called by
+all the Master(s) and Slave(s) associated with stream. From ASoC DPCM
+framework, this stream state is linked to .hw_free() operation.</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">int</span><span class="w"> </span><span class="nf">sdw_stream_remove_master</span><span class="p">(</span><span class="k">struct</span> <span class="nc">sdw_bus</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">bus</span><span class="p">,</span><span class="w"></span>
+<span class="w">              </span><span class="k">struct</span> <span class="nc">sdw_stream_runtime</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">stream</span><span class="p">);</span><span class="w"></span>
+<span class="kt">int</span><span class="w"> </span><span class="nf">sdw_stream_remove_slave</span><span class="p">(</span><span class="k">struct</span> <span class="nc">sdw_slave</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">slave</span><span class="p">,</span><span class="w"></span>
+<span class="w">              </span><span class="k">struct</span> <span class="nc">sdw_stream_runtime</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">stream</span><span class="p">);</span><span class="w"></span>
+</pre></div>
+</div>
+<p>The .shutdown() ASoC DPCM operation calls below Bus API to release
+stream assigned as part of ALLOCATED state.</p>
+<p>In .shutdown() the data structure maintaining stream state are freed up.</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">void</span><span class="w"> </span><span class="nf">sdw_release_stream</span><span class="p">(</span><span class="k">struct</span> <span class="nc">sdw_stream_runtime</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">stream</span><span class="p">);</span><span class="w"></span>
+</pre></div>
+</div>
+<p>The SoundWire core provides a sdw_shutdown_stream() helper function,
+typically called during a dailink .shutdown() callback, which clears
+the stream pointer for all DAIS connected to a stream and releases the
+memory allocated for the stream.</p>
+</section>
+</section>
+</section>
+<section id="not-supported">
+<h2>Not Supported<a class="headerlink" href="#not-supported" title="Permalink to this headline">¶</a></h2>
+<ol class="arabic simple">
+<li><p>A single port with multiple channels supported cannot be used between two
+streams or across stream. For example a port with 4 channels cannot be used
+to handle 2 independent stereo streams even though it’s possible in theory
+in SoundWire.</p></li>
+</ol>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Audio Stream in SoundWire</a><ul>
+<li><a class="reference internal" href="#soundwire-stream-management-flow">SoundWire Stream Management flow</a><ul>
+<li><a class="reference internal" href="#stream-definitions">Stream definitions</a></li>
+<li><a class="reference internal" href="#soundwire-stream-states">SoundWire stream states</a></li>
+<li><a class="reference internal" href="#stream-state-operations">Stream State Operations</a><ul>
+<li><a class="reference internal" href="#sdw-stream-allocated">SDW_STREAM_ALLOCATED</a></li>
+<li><a class="reference internal" href="#sdw-stream-configured">SDW_STREAM_CONFIGURED</a></li>
+<li><a class="reference internal" href="#sdw-stream-prepared">SDW_STREAM_PREPARED</a></li>
+<li><a class="reference internal" href="#sdw-stream-enabled">SDW_STREAM_ENABLED</a></li>
+<li><a class="reference internal" href="#sdw-stream-disabled">SDW_STREAM_DISABLED</a></li>
+<li><a class="reference internal" href="#sdw-stream-deprepared">SDW_STREAM_DEPREPARED</a></li>
+<li><a class="reference internal" href="#sdw-stream-released">SDW_STREAM_RELEASED</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#not-supported">Not Supported</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/soundwire/stream.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/soundwire/stream.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

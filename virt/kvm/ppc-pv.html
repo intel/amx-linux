@@ -1,0 +1,441 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>The PPC KVM paravirtual interface &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="KVM for x86 systems" href="x86/index.html" />
+    <link rel="prev" title="s390 (IBM Z) Protected Virtualization dumps" href="s390/s390-pv-dump.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="the-ppc-kvm-paravirtual-interface">
+<h1>The PPC KVM paravirtual interface<a class="headerlink" href="#the-ppc-kvm-paravirtual-interface" title="Permalink to this headline">¶</a></h1>
+<p>The basic execution principle by which KVM on PowerPC works is to run all kernel
+space code in PR=1 which is user space. This way we trap all privileged
+instructions and can emulate them accordingly.</p>
+<p>Unfortunately that is also the downfall. There are quite some privileged
+instructions that needlessly return us to the hypervisor even though they
+could be handled differently.</p>
+<p>This is what the PPC PV interface helps with. It takes privileged instructions
+and transforms them into unprivileged ones with some help from the hypervisor.
+This cuts down virtualization costs by about 50% on some of my benchmarks.</p>
+<p>The code for that interface can be found in arch/powerpc/kernel/kvm*</p>
+<section id="querying-for-existence">
+<h2>Querying for existence<a class="headerlink" href="#querying-for-existence" title="Permalink to this headline">¶</a></h2>
+<p>To find out if we’re running on KVM or not, we leverage the device tree. When
+Linux is running on KVM, a node /hypervisor exists. That node contains a
+compatible property with the value “linux,kvm”.</p>
+<p>Once you determined you’re running under a PV capable KVM, you can now use
+hypercalls as described below.</p>
+</section>
+<section id="kvm-hypercalls">
+<h2>KVM hypercalls<a class="headerlink" href="#kvm-hypercalls" title="Permalink to this headline">¶</a></h2>
+<p>Inside the device tree’s /hypervisor node there’s a property called
+‘hypercall-instructions’. This property contains at most 4 opcodes that make
+up the hypercall. To call a hypercall, just call these instructions.</p>
+<p>The parameters are as follows:</p>
+<blockquote>
+<div><table class="docutils align-default">
+<colgroup>
+<col style="width: 20%" />
+<col style="width: 40%" />
+<col style="width: 40%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Register</p></th>
+<th class="head"><p>IN</p></th>
+<th class="head"><p>OUT</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>r0</p></td>
+<td><ul class="simple">
+<li></li>
+</ul>
+</td>
+<td><p>volatile</p></td>
+</tr>
+<tr class="row-odd"><td><p>r3</p></td>
+<td><p>1st parameter</p></td>
+<td><p>Return code</p></td>
+</tr>
+<tr class="row-even"><td><p>r4</p></td>
+<td><p>2nd parameter</p></td>
+<td><p>1st output value</p></td>
+</tr>
+<tr class="row-odd"><td><p>r5</p></td>
+<td><p>3rd parameter</p></td>
+<td><p>2nd output value</p></td>
+</tr>
+<tr class="row-even"><td><p>r6</p></td>
+<td><p>4th parameter</p></td>
+<td><p>3rd output value</p></td>
+</tr>
+<tr class="row-odd"><td><p>r7</p></td>
+<td><p>5th parameter</p></td>
+<td><p>4th output value</p></td>
+</tr>
+<tr class="row-even"><td><p>r8</p></td>
+<td><p>6th parameter</p></td>
+<td><p>5th output value</p></td>
+</tr>
+<tr class="row-odd"><td><p>r9</p></td>
+<td><p>7th parameter</p></td>
+<td><p>6th output value</p></td>
+</tr>
+<tr class="row-even"><td><p>r10</p></td>
+<td><p>8th parameter</p></td>
+<td><p>7th output value</p></td>
+</tr>
+<tr class="row-odd"><td><p>r11</p></td>
+<td><p>hypercall number</p></td>
+<td><p>8th output value</p></td>
+</tr>
+<tr class="row-even"><td><p>r12</p></td>
+<td><ul class="simple">
+<li></li>
+</ul>
+</td>
+<td><p>volatile</p></td>
+</tr>
+</tbody>
+</table>
+</div></blockquote>
+<p>Hypercall definitions are shared in generic code, so the same hypercall numbers
+apply for x86 and powerpc alike with the exception that each KVM hypercall
+also needs to be ORed with the KVM vendor code which is (42 &lt;&lt; 16).</p>
+<p>Return codes can be as follows:</p>
+<blockquote>
+<div><table class="docutils align-default">
+<colgroup>
+<col style="width: 14%" />
+<col style="width: 86%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Code</p></th>
+<th class="head"><p>Meaning</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>0</p></td>
+<td><p>Success</p></td>
+</tr>
+<tr class="row-odd"><td><p>12</p></td>
+<td><p>Hypercall not implemented</p></td>
+</tr>
+<tr class="row-even"><td><p>&lt;0</p></td>
+<td><p>Error</p></td>
+</tr>
+</tbody>
+</table>
+</div></blockquote>
+</section>
+<section id="the-magic-page">
+<h2>The magic page<a class="headerlink" href="#the-magic-page" title="Permalink to this headline">¶</a></h2>
+<p>To enable communication between the hypervisor and guest there is a new shared
+page that contains parts of supervisor visible register state. The guest can
+map this shared page using the KVM hypercall KVM_HC_PPC_MAP_MAGIC_PAGE.</p>
+<p>With this hypercall issued the guest always gets the magic page mapped at the
+desired location. The first parameter indicates the effective address when the
+MMU is enabled. The second parameter indicates the address in real mode, if
+applicable to the target. For now, we always map the page to -4096. This way we
+can access it using absolute load and store functions. The following
+instruction reads the first field of the magic page:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ld      rX, -4096(0)
+</pre></div>
+</div>
+<p>The interface is designed to be extensible should there be need later to add
+additional registers to the magic page. If you add fields to the magic page,
+also define a new hypercall feature to indicate that the host can give you more
+registers. Only if the host supports the additional features, make use of them.</p>
+<p>The magic page layout is described by struct kvm_vcpu_arch_shared
+in arch/powerpc/include/asm/kvm_para.h.</p>
+</section>
+<section id="magic-page-features">
+<h2>Magic page features<a class="headerlink" href="#magic-page-features" title="Permalink to this headline">¶</a></h2>
+<p>When mapping the magic page using the KVM hypercall KVM_HC_PPC_MAP_MAGIC_PAGE,
+a second return value is passed to the guest. This second return value contains
+a bitmap of available features inside the magic page.</p>
+<p>The following enhancements to the magic page are currently available:</p>
+<blockquote>
+<div><table class="docutils align-default">
+<colgroup>
+<col style="width: 42%" />
+<col style="width: 58%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>KVM_MAGIC_FEAT_SR</p></td>
+<td><p>Maps SR registers r/w in the magic page</p></td>
+</tr>
+<tr class="row-even"><td><p>KVM_MAGIC_FEAT_MAS0_TO_SPRG7</p></td>
+<td><p>Maps MASn, ESR, PIR and high SPRGs</p></td>
+</tr>
+</tbody>
+</table>
+</div></blockquote>
+<p>For enhanced features in the magic page, please check for the existence of the
+feature before using them!</p>
+</section>
+<section id="magic-page-flags">
+<h2>Magic page flags<a class="headerlink" href="#magic-page-flags" title="Permalink to this headline">¶</a></h2>
+<p>In addition to features that indicate whether a host is capable of a particular
+feature we also have a channel for a guest to tell the guest whether it’s capable
+of something. This is what we call “flags”.</p>
+<p>Flags are passed to the host in the low 12 bits of the Effective Address.</p>
+<p>The following flags are currently available for a guest to expose:</p>
+<blockquote>
+<div><p>MAGIC_PAGE_FLAG_NOT_MAPPED_NX Guest handles NX bits correctly wrt magic page</p>
+</div></blockquote>
+</section>
+<section id="msr-bits">
+<h2>MSR bits<a class="headerlink" href="#msr-bits" title="Permalink to this headline">¶</a></h2>
+<p>The MSR contains bits that require hypervisor intervention and bits that do
+not require direct hypervisor intervention because they only get interpreted
+when entering the guest or don’t have any impact on the hypervisor’s behavior.</p>
+<p>The following bits are safe to be set inside the guest:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>MSR_EE</p></li>
+<li><p>MSR_RI</p></li>
+</ul>
+</div></blockquote>
+<p>If any other bit changes in the MSR, please still use mtmsr(d).</p>
+</section>
+<section id="patched-instructions">
+<h2>Patched instructions<a class="headerlink" href="#patched-instructions" title="Permalink to this headline">¶</a></h2>
+<p>The “ld” and “std” instructions are transformed to “lwz” and “stw” instructions
+respectively on 32 bit systems with an added offset of 4 to accommodate for big
+endianness.</p>
+<p>The following is a list of mapping the Linux kernel performs when running as
+guest. Implementing any of those mappings is optional, as the instruction traps
+also act on the shared page. So calling privileged instructions still works as
+before.</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 42%" />
+<col style="width: 58%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>From</p></th>
+<th class="head"><p>To</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>mfmsr   rX</p></td>
+<td><p>ld      rX, magic_page-&gt;msr</p></td>
+</tr>
+<tr class="row-odd"><td><p>mfsprg  rX, 0</p></td>
+<td><p>ld      rX, magic_page-&gt;sprg0</p></td>
+</tr>
+<tr class="row-even"><td><p>mfsprg  rX, 1</p></td>
+<td><p>ld      rX, magic_page-&gt;sprg1</p></td>
+</tr>
+<tr class="row-odd"><td><p>mfsprg  rX, 2</p></td>
+<td><p>ld      rX, magic_page-&gt;sprg2</p></td>
+</tr>
+<tr class="row-even"><td><p>mfsprg  rX, 3</p></td>
+<td><p>ld      rX, magic_page-&gt;sprg3</p></td>
+</tr>
+<tr class="row-odd"><td><p>mfsrr0  rX</p></td>
+<td><p>ld      rX, magic_page-&gt;srr0</p></td>
+</tr>
+<tr class="row-even"><td><p>mfsrr1  rX</p></td>
+<td><p>ld      rX, magic_page-&gt;srr1</p></td>
+</tr>
+<tr class="row-odd"><td><p>mfdar   rX</p></td>
+<td><p>ld      rX, magic_page-&gt;dar</p></td>
+</tr>
+<tr class="row-even"><td><p>mfdsisr rX</p></td>
+<td><p>lwz     rX, magic_page-&gt;dsisr</p></td>
+</tr>
+<tr class="row-odd"><td><p>mtmsr   rX</p></td>
+<td><p>std     rX, magic_page-&gt;msr</p></td>
+</tr>
+<tr class="row-even"><td><p>mtsprg  0, rX</p></td>
+<td><p>std     rX, magic_page-&gt;sprg0</p></td>
+</tr>
+<tr class="row-odd"><td><p>mtsprg  1, rX</p></td>
+<td><p>std     rX, magic_page-&gt;sprg1</p></td>
+</tr>
+<tr class="row-even"><td><p>mtsprg  2, rX</p></td>
+<td><p>std     rX, magic_page-&gt;sprg2</p></td>
+</tr>
+<tr class="row-odd"><td><p>mtsprg  3, rX</p></td>
+<td><p>std     rX, magic_page-&gt;sprg3</p></td>
+</tr>
+<tr class="row-even"><td><p>mtsrr0  rX</p></td>
+<td><p>std     rX, magic_page-&gt;srr0</p></td>
+</tr>
+<tr class="row-odd"><td><p>mtsrr1  rX</p></td>
+<td><p>std     rX, magic_page-&gt;srr1</p></td>
+</tr>
+<tr class="row-even"><td><p>mtdar   rX</p></td>
+<td><p>std     rX, magic_page-&gt;dar</p></td>
+</tr>
+<tr class="row-odd"><td><p>mtdsisr rX</p></td>
+<td><p>stw     rX, magic_page-&gt;dsisr</p></td>
+</tr>
+<tr class="row-even"><td><p>tlbsync</p></td>
+<td><p>nop</p></td>
+</tr>
+<tr class="row-odd"><td><p>mtmsrd  rX, 0</p></td>
+<td><p>b       &lt;special mtmsr section&gt;</p></td>
+</tr>
+<tr class="row-even"><td><p>mtmsr   rX</p></td>
+<td><p>b       &lt;special mtmsr section&gt;</p></td>
+</tr>
+<tr class="row-odd"><td><p>mtmsrd  rX, 1</p></td>
+<td><p>b       &lt;special mtmsrd section&gt;</p></td>
+</tr>
+<tr class="row-even"><td><p>[Book3S only]</p></td>
+<td></td>
+</tr>
+<tr class="row-odd"><td><p>mtsrin  rX, rY</p></td>
+<td><p>b       &lt;special mtsrin section&gt;</p></td>
+</tr>
+<tr class="row-even"><td><p>[BookE only]</p></td>
+<td></td>
+</tr>
+<tr class="row-odd"><td><p>wrteei  [0|1]</p></td>
+<td><p>b       &lt;special wrteei section&gt;</p></td>
+</tr>
+</tbody>
+</table>
+<p>Some instructions require more logic to determine what’s going on than a load
+or store instruction can deliver. To enable patching of those, we keep some
+RAM around where we can live translate instructions to. What happens is the
+following:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>copy emulation code to memory</p></li>
+<li><p>patch that code to fit the emulated instruction</p></li>
+<li><p>patch that code to return to the original pc + 4</p></li>
+<li><p>patch the original instruction to branch to the new code</p></li>
+</ol>
+</div></blockquote>
+<p>That way we can inject an arbitrary amount of code as replacement for a single
+instruction. This allows us to check for pending interrupts when setting EE=1
+for example.</p>
+</section>
+<section id="hypercall-abis-in-kvm-on-powerpc">
+<h2>Hypercall ABIs in KVM on PowerPC<a class="headerlink" href="#hypercall-abis-in-kvm-on-powerpc" title="Permalink to this headline">¶</a></h2>
+<ol class="arabic simple">
+<li><p>KVM hypercalls (ePAPR)</p></li>
+</ol>
+<p>These are ePAPR compliant hypercall implementation (mentioned above). Even
+generic hypercalls are implemented here, like the ePAPR idle hcall. These are
+available on all targets.</p>
+<ol class="arabic simple" start="2">
+<li><p>PAPR hypercalls</p></li>
+</ol>
+<p>PAPR hypercalls are needed to run server PowerPC PAPR guests (-M pseries in QEMU).
+These are the same hypercalls that pHyp, the POWER hypervisor implements. Some of
+them are handled in the kernel, some are handled in user space. This is only
+available on book3s_64.</p>
+<ol class="arabic simple" start="3">
+<li><p>OSI hypercalls</p></li>
+</ol>
+<p>Mac-on-Linux is another user of KVM on PowerPC, which has its own hypercall (long
+before KVM). This is supported to maintain compatibility. All these hypercalls get
+forwarded to user space. This is only useful on book3s_32, but can be used with
+book3s_64 as well.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">The PPC KVM paravirtual interface</a><ul>
+<li><a class="reference internal" href="#querying-for-existence">Querying for existence</a></li>
+<li><a class="reference internal" href="#kvm-hypercalls">KVM hypercalls</a></li>
+<li><a class="reference internal" href="#the-magic-page">The magic page</a></li>
+<li><a class="reference internal" href="#magic-page-features">Magic page features</a></li>
+<li><a class="reference internal" href="#magic-page-flags">Magic page flags</a></li>
+<li><a class="reference internal" href="#msr-bits">MSR bits</a></li>
+<li><a class="reference internal" href="#patched-instructions">Patched instructions</a></li>
+<li><a class="reference internal" href="#hypercall-abis-in-kvm-on-powerpc">Hypercall ABIs in KVM on PowerPC</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/virt/kvm/ppc-pv.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/virt/kvm/ppc-pv.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

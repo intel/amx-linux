@@ -1,0 +1,179 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Notes on the change from 16-bit UIDs to 32-bit UIDs &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Hardware random number generators" href="hw_random.html" />
+    <link rel="prev" title="Configfs GPIO Simulator" href="gpio/gpio-sim.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="notes-on-the-change-from-16-bit-uids-to-32-bit-uids">
+<h1>Notes on the change from 16-bit UIDs to 32-bit UIDs<a class="headerlink" href="#notes-on-the-change-from-16-bit-uids-to-32-bit-uids" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">Author</dt>
+<dd class="field-odd"><p>Chris Wing &lt;<a class="reference external" href="mailto:wingc&#37;&#52;&#48;umich&#46;edu">wingc<span>&#64;</span>umich<span>&#46;</span>edu</a>&gt;</p>
+</dd>
+<dt class="field-even">Last updated</dt>
+<dd class="field-even"><p>January 11, 2000</p>
+</dd>
+</dl>
+<ul class="simple">
+<li><p>kernel code MUST take into account __kernel_uid_t and __kernel_uid32_t
+when communicating between user and kernel space in an ioctl or data
+structure.</p></li>
+<li><p>kernel code should use uid_t and gid_t in kernel-private structures and
+code.</p></li>
+</ul>
+<p>What’s left to be done for 32-bit UIDs on all Linux architectures:</p>
+<ul>
+<li><p>Disk quotas have an interesting limitation that is not related to the
+maximum UID/GID. They are limited by the maximum file size on the
+underlying filesystem, because quota records are written at offsets
+corresponding to the UID in question.
+Further investigation is needed to see if the quota system can cope
+properly with huge UIDs. If it can deal with 64-bit file offsets on all
+architectures, this should not be a problem.</p></li>
+<li><p>Decide whether or not to keep backwards compatibility with the system
+accounting file, or if we should break it as the comments suggest
+(currently, the old 16-bit UID and GID are still written to disk, and
+part of the former pad space is used to store separate 32-bit UID and
+GID)</p></li>
+<li><p>Need to validate that OS emulation calls the 16-bit UID
+compatibility syscalls, if the OS being emulated used 16-bit UIDs, or
+uses the 32-bit UID system calls properly otherwise.</p>
+<p>This affects at least:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>iBCS on Intel</p></li>
+<li><p>sparc32 emulation on sparc64
+(need to support whatever new 32-bit UID system calls are added to
+sparc32)</p></li>
+</ul>
+</div></blockquote>
+</li>
+<li><p>Validate that all filesystems behave properly.</p>
+<p>At present, 32-bit UIDs _should_ work for:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>ext2</p></li>
+<li><p>ufs</p></li>
+<li><p>isofs</p></li>
+<li><p>nfs</p></li>
+<li><p>coda</p></li>
+<li><p>udf</p></li>
+</ul>
+</div></blockquote>
+<p>Ioctl() fixups have been made for:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>ncpfs</p></li>
+<li><p>smbfs</p></li>
+</ul>
+</div></blockquote>
+<p>Filesystems with simple fixups to prevent 16-bit UID wraparound:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>minix</p></li>
+<li><p>sysv</p></li>
+<li><p>qnx4</p></li>
+</ul>
+</div></blockquote>
+<p>Other filesystems have not been checked yet.</p>
+</li>
+<li><p>The ncpfs and smpfs filesystems cannot presently use 32-bit UIDs in
+all ioctl()s. Some new ioctl()s have been added with 32-bit UIDs, but
+more are needed. (as well as new user&lt;-&gt;kernel data structures)</p></li>
+<li><p>The ELF core dump format only supports 16-bit UIDs on arm, i386, m68k,
+sh, and sparc32. Fixing this is probably not that important, but would
+require adding a new ELF section.</p></li>
+<li><p>The ioctl()s used to control the in-kernel NFS server only support
+16-bit UIDs on arm, i386, m68k, sh, and sparc32.</p></li>
+<li><p>make sure that the UID mapping feature of AX25 networking works properly
+(it should be safe because it’s always used a 32-bit integer to
+communicate between user and kernel)</p></li>
+</ul>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/admin-guide/highuid.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/admin-guide/highuid.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,293 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>9.1.8. PXA-Camera Host Driver &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="9.1.9. The Radiotrack radio driver" href="radiotrack.html" />
+    <link rel="prev" title="9.1.7. The pvrusb2 driver" href="pvrusb2.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="pxa-camera-host-driver">
+<h1><span class="section-number">9.1.8. </span>PXA-Camera Host Driver<a class="headerlink" href="#pxa-camera-host-driver" title="Permalink to this headline">¶</a></h1>
+<p>Author: Robert Jarzmik &lt;<a class="reference external" href="mailto:robert&#46;jarzmik&#37;&#52;&#48;free&#46;fr">robert<span>&#46;</span>jarzmik<span>&#64;</span>free<span>&#46;</span>fr</a>&gt;</p>
+<section id="constraints">
+<h2><span class="section-number">9.1.8.1. </span>Constraints<a class="headerlink" href="#constraints" title="Permalink to this headline">¶</a></h2>
+<ol class="loweralpha simple">
+<li><p>Image size for YUV422P format
+All YUV422P images are enforced to have width x height % 16 = 0.
+This is due to DMA constraints, which transfers only planes of 8 byte
+multiples.</p></li>
+</ol>
+</section>
+<section id="global-video-workflow">
+<h2><span class="section-number">9.1.8.2. </span>Global video workflow<a class="headerlink" href="#global-video-workflow" title="Permalink to this headline">¶</a></h2>
+<ol class="loweralpha">
+<li><p>QCI stopped
+Initially, the QCI interface is stopped.
+When a buffer is queued, start_streaming is called and the QCI starts.</p></li>
+<li><p>QCI started
+More buffers can be queued while the QCI is started without halting the
+capture.  The new buffers are “appended” at the tail of the DMA chain, and
+smoothly captured one frame after the other.</p>
+<p>Once a buffer is filled in the QCI interface, it is marked as “DONE” and
+removed from the active buffers list. It can be then requeud or dequeued by
+userland application.</p>
+<p>Once the last buffer is filled in, the QCI interface stops.</p>
+</li>
+<li><p>Capture global finite state machine schema</p></li>
+</ol>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>+----+                             +---+  +----+
+| DQ |                             | Q |  | DQ |
+|    v                             |   v  |    v
++-----------+                     +------------------------+
+|   STOP    |                     | Wait for capture start |
++-----------+         Q           +------------------------+
++-&gt; | QCI: stop | ------------------&gt; | QCI: run               | &lt;------------+
+|   | DMA: stop |                     | DMA: stop              |              |
+|   +-----------+             +-----&gt; +------------------------+              |
+|                            /                            |                   |
+|                           /             +---+  +----+   |                   |
+|capture list empty        /              | Q |  | DQ |   | QCI Irq EOF       |
+|                         /               |   v  |    v   v                   |
+|   +--------------------+             +----------------------+               |
+|   | DMA hotlink missed |             |    Capture running   |               |
+|   +--------------------+             +----------------------+               |
+|   | QCI: run           |     +-----&gt; | QCI: run             | &lt;-+           |
+|   | DMA: stop          |    /        | DMA: run             |   |           |
+|   +--------------------+   /         +----------------------+   | Other     |
+|     ^                     /DMA still            |               | channels  |
+|     | capture list       /  running             | DMA Irq End   | not       |
+|     | not empty         /                       |               | finished  |
+|     |                  /                        v               | yet       |
+|   +----------------------+           +----------------------+   |           |
+|   |  Videobuf released   |           |  Channel completed   |   |           |
+|   +----------------------+           +----------------------+   |           |
++-- | QCI: run             |           | QCI: run             | --+           |
+| DMA: run             |           | DMA: run             |               |
++----------------------+           +----------------------+               |
+        ^                      /           |                           |
+        |          no overrun /            | overrun                   |
+        |                    /             v                           |
++--------------------+         /   +----------------------+               |
+|  Frame completed   |        /    |     Frame overran    |               |
++--------------------+ &lt;-----+     +----------------------+ restart frame |
+| QCI: run           |             | QCI: stop            | --------------+
+| DMA: run           |             | DMA: stop            |
++--------------------+             +----------------------+
+
+Legend: - each box is a FSM state
+        - each arrow is the condition to transition to another state
+        - an arrow with a comment is a mandatory transition (no condition)
+        - arrow &quot;Q&quot; means : a buffer was enqueued
+        - arrow &quot;DQ&quot; means : a buffer was dequeued
+        - &quot;QCI: stop&quot; means the QCI interface is not enabled
+        - &quot;DMA: stop&quot; means all 3 DMA channels are stopped
+        - &quot;DMA: run&quot; means at least 1 DMA channel is still running
+</pre></div>
+</div>
+</section>
+<section id="dma-usage">
+<h2><span class="section-number">9.1.8.3. </span>DMA usage<a class="headerlink" href="#dma-usage" title="Permalink to this headline">¶</a></h2>
+<ol class="loweralpha simple">
+<li><dl class="simple">
+<dt>DMA flow</dt><dd><ul class="simple">
+<li><p>first buffer queued for capture
+Once a first buffer is queued for capture, the QCI is started, but data
+transfer is not started. On “End Of Frame” interrupt, the irq handler
+starts the DMA chain.</p></li>
+<li><p>capture of one videobuffer
+The DMA chain starts transferring data into videobuffer RAM pages.
+When all pages are transferred, the DMA irq is raised on “ENDINTR” status</p></li>
+<li><p>finishing one videobuffer
+The DMA irq handler marks the videobuffer as “done”, and removes it from
+the active running queue
+Meanwhile, the next videobuffer (if there is one), is transferred by DMA</p></li>
+<li><p>finishing the last videobuffer
+On the DMA irq of the last videobuffer, the QCI is stopped.</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><p>DMA prepared buffer will have this structure</p></li>
+</ol>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>+------------+-----+---------------+-----------------+
+| desc-sg[0] | ... | desc-sg[last] | finisher/linker |
++------------+-----+---------------+-----------------+
+</pre></div>
+</div>
+<p>This structure is pointed by dma-&gt;sg_cpu.
+The descriptors are used as follows:</p>
+<ul class="simple">
+<li><p>desc-sg[i]: i-th descriptor, transferring the i-th sg
+element to the video buffer scatter gather</p></li>
+<li><p>finisher: has ddadr=DADDR_STOP, dcmd=ENDIRQEN</p></li>
+<li><p>linker: has ddadr= desc-sg[0] of next video buffer, dcmd=0</p></li>
+</ul>
+<p>For the next schema, let’s assume d0=desc-sg[0] .. dN=desc-sg[N],
+“f” stands for finisher and “l” for linker.
+A typical running chain is :</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>    Videobuffer 1         Videobuffer 2
++---------+----+---+  +----+----+----+---+
+| d0 | .. | dN | l |  | d0 | .. | dN | f |
++---------+----+-|-+  ^----+----+----+---+
+                 |    |
+                 +----+
+</pre></div>
+</div>
+<p>After the chaining is finished, the chain looks like :</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>    Videobuffer 1         Videobuffer 2         Videobuffer 3
++---------+----+---+  +----+----+----+---+  +----+----+----+---+
+| d0 | .. | dN | l |  | d0 | .. | dN | l |  | d0 | .. | dN | f |
++---------+----+-|-+  ^----+----+----+-|-+  ^----+----+----+---+
+                 |    |                |    |
+                 +----+                +----+
+                                      new_link
+</pre></div>
+</div>
+<ol class="loweralpha simple" start="3">
+<li><p>DMA hot chaining timeslice issue</p></li>
+</ol>
+<p>As DMA chaining is done while DMA _is_ running, the linking may be done
+while the DMA jumps from one Videobuffer to another. On the schema, that
+would be a problem if the following sequence is encountered :</p>
+<ul class="simple">
+<li><p>DMA chain is Videobuffer1 + Videobuffer2</p></li>
+<li><p>pxa_videobuf_queue() is called to queue Videobuffer3</p></li>
+<li><p>DMA controller finishes Videobuffer2, and DMA stops</p></li>
+</ul>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span> =&gt;
+    Videobuffer 1         Videobuffer 2
++---------+----+---+  +----+----+----+---+
+| d0 | .. | dN | l |  | d0 | .. | dN | f |
++---------+----+-|-+  ^----+----+----+-^-+
+                 |    |                |
+                 +----+                +-- DMA DDADR loads DDADR_STOP
+</pre></div>
+</div>
+<ul class="simple">
+<li><p>pxa_dma_add_tail_buf() is called, the Videobuffer2 “finisher” is
+replaced by a “linker” to Videobuffer3 (creation of new_link)</p></li>
+<li><p>pxa_videobuf_queue() finishes</p></li>
+<li><p>the DMA irq handler is called, which terminates Videobuffer2</p></li>
+<li><p>Videobuffer3 capture is not scheduled on DMA chain (as it stopped !!!)</p></li>
+</ul>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>    Videobuffer 1         Videobuffer 2         Videobuffer 3
++---------+----+---+  +----+----+----+---+  +----+----+----+---+
+| d0 | .. | dN | l |  | d0 | .. | dN | l |  | d0 | .. | dN | f |
++---------+----+-|-+  ^----+----+----+-|-+  ^----+----+----+---+
+                 |    |                |    |
+                 +----+                +----+
+                                      new_link
+                                     DMA DDADR still is DDADR_STOP
+</pre></div>
+</div>
+<ul class="simple">
+<li><p>pxa_camera_check_link_miss() is called
+This checks if the DMA is finished and a buffer is still on the
+pcdev-&gt;capture list. If that’s the case, the capture will be restarted,
+and Videobuffer3 is scheduled on DMA chain.</p></li>
+<li><p>the DMA irq handler finishes</p></li>
+</ul>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>If DMA stops just after pxa_camera_check_link_miss() reads DDADR()
+value, we have the guarantee that the DMA irq handler will be called back
+when the DMA will finish the buffer, and pxa_camera_check_link_miss() will
+be called again, to reschedule Videobuffer3.</p>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">9.1.8. PXA-Camera Host Driver</a><ul>
+<li><a class="reference internal" href="#constraints">9.1.8.1. Constraints</a></li>
+<li><a class="reference internal" href="#global-video-workflow">9.1.8.2. Global video workflow</a></li>
+<li><a class="reference internal" href="#dma-usage">9.1.8.3. DMA usage</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/driver-api/media/drivers/pxa_camera.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/driver-api/media/drivers/pxa_camera.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

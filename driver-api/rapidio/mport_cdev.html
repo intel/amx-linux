@@ -1,0 +1,223 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>RapidIO subsystem mport character device driver (rio_mport_cdev.c) &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="RapidIO subsystem Channelized Messaging character device driver (rio_cm.c)" href="rio_cm.html" />
+    <link rel="prev" title="RapidIO subsystem mport driver for IDT Tsi721 PCI Express-to-SRIO bridge." href="tsi721.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="rapidio-subsystem-mport-character-device-driver-rio-mport-cdev-c">
+<h1>RapidIO subsystem mport character device driver (rio_mport_cdev.c)<a class="headerlink" href="#rapidio-subsystem-mport-character-device-driver-rio-mport-cdev-c" title="Permalink to this headline">¶</a></h1>
+<section id="overview">
+<h2>1. Overview<a class="headerlink" href="#overview" title="Permalink to this headline">¶</a></h2>
+<p>This device driver is the result of collaboration within the RapidIO.org
+Software Task Group (STG) between Texas Instruments, Freescale,
+Prodrive Technologies, Nokia Networks, BAE and IDT.  Additional input was
+received from other members of RapidIO.org. The objective was to create a
+character mode driver interface which exposes the capabilities of RapidIO
+devices directly to applications, in a manner that allows the numerous and
+varied RapidIO implementations to interoperate.</p>
+<p>This driver (MPORT_CDEV) provides access to basic RapidIO subsystem operations
+for user-space applications. Most of RapidIO operations are supported through
+‘ioctl’ system calls.</p>
+<p>When loaded this device driver creates filesystem nodes named rio_mportX in /dev
+directory for each registered RapidIO mport device. ‘X’ in the node name matches
+to unique port ID assigned to each local mport device.</p>
+<p>Using available set of ioctl commands user-space applications can perform
+following RapidIO bus and subsystem operations:</p>
+<ul class="simple">
+<li><p>Reads and writes from/to configuration registers of mport devices
+(RIO_MPORT_MAINT_READ_LOCAL/RIO_MPORT_MAINT_WRITE_LOCAL)</p></li>
+<li><p>Reads and writes from/to configuration registers of remote RapidIO devices.
+This operations are defined as RapidIO Maintenance reads/writes in RIO spec.
+(RIO_MPORT_MAINT_READ_REMOTE/RIO_MPORT_MAINT_WRITE_REMOTE)</p></li>
+<li><p>Set RapidIO Destination ID for mport devices (RIO_MPORT_MAINT_HDID_SET)</p></li>
+<li><p>Set RapidIO Component Tag for mport devices (RIO_MPORT_MAINT_COMPTAG_SET)</p></li>
+<li><p>Query logical index of mport devices (RIO_MPORT_MAINT_PORT_IDX_GET)</p></li>
+<li><p>Query capabilities and RapidIO link configuration of mport devices
+(RIO_MPORT_GET_PROPERTIES)</p></li>
+<li><p>Enable/Disable reporting of RapidIO doorbell events to user-space applications
+(RIO_ENABLE_DOORBELL_RANGE/RIO_DISABLE_DOORBELL_RANGE)</p></li>
+<li><p>Enable/Disable reporting of RIO port-write events to user-space applications
+(RIO_ENABLE_PORTWRITE_RANGE/RIO_DISABLE_PORTWRITE_RANGE)</p></li>
+<li><p>Query/Control type of events reported through this driver: doorbells,
+port-writes or both (RIO_SET_EVENT_MASK/RIO_GET_EVENT_MASK)</p></li>
+<li><p>Configure/Map mport’s outbound requests window(s) for specific size,
+RapidIO destination ID, hopcount and request type
+(RIO_MAP_OUTBOUND/RIO_UNMAP_OUTBOUND)</p></li>
+<li><p>Configure/Map mport’s inbound requests window(s) for specific size,
+RapidIO base address and local memory base address
+(RIO_MAP_INBOUND/RIO_UNMAP_INBOUND)</p></li>
+<li><p>Allocate/Free contiguous DMA coherent memory buffer for DMA data transfers
+to/from remote RapidIO devices (RIO_ALLOC_DMA/RIO_FREE_DMA)</p></li>
+<li><p>Initiate DMA data transfers to/from remote RapidIO devices (RIO_TRANSFER).
+Supports blocking, asynchronous and posted (a.k.a ‘fire-and-forget’) data
+transfer modes.</p></li>
+<li><p>Check/Wait for completion of asynchronous DMA data transfer
+(RIO_WAIT_FOR_ASYNC)</p></li>
+<li><p>Manage device objects supported by RapidIO subsystem (RIO_DEV_ADD/RIO_DEV_DEL).
+This allows implementation of various RapidIO fabric enumeration algorithms
+as user-space applications while using remaining functionality provided by
+kernel RapidIO subsystem.</p></li>
+</ul>
+</section>
+<section id="hardware-compatibility">
+<h2>2. Hardware Compatibility<a class="headerlink" href="#hardware-compatibility" title="Permalink to this headline">¶</a></h2>
+<p>This device driver uses standard interfaces defined by kernel RapidIO subsystem
+and therefore it can be used with any mport device driver registered by RapidIO
+subsystem with limitations set by available mport implementation.</p>
+<p>At this moment the most common limitation is availability of RapidIO-specific
+DMA engine framework for specific mport device. Users should verify available
+functionality of their platform when planning to use this driver:</p>
+<ul class="simple">
+<li><p>IDT Tsi721 PCIe-to-RapidIO bridge device and its mport device driver are fully
+compatible with this driver.</p></li>
+<li><p>Freescale SoCs ‘fsl_rio’ mport driver does not have implementation for RapidIO
+specific DMA engine support and therefore DMA data transfers mport_cdev driver
+are not available.</p></li>
+</ul>
+</section>
+<section id="module-parameters">
+<h2>3. Module parameters<a class="headerlink" href="#module-parameters" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><dl class="simple">
+<dt>‘dma_timeout’</dt><dd><ul>
+<li><p>DMA transfer completion timeout (in msec, default value 3000).
+This parameter set a maximum completion wait time for SYNC mode DMA
+transfer requests and for RIO_WAIT_FOR_ASYNC ioctl requests.</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>‘dbg_level’</dt><dd><ul>
+<li><p>This parameter allows to control amount of debug information
+generated by this device driver. This parameter is formed by set of
+bit masks that correspond to the specific functional blocks.
+For mask definitions see ‘drivers/rapidio/devices/rio_mport_cdev.c’
+This parameter can be changed dynamically.
+Use CONFIG_RAPIDIO_DEBUG=y to enable debug output at the top level.</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+</ul>
+</section>
+<section id="known-problems">
+<h2>4. Known problems<a class="headerlink" href="#known-problems" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>None.</p>
+</div></blockquote>
+</section>
+<section id="user-space-applications-and-api">
+<h2>5. User-space Applications and API<a class="headerlink" href="#user-space-applications-and-api" title="Permalink to this headline">¶</a></h2>
+<p>API library and applications that use this device driver are available from
+RapidIO.org.</p>
+</section>
+<section id="todo-list">
+<h2>6. TODO List<a class="headerlink" href="#todo-list" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p>Add support for sending/receiving “raw” RapidIO messaging packets.</p></li>
+<li><p>Add memory mapped DMA data transfers as an option when RapidIO-specific DMA
+is not available.</p></li>
+</ul>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">RapidIO subsystem mport character device driver (rio_mport_cdev.c)</a><ul>
+<li><a class="reference internal" href="#overview">1. Overview</a></li>
+<li><a class="reference internal" href="#hardware-compatibility">2. Hardware Compatibility</a></li>
+<li><a class="reference internal" href="#module-parameters">3. Module parameters</a></li>
+<li><a class="reference internal" href="#known-problems">4. Known problems</a></li>
+<li><a class="reference internal" href="#user-space-applications-and-api">5. User-space Applications and API</a></li>
+<li><a class="reference internal" href="#todo-list">6. TODO List</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/rapidio/mport_cdev.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/rapidio/mport_cdev.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,283 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>MEN Chameleon Bus &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="NTB Drivers" href="ntb.html" />
+    <link rel="prev" title="GPMC (General Purpose Memory Controller)" href="memory-devices/ti-gpmc.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="men-chameleon-bus">
+<h1>MEN Chameleon Bus<a class="headerlink" href="#men-chameleon-bus" title="Permalink to this headline">¶</a></h1>
+<section id="introduction">
+<h2>Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>This document describes the architecture and implementation of the MEN
+Chameleon Bus (called MCB throughout this document).</p>
+<section id="scope-of-this-document">
+<h3>Scope of this Document<a class="headerlink" href="#scope-of-this-document" title="Permalink to this headline">¶</a></h3>
+<p>This document is intended to be a short overview of the current
+implementation and does by no means describe the complete possibilities of MCB
+based devices.</p>
+</section>
+<section id="limitations-of-the-current-implementation">
+<h3>Limitations of the current implementation<a class="headerlink" href="#limitations-of-the-current-implementation" title="Permalink to this headline">¶</a></h3>
+<p>The current implementation is limited to PCI and PCIe based carrier devices
+that only use a single memory resource and share the PCI legacy IRQ.  Not
+implemented are:</p>
+<ul class="simple">
+<li><p>Multi-resource MCB devices like the VME Controller or M-Module carrier.</p></li>
+<li><p>MCB devices that need another MCB device, like SRAM for a DMA Controller’s
+buffer descriptors or a video controller’s video memory.</p></li>
+<li><p>A per-carrier IRQ domain for carrier devices that have one (or more) IRQs
+per MCB device like PCIe based carriers with MSI or MSI-X support.</p></li>
+</ul>
+</section>
+</section>
+<section id="architecture">
+<h2>Architecture<a class="headerlink" href="#architecture" title="Permalink to this headline">¶</a></h2>
+<p>MCB is divided into 3 functional blocks:</p>
+<ul class="simple">
+<li><p>The MEN Chameleon Bus itself,</p></li>
+<li><p>drivers for MCB Carrier Devices and</p></li>
+<li><p>the parser for the Chameleon table.</p></li>
+</ul>
+<section id="id1">
+<h3>MEN Chameleon Bus<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h3>
+<p>The MEN Chameleon Bus is an artificial bus system that attaches to a so
+called Chameleon FPGA device found on some hardware produced my MEN Mikro
+Elektronik GmbH. These devices are multi-function devices implemented in a
+single FPGA and usually attached via some sort of PCI or PCIe link. Each
+FPGA contains a header section describing the content of the FPGA. The
+header lists the device id, PCI BAR, offset from the beginning of the PCI
+BAR, size in the FPGA, interrupt number and some other properties currently
+not handled by the MCB implementation.</p>
+</section>
+<section id="carrier-devices">
+<h3>Carrier Devices<a class="headerlink" href="#carrier-devices" title="Permalink to this headline">¶</a></h3>
+<p>A carrier device is just an abstraction for the real world physical bus the
+Chameleon FPGA is attached to. Some IP Core drivers may need to interact with
+properties of the carrier device (like querying the IRQ number of a PCI
+device). To provide abstraction from the real hardware bus, an MCB carrier
+device provides callback methods to translate the driver’s MCB function calls
+to hardware related function calls. For example a carrier device may
+implement the get_irq() method which can be translated into a hardware bus
+query for the IRQ number the device should use.</p>
+</section>
+<section id="parser">
+<h3>Parser<a class="headerlink" href="#parser" title="Permalink to this headline">¶</a></h3>
+<p>The parser reads the first 512 bytes of a Chameleon device and parses the
+Chameleon table. Currently the parser only supports the Chameleon v2 variant
+of the Chameleon table but can easily be adopted to support an older or
+possible future variant. While parsing the table’s entries new MCB devices
+are allocated and their resources are assigned according to the resource
+assignment in the Chameleon table. After resource assignment is finished, the
+MCB devices are registered at the MCB and thus at the driver core of the
+Linux kernel.</p>
+</section>
+</section>
+<section id="resource-handling">
+<h2>Resource handling<a class="headerlink" href="#resource-handling" title="Permalink to this headline">¶</a></h2>
+<p>The current implementation assigns exactly one memory and one IRQ resource
+per MCB device. But this is likely going to change in the future.</p>
+<section id="memory-resources">
+<h3>Memory Resources<a class="headerlink" href="#memory-resources" title="Permalink to this headline">¶</a></h3>
+<p>Each MCB device has exactly one memory resource, which can be requested from
+the MCB bus. This memory resource is the physical address of the MCB device
+inside the carrier and is intended to be passed to <a class="reference internal" href="device-io.html#c.ioremap" title="ioremap"><code class="xref c c-func docutils literal notranslate"><span class="pre">ioremap()</span></code></a> and friends. It
+is already requested from the kernel by calling request_mem_region().</p>
+</section>
+<section id="irqs">
+<h3>IRQs<a class="headerlink" href="#irqs" title="Permalink to this headline">¶</a></h3>
+<p>Each MCB device has exactly one IRQ resource, which can be requested from the
+MCB bus. If a carrier device driver implements the -&gt;get_irq() callback
+method, the IRQ number assigned by the carrier device will be returned,
+otherwise the IRQ number inside the Chameleon table will be returned. This
+number is suitable to be passed to <a class="reference internal" href="../core-api/genericirq.html#c.request_irq" title="request_irq"><code class="xref c c-func docutils literal notranslate"><span class="pre">request_irq()</span></code></a>.</p>
+</section>
+</section>
+<section id="writing-an-mcb-driver">
+<h2>Writing an MCB driver<a class="headerlink" href="#writing-an-mcb-driver" title="Permalink to this headline">¶</a></h2>
+<section id="the-driver-structure">
+<h3>The driver structure<a class="headerlink" href="#the-driver-structure" title="Permalink to this headline">¶</a></h3>
+<p>Each MCB driver has a structure to identify the device driver as well as
+device ids which identify the IP Core inside the FPGA. The driver structure
+also contains callback methods which get executed on driver probe and
+removal from the system:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>static const struct mcb_device_id foo_ids[] = {
+        { .device = 0x123 },
+        { }
+};
+MODULE_DEVICE_TABLE(mcb, foo_ids);
+
+static struct mcb_driver foo_driver = {
+driver = {
+        .name = &quot;foo-bar&quot;,
+        .owner = THIS_MODULE,
+},
+        .probe = foo_probe,
+        .remove = foo_remove,
+        .id_table = foo_ids,
+};
+</pre></div>
+</div>
+</section>
+<section id="probing-and-attaching">
+<h3>Probing and attaching<a class="headerlink" href="#probing-and-attaching" title="Permalink to this headline">¶</a></h3>
+<p>When a driver is loaded and the MCB devices it services are found, the MCB
+core will call the driver’s probe callback method. When the driver is removed
+from the system, the MCB core will call the driver’s remove callback method:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>static init foo_probe(struct mcb_device *mdev, const struct mcb_device_id *id);
+static void foo_remove(struct mcb_device *mdev);
+</pre></div>
+</div>
+</section>
+<section id="initializing-the-driver">
+<h3>Initializing the driver<a class="headerlink" href="#initializing-the-driver" title="Permalink to this headline">¶</a></h3>
+<p>When the kernel is booted or your foo driver module is inserted, you have to
+perform driver initialization. Usually it is enough to register your driver
+module at the MCB core:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>static int __init foo_init(void)
+{
+        return mcb_register_driver(&amp;foo_driver);
+}
+module_init(foo_init);
+
+static void __exit foo_exit(void)
+{
+        mcb_unregister_driver(&amp;foo_driver);
+}
+module_exit(foo_exit);
+</pre></div>
+</div>
+<p>The module_mcb_driver() macro can be used to reduce the above code:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>module_mcb_driver(foo_driver);
+</pre></div>
+</div>
+</section>
+<section id="using-dma">
+<h3>Using DMA<a class="headerlink" href="#using-dma" title="Permalink to this headline">¶</a></h3>
+<p>To make use of the kernel’s DMA-API’s function, you will need to use the
+carrier device’s ‘<a class="reference internal" href="infrastructure.html#c.device" title="device"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span></code></a>’. Fortunately ‘struct mcb_device’ embeds a
+pointer (-&gt;dma_dev) to the carrier’s device for DMA purposes:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ret = dma_set_mask_and_coherent(&amp;mdev-&gt;dma_dev, DMA_BIT_MASK(dma_bits));
+if (rc)
+        /* Handle errors */
+</pre></div>
+</div>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">MEN Chameleon Bus</a><ul>
+<li><a class="reference internal" href="#introduction">Introduction</a><ul>
+<li><a class="reference internal" href="#scope-of-this-document">Scope of this Document</a></li>
+<li><a class="reference internal" href="#limitations-of-the-current-implementation">Limitations of the current implementation</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#architecture">Architecture</a><ul>
+<li><a class="reference internal" href="#id1">MEN Chameleon Bus</a></li>
+<li><a class="reference internal" href="#carrier-devices">Carrier Devices</a></li>
+<li><a class="reference internal" href="#parser">Parser</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#resource-handling">Resource handling</a><ul>
+<li><a class="reference internal" href="#memory-resources">Memory Resources</a></li>
+<li><a class="reference internal" href="#irqs">IRQs</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#writing-an-mcb-driver">Writing an MCB driver</a><ul>
+<li><a class="reference internal" href="#the-driver-structure">The driver structure</a></li>
+<li><a class="reference internal" href="#probing-and-attaching">Probing and attaching</a></li>
+<li><a class="reference internal" href="#initializing-the-driver">Initializing the driver</a></li>
+<li><a class="reference internal" href="#using-dma">Using DMA</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/driver-api/men-chameleon-bus.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/driver-api/men-chameleon-bus.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

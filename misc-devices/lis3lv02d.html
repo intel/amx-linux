@@ -1,0 +1,205 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Kernel driver lis3lv02d &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Kernel driver max6875" href="max6875.html" />
+    <link rel="prev" title="Kernel driver isl29003" href="isl29003.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="kernel-driver-lis3lv02d">
+<h1>Kernel driver lis3lv02d<a class="headerlink" href="#kernel-driver-lis3lv02d" title="Permalink to this headline">¶</a></h1>
+<p>Supported chips:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>STMicroelectronics LIS3LV02DL, LIS3LV02DQ (12 bits precision)</p></li>
+<li><p>STMicroelectronics LIS302DL, LIS3L02DQ, LIS331DL (8 bits) and
+LIS331DLH (16 bits)</p></li>
+</ul>
+</div></blockquote>
+<dl class="simple">
+<dt>Authors:</dt><dd><ul class="simple">
+<li><p>Yan Burman &lt;<a class="reference external" href="mailto:burman&#46;yan&#37;&#52;&#48;gmail&#46;com">burman<span>&#46;</span>yan<span>&#64;</span>gmail<span>&#46;</span>com</a>&gt;</p></li>
+<li><p>Eric Piel &lt;<a class="reference external" href="mailto:eric&#46;piel&#37;&#52;&#48;tremplin-utc&#46;net">eric<span>&#46;</span>piel<span>&#64;</span>tremplin-utc<span>&#46;</span>net</a>&gt;</p></li>
+</ul>
+</dd>
+</dl>
+<section id="description">
+<h2>Description<a class="headerlink" href="#description" title="Permalink to this headline">¶</a></h2>
+<p>This driver provides support for the accelerometer found in various HP laptops
+sporting the feature officially called “HP Mobile Data Protection System 3D” or
+“HP 3D DriveGuard”. It detects automatically laptops with this sensor. Known
+models (full list can be found in drivers/platform/x86/hp_accel.c) will have
+their axis automatically oriented on standard way (eg: you can directly play
+neverball). The accelerometer data is readable via
+/sys/devices/platform/lis3lv02d. Reported values are scaled
+to mg values (1/1000th of earth gravity).</p>
+<p>Sysfs attributes under /sys/devices/platform/lis3lv02d/:</p>
+<dl class="simple">
+<dt>position</dt><dd><ul class="simple">
+<li><p>3D position that the accelerometer reports. Format: “(x,y,z)”</p></li>
+</ul>
+</dd>
+<dt>rate</dt><dd><ul class="simple">
+<li><p>read reports the sampling rate of the accelerometer device in HZ.
+write changes sampling rate of the accelerometer device.
+Only values which are supported by HW are accepted.</p></li>
+</ul>
+</dd>
+<dt>selftest</dt><dd><ul class="simple">
+<li><p>performs selftest for the chip as specified by chip manufacturer.</p></li>
+</ul>
+</dd>
+</dl>
+<p>This driver also provides an absolute input class device, allowing
+the laptop to act as a pinball machine-esque joystick. Joystick device can be
+calibrated. Joystick device can be in two different modes.
+By default output values are scaled between -32768 .. 32767. In joystick raw
+mode, joystick and sysfs position entry have the same scale. There can be
+small difference due to input system fuzziness feature.
+Events are also available as input event device.</p>
+<p>Selftest is meant only for hardware diagnostic purposes. It is not meant to be
+used during normal operations. Position data is not corrupted during selftest
+but interrupt behaviour is not guaranteed to work reliably. In test mode, the
+sensing element is internally moved little bit. Selftest measures difference
+between normal mode and test mode. Chip specifications tell the acceptance
+limit for each type of the chip. Limits are provided via platform data
+to allow adjustment of the limits without a change to the actual driver.
+Seltest returns either “OK x y z” or “FAIL x y z” where x, y and z are
+measured difference between modes. Axes are not remapped in selftest mode.
+Measurement values are provided to help HW diagnostic applications to make
+final decision.</p>
+<p>On HP laptops, if the led infrastructure is activated, support for a led
+indicating disk protection will be provided as /sys/class/leds/hp::hddprotect.</p>
+<p>Another feature of the driver is misc device called “freefall” that
+acts similar to /dev/rtc and reacts on free-fall interrupts received
+from the device. It supports blocking operations, poll/select and
+fasync operation modes. You must read 1 bytes from the device.  The
+result is number of free-fall interrupts since the last successful
+read (or 255 if number of interrupts would not fit). See the freefall.c
+file for an example on using the device.</p>
+</section>
+<section id="axes-orientation">
+<h2>Axes orientation<a class="headerlink" href="#axes-orientation" title="Permalink to this headline">¶</a></h2>
+<p>For better compatibility between the various laptops. The values reported by
+the accelerometer are converted into a “standard” organisation of the axes
+(aka “can play neverball out of the box”):</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>When the laptop is horizontal the position reported is about 0 for X and Y
+and a positive value for Z</p></li>
+<li><p>If the left side is elevated, X increases (becomes positive)</p></li>
+<li><p>If the front side (where the touchpad is) is elevated, Y decreases
+(becomes negative)</p></li>
+<li><p>If the laptop is put upside-down, Z becomes negative</p></li>
+</ul>
+</div></blockquote>
+<p>If your laptop model is not recognized (cf “dmesg”), you can send an
+email to the maintainer to add it to the database.  When reporting a new
+laptop, please include the output of “dmidecode” plus the value of
+/sys/devices/platform/lis3lv02d/position in these four cases.</p>
+</section>
+<section id="q-a">
+<h2>Q&amp;A<a class="headerlink" href="#q-a" title="Permalink to this headline">¶</a></h2>
+<p>Q: How do I safely simulate freefall? I have an HP “portable
+workstation” which has about 3.5kg and a plastic case, so letting it
+fall to the ground is out of question…</p>
+<p>A: The sensor is pretty sensitive, so your hands can do it. Lift it
+into free space, follow the fall with your hands for like 10
+centimeters. That should be enough to trigger the detection.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Kernel driver lis3lv02d</a><ul>
+<li><a class="reference internal" href="#description">Description</a></li>
+<li><a class="reference internal" href="#axes-orientation">Axes orientation</a></li>
+<li><a class="reference internal" href="#q-a">Q&amp;A</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/misc-devices/lis3lv02d.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/misc-devices/lis3lv02d.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

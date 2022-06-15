@@ -1,0 +1,152 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>ARM Cache Coherent Network &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Arm Coherent Mesh Network PMU" href="arm-cmn.html" />
+    <link rel="prev" title="Qualcomm Datacenter Technologies L3 Cache Performance Monitoring Unit (PMU)" href="qcom_l3_pmu.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="arm-cache-coherent-network">
+<h1>ARM Cache Coherent Network<a class="headerlink" href="#arm-cache-coherent-network" title="Permalink to this headline">¶</a></h1>
+<p>CCN-504 is a ring-bus interconnect consisting of 11 crosspoints
+(XPs), with each crosspoint supporting up to two device ports,
+so nodes (devices) 0 and 1 are connected to crosspoint 0,
+nodes 2 and 3 to crosspoint 1 etc.</p>
+<section id="pmu-perf-driver">
+<h2>PMU (perf) driver<a class="headerlink" href="#pmu-perf-driver" title="Permalink to this headline">¶</a></h2>
+<p>The CCN driver registers a perf PMU driver, which provides
+description of available events and configuration options
+in sysfs, see /sys/bus/event_source/devices/ccn*.</p>
+<p>The “format” directory describes format of the config, config1
+and config2 fields of the perf_event_attr structure. The “events”
+directory provides configuration templates for all documented
+events, that can be used with perf tool. For example “xp_valid_flit”
+is an equivalent of “type=0x8,event=0x4”. Other parameters must be
+explicitly specified.</p>
+<p>For events originating from device, “node” defines its index.</p>
+<p>Crosspoint PMU events require “xp” (index), “bus” (bus number)
+and “vc” (virtual channel ID).</p>
+<p>Crosspoint watchpoint-based events (special “event” value 0xfe)
+require “xp” and “vc” as above plus “port” (device port index),
+“dir” (transmit/receive direction), comparator values (“cmp_l”
+and “cmp_h”) and “mask”, being index of the comparator mask.</p>
+<p>Masks are defined separately from the event description
+(due to limited number of the config values) in the “cmp_mask”
+directory, with first 8 configurable by user and additional
+4 hardcoded for the most frequent use cases.</p>
+<p>Cycle counter is described by a “type” value 0xff and does
+not require any other settings.</p>
+<p>The driver also provides a “cpumask” sysfs attribute, which contains
+a single CPU ID, of the processor which will be used to handle all
+the CCN PMU events. It is recommended that the user space tools
+request the events on this processor (if not, the perf_event-&gt;cpu value
+will be overwritten anyway). In case of this processor being offlined,
+the events are migrated to another one and the attribute is updated.</p>
+<p>Example of perf tool use:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/ # perf list | grep ccn
+  ccn/cycles/                                        [Kernel PMU event]
+&lt;...&gt;
+  ccn/xp_valid_flit,xp=?,port=?,vc=?,dir=?/          [Kernel PMU event]
+&lt;...&gt;
+
+/ # perf stat -a -e ccn/cycles/,ccn/xp_valid_flit,xp=1,port=0,vc=1,dir=1/ \
+                                                                       sleep 1
+</pre></div>
+</div>
+<p>The driver does not support sampling, therefore “perf record” will
+not work. Per-task (without “-a”) perf sessions are not supported.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">ARM Cache Coherent Network</a><ul>
+<li><a class="reference internal" href="#pmu-perf-driver">PMU (perf) driver</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/admin-guide/perf/arm-ccn.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/admin-guide/perf/arm-ccn.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

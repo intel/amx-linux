@@ -1,0 +1,225 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>InfiniBand Midlayer Locking &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="IP over InfiniBand" href="ipoib.html" />
+    <link rel="prev" title="InfiniBand" href="index.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="infiniband-midlayer-locking">
+<h1>InfiniBand Midlayer Locking<a class="headerlink" href="#infiniband-midlayer-locking" title="Permalink to this headline">¶</a></h1>
+<blockquote>
+<div><p>This guide is an attempt to make explicit the locking assumptions
+made by the InfiniBand midlayer.  It describes the requirements on
+both low-level drivers that sit below the midlayer and upper level
+protocols that use the midlayer.</p>
+</div></blockquote>
+<section id="sleeping-and-interrupt-context">
+<h2>Sleeping and interrupt context<a class="headerlink" href="#sleeping-and-interrupt-context" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>With the following exceptions, a low-level driver implementation of
+all of the methods in struct ib_device may sleep.  The exceptions
+are any methods from the list:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>create_ah</p></li>
+<li><p>modify_ah</p></li>
+<li><p>query_ah</p></li>
+<li><p>destroy_ah</p></li>
+<li><p>post_send</p></li>
+<li><p>post_recv</p></li>
+<li><p>poll_cq</p></li>
+<li><p>req_notify_cq</p></li>
+</ul>
+</div></blockquote>
+<p>which may not sleep and must be callable from any context.</p>
+<p>The corresponding functions exported to upper level protocol
+consumers:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>rdma_create_ah</p></li>
+<li><p>rdma_modify_ah</p></li>
+<li><p>rdma_query_ah</p></li>
+<li><p>rdma_destroy_ah</p></li>
+<li><p>ib_post_send</p></li>
+<li><p>ib_post_recv</p></li>
+<li><p>ib_req_notify_cq</p></li>
+</ul>
+</div></blockquote>
+<p>are therefore safe to call from any context.</p>
+<p>In addition, the function</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>ib_dispatch_event</p></li>
+</ul>
+</div></blockquote>
+<p>used by low-level drivers to dispatch asynchronous events through
+the midlayer is also safe to call from any context.</p>
+</div></blockquote>
+<section id="reentrancy">
+<h3>Reentrancy<a class="headerlink" href="#reentrancy" title="Permalink to this headline">¶</a></h3>
+<blockquote>
+<div><p>All of the methods in struct ib_device exported by a low-level
+driver must be fully reentrant.  The low-level driver is required to
+perform all synchronization necessary to maintain consistency, even
+if multiple function calls using the same object are run
+simultaneously.</p>
+<p>The IB midlayer does not perform any serialization of function calls.</p>
+<p>Because low-level drivers are reentrant, upper level protocol
+consumers are not required to perform any serialization.  However,
+some serialization may be required to get sensible results.  For
+example, a consumer may safely call ib_poll_cq() on multiple CPUs
+simultaneously.  However, the ordering of the work completion
+information between different calls of ib_poll_cq() is not defined.</p>
+</div></blockquote>
+</section>
+<section id="callbacks">
+<h3>Callbacks<a class="headerlink" href="#callbacks" title="Permalink to this headline">¶</a></h3>
+<blockquote>
+<div><p>A low-level driver must not perform a callback directly from the
+same callchain as an ib_device method call.  For example, it is not
+allowed for a low-level driver to call a consumer’s completion event
+handler directly from its post_send method.  Instead, the low-level
+driver should defer this callback by, for example, scheduling a
+tasklet to perform the callback.</p>
+<p>The low-level driver is responsible for ensuring that multiple
+completion event handlers for the same CQ are not called
+simultaneously.  The driver must guarantee that only one CQ event
+handler for a given CQ is running at a time.  In other words, the
+following situation is not allowed:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>      CPU1                                    CPU2
+
+low-level driver -&gt;
+  consumer CQ event callback:
+    /* ... */
+    ib_req_notify_cq(cq, ...);
+                                      low-level driver -&gt;
+    /* ... */                           consumer CQ event callback:
+                                          /* ... */
+    return from CQ event handler
+</pre></div>
+</div>
+<p>The context in which completion event and asynchronous event
+callbacks run is not defined.  Depending on the low-level driver, it
+may be process context, softirq context, or interrupt context.
+Upper level protocol consumers may not sleep in a callback.</p>
+</div></blockquote>
+</section>
+<section id="hot-plug">
+<h3>Hot-plug<a class="headerlink" href="#hot-plug" title="Permalink to this headline">¶</a></h3>
+<blockquote>
+<div><p>A low-level driver announces that a device is ready for use by
+consumers when it calls <a class="reference internal" href="../driver-api/infiniband.html#c.ib_register_device" title="ib_register_device"><code class="xref c c-func docutils literal notranslate"><span class="pre">ib_register_device()</span></code></a>, all initialization
+must be complete before this call.  The device must remain usable
+until the driver’s call to <a class="reference internal" href="../driver-api/infiniband.html#c.ib_unregister_device" title="ib_unregister_device"><code class="xref c c-func docutils literal notranslate"><span class="pre">ib_unregister_device()</span></code></a> has returned.</p>
+<p>A low-level driver must call <a class="reference internal" href="../driver-api/infiniband.html#c.ib_register_device" title="ib_register_device"><code class="xref c c-func docutils literal notranslate"><span class="pre">ib_register_device()</span></code></a> and
+<a class="reference internal" href="../driver-api/infiniband.html#c.ib_unregister_device" title="ib_unregister_device"><code class="xref c c-func docutils literal notranslate"><span class="pre">ib_unregister_device()</span></code></a> from process context.  It must not hold any
+semaphores that could cause deadlock if a consumer calls back into
+the driver across these calls.</p>
+<p>An upper level protocol consumer may begin using an IB device as
+soon as the add method of its struct ib_client is called for that
+device.  A consumer must finish all cleanup and free all resources
+relating to a device before returning from the remove method.</p>
+<p>A consumer is permitted to sleep in its add and remove methods.</p>
+</div></blockquote>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">InfiniBand Midlayer Locking</a><ul>
+<li><a class="reference internal" href="#sleeping-and-interrupt-context">Sleeping and interrupt context</a><ul>
+<li><a class="reference internal" href="#reentrancy">Reentrancy</a></li>
+<li><a class="reference internal" href="#callbacks">Callbacks</a></li>
+<li><a class="reference internal" href="#hot-plug">Hot-plug</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/infiniband/core_locking.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/infiniband/core_locking.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

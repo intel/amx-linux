@@ -1,0 +1,216 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>XZ data compression in Linux &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Translations" href="../translations/index.html" />
+    <link rel="prev" title="TEE subsystem" href="tee.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="xz-data-compression-in-linux">
+<h1>XZ data compression in Linux<a class="headerlink" href="#xz-data-compression-in-linux" title="Permalink to this headline">¶</a></h1>
+<section id="introduction">
+<h2>Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>XZ is a general purpose data compression format with high compression
+ratio and relatively fast decompression. The primary compression
+algorithm (filter) is LZMA2. Additional filters can be used to improve
+compression ratio even further. E.g. Branch/Call/Jump (BCJ) filters
+improve compression ratio of executable data.</p>
+<p>The XZ decompressor in Linux is called XZ Embedded. It supports
+the LZMA2 filter and optionally also BCJ filters. CRC32 is supported
+for integrity checking. The home page of XZ Embedded is at
+&lt;<a class="reference external" href="https://tukaani.org/xz/embedded.html">https://tukaani.org/xz/embedded.html</a>&gt;, where you can find the
+latest version and also information about using the code outside
+the Linux kernel.</p>
+<p>For userspace, XZ Utils provide a zlib-like compression library
+and a gzip-like command line tool. XZ Utils can be downloaded from
+&lt;<a class="reference external" href="https://tukaani.org/xz/">https://tukaani.org/xz/</a>&gt;.</p>
+</section>
+<section id="xz-related-components-in-the-kernel">
+<h2>XZ related components in the kernel<a class="headerlink" href="#xz-related-components-in-the-kernel" title="Permalink to this headline">¶</a></h2>
+<p>The xz_dec module provides XZ decompressor with single-call (buffer
+to buffer) and multi-call (stateful) APIs. The usage of the xz_dec
+module is documented in include/linux/xz.h.</p>
+<p>The xz_dec_test module is for testing xz_dec. xz_dec_test is not
+useful unless you are hacking the XZ decompressor. xz_dec_test
+allocates a char device major dynamically to which one can write
+.xz files from userspace. The decompressed output is thrown away.
+Keep an eye on dmesg to see diagnostics printed by xz_dec_test.
+See the xz_dec_test source code for the details.</p>
+<p>For decompressing the kernel image, initramfs, and initrd, there
+is a wrapper function in lib/decompress_unxz.c. Its API is the
+same as in other decompress_*.c files, which is defined in
+include/linux/decompress/generic.h.</p>
+<p>scripts/xz_wrap.sh is a wrapper for the xz command line tool found
+from XZ Utils. The wrapper sets compression options to values suitable
+for compressing the kernel image.</p>
+<p>For kernel makefiles, two commands are provided for use with
+$(call if_needed). The kernel image should be compressed with
+$(call if_needed,xzkern) which will use a BCJ filter and a big LZMA2
+dictionary. It will also append a four-byte trailer containing the
+uncompressed size of the file, which is needed by the boot code.
+Other things should be compressed with $(call if_needed,xzmisc)
+which will use no BCJ filter and 1 MiB LZMA2 dictionary.</p>
+</section>
+<section id="notes-on-compression-options">
+<h2>Notes on compression options<a class="headerlink" href="#notes-on-compression-options" title="Permalink to this headline">¶</a></h2>
+<p>Since the XZ Embedded supports only streams with no integrity check or
+CRC32, make sure that you don’t use some other integrity check type
+when encoding files that are supposed to be decoded by the kernel. With
+liblzma, you need to use either LZMA_CHECK_NONE or LZMA_CHECK_CRC32
+when encoding. With the xz command line tool, use –check=none or
+–check=crc32.</p>
+<p>Using CRC32 is strongly recommended unless there is some other layer
+which will verify the integrity of the uncompressed data anyway.
+Double checking the integrity would probably be waste of CPU cycles.
+Note that the headers will always have a CRC32 which will be validated
+by the decoder; you can only change the integrity check type (or
+disable it) for the actual uncompressed data.</p>
+<p>In userspace, LZMA2 is typically used with dictionary sizes of several
+megabytes. The decoder needs to have the dictionary in RAM, thus big
+dictionaries cannot be used for files that are intended to be decoded
+by the kernel. 1 MiB is probably the maximum reasonable dictionary
+size for in-kernel use (maybe more is OK for initramfs). The presets
+in XZ Utils may not be optimal when creating files for the kernel,
+so don’t hesitate to use custom settings. Example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>xz --check=crc32 --lzma2=dict=512KiB inputfile
+</pre></div>
+</div>
+<p>An exception to above dictionary size limitation is when the decoder
+is used in single-call mode. Decompressing the kernel itself is an
+example of this situation. In single-call mode, the memory usage
+doesn’t depend on the dictionary size, and it is perfectly fine to
+use a big dictionary: for maximum compression, the dictionary should
+be at least as big as the uncompressed data itself.</p>
+</section>
+<section id="future-plans">
+<h2>Future plans<a class="headerlink" href="#future-plans" title="Permalink to this headline">¶</a></h2>
+<p>Creating a limited XZ encoder may be considered if people think it is
+useful. LZMA2 is slower to compress than e.g. Deflate or LZO even at
+the fastest settings, so it isn’t clear if LZMA2 encoder is wanted
+into the kernel.</p>
+<p>Support for limited random-access reading is planned for the
+decompression code. I don’t know if it could have any use in the
+kernel, but I know that it would be useful in some embedded projects
+outside the Linux kernel.</p>
+</section>
+<section id="conformance-to-the-xz-file-format-specification">
+<h2>Conformance to the .xz file format specification<a class="headerlink" href="#conformance-to-the-xz-file-format-specification" title="Permalink to this headline">¶</a></h2>
+<p>There are a couple of corner cases where things have been simplified
+at expense of detecting errors as early as possible. These should not
+matter in practice all, since they don’t cause security issues. But
+it is good to know this if testing the code e.g. with the test files
+from XZ Utils.</p>
+</section>
+<section id="reporting-bugs">
+<h2>Reporting bugs<a class="headerlink" href="#reporting-bugs" title="Permalink to this headline">¶</a></h2>
+<p>Before reporting a bug, please check that it’s not fixed already
+at upstream. See &lt;<a class="reference external" href="https://tukaani.org/xz/embedded.html">https://tukaani.org/xz/embedded.html</a>&gt; to get the
+latest code.</p>
+<p>Report bugs to &lt;<a class="reference external" href="mailto:lasse&#46;collin&#37;&#52;&#48;tukaani&#46;org">lasse<span>&#46;</span>collin<span>&#64;</span>tukaani<span>&#46;</span>org</a>&gt; or visit #tukaani on
+Freenode and talk to Larhzu. I don’t actively read LKML or other
+kernel-related mailing lists, so if there’s something I should know,
+you should email to me personally or use IRC.</p>
+<p>Don’t bother Igor Pavlov with questions about the XZ implementation
+in the kernel or about XZ Utils. While these two implementations
+include essential code that is directly based on Igor Pavlov’s code,
+these implementations aren’t maintained nor supported by him.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">XZ data compression in Linux</a><ul>
+<li><a class="reference internal" href="#introduction">Introduction</a></li>
+<li><a class="reference internal" href="#xz-related-components-in-the-kernel">XZ related components in the kernel</a></li>
+<li><a class="reference internal" href="#notes-on-compression-options">Notes on compression options</a></li>
+<li><a class="reference internal" href="#future-plans">Future plans</a></li>
+<li><a class="reference internal" href="#conformance-to-the-xz-file-format-specification">Conformance to the .xz file format specification</a></li>
+<li><a class="reference internal" href="#reporting-bugs">Reporting bugs</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/staging/xz.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/staging/xz.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

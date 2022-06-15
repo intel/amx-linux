@@ -1,0 +1,290 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>GPMC (General Purpose Memory Controller) &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="MEN Chameleon Bus" href="../men-chameleon-bus.html" />
+    <link rel="prev" title="TI EMIF SDRAM Controller Driver" href="ti-emif.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="gpmc-general-purpose-memory-controller">
+<h1>GPMC (General Purpose Memory Controller)<a class="headerlink" href="#gpmc-general-purpose-memory-controller" title="Permalink to this headline">¶</a></h1>
+<p>GPMC is an unified memory controller dedicated to interfacing external
+memory devices like</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Asynchronous SRAM like memories and application specific integrated
+circuit devices.</p></li>
+<li><p>Asynchronous, synchronous, and page mode burst NOR flash devices
+NAND flash</p></li>
+<li><p>Pseudo-SRAM devices</p></li>
+</ul>
+</div></blockquote>
+<p>GPMC is found on Texas Instruments SoC’s (OMAP based)
+IP details: <a class="reference external" href="https://www.ti.com/lit/pdf/spruh73">https://www.ti.com/lit/pdf/spruh73</a> section 7.1</p>
+<section id="gpmc-generic-timing-calculation">
+<h2>GPMC generic timing calculation:<a class="headerlink" href="#gpmc-generic-timing-calculation" title="Permalink to this headline">¶</a></h2>
+<p>GPMC has certain timings that has to be programmed for proper
+functioning of the peripheral, while peripheral has another set of
+timings. To have peripheral work with gpmc, peripheral timings has to
+be translated to the form gpmc can understand. The way it has to be
+translated depends on the connected peripheral. Also there is a
+dependency for certain gpmc timings on gpmc clock frequency. Hence a
+generic timing routine was developed to achieve above requirements.</p>
+<p>Generic routine provides a generic method to calculate gpmc timings
+from gpmc peripheral timings. struct gpmc_device_timings fields has to
+be updated with timings from the datasheet of the peripheral that is
+connected to gpmc. A few of the peripheral timings can be fed either
+in time or in cycles, provision to handle this scenario has been
+provided (refer struct gpmc_device_timings definition). It may so
+happen that timing as specified by peripheral datasheet is not present
+in timing structure, in this scenario, try to correlate peripheral
+timing to the one available. If that doesn’t work, try to add a new
+field as required by peripheral, educate generic timing routine to
+handle it, make sure that it does not break any of the existing.
+Then there may be cases where peripheral datasheet doesn’t mention
+certain fields of struct gpmc_device_timings, zero those entries.</p>
+<p>Generic timing routine has been verified to work properly on
+multiple onenand’s and tusb6010 peripherals.</p>
+<p>A word of caution: generic timing routine has been developed based
+on understanding of gpmc timings, peripheral timings, available
+custom timing routines, a kind of reverse engineering without
+most of the datasheets &amp; hardware (to be exact none of those supported
+in mainline having custom timing routine) and by simulation.</p>
+<p>gpmc timing dependency on peripheral timings:</p>
+<p>[&lt;gpmc_timing&gt;: &lt;peripheral timing1&gt;, &lt;peripheral timing2&gt; …]</p>
+<ol class="arabic simple">
+<li><p>common</p></li>
+</ol>
+<dl class="simple">
+<dt>cs_on:</dt><dd><p>t_ceasu</p>
+</dd>
+<dt>adv_on:</dt><dd><p>t_avdasu, t_ceavd</p>
+</dd>
+</dl>
+<ol class="arabic simple" start="2">
+<li><p>sync common</p></li>
+</ol>
+<dl class="simple">
+<dt>sync_clk:</dt><dd><p>clk</p>
+</dd>
+<dt>page_burst_access:</dt><dd><p>t_bacc</p>
+</dd>
+<dt>clk_activation:</dt><dd><p>t_ces, t_avds</p>
+</dd>
+</dl>
+<ol class="arabic simple" start="3">
+<li><p>read async muxed</p></li>
+</ol>
+<dl class="simple">
+<dt>adv_rd_off:</dt><dd><p>t_avdp_r</p>
+</dd>
+<dt>oe_on:</dt><dd><p>t_oeasu, t_aavdh</p>
+</dd>
+<dt>access:</dt><dd><p>t_iaa, t_oe, t_ce, t_aa</p>
+</dd>
+<dt>rd_cycle:</dt><dd><p>t_rd_cycle, t_cez_r, t_oez</p>
+</dd>
+</dl>
+<ol class="arabic simple" start="4">
+<li><p>read async non-muxed</p></li>
+</ol>
+<dl class="simple">
+<dt>adv_rd_off:</dt><dd><p>t_avdp_r</p>
+</dd>
+<dt>oe_on:</dt><dd><p>t_oeasu</p>
+</dd>
+<dt>access:</dt><dd><p>t_iaa, t_oe, t_ce, t_aa</p>
+</dd>
+<dt>rd_cycle:</dt><dd><p>t_rd_cycle, t_cez_r, t_oez</p>
+</dd>
+</dl>
+<ol class="arabic simple" start="5">
+<li><p>read sync muxed</p></li>
+</ol>
+<dl class="simple">
+<dt>adv_rd_off:</dt><dd><p>t_avdp_r, t_avdh</p>
+</dd>
+<dt>oe_on:</dt><dd><p>t_oeasu, t_ach, cyc_aavdh_oe</p>
+</dd>
+<dt>access:</dt><dd><p>t_iaa, cyc_iaa, cyc_oe</p>
+</dd>
+<dt>rd_cycle:</dt><dd><p>t_cez_r, t_oez, t_ce_rdyz</p>
+</dd>
+</dl>
+<ol class="arabic simple" start="6">
+<li><p>read sync non-muxed</p></li>
+</ol>
+<dl class="simple">
+<dt>adv_rd_off:</dt><dd><p>t_avdp_r</p>
+</dd>
+<dt>oe_on:</dt><dd><p>t_oeasu</p>
+</dd>
+<dt>access:</dt><dd><p>t_iaa, cyc_iaa, cyc_oe</p>
+</dd>
+<dt>rd_cycle:</dt><dd><p>t_cez_r, t_oez, t_ce_rdyz</p>
+</dd>
+</dl>
+<ol class="arabic simple" start="7">
+<li><p>write async muxed</p></li>
+</ol>
+<dl class="simple">
+<dt>adv_wr_off:</dt><dd><p>t_avdp_w</p>
+</dd>
+<dt>we_on, wr_data_mux_bus:</dt><dd><p>t_weasu, t_aavdh, cyc_aavhd_we</p>
+</dd>
+<dt>we_off:</dt><dd><p>t_wpl</p>
+</dd>
+<dt>cs_wr_off:</dt><dd><p>t_wph</p>
+</dd>
+<dt>wr_cycle:</dt><dd><p>t_cez_w, t_wr_cycle</p>
+</dd>
+</dl>
+<ol class="arabic simple" start="8">
+<li><p>write async non-muxed</p></li>
+</ol>
+<dl class="simple">
+<dt>adv_wr_off:</dt><dd><p>t_avdp_w</p>
+</dd>
+<dt>we_on, wr_data_mux_bus:</dt><dd><p>t_weasu</p>
+</dd>
+<dt>we_off:</dt><dd><p>t_wpl</p>
+</dd>
+<dt>cs_wr_off:</dt><dd><p>t_wph</p>
+</dd>
+<dt>wr_cycle:</dt><dd><p>t_cez_w, t_wr_cycle</p>
+</dd>
+</dl>
+<ol class="arabic simple" start="9">
+<li><p>write sync muxed</p></li>
+</ol>
+<dl class="simple">
+<dt>adv_wr_off:</dt><dd><p>t_avdp_w, t_avdh</p>
+</dd>
+<dt>we_on, wr_data_mux_bus:</dt><dd><p>t_weasu, t_rdyo, t_aavdh, cyc_aavhd_we</p>
+</dd>
+<dt>we_off:</dt><dd><p>t_wpl, cyc_wpl</p>
+</dd>
+<dt>cs_wr_off:</dt><dd><p>t_wph</p>
+</dd>
+<dt>wr_cycle:</dt><dd><p>t_cez_w, t_ce_rdyz</p>
+</dd>
+</dl>
+<ol class="arabic simple" start="10">
+<li><p>write sync non-muxed</p></li>
+</ol>
+<dl class="simple">
+<dt>adv_wr_off:</dt><dd><p>t_avdp_w</p>
+</dd>
+<dt>we_on, wr_data_mux_bus:</dt><dd><p>t_weasu, t_rdyo</p>
+</dd>
+<dt>we_off:</dt><dd><p>t_wpl, cyc_wpl</p>
+</dd>
+<dt>cs_wr_off:</dt><dd><p>t_wph</p>
+</dd>
+<dt>wr_cycle:</dt><dd><p>t_cez_w, t_ce_rdyz</p>
+</dd>
+<dt>Note:</dt><dd><p>Many of gpmc timings are dependent on other gpmc timings (a few
+gpmc timings purely dependent on other gpmc timings, a reason that
+some of the gpmc timings are missing above), and it will result in
+indirect dependency of peripheral timings to gpmc timings other than
+mentioned above, refer timing routine for more details. To know what
+these peripheral timings correspond to, please see explanations in
+struct gpmc_device_timings definition. And for gpmc timings refer
+IP details (link above).</p>
+</dd>
+</dl>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">GPMC (General Purpose Memory Controller)</a><ul>
+<li><a class="reference internal" href="#gpmc-generic-timing-calculation">GPMC generic timing calculation:</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/memory-devices/ti-gpmc.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/memory-devices/ti-gpmc.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

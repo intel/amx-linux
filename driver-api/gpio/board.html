@@ -1,0 +1,329 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>GPIO Mappings &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Subsystem drivers using GPIO" href="drivers-on-gpio.html" />
+    <link rel="prev" title="GPIO Descriptor Consumer Interface" href="consumer.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="gpio-mappings">
+<h1>GPIO Mappings<a class="headerlink" href="#gpio-mappings" title="Permalink to this headline">¶</a></h1>
+<p>This document explains how GPIOs can be assigned to given devices and functions.</p>
+<p>Note that it only applies to the new descriptor-based interface. For a
+description of the deprecated integer-based GPIO interface please refer to
+<a class="reference internal" href="legacy.html"><span class="doc">Legacy GPIO Interfaces</span></a> (actually, there is no real mapping possible with the old
+interface; you just fetch an integer from somewhere and request the
+corresponding GPIO).</p>
+<p>All platforms can enable the GPIO library, but if the platform strictly
+requires GPIO functionality to be present, it needs to select GPIOLIB from its
+Kconfig. Then, how GPIOs are mapped depends on what the platform uses to
+describe its hardware layout. Currently, mappings can be defined through device
+tree, ACPI, and platform data.</p>
+<section id="device-tree">
+<h2>Device Tree<a class="headerlink" href="#device-tree" title="Permalink to this headline">¶</a></h2>
+<p>GPIOs can easily be mapped to devices and functions in the device tree. The
+exact way to do it depends on the GPIO controller providing the GPIOs, see the
+device tree bindings for your controller.</p>
+<p>GPIOs mappings are defined in the consumer device’s node, in a property named
+&lt;function&gt;-gpios, where &lt;function&gt; is the function the driver will request
+through <a class="reference internal" href="index.html#c.gpiod_get" title="gpiod_get"><code class="xref c c-func docutils literal notranslate"><span class="pre">gpiod_get()</span></code></a>. For example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>foo_device {
+        compatible = &quot;acme,foo&quot;;
+        ...
+        led-gpios = &lt;&amp;gpio 15 GPIO_ACTIVE_HIGH&gt;, /* red */
+                    &lt;&amp;gpio 16 GPIO_ACTIVE_HIGH&gt;, /* green */
+                    &lt;&amp;gpio 17 GPIO_ACTIVE_HIGH&gt;; /* blue */
+
+        power-gpios = &lt;&amp;gpio 1 GPIO_ACTIVE_LOW&gt;;
+};
+</pre></div>
+</div>
+<p>Properties named &lt;function&gt;-gpio are also considered valid and old bindings use
+it but are only supported for compatibility reasons and should not be used for
+newer bindings since it has been deprecated.</p>
+<p>This property will make GPIOs 15, 16 and 17 available to the driver under the
+“led” function, and GPIO 1 as the “power” GPIO:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct gpio_desc *red, *green, *blue, *power;
+
+red = gpiod_get_index(dev, &quot;led&quot;, 0, GPIOD_OUT_HIGH);
+green = gpiod_get_index(dev, &quot;led&quot;, 1, GPIOD_OUT_HIGH);
+blue = gpiod_get_index(dev, &quot;led&quot;, 2, GPIOD_OUT_HIGH);
+
+power = gpiod_get(dev, &quot;power&quot;, GPIOD_OUT_HIGH);
+</pre></div>
+</div>
+<p>The led GPIOs will be active high, while the power GPIO will be active low (i.e.
+gpiod_is_active_low(power) will be true).</p>
+<p>The second parameter of the <a class="reference internal" href="index.html#c.gpiod_get" title="gpiod_get"><code class="xref c c-func docutils literal notranslate"><span class="pre">gpiod_get()</span></code></a> functions, the con_id string, has to be
+the &lt;function&gt;-prefix of the GPIO suffixes (“gpios” or “gpio”, automatically
+looked up by the gpiod functions internally) used in the device tree. With above
+“led-gpios” example, use the prefix without the “-” as con_id parameter: “led”.</p>
+<p>Internally, the GPIO subsystem prefixes the GPIO suffix (“gpios” or “gpio”)
+with the string passed in con_id to get the resulting string
+(<code class="docutils literal notranslate"><span class="pre">snprintf(...</span> <span class="pre">&quot;%s-%s&quot;,</span> <span class="pre">con_id,</span> <span class="pre">gpio_suffixes[]</span></code>).</p>
+</section>
+<section id="acpi">
+<h2>ACPI<a class="headerlink" href="#acpi" title="Permalink to this headline">¶</a></h2>
+<p>ACPI also supports function names for GPIOs in a similar fashion to DT.
+The above DT example can be converted to an equivalent ACPI description
+with the help of _DSD (Device Specific Data), introduced in ACPI 5.1:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Device (FOO) {
+        Name (_CRS, ResourceTemplate () {
+                GpioIo (Exclusive, PullUp, 0, 0, IoRestrictionOutputOnly,
+                        &quot;\\_SB.GPI0&quot;, 0, ResourceConsumer) { 15 } // red
+                GpioIo (Exclusive, PullUp, 0, 0, IoRestrictionOutputOnly,
+                        &quot;\\_SB.GPI0&quot;, 0, ResourceConsumer) { 16 } // green
+                GpioIo (Exclusive, PullUp, 0, 0, IoRestrictionOutputOnly,
+                        &quot;\\_SB.GPI0&quot;, 0, ResourceConsumer) { 17 } // blue
+                GpioIo (Exclusive, PullNone, 0, 0, IoRestrictionOutputOnly,
+                        &quot;\\_SB.GPI0&quot;, 0, ResourceConsumer) { 1 } // power
+        })
+
+        Name (_DSD, Package () {
+                ToUUID(&quot;daffd814-6eba-4d8c-8a91-bc9bbf4aa301&quot;),
+                Package () {
+                        Package () {
+                                &quot;led-gpios&quot;,
+                                Package () {
+                                        ^FOO, 0, 0, 1,
+                                        ^FOO, 1, 0, 1,
+                                        ^FOO, 2, 0, 1,
+                                }
+                        },
+                        Package () { &quot;power-gpios&quot;, Package () { ^FOO, 3, 0, 0 } },
+                }
+        })
+}
+</pre></div>
+</div>
+<p>For more information about the ACPI GPIO bindings see
+<a class="reference internal" href="../../firmware-guide/acpi/gpio-properties.html"><span class="doc">_DSD Device Properties Related to GPIO</span></a>.</p>
+</section>
+<section id="platform-data">
+<h2>Platform Data<a class="headerlink" href="#platform-data" title="Permalink to this headline">¶</a></h2>
+<p>Finally, GPIOs can be bound to devices and functions using platform data. Board
+files that desire to do so need to include the following header:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#include &lt;linux/gpio/machine.h&gt;
+</pre></div>
+</div>
+<p>GPIOs are mapped by the means of tables of lookups, containing instances of the
+gpiod_lookup structure. Two macros are defined to help declaring such mappings:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>GPIO_LOOKUP(key, chip_hwnum, con_id, flags)
+GPIO_LOOKUP_IDX(key, chip_hwnum, con_id, idx, flags)
+</pre></div>
+</div>
+<p>where</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>key is either the label of the gpiod_chip instance providing the GPIO, or
+the GPIO line name</p></li>
+<li><p>chip_hwnum is the hardware number of the GPIO within the chip, or U16_MAX
+to indicate that key is a GPIO line name</p></li>
+<li><dl class="simple">
+<dt>con_id is the name of the GPIO function from the device point of view. It</dt><dd><p>can be NULL, in which case it will match any function.</p>
+</dd>
+</dl>
+</li>
+<li><p>idx is the index of the GPIO within the function.</p></li>
+<li><dl class="simple">
+<dt>flags is defined to specify the following properties:</dt><dd><ul>
+<li><p>GPIO_ACTIVE_HIGH      - GPIO line is active high</p></li>
+<li><p>GPIO_ACTIVE_LOW       - GPIO line is active low</p></li>
+<li><p>GPIO_OPEN_DRAIN       - GPIO line is set up as open drain</p></li>
+<li><p>GPIO_OPEN_SOURCE      - GPIO line is set up as open source</p></li>
+<li><dl class="simple">
+<dt>GPIO_PERSISTENT       - GPIO line is persistent during</dt><dd><p>suspend/resume and maintains its value</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>GPIO_TRANSITORY       - GPIO line is transitory and may loose its</dt><dd><p>electrical state during suspend/resume</p>
+</dd>
+</dl>
+</li>
+</ul>
+</dd>
+</dl>
+</li>
+</ul>
+</div></blockquote>
+<p>In the future, these flags might be extended to support more properties.</p>
+<dl class="simple">
+<dt>Note that:</dt><dd><ol class="arabic simple">
+<li><p>GPIO line names are not guaranteed to be globally unique, so the first
+match found will be used.</p></li>
+<li><p>GPIO_LOOKUP() is just a shortcut to GPIO_LOOKUP_IDX() where idx = 0.</p></li>
+</ol>
+</dd>
+</dl>
+<p>A lookup table can then be defined as follows, with an empty entry defining its
+end. The ‘dev_id’ field of the table is the identifier of the device that will
+make use of these GPIOs. It can be NULL, in which case it will be matched for
+calls to <a class="reference internal" href="index.html#c.gpiod_get" title="gpiod_get"><code class="xref c c-func docutils literal notranslate"><span class="pre">gpiod_get()</span></code></a> with a NULL device.</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="k">struct</span> <span class="nc">gpiod_lookup_table</span><span class="w"> </span><span class="n">gpios_table</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="p">.</span><span class="n">dev_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;foo.0&quot;</span><span class="p">,</span><span class="w"></span>
+<span class="w">        </span><span class="p">.</span><span class="n">table</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">                </span><span class="n">GPIO_LOOKUP_IDX</span><span class="p">(</span><span class="s">&quot;gpio.0&quot;</span><span class="p">,</span><span class="w"> </span><span class="mi">15</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;led&quot;</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">GPIO_ACTIVE_HIGH</span><span class="p">),</span><span class="w"></span>
+<span class="w">                </span><span class="n">GPIO_LOOKUP_IDX</span><span class="p">(</span><span class="s">&quot;gpio.0&quot;</span><span class="p">,</span><span class="w"> </span><span class="mi">16</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;led&quot;</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">GPIO_ACTIVE_HIGH</span><span class="p">),</span><span class="w"></span>
+<span class="w">                </span><span class="n">GPIO_LOOKUP_IDX</span><span class="p">(</span><span class="s">&quot;gpio.0&quot;</span><span class="p">,</span><span class="w"> </span><span class="mi">17</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;led&quot;</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="n">GPIO_ACTIVE_HIGH</span><span class="p">),</span><span class="w"></span>
+<span class="w">                </span><span class="n">GPIO_LOOKUP</span><span class="p">(</span><span class="s">&quot;gpio.0&quot;</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;power&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">GPIO_ACTIVE_LOW</span><span class="p">),</span><span class="w"></span>
+<span class="w">                </span><span class="p">{</span><span class="w"> </span><span class="p">},</span><span class="w"></span>
+<span class="w">        </span><span class="p">},</span><span class="w"></span>
+<span class="p">};</span><span class="w"></span>
+</pre></div>
+</div>
+<p>And the table can be added by the board code as follows:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>gpiod_add_lookup_table(&amp;gpios_table);
+</pre></div>
+</div>
+<p>The driver controlling “foo.0” will then be able to obtain its GPIOs as follows:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct gpio_desc *red, *green, *blue, *power;
+
+red = gpiod_get_index(dev, &quot;led&quot;, 0, GPIOD_OUT_HIGH);
+green = gpiod_get_index(dev, &quot;led&quot;, 1, GPIOD_OUT_HIGH);
+blue = gpiod_get_index(dev, &quot;led&quot;, 2, GPIOD_OUT_HIGH);
+
+power = gpiod_get(dev, &quot;power&quot;, GPIOD_OUT_HIGH);
+</pre></div>
+</div>
+<p>Since the “led” GPIOs are mapped as active-high, this example will switch their
+signals to 1, i.e. enabling the LEDs. And for the “power” GPIO, which is mapped
+as active-low, its actual signal will be 0 after this code. Contrary to the
+legacy integer GPIO interface, the active-low property is handled during
+mapping and is thus transparent to GPIO consumers.</p>
+<p>A set of functions such as <a class="reference internal" href="index.html#c.gpiod_set_value" title="gpiod_set_value"><code class="xref c c-func docutils literal notranslate"><span class="pre">gpiod_set_value()</span></code></a> is available to work with
+the new descriptor-oriented interface.</p>
+<p>Boards using platform data can also hog GPIO lines by defining GPIO hog tables.</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="k">struct</span> <span class="nc">gpiod_hog</span><span class="w"> </span><span class="n">gpio_hog_table</span><span class="p">[]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="n">GPIO_HOG</span><span class="p">(</span><span class="s">&quot;gpio.0&quot;</span><span class="p">,</span><span class="w"> </span><span class="mi">10</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;foo&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">GPIO_ACTIVE_LOW</span><span class="p">,</span><span class="w"> </span><span class="n">GPIOD_OUT_HIGH</span><span class="p">),</span><span class="w"></span>
+<span class="w">        </span><span class="p">{</span><span class="w"> </span><span class="p">}</span><span class="w"></span>
+<span class="p">};</span><span class="w"></span>
+</pre></div>
+</div>
+<p>And the table can be added to the board code as follows:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>gpiod_add_hogs(gpio_hog_table);
+</pre></div>
+</div>
+<p>The line will be hogged as soon as the gpiochip is created or - in case the
+chip was created earlier - when the hog table is registered.</p>
+</section>
+<section id="arrays-of-pins">
+<h2>Arrays of pins<a class="headerlink" href="#arrays-of-pins" title="Permalink to this headline">¶</a></h2>
+<p>In addition to requesting pins belonging to a function one by one, a device may
+also request an array of pins assigned to the function.  The way those pins are
+mapped to the device determines if the array qualifies for fast bitmap
+processing.  If yes, a bitmap is passed over get/set array functions directly
+between a caller and a respective .get/set_multiple() callback of a GPIO chip.</p>
+<p>In order to qualify for fast bitmap processing, the array must meet the
+following requirements:</p>
+<ul class="simple">
+<li><p>pin hardware number of array member 0 must also be 0,</p></li>
+<li><p>pin hardware numbers of consecutive array members which belong to the same
+chip as member 0 does must also match their array indexes.</p></li>
+</ul>
+<p>Otherwise fast bitmap processing path is not used in order to avoid consecutive
+pins which belong to the same chip but are not in hardware order being processed
+separately.</p>
+<p>If the array applies for fast bitmap processing path, pins which belong to
+different chips than member 0 does, as well as those with indexes different from
+their hardware pin numbers, are excluded from the fast path, both input and
+output.  Moreover, open drain and open source pins are excluded from fast bitmap
+output processing.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">GPIO Mappings</a><ul>
+<li><a class="reference internal" href="#device-tree">Device Tree</a></li>
+<li><a class="reference internal" href="#acpi">ACPI</a></li>
+<li><a class="reference internal" href="#platform-data">Platform Data</a></li>
+<li><a class="reference internal" href="#arrays-of-pins">Arrays of pins</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/gpio/board.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/gpio/board.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,236 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>GCC plugin infrastructure &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Building Linux with Clang/LLVM" href="llvm.html" />
+    <link rel="prev" title="Reproducible builds" href="reproducible-builds.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="gcc-plugin-infrastructure">
+<h1>GCC plugin infrastructure<a class="headerlink" href="#gcc-plugin-infrastructure" title="Permalink to this headline">¶</a></h1>
+<section id="introduction">
+<h2>Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>GCC plugins are loadable modules that provide extra features to the
+compiler <a class="footnote-reference brackets" href="#id8" id="id1">1</a>. They are useful for runtime instrumentation and static analysis.
+We can analyse, change and add further code during compilation via
+callbacks <a class="footnote-reference brackets" href="#id9" id="id2">2</a>, GIMPLE <a class="footnote-reference brackets" href="#id10" id="id3">3</a>, IPA <a class="footnote-reference brackets" href="#id11" id="id4">4</a> and RTL passes <a class="footnote-reference brackets" href="#id12" id="id5">5</a>.</p>
+<p>The GCC plugin infrastructure of the kernel supports building out-of-tree
+modules, cross-compilation and building in a separate directory.
+Plugin source files have to be compilable by a C++ compiler.</p>
+<p>Currently the GCC plugin infrastructure supports only some architectures.
+Grep “select HAVE_GCC_PLUGINS” to find out which architectures support
+GCC plugins.</p>
+<p>This infrastructure was ported from grsecurity <a class="footnote-reference brackets" href="#id13" id="id6">6</a> and PaX <a class="footnote-reference brackets" href="#id14" id="id7">7</a>.</p>
+<p>–</p>
+<dl class="footnote brackets">
+<dt class="label" id="id8"><span class="brackets"><a class="fn-backref" href="#id1">1</a></span></dt>
+<dd><p><a class="reference external" href="https://gcc.gnu.org/onlinedocs/gccint/Plugins.html">https://gcc.gnu.org/onlinedocs/gccint/Plugins.html</a></p>
+</dd>
+<dt class="label" id="id9"><span class="brackets"><a class="fn-backref" href="#id2">2</a></span></dt>
+<dd><p><a class="reference external" href="https://gcc.gnu.org/onlinedocs/gccint/Plugin-API.html#Plugin-API">https://gcc.gnu.org/onlinedocs/gccint/Plugin-API.html#Plugin-API</a></p>
+</dd>
+<dt class="label" id="id10"><span class="brackets"><a class="fn-backref" href="#id3">3</a></span></dt>
+<dd><p><a class="reference external" href="https://gcc.gnu.org/onlinedocs/gccint/GIMPLE.html">https://gcc.gnu.org/onlinedocs/gccint/GIMPLE.html</a></p>
+</dd>
+<dt class="label" id="id11"><span class="brackets"><a class="fn-backref" href="#id4">4</a></span></dt>
+<dd><p><a class="reference external" href="https://gcc.gnu.org/onlinedocs/gccint/IPA.html">https://gcc.gnu.org/onlinedocs/gccint/IPA.html</a></p>
+</dd>
+<dt class="label" id="id12"><span class="brackets"><a class="fn-backref" href="#id5">5</a></span></dt>
+<dd><p><a class="reference external" href="https://gcc.gnu.org/onlinedocs/gccint/RTL.html">https://gcc.gnu.org/onlinedocs/gccint/RTL.html</a></p>
+</dd>
+<dt class="label" id="id13"><span class="brackets"><a class="fn-backref" href="#id6">6</a></span></dt>
+<dd><p><a class="reference external" href="https://grsecurity.net/">https://grsecurity.net/</a></p>
+</dd>
+<dt class="label" id="id14"><span class="brackets"><a class="fn-backref" href="#id7">7</a></span></dt>
+<dd><p><a class="reference external" href="https://pax.grsecurity.net/">https://pax.grsecurity.net/</a></p>
+</dd>
+</dl>
+</section>
+<section id="purpose">
+<h2>Purpose<a class="headerlink" href="#purpose" title="Permalink to this headline">¶</a></h2>
+<p>GCC plugins are designed to provide a place to experiment with potential
+compiler features that are neither in GCC nor Clang upstream. Once
+their utility is proven, the goal is to upstream the feature into GCC
+(and Clang), and then to finally remove them from the kernel once the
+feature is available in all supported versions of GCC.</p>
+<p>Specifically, new plugins should implement only features that have no
+upstream compiler support (in either GCC or Clang).</p>
+<p>When a feature exists in Clang but not GCC, effort should be made to
+bring the feature to upstream GCC (rather than just as a kernel-specific
+GCC plugin), so the entire ecosystem can benefit from it.</p>
+<p>Similarly, even if a feature provided by a GCC plugin does <em>not</em> exist
+in Clang, but the feature is proven to be useful, effort should be spent
+to upstream the feature to GCC (and Clang).</p>
+<p>After a feature is available in upstream GCC, the plugin will be made
+unbuildable for the corresponding GCC version (and later). Once all
+kernel-supported versions of GCC provide the feature, the plugin will
+be removed from the kernel.</p>
+</section>
+<section id="files">
+<h2>Files<a class="headerlink" href="#files" title="Permalink to this headline">¶</a></h2>
+<p><strong>$(src)/scripts/gcc-plugins</strong></p>
+<blockquote>
+<div><p>This is the directory of the GCC plugins.</p>
+</div></blockquote>
+<p><strong>$(src)/scripts/gcc-plugins/gcc-common.h</strong></p>
+<blockquote>
+<div><p>This is a compatibility header for GCC plugins.
+It should be always included instead of individual gcc headers.</p>
+</div></blockquote>
+<p><strong>$(src)/scripts/gcc-plugins/gcc-generate-gimple-pass.h,
+$(src)/scripts/gcc-plugins/gcc-generate-ipa-pass.h,
+$(src)/scripts/gcc-plugins/gcc-generate-simple_ipa-pass.h,
+$(src)/scripts/gcc-plugins/gcc-generate-rtl-pass.h</strong></p>
+<blockquote>
+<div><p>These headers automatically generate the registration structures for
+GIMPLE, SIMPLE_IPA, IPA and RTL passes.
+They should be preferred to creating the structures by hand.</p>
+</div></blockquote>
+</section>
+<section id="usage">
+<h2>Usage<a class="headerlink" href="#usage" title="Permalink to this headline">¶</a></h2>
+<p>You must install the gcc plugin headers for your gcc version,
+e.g., on Ubuntu for gcc-10:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>apt-get install gcc-10-plugin-dev
+</pre></div>
+</div>
+<p>Or on Fedora:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>dnf install gcc-plugin-devel libmpc-devel
+</pre></div>
+</div>
+<p>Or on Fedora when using cross-compilers that include plugins:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>dnf install libmpc-devel
+</pre></div>
+</div>
+<p>Enable the GCC plugin infrastructure and some plugin(s) you want to use
+in the kernel config:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>CONFIG_GCC_PLUGINS=y
+CONFIG_GCC_PLUGIN_LATENT_ENTROPY=y
+...
+</pre></div>
+</div>
+<p>Run gcc (native or cross-compiler) to ensure plugin headers are detected:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>gcc -print-file-name=plugin
+CROSS_COMPILE=arm-linux-gnu- ${CROSS_COMPILE}gcc -print-file-name=plugin
+</pre></div>
+</div>
+<p>The word “plugin” means they are not detected:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>plugin
+</pre></div>
+</div>
+<p>A full path means they are detected:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/usr/lib/gcc/x86_64-redhat-linux/12/plugin
+</pre></div>
+</div>
+<p>To compile the minimum tool set including the plugin(s):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>make scripts
+</pre></div>
+</div>
+<p>or just run the kernel make and compile the whole kernel with
+the cyclomatic complexity GCC plugin.</p>
+</section>
+<section id="how-to-add-a-new-gcc-plugin">
+<h2>4. How to add a new GCC plugin<a class="headerlink" href="#how-to-add-a-new-gcc-plugin" title="Permalink to this headline">¶</a></h2>
+<p>The GCC plugins are in scripts/gcc-plugins/. You need to put plugin source files
+right under scripts/gcc-plugins/. Creating subdirectories is not supported.
+It must be added to scripts/gcc-plugins/Makefile, scripts/Makefile.gcc-plugins
+and a relevant Kconfig file.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">GCC plugin infrastructure</a><ul>
+<li><a class="reference internal" href="#introduction">Introduction</a></li>
+<li><a class="reference internal" href="#purpose">Purpose</a></li>
+<li><a class="reference internal" href="#files">Files</a></li>
+<li><a class="reference internal" href="#usage">Usage</a></li>
+<li><a class="reference internal" href="#how-to-add-a-new-gcc-plugin">4. How to add a new GCC plugin</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/kbuild/gcc-plugins.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/kbuild/gcc-plugins.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

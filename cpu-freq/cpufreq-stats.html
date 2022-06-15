@@ -1,0 +1,213 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>General Description of sysfs CPUFreq Stats &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Frame Buffer" href="../fb/index.html" />
+    <link rel="prev" title="How to Implement a new CPUFreq Processor Driver" href="cpu-drivers.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="general-description-of-sysfs-cpufreq-stats">
+<h1>General Description of sysfs CPUFreq Stats<a class="headerlink" href="#general-description-of-sysfs-cpufreq-stats" title="Permalink to this headline">¶</a></h1>
+<p>information for users</p>
+<p>Author: Venkatesh Pallipadi &lt;<a class="reference external" href="mailto:venkatesh&#46;pallipadi&#37;&#52;&#48;intel&#46;com">venkatesh<span>&#46;</span>pallipadi<span>&#64;</span>intel<span>&#46;</span>com</a>&gt;</p>
+<section id="introduction">
+<h2>1. Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>cpufreq-stats is a driver that provides CPU frequency statistics for each CPU.
+These statistics are provided in /sysfs as a bunch of read_only interfaces. This
+interface (when configured) will appear in a separate directory under cpufreq
+in /sysfs (&lt;sysfs root&gt;/devices/system/cpu/cpuX/cpufreq/stats/) for each CPU.
+Various statistics will form read_only files under this directory.</p>
+<p>This driver is designed to be independent of any particular cpufreq_driver
+that may be running on your CPU. So, it will work with any cpufreq_driver.</p>
+</section>
+<section id="statistics-provided-with-example">
+<h2>2. Statistics Provided (with example)<a class="headerlink" href="#statistics-provided-with-example" title="Permalink to this headline">¶</a></h2>
+<p>cpufreq stats provides following statistics (explained in detail below).</p>
+<ul class="simple">
+<li><p>time_in_state</p></li>
+<li><p>total_trans</p></li>
+<li><p>trans_table</p></li>
+</ul>
+<p>All the statistics will be from the time the stats driver has been inserted
+(or the time the stats were reset) to the time when a read of a particular
+statistic is done. Obviously, stats driver will not have any information
+about the frequency transitions before the stats driver insertion.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>&lt;mysystem&gt;:/sys/devices/system/cpu/cpu0/cpufreq/stats # ls -l
+total 0
+drwxr-xr-x  2 root root    0 May 14 16:06 .
+drwxr-xr-x  3 root root    0 May 14 15:58 ..
+--w-------  1 root root 4096 May 14 16:06 reset
+-r--r--r--  1 root root 4096 May 14 16:06 time_in_state
+-r--r--r--  1 root root 4096 May 14 16:06 total_trans
+-r--r--r--  1 root root 4096 May 14 16:06 trans_table
+</pre></div>
+</div>
+<ul class="simple">
+<li><p><strong>reset</strong></p></li>
+</ul>
+<p>Write-only attribute that can be used to reset the stat counters. This can be
+useful for evaluating system behaviour under different governors without the
+need for a reboot.</p>
+<ul class="simple">
+<li><p><strong>time_in_state</strong></p></li>
+</ul>
+<p>This gives the amount of time spent in each of the frequencies supported by
+this CPU. The cat output will have “&lt;frequency&gt; &lt;time&gt;” pair in each line, which
+will mean this CPU spent &lt;time&gt; usertime units of time at &lt;frequency&gt;. Output
+will have one line for each of the supported frequencies. usertime units here
+is 10mS (similar to other time exported in /proc).</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>&lt;mysystem&gt;:/sys/devices/system/cpu/cpu0/cpufreq/stats # cat time_in_state
+3600000 2089
+3400000 136
+3200000 34
+3000000 67
+2800000 172488
+</pre></div>
+</div>
+<ul class="simple">
+<li><p><strong>total_trans</strong></p></li>
+</ul>
+<p>This gives the total number of frequency transitions on this CPU. The cat
+output will have a single count which is the total number of frequency
+transitions.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>&lt;mysystem&gt;:/sys/devices/system/cpu/cpu0/cpufreq/stats # cat total_trans
+20
+</pre></div>
+</div>
+<ul class="simple">
+<li><p><strong>trans_table</strong></p></li>
+</ul>
+<p>This will give a fine grained information about all the CPU frequency
+transitions. The cat output here is a two dimensional matrix, where an entry
+&lt;i,j&gt; (row i, column j) represents the count of number of transitions from
+Freq_i to Freq_j. Freq_i rows and Freq_j columns follow the sorting order in
+which the driver has provided the frequency table initially to the cpufreq core
+and so can be sorted (ascending or descending) or unsorted.  The output here
+also contains the actual freq values for each row and column for better
+readability.</p>
+<p>If the transition table is bigger than PAGE_SIZE, reading this will
+return an -EFBIG error.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>&lt;mysystem&gt;:/sys/devices/system/cpu/cpu0/cpufreq/stats # cat trans_table
+From  :    To
+        :   3600000   3400000   3200000   3000000   2800000
+3600000:         0         5         0         0         0
+3400000:         4         0         2         0         0
+3200000:         0         1         0         2         0
+3000000:         0         0         1         0         3
+2800000:         0         0         0         2         0
+</pre></div>
+</div>
+</section>
+<section id="configuring-cpufreq-stats">
+<h2>3. Configuring cpufreq-stats<a class="headerlink" href="#configuring-cpufreq-stats" title="Permalink to this headline">¶</a></h2>
+<p>To configure cpufreq-stats in your kernel:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Config Main Menu
+        Power management options (ACPI, APM)  ---&gt;
+                CPU Frequency scaling  ---&gt;
+                        [*] CPU Frequency scaling
+                        [*]   CPU frequency translation statistics
+</pre></div>
+</div>
+<p>“CPU Frequency scaling” (CONFIG_CPU_FREQ) should be enabled to configure
+cpufreq-stats.</p>
+<p>“CPU frequency translation statistics” (CONFIG_CPU_FREQ_STAT) provides the
+statistics which includes time_in_state, total_trans and trans_table.</p>
+<p>Once this option is enabled and your CPU supports cpufrequency, you
+will be able to see the CPU frequency statistics in /sysfs.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">General Description of sysfs CPUFreq Stats</a><ul>
+<li><a class="reference internal" href="#introduction">1. Introduction</a></li>
+<li><a class="reference internal" href="#statistics-provided-with-example">2. Statistics Provided (with example)</a></li>
+<li><a class="reference internal" href="#configuring-cpufreq-stats">3. Configuring cpufreq-stats</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/cpu-freq/cpufreq-stats.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/cpu-freq/cpufreq-stats.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

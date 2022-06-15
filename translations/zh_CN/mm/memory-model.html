@@ -1,0 +1,202 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>物理内存模型 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="id1">
+<h1>物理内存模型<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h1>
+<p>系统中的物理内存可以用不同的方式进行寻址。最简单的情况是，物理内存从地址0开
+始，跨越一个连续的范围，直到最大的地址。然而，这个范围可能包含CPU无法访问的
+小孔隙。那么，在完全不同的地址可能有几个连续的范围。而且，别忘了NUMA，即不
+同的内存库连接到不同的CPU。</p>
+<p>Linux使用两种内存模型中的一种对这种多样性进行抽象。FLATMEM和SPARSEM。每
+个架构都定义了它所支持的内存模型，默认的内存模型是什么，以及是否有可能手动
+覆盖该默认值。</p>
+<p>所有的内存模型都使用排列在一个或多个数组中的 <cite>struct page</cite> 来跟踪物理页
+帧的状态。</p>
+<p>无论选择哪种内存模型，物理页框号（PFN）和相应的 <cite>struct page</cite> 之间都存
+在一对一的映射关系。</p>
+<p>每个内存模型都定义了 <code class="xref c c-func docutils literal notranslate"><span class="pre">pfn_to_page()</span></code> 和 <code class="xref c c-func docutils literal notranslate"><span class="pre">page_to_pfn()</span></code>
+帮助函数，允许从PFN到 <cite>struct page</cite> 的转换，反之亦然。</p>
+<section id="flatmem">
+<h2>FLATMEM<a class="headerlink" href="#flatmem" title="Permalink to this headline">¶</a></h2>
+<p>最简单的内存模型是FLATMEM。这个模型适用于非NUMA系统的连续或大部分连续的
+物理内存。</p>
+<p>在FLATMEM内存模型中，有一个全局的 <cite>mem_map</cite> 数组来映射整个物理内存。对
+于大多数架构，孔隙在 <cite>mem_map</cite> 数组中都有条目。与孔洞相对应的 <cite>struct page</cite>
+对象从未被完全初始化。</p>
+<p>为了分配 <cite>mem_map</cite> 数组，架构特定的设置代码应该调用<a class="reference internal" href="../../../core-api/mm-api.html#c.free_area_init" title="free_area_init"><code class="xref c c-func docutils literal notranslate"><span class="pre">free_area_init()</span></code></a>函数。
+然而，在调用<a class="reference internal" href="../../../core-api/boot-time-mm.html#c.memblock_free_all" title="memblock_free_all"><code class="xref c c-func docutils literal notranslate"><span class="pre">memblock_free_all()</span></code></a>函数之前，映射数组是不能使用的，该函数
+将所有的内存交给页分配器。</p>
+<p>一个架构可能会释放 <cite>mem_map</cite> 数组中不包括实际物理页的部分。在这种情况下，特
+定架构的 <a class="reference internal" href="../../../core-api/mm-api.html#c.pfn_valid" title="pfn_valid"><code class="xref c c-func docutils literal notranslate"><span class="pre">pfn_valid()</span></code></a> 实现应该考虑到 <cite>mem_map</cite> 中的孔隙。</p>
+<p>使用FLATMEM，PFN和 <cite>struct page</cite> 之间的转换是直接的。 <cite>PFN - ARCH_PFN_OFFSET</cite>
+是 <cite>mem_map</cite> 数组的一个索引。</p>
+<p><cite>ARCH_PFN_OFFSET</cite> 定义了物理内存起始地址不同于0的系统的第一个页框号。</p>
+</section>
+<section id="sparsemem">
+<h2>SPARSEMEM<a class="headerlink" href="#sparsemem" title="Permalink to this headline">¶</a></h2>
+<p>SPARSEMEM是Linux中最通用的内存模型，它是唯一支持若干高级功能的内存模型，
+如物理内存的热插拔、非易失性内存设备的替代内存图和较大系统的内存图的延迟
+初始化。</p>
+<p>SPARSEMEM模型将物理内存显示为一个部分的集合。一个区段用mem_section结构
+体表示，它包含 <cite>section_mem_map</cite> ，从逻辑上讲，它是一个指向 <cite>struct page</cite>
+阵列的指针。然而，它被存储在一些其他的magic中，以帮助分区管理。区段的大小
+和最大区段数是使用 <cite>SECTION_SIZE_BITS</cite> 和 <cite>MAX_PHYSMEM_BITS</cite> 常量
+来指定的，这两个常量是由每个支持SPARSEMEM的架构定义的。 <cite>MAX_PHYSMEM_BITS</cite>
+是一个架构所支持的物理地址的实际宽度，而 <cite>SECTION_SIZE_BITS</cite> 是一个任
+意的值。</p>
+<p>最大的段数表示为 <cite>NR_MEM_SECTIONS</cite> ，定义为</p>
+<div class="math">
+<p><img src="../../../_images/math/d99368220bfdedf1a888b1c09eb7236a8c87d079.png" alt="NR\_MEM\_SECTIONS = 2 ^ {(MAX\_PHYSMEM\_BITS - SECTION\_SIZE\_BITS)}"/></p>
+</div><p><cite>mem_section</cite> 对象被安排在一个叫做 <cite>mem_sections</cite> 的二维数组中。这个数组的
+大小和位置取决于 <cite>CONFIG_SPARSEM_EXTREME</cite> 和可能的最大段数:</p>
+<ul class="simple">
+<li><p>当 <cite>CONFIG_SPARSEMEM_EXTREME</cite> 被禁用时， <cite>mem_sections</cite> 数组是静态的，有
+<cite>NR_MEM_SECTIONS</cite> 行。每一行持有一个 <cite>mem_section</cite> 对象。</p></li>
+<li><p>当 <cite>CONFIG_SPARSEMEM_EXTREME</cite> 被启用时， <cite>mem_sections</cite> 数组被动态分配。
+每一行包含价值 <cite>PAGE_SIZE</cite> 的 <cite>mem_section</cite> 对象，行数的计算是为了适应所有的
+内存区。</p></li>
+</ul>
+<p>架构设置代码应该调用sparse_init()来初始化内存区和内存映射。</p>
+<dl class="simple">
+<dt>通过SPARSEMEM，有两种可能的方式将PFN转换为相应的 <cite>struct page</cite> –“classic sparse”和</dt><dd><p>“sparse vmemmap”。选择是在构建时进行的，它由 <cite>CONFIG_SPARSEMEM_VMEMMAP</cite> 的
+值决定。</p>
+</dd>
+</dl>
+<p>Classic sparse在page-&gt;flags中编码了一个页面的段号，并使用PFN的高位来访问映射该页
+框的段。在一个区段内，PFN是指向页数组的索引。</p>
+<p>Sparse vmemmapvmemmap使用虚拟映射的内存映射来优化pfn_to_page和page_to_pfn操
+作。有一个全局的 <cite>struct page *vmemmap</cite> 指针，指向一个虚拟连续的 <cite>struct page</cite>
+对象阵列。PFN是该数组的一个索引，<cite>struct page</cite> 从 <cite>vmemmap</cite> 的偏移量是该页的PFN。</p>
+<p>为了使用vmemmap，一个架构必须保留一个虚拟地址的范围，以映射包含内存映射的物理页，并
+确保 <cite>vmemmap`指向该范围。此外，架构应该实现 :c:func:`vmemmap_populate</cite> 方法，
+它将分配物理内存并为虚拟内存映射创建页表。如果一个架构对vmemmap映射没有任何特殊要求，
+它可以使用通用内存管理提供的默认 <code class="xref c c-func docutils literal notranslate"><span class="pre">vmemmap_populate_basepages()</span></code>。</p>
+<p>虚拟映射的内存映射允许将持久性内存设备的 <cite>struct page</cite> 对象存储在这些设备上预先分
+配的存储中。这种存储用vmem_altmap结构表示，最终通过一长串的函数调用传递给
+vmemmap_populate()。vmemmap_populate()实现可以使用 <cite>vmem_altmap</cite> 和
+<code class="xref c c-func docutils literal notranslate"><span class="pre">vmemmap_alloc_block_buf()</span></code> 助手来分配持久性内存设备上的内存映射。</p>
+</section>
+<section id="zone-device">
+<h2>ZONE_DEVICE<a class="headerlink" href="#zone-device" title="Permalink to this headline">¶</a></h2>
+<p><cite>ZONE_DEVICE</cite> 设施建立在 <cite>SPARSEM_VMEMMAP</cite> 之上，为设备驱动识别的物理地址范
+围提供 <cite>struct page</cite> <cite>mem_map</cite> 服务。 <cite>ZONE_DEVICE</cite> 的 “设备” 方面与以下
+事实有关：这些地址范围的页面对象从未被在线标记过，而且必须对设备进行引用，而不仅仅
+是页面，以保持内存被“锁定”以便使用。 <cite>ZONE_DEVICE</cite> ，通过 <code class="xref c c-func docutils literal notranslate"><span class="pre">devm_memremap_pages()</span></code> ，
+为给定的pfns范围执行足够的内存热插拔来开启 <code class="xref c c-func docutils literal notranslate"><span class="pre">pfn_to_page()</span></code>，
+<code class="xref c c-func docutils literal notranslate"><span class="pre">page_to_pfn()</span></code>, ，和 <code class="xref c c-func docutils literal notranslate"><span class="pre">get_user_pages()</span></code> 服务。由于页面引
+用计数永远不会低于1，所以页面永远不会被追踪为空闲内存，页面的 <cite>struct list_head lru</cite>
+空间被重新利用，用于向映射该内存的主机设备/驱动程序进行反向引用。</p>
+<p>虽然 <cite>SPARSEMEM</cite> 将内存作为一个区段的集合，可以选择收集并合成内存块，但
+<cite>ZONE_DEVICE</cite> 用户需要更小的颗粒度来填充 <cite>mem_map</cite> 。鉴于 <cite>ZONE_DEVICE</cite>
+内存从未被在线标记，因此它的内存范围从未通过sysfs内存热插拔api暴露在内存块边界
+上。这个实现依赖于这种缺乏用户接口的约束，允许子段大小的内存范围被指定给
+<code class="xref c c-func docutils literal notranslate"><span class="pre">arch_add_memory()</span></code> ，即内存热插拔的上半部分。子段支持允许2MB作为
+<code class="xref c c-func docutils literal notranslate"><span class="pre">devm_memremap_pages()</span></code> 的跨架构通用对齐颗粒度。</p>
+<p><cite>ZONE_DEVICE</cite> 的用户是:</p>
+<ul class="simple">
+<li><p>pmem: 通过DAX映射将平台持久性内存作为直接I/O目标使用。</p></li>
+<li><p>hmm: 用 <cite>-&gt;page_fault()</cite> 和 <cite>-&gt;page_free()</cite> 事件回调扩展 <cite>ZONE_DEVICE</cite> ，
+以允许设备驱动程序协调与设备内存相关的内存管理事件，通常是GPU内存。参见Documentation/mm/hmm.rst。</p></li>
+<li><p>p2pdma: 创建 <cite>struct page</cite> 对象，允许PCI/E拓扑结构中的peer设备协调它们之间的
+直接DMA操作，即绕过主机内存。</p></li>
+</ul>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">物理内存模型</a><ul>
+<li><a class="reference internal" href="#flatmem">FLATMEM</a></li>
+<li><a class="reference internal" href="#sparsemem">SPARSEMEM</a></li>
+<li><a class="reference internal" href="#zone-device">ZONE_DEVICE</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/mm/memory-model.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/mm/memory-model.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,408 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>2.10. ioctls CEC_G_MODE and CEC_S_MODE &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="2.11. ioctls CEC_RECEIVE and CEC_TRANSMIT" href="cec-ioc-receive.html" />
+    <link rel="prev" title="2.9. ioctl CEC_DQEVENT" href="cec-ioc-dqevent.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="ioctls-cec-g-mode-and-cec-s-mode">
+<span id="cec-s-mode"></span><span id="cec-g-mode"></span><span id="cec-mode"></span><h1><span class="section-number">2.10. </span>ioctls CEC_G_MODE and CEC_S_MODE<a class="headerlink" href="#ioctls-cec-g-mode-and-cec-s-mode" title="Permalink to this headline">¶</a></h1>
+<p>CEC_G_MODE, CEC_S_MODE - Get or set exclusive use of the CEC adapter</p>
+<section id="synopsis">
+<h2><span class="section-number">2.10.1. </span>Synopsis<a class="headerlink" href="#synopsis" title="Permalink to this headline">¶</a></h2>
+<dl class="macro">
+<dt id="c.CEC.CEC_G_MODE">
+<code class="sig-name descname">CEC_G_MODE</code><a class="headerlink" href="#c.CEC.CEC_G_MODE" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<p><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">ioctl(int</span> <span class="pre">fd,</span> <span class="pre">CEC_G_MODE,</span> <span class="pre">__u32</span> <span class="pre">*argp)</span></code></p>
+<dl class="macro">
+<dt id="c.CEC.CEC_S_MODE">
+<code class="sig-name descname">CEC_S_MODE</code><a class="headerlink" href="#c.CEC.CEC_S_MODE" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<p><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">ioctl(int</span> <span class="pre">fd,</span> <span class="pre">CEC_S_MODE,</span> <span class="pre">__u32</span> <span class="pre">*argp)</span></code></p>
+</section>
+<section id="arguments">
+<h2><span class="section-number">2.10.2. </span>Arguments<a class="headerlink" href="#arguments" title="Permalink to this headline">¶</a></h2>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">fd</span></code></dt><dd><p>File descriptor returned by <code class="xref c c-func docutils literal notranslate"><span class="pre">open()</span></code>.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">argp</span></code></dt><dd><p>Pointer to CEC mode.</p>
+</dd>
+</dl>
+</section>
+<section id="description">
+<h2><span class="section-number">2.10.3. </span>Description<a class="headerlink" href="#description" title="Permalink to this headline">¶</a></h2>
+<p>By default any filehandle can use <a class="reference internal" href="cec-ioc-receive.html#cec-transmit"><span class="std std-ref">ioctls CEC_RECEIVE and CEC_TRANSMIT</span></a>, but in order to prevent
+applications from stepping on each others toes it must be possible to
+obtain exclusive access to the CEC adapter. This ioctl sets the
+filehandle to initiator and/or follower mode which can be exclusive
+depending on the chosen mode. The initiator is the filehandle that is
+used to initiate messages, i.e. it commands other CEC devices. The
+follower is the filehandle that receives messages sent to the CEC
+adapter and processes them. The same filehandle can be both initiator
+and follower, or this role can be taken by two different filehandles.</p>
+<p>When a CEC message is received, then the CEC framework will decide how
+it will be processed. If the message is a reply to an earlier
+transmitted message, then the reply is sent back to the filehandle that
+is waiting for it. In addition the CEC framework will process it.</p>
+<p>If the message is not a reply, then the CEC framework will process it
+first. If there is no follower, then the message is just discarded and a
+feature abort is sent back to the initiator if the framework couldn’t
+process it. If there is a follower, then the message is passed on to the
+follower who will use <a class="reference internal" href="cec-ioc-receive.html#cec-receive"><span class="std std-ref">ioctl CEC_RECEIVE</span></a> to dequeue
+the new message. The framework expects the follower to make the right
+decisions.</p>
+<p>The CEC framework will process core messages unless requested otherwise
+by the follower. The follower can enable the passthrough mode. In that
+case, the CEC framework will pass on most core messages without
+processing them and the follower will have to implement those messages.
+There are some messages that the core will always process, regardless of
+the passthrough mode. See <a class="reference internal" href="#cec-core-processing"><span class="std std-ref">Core Message Processing</span></a> for details.</p>
+<p>If there is no initiator, then any CEC filehandle can use
+<a class="reference internal" href="cec-ioc-receive.html#cec-transmit"><span class="std std-ref">ioctl CEC_TRANSMIT</span></a>. If there is an exclusive
+initiator then only that initiator can call
+<a class="reference internal" href="cec-ioc-receive.html#cec-transmit"><span class="std std-ref">ioctls CEC_RECEIVE and CEC_TRANSMIT</span></a>. The follower can of course
+always call <a class="reference internal" href="cec-ioc-receive.html#cec-transmit"><span class="std std-ref">ioctl CEC_TRANSMIT</span></a>.</p>
+<p>Available initiator modes are:</p>
+<span id="cec-mode-initiator-e"></span><table class="docutils align-default" id="id1">
+<caption><span class="caption-text">Initiator Modes</span><a class="headerlink" href="#id1" title="Permalink to this table">¶</a></caption>
+<colgroup>
+<col style="width: 15%" />
+<col style="width: 5%" />
+<col style="width: 80%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">CEC_MODE_NO_INITIATOR</span></code></p>
+</td>
+<td><p>0x0</p>
+</td>
+<td><p id="cec-mode-no-initiator">This is not an initiator, i.e. it cannot transmit CEC messages or
+make any other changes to the CEC adapter.</p>
+</td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">CEC_MODE_INITIATOR</span></code></p>
+</td>
+<td><p>0x1</p>
+</td>
+<td><p id="cec-mode-initiator">This is an initiator (the default when the device is opened) and
+it can transmit CEC messages and make changes to the CEC adapter,
+unless there is an exclusive initiator.</p>
+</td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">CEC_MODE_EXCL_INITIATOR</span></code></p>
+</td>
+<td><p>0x2</p>
+</td>
+<td><p id="cec-mode-excl-initiator">This is an exclusive initiator and this file descriptor is the
+only one that can transmit CEC messages and make changes to the
+CEC adapter. If someone else is already the exclusive initiator
+then an attempt to become one will return the <code class="docutils literal notranslate"><span class="pre">EBUSY</span></code> error code
+error.</p>
+</td>
+</tr>
+</tbody>
+</table>
+<p>Available follower modes are:</p>
+<span id="cec-mode-follower-e"></span><table class="longtable docutils align-default" id="id2">
+<caption><span class="caption-text">Follower Modes</span><a class="headerlink" href="#id2" title="Permalink to this table">¶</a></caption>
+<colgroup>
+<col style="width: 15%" />
+<col style="width: 5%" />
+<col style="width: 80%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">CEC_MODE_NO_FOLLOWER</span></code></p>
+</td>
+<td><p>0x00</p>
+</td>
+<td><p id="cec-mode-no-follower">This is not a follower (the default when the device is opened).</p>
+</td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">CEC_MODE_FOLLOWER</span></code></p>
+</td>
+<td><p>0x10</p>
+</td>
+<td><p id="cec-mode-follower">This is a follower and it will receive CEC messages unless there
+is an exclusive follower. You cannot become a follower if
+<a class="reference internal" href="cec-ioc-adap-g-caps.html#cec-cap-transmit"><span class="std std-ref">CEC_CAP_TRANSMIT</span></a> is not set or if <a class="reference internal" href="#cec-mode-no-initiator"><span class="std std-ref">CEC_MODE_NO_INITIATOR</span></a>
+was specified, the <code class="docutils literal notranslate"><span class="pre">EINVAL</span></code> error code is returned in that case.</p>
+</td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">CEC_MODE_EXCL_FOLLOWER</span></code></p>
+</td>
+<td><p>0x20</p>
+</td>
+<td><p id="cec-mode-excl-follower">This is an exclusive follower and only this file descriptor will
+receive CEC messages for processing. If someone else is already
+the exclusive follower then an attempt to become one will return
+the <code class="docutils literal notranslate"><span class="pre">EBUSY</span></code> error code. You cannot become a follower if
+<a class="reference internal" href="cec-ioc-adap-g-caps.html#cec-cap-transmit"><span class="std std-ref">CEC_CAP_TRANSMIT</span></a> is not set or if <a class="reference internal" href="#cec-mode-no-initiator"><span class="std std-ref">CEC_MODE_NO_INITIATOR</span></a>
+was specified, the <code class="docutils literal notranslate"><span class="pre">EINVAL</span></code> error code is returned in that case.</p>
+</td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">CEC_MODE_EXCL_FOLLOWER_PASSTHRU</span></code></p>
+</td>
+<td><p>0x30</p>
+</td>
+<td><p id="cec-mode-excl-follower-passthru">This is an exclusive follower and only this file descriptor will
+receive CEC messages for processing. In addition it will put the
+CEC device into passthrough mode, allowing the exclusive follower
+to handle most core messages instead of relying on the CEC
+framework for that. If someone else is already the exclusive
+follower then an attempt to become one will return the <code class="docutils literal notranslate"><span class="pre">EBUSY</span></code> error
+code. You cannot become a follower if <a class="reference internal" href="cec-ioc-adap-g-caps.html#cec-cap-transmit"><span class="std std-ref">CEC_CAP_TRANSMIT</span></a>
+is not set or if <a class="reference internal" href="#cec-mode-no-initiator"><span class="std std-ref">CEC_MODE_NO_INITIATOR</span></a> was specified,
+the <code class="docutils literal notranslate"><span class="pre">EINVAL</span></code> error code is returned in that case.</p>
+</td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">CEC_MODE_MONITOR_PIN</span></code></p>
+</td>
+<td><p>0xd0</p>
+</td>
+<td><p id="cec-mode-monitor-pin">Put the file descriptor into pin monitoring mode. Can only be used in
+combination with <a class="reference internal" href="#cec-mode-no-initiator"><span class="std std-ref">CEC_MODE_NO_INITIATOR</span></a>,
+otherwise the <code class="docutils literal notranslate"><span class="pre">EINVAL</span></code> error code will be returned.
+This mode requires that the <a class="reference internal" href="cec-ioc-adap-g-caps.html#cec-cap-monitor-pin"><span class="std std-ref">CEC_CAP_MONITOR_PIN</span></a>
+capability is set, otherwise the <code class="docutils literal notranslate"><span class="pre">EINVAL</span></code> error code is returned.
+While in pin monitoring mode this file descriptor can receive the
+<code class="docutils literal notranslate"><span class="pre">CEC_EVENT_PIN_CEC_LOW</span></code> and <code class="docutils literal notranslate"><span class="pre">CEC_EVENT_PIN_CEC_HIGH</span></code> events to see the
+low-level CEC pin transitions. This is very useful for debugging.
+This mode is only allowed if the process has the <code class="docutils literal notranslate"><span class="pre">CAP_NET_ADMIN</span></code>
+capability. If that is not set, then the <code class="docutils literal notranslate"><span class="pre">EPERM</span></code> error code is returned.</p>
+</td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">CEC_MODE_MONITOR</span></code></p>
+</td>
+<td><p>0xe0</p>
+</td>
+<td><p id="cec-mode-monitor">Put the file descriptor into monitor mode. Can only be used in
+combination with <a class="reference internal" href="#cec-mode-no-initiator"><span class="std std-ref">CEC_MODE_NO_INITIATOR</span></a>,
+otherwise the <code class="docutils literal notranslate"><span class="pre">EINVAL</span></code> error code will be returned.
+In monitor mode all messages this CEC
+device transmits and all messages it receives (both broadcast
+messages and directed messages for one its logical addresses) will
+be reported. This is very useful for debugging. This is only
+allowed if the process has the <code class="docutils literal notranslate"><span class="pre">CAP_NET_ADMIN</span></code> capability. If
+that is not set, then the <code class="docutils literal notranslate"><span class="pre">EPERM</span></code> error code is returned.</p>
+</td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">CEC_MODE_MONITOR_ALL</span></code></p>
+</td>
+<td><p>0xf0</p>
+</td>
+<td><p id="cec-mode-monitor-all">Put the file descriptor into ‘monitor all’ mode. Can only be used
+in combination with <a class="reference internal" href="#cec-mode-no-initiator"><span class="std std-ref">CEC_MODE_NO_INITIATOR</span></a>, otherwise
+the <code class="docutils literal notranslate"><span class="pre">EINVAL</span></code> error code will be returned. In ‘monitor all’ mode all messages
+this CEC device transmits and all messages it receives, including
+directed messages for other CEC devices, will be reported. This is
+very useful for debugging, but not all devices support this. This
+mode requires that the <a class="reference internal" href="cec-ioc-adap-g-caps.html#cec-cap-monitor-all"><span class="std std-ref">CEC_CAP_MONITOR_ALL</span></a> capability is set,
+otherwise the <code class="docutils literal notranslate"><span class="pre">EINVAL</span></code> error code is returned. This is only allowed if
+the process has the <code class="docutils literal notranslate"><span class="pre">CAP_NET_ADMIN</span></code> capability. If that is not
+set, then the <code class="docutils literal notranslate"><span class="pre">EPERM</span></code> error code is returned.</p>
+</td>
+</tr>
+</tbody>
+</table>
+<p>Core message processing details:</p>
+<span id="cec-core-processing"></span><table class="docutils align-default" id="id3">
+<caption><span class="caption-text">Core Message Processing</span><a class="headerlink" href="#id3" title="Permalink to this table">¶</a></caption>
+<colgroup>
+<col style="width: 11%" />
+<col style="width: 89%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">CEC_MSG_GET_CEC_VERSION</span></code></p>
+</td>
+<td><p id="cec-msg-get-cec-version">The core will return the CEC version that was set with
+<a class="reference internal" href="cec-ioc-adap-g-log-addrs.html#cec-adap-s-log-addrs"><span class="std std-ref">ioctl CEC_ADAP_S_LOG_ADDRS</span></a>,
+except when in passthrough mode. In passthrough mode the core
+does nothing and this message has to be handled by a follower
+instead.</p>
+</td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">CEC_MSG_GIVE_DEVICE_VENDOR_ID</span></code></p>
+</td>
+<td><p id="cec-msg-give-device-vendor-id">The core will return the vendor ID that was set with
+<a class="reference internal" href="cec-ioc-adap-g-log-addrs.html#cec-adap-s-log-addrs"><span class="std std-ref">ioctl CEC_ADAP_S_LOG_ADDRS</span></a>,
+except when in passthrough mode. In passthrough mode the core
+does nothing and this message has to be handled by a follower
+instead.</p>
+</td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">CEC_MSG_ABORT</span></code></p>
+</td>
+<td><p id="cec-msg-abort">The core will return a Feature Abort message with reason
+‘Feature Refused’ as per the specification, except when in
+passthrough mode. In passthrough mode the core does nothing
+and this message has to be handled by a follower instead.</p>
+</td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">CEC_MSG_GIVE_PHYSICAL_ADDR</span></code></p>
+</td>
+<td><p id="cec-msg-give-physical-addr">The core will report the current physical address, except when
+in passthrough mode. In passthrough mode the core does nothing
+and this message has to be handled by a follower instead.</p>
+</td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">CEC_MSG_GIVE_OSD_NAME</span></code></p>
+</td>
+<td><p id="cec-msg-give-osd-name">The core will report the current OSD name that was set with
+<a class="reference internal" href="cec-ioc-adap-g-log-addrs.html#cec-adap-s-log-addrs"><span class="std std-ref">ioctl CEC_ADAP_S_LOG_ADDRS</span></a>,
+except when in passthrough mode. In passthrough mode the core
+does nothing and this message has to be handled by a follower
+instead.</p>
+</td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">CEC_MSG_GIVE_FEATURES</span></code></p>
+</td>
+<td><p id="cec-msg-give-features">The core will do nothing if the CEC version is older than 2.0,
+otherwise it will report the current features that were set with
+<a class="reference internal" href="cec-ioc-adap-g-log-addrs.html#cec-adap-s-log-addrs"><span class="std std-ref">ioctl CEC_ADAP_S_LOG_ADDRS</span></a>,
+except when in passthrough mode. In passthrough mode the core
+does nothing (for any CEC version) and this message has to be handled
+by a follower instead.</p>
+</td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">CEC_MSG_USER_CONTROL_PRESSED</span></code></p>
+</td>
+<td><p id="cec-msg-user-control-pressed">If <a class="reference internal" href="cec-ioc-adap-g-caps.html#cec-cap-rc"><span class="std std-ref">CEC_CAP_RC</span></a> is set and if
+<a class="reference internal" href="cec-ioc-adap-g-log-addrs.html#cec-log-addrs-fl-allow-rc-passthru"><span class="std std-ref">CEC_LOG_ADDRS_FL_ALLOW_RC_PASSTHRU</span></a>
+is set, then generate a remote control key
+press. This message is always passed on to the follower(s).</p>
+</td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">CEC_MSG_USER_CONTROL_RELEASED</span></code></p>
+</td>
+<td><p id="cec-msg-user-control-released">If <a class="reference internal" href="cec-ioc-adap-g-caps.html#cec-cap-rc"><span class="std std-ref">CEC_CAP_RC</span></a> is set and if
+<a class="reference internal" href="cec-ioc-adap-g-log-addrs.html#cec-log-addrs-fl-allow-rc-passthru"><span class="std std-ref">CEC_LOG_ADDRS_FL_ALLOW_RC_PASSTHRU</span></a>
+is set, then generate a remote control key
+release. This message is always passed on to the follower(s).</p>
+</td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">CEC_MSG_REPORT_PHYSICAL_ADDR</span></code></p>
+</td>
+<td><p id="cec-msg-report-physical-addr">The CEC framework will make note of the reported physical address
+and then just pass the message on to the follower(s).</p>
+</td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="return-value">
+<h2><span class="section-number">2.10.4. </span>Return Value<a class="headerlink" href="#return-value" title="Permalink to this headline">¶</a></h2>
+<p>On success 0 is returned, on error -1 and the <code class="docutils literal notranslate"><span class="pre">errno</span></code> variable is set
+appropriately. The generic error codes are described at the
+<a class="reference internal" href="../gen-errors.html#id1"><span class="std std-ref">Generic Error Codes</span></a> chapter.</p>
+<p>The <a class="reference internal" href="#cec-s-mode"><span class="std std-ref">ioctl CEC_S_MODE</span></a> can return the following
+error codes:</p>
+<dl class="simple">
+<dt>EINVAL</dt><dd><p>The requested mode is invalid.</p>
+</dd>
+<dt>EPERM</dt><dd><p>Monitor mode is requested, but the process does have the <code class="docutils literal notranslate"><span class="pre">CAP_NET_ADMIN</span></code>
+capability.</p>
+</dd>
+<dt>EBUSY</dt><dd><p>Someone else is already an exclusive follower or initiator.</p>
+</dd>
+</dl>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">2.10. ioctls CEC_G_MODE and CEC_S_MODE</a><ul>
+<li><a class="reference internal" href="#synopsis">2.10.1. Synopsis</a></li>
+<li><a class="reference internal" href="#arguments">2.10.2. Arguments</a></li>
+<li><a class="reference internal" href="#description">2.10.3. Description</a></li>
+<li><a class="reference internal" href="#return-value">2.10.4. Return Value</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/userspace-api/media/cec/cec-ioc-g-mode.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/userspace-api/media/cec/cec-ioc-g-mode.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

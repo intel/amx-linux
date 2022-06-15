@@ -1,0 +1,263 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Multi-Gen LRU &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="What is NUMA?" href="numa.html" />
+    <link rel="prev" title="When do you need to notify inside page table lock ?" href="mmu_notifier.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="multi-gen-lru">
+<h1>Multi-Gen LRU<a class="headerlink" href="#multi-gen-lru" title="Permalink to this headline">¶</a></h1>
+<p>The multi-gen LRU is an alternative LRU implementation that optimizes
+page reclaim and improves performance under memory pressure. Page
+reclaim decides the kernel’s caching policy and ability to overcommit
+memory. It directly impacts the kswapd CPU usage and RAM efficiency.</p>
+<section id="design-overview">
+<h2>Design overview<a class="headerlink" href="#design-overview" title="Permalink to this headline">¶</a></h2>
+<section id="objectives">
+<h3>Objectives<a class="headerlink" href="#objectives" title="Permalink to this headline">¶</a></h3>
+<p>The design objectives are:</p>
+<ul class="simple">
+<li><p>Good representation of access recency</p></li>
+<li><p>Try to profit from spatial locality</p></li>
+<li><p>Fast paths to make obvious choices</p></li>
+<li><p>Simple self-correcting heuristics</p></li>
+</ul>
+<p>The representation of access recency is at the core of all LRU
+implementations. In the multi-gen LRU, each generation represents a
+group of pages with similar access recency. Generations establish a
+(time-based) common frame of reference and therefore help make better
+choices, e.g., between different memcgs on a computer or different
+computers in a data center (for job scheduling).</p>
+<p>Exploiting spatial locality improves efficiency when gathering the
+accessed bit. A rmap walk targets a single page and does not try to
+profit from discovering a young PTE. A page table walk can sweep all
+the young PTEs in an address space, but the address space can be too
+sparse to make a profit. The key is to optimize both methods and use
+them in combination.</p>
+<p>Fast paths reduce code complexity and runtime overhead. Unmapped pages
+do not require TLB flushes; clean pages do not require writeback.
+These facts are only helpful when other conditions, e.g., access
+recency, are similar. With generations as a common frame of reference,
+additional factors stand out. But obvious choices might not be good
+choices; thus self-correction is necessary.</p>
+<p>The benefits of simple self-correcting heuristics are self-evident.
+Again, with generations as a common frame of reference, this becomes
+attainable. Specifically, pages in the same generation can be
+categorized based on additional factors, and a feedback loop can
+statistically compare the refault percentages across those categories
+and infer which of them are better choices.</p>
+</section>
+<section id="assumptions">
+<h3>Assumptions<a class="headerlink" href="#assumptions" title="Permalink to this headline">¶</a></h3>
+<p>The protection of hot pages and the selection of cold pages are based
+on page access channels and patterns. There are two access channels:</p>
+<ul class="simple">
+<li><p>Accesses through page tables</p></li>
+<li><p>Accesses through file descriptors</p></li>
+</ul>
+<p>The protection of the former channel is by design stronger because:</p>
+<ol class="arabic simple">
+<li><p>The uncertainty in determining the access patterns of the former
+channel is higher due to the approximation of the accessed bit.</p></li>
+<li><p>The cost of evicting the former channel is higher due to the TLB
+flushes required and the likelihood of encountering the dirty bit.</p></li>
+<li><p>The penalty of underprotecting the former channel is higher because
+applications usually do not prepare themselves for major page
+faults like they do for blocked I/O. E.g., GUI applications
+commonly use dedicated I/O threads to avoid blocking rendering
+threads.</p></li>
+</ol>
+<p>There are also two access patterns:</p>
+<ul class="simple">
+<li><p>Accesses exhibiting temporal locality</p></li>
+<li><p>Accesses not exhibiting temporal locality</p></li>
+</ul>
+<p>For the reasons listed above, the former channel is assumed to follow
+the former pattern unless <code class="docutils literal notranslate"><span class="pre">VM_SEQ_READ</span></code> or <code class="docutils literal notranslate"><span class="pre">VM_RAND_READ</span></code> is
+present, and the latter channel is assumed to follow the latter
+pattern unless outlying refaults have been observed.</p>
+</section>
+</section>
+<section id="workflow-overview">
+<h2>Workflow overview<a class="headerlink" href="#workflow-overview" title="Permalink to this headline">¶</a></h2>
+<p>Evictable pages are divided into multiple generations for each
+<code class="docutils literal notranslate"><span class="pre">lruvec</span></code>. The youngest generation number is stored in
+<code class="docutils literal notranslate"><span class="pre">lrugen-&gt;max_seq</span></code> for both anon and file types as they are aged on
+an equal footing. The oldest generation numbers are stored in
+<code class="docutils literal notranslate"><span class="pre">lrugen-&gt;min_seq[]</span></code> separately for anon and file types as clean file
+pages can be evicted regardless of swap constraints. These three
+variables are monotonically increasing.</p>
+<p>Generation numbers are truncated into <code class="docutils literal notranslate"><span class="pre">order_base_2(MAX_NR_GENS+1)</span></code>
+bits in order to fit into the gen counter in <code class="docutils literal notranslate"><span class="pre">folio-&gt;flags</span></code>. Each
+truncated generation number is an index to <code class="docutils literal notranslate"><span class="pre">lrugen-&gt;lists[]</span></code>. The
+sliding window technique is used to track at least <code class="docutils literal notranslate"><span class="pre">MIN_NR_GENS</span></code> and
+at most <code class="docutils literal notranslate"><span class="pre">MAX_NR_GENS</span></code> generations. The gen counter stores a value
+within <code class="docutils literal notranslate"><span class="pre">[1,</span> <span class="pre">MAX_NR_GENS]</span></code> while a page is on one of
+<code class="docutils literal notranslate"><span class="pre">lrugen-&gt;lists[]</span></code>; otherwise it stores zero.</p>
+<p>Each generation is divided into multiple tiers. A page accessed <code class="docutils literal notranslate"><span class="pre">N</span></code>
+times through file descriptors is in tier <code class="docutils literal notranslate"><span class="pre">order_base_2(N)</span></code>. Unlike
+generations, tiers do not have dedicated <code class="docutils literal notranslate"><span class="pre">lrugen-&gt;lists[]</span></code>. In
+contrast to moving across generations, which requires the LRU lock,
+moving across tiers only involves atomic operations on
+<code class="docutils literal notranslate"><span class="pre">folio-&gt;flags</span></code> and therefore has a negligible cost. A feedback loop
+modeled after the PID controller monitors refaults over all the tiers
+from anon and file types and decides which tiers from which types to
+evict or protect.</p>
+<p>There are two conceptually independent procedures: the aging and the
+eviction. They form a closed-loop system, i.e., the page reclaim.</p>
+<section id="aging">
+<h3>Aging<a class="headerlink" href="#aging" title="Permalink to this headline">¶</a></h3>
+<p>The aging produces young generations. Given an <code class="docutils literal notranslate"><span class="pre">lruvec</span></code>, it
+increments <code class="docutils literal notranslate"><span class="pre">max_seq</span></code> when <code class="docutils literal notranslate"><span class="pre">max_seq-min_seq+1</span></code> approaches
+<code class="docutils literal notranslate"><span class="pre">MIN_NR_GENS</span></code>. The aging promotes hot pages to the youngest
+generation when it finds them accessed through page tables; the
+demotion of cold pages happens consequently when it increments
+<code class="docutils literal notranslate"><span class="pre">max_seq</span></code>. The aging uses page table walks and rmap walks to find
+young PTEs. For the former, it iterates <code class="docutils literal notranslate"><span class="pre">lruvec_memcg()-&gt;mm_list</span></code>
+and calls <code class="docutils literal notranslate"><span class="pre">walk_page_range()</span></code> with each <code class="docutils literal notranslate"><span class="pre">mm_struct</span></code> on this list
+to scan PTEs, and after each iteration, it increments <code class="docutils literal notranslate"><span class="pre">max_seq</span></code>. For
+the latter, when the eviction walks the rmap and finds a young PTE,
+the aging scans the adjacent PTEs. For both, on finding a young PTE,
+the aging clears the accessed bit and updates the gen counter of the
+page mapped by this PTE to <code class="docutils literal notranslate"><span class="pre">(max_seq%MAX_NR_GENS)+1</span></code>.</p>
+</section>
+<section id="eviction">
+<h3>Eviction<a class="headerlink" href="#eviction" title="Permalink to this headline">¶</a></h3>
+<p>The eviction consumes old generations. Given an <code class="docutils literal notranslate"><span class="pre">lruvec</span></code>, it
+increments <code class="docutils literal notranslate"><span class="pre">min_seq</span></code> when <code class="docutils literal notranslate"><span class="pre">lrugen-&gt;lists[]</span></code> indexed by
+<code class="docutils literal notranslate"><span class="pre">min_seq%MAX_NR_GENS</span></code> becomes empty. To select a type and a tier to
+evict from, it first compares <code class="docutils literal notranslate"><span class="pre">min_seq[]</span></code> to select the older type.
+If both types are equally old, it selects the one whose first tier has
+a lower refault percentage. The first tier contains single-use
+unmapped clean pages, which are the best bet. The eviction sorts a
+page according to its gen counter if the aging has found this page
+accessed through page tables and updated its gen counter. It also
+moves a page to the next generation, i.e., <code class="docutils literal notranslate"><span class="pre">min_seq+1</span></code>, if this page
+was accessed multiple times through file descriptors and the feedback
+loop has detected outlying refaults from the tier this page is in. To
+this end, the feedback loop uses the first tier as the baseline, for
+the reason stated earlier.</p>
+</section>
+<section id="summary">
+<h3>Summary<a class="headerlink" href="#summary" title="Permalink to this headline">¶</a></h3>
+<p>The multi-gen LRU can be disassembled into the following parts:</p>
+<ul class="simple">
+<li><p>Generations</p></li>
+<li><p>Rmap walks</p></li>
+<li><p>Page table walks</p></li>
+<li><p>Bloom filters</p></li>
+<li><p>PID controller</p></li>
+</ul>
+<p>The aging and the eviction form a producer-consumer model;
+specifically, the latter drives the former by the sliding window over
+generations. Within the aging, rmap walks drive page table walks by
+inserting hot densely populated page tables to the Bloom filters.
+Within the eviction, the PID controller uses refaults as the feedback
+to select types to evict and tiers to protect.</p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Multi-Gen LRU</a><ul>
+<li><a class="reference internal" href="#design-overview">Design overview</a><ul>
+<li><a class="reference internal" href="#objectives">Objectives</a></li>
+<li><a class="reference internal" href="#assumptions">Assumptions</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#workflow-overview">Workflow overview</a><ul>
+<li><a class="reference internal" href="#aging">Aging</a></li>
+<li><a class="reference internal" href="#eviction">Eviction</a></li>
+<li><a class="reference internal" href="#summary">Summary</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/mm/multigen_lru.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/mm/multigen_lru.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

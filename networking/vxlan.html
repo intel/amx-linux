@@ -1,0 +1,192 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Virtual eXtensible Local Area Networking documentation &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Packet Layer to Device Driver" href="x25-iface.html" />
+    <link rel="prev" title="Virtual Routing and Forwarding (VRF)" href="vrf.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="virtual-extensible-local-area-networking-documentation">
+<h1>Virtual eXtensible Local Area Networking documentation<a class="headerlink" href="#virtual-extensible-local-area-networking-documentation" title="Permalink to this headline">¶</a></h1>
+<p>The VXLAN protocol is a tunnelling protocol designed to solve the
+problem of limited VLAN IDs (4096) in IEEE 802.1q.  With VXLAN the
+size of the identifier is expanded to 24 bits (16777216).</p>
+<p>VXLAN is described by IETF RFC 7348, and has been implemented by a
+number of vendors.  The protocol runs over UDP using a single
+destination port.  This document describes the Linux kernel tunnel
+device, there is also a separate implementation of VXLAN for
+Openvswitch.</p>
+<p>Unlike most tunnels, a VXLAN is a 1 to N network, not just point to
+point. A VXLAN device can learn the IP address of the other endpoint
+either dynamically in a manner similar to a learning bridge, or make
+use of statically-configured forwarding entries.</p>
+<p>The management of vxlan is done in a manner similar to its two closest
+neighbors GRE and VLAN. Configuring VXLAN requires the version of
+iproute2 that matches the kernel release where VXLAN was first merged
+upstream.</p>
+<ol class="arabic">
+<li><p>Create vxlan device:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># ip link add vxlan0 type vxlan id 42 group 239.1.1.1 dev eth1 dstport 4789
+</pre></div>
+</div>
+</li>
+</ol>
+<p>This creates a new device named vxlan0.  The device uses the multicast
+group 239.1.1.1 over eth1 to handle traffic for which there is no
+entry in the forwarding table.  The destination port number is set to
+the IANA-assigned value of 4789.  The Linux implementation of VXLAN
+pre-dates the IANA’s selection of a standard destination port number
+and uses the Linux-selected value by default to maintain backwards
+compatibility.</p>
+<ol class="arabic" start="2">
+<li><p>Delete vxlan device:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># ip link delete vxlan0
+</pre></div>
+</div>
+</li>
+<li><p>Show vxlan info:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># ip -d link show vxlan0
+</pre></div>
+</div>
+</li>
+</ol>
+<p>It is possible to create, destroy and display the vxlan
+forwarding table using the new bridge command.</p>
+<ol class="arabic">
+<li><p>Create forwarding table entry:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># bridge fdb add to 00:17:42:8a:b4:05 dst 192.19.0.2 dev vxlan0
+</pre></div>
+</div>
+</li>
+<li><p>Delete forwarding table entry:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># bridge fdb delete 00:17:42:8a:b4:05 dev vxlan0
+</pre></div>
+</div>
+</li>
+<li><p>Show forwarding table:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># bridge fdb show dev vxlan0
+</pre></div>
+</div>
+</li>
+</ol>
+<p>The following NIC features may indicate support for UDP tunnel-related
+offloads (most commonly VXLAN features, but support for a particular
+encapsulation protocol is NIC specific):</p>
+<blockquote>
+<div><ul class="simple">
+<li><p><cite>tx-udp_tnl-segmentation</cite></p></li>
+<li><dl class="simple">
+<dt><cite>tx-udp_tnl-csum-segmentation</cite></dt><dd><p>ability to perform TCP segmentation offload of UDP encapsulated frames</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt><cite>rx-udp_tunnel-port-offload</cite></dt><dd><p>receive side parsing of UDP encapsulated frames which allows NICs to
+perform protocol-aware offloads, like checksum validation offload of
+inner frames (only needed by NICs without protocol-agnostic offloads)</p>
+</dd>
+</dl>
+</li>
+</ul>
+</div></blockquote>
+<p>For devices supporting <cite>rx-udp_tunnel-port-offload</cite> the list of currently
+offloaded ports can be interrogated with <cite>ethtool</cite>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ ethtool --show-tunnels eth0
+Tunnel information for eth0:
+  UDP port table 0:
+    Size: 4
+    Types: vxlan
+    No entries
+  UDP port table 1:
+    Size: 4
+    Types: geneve, vxlan-gpe
+    Entries (1):
+        port 1230, vxlan-gpe
+</pre></div>
+</div>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/networking/vxlan.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/networking/vxlan.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,292 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>DCCP protocol &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="DCTCP (DataCenter TCP)" href="dctcp.html" />
+    <link rel="prev" title="cdc_mbim - Driver for CDC MBIM Mobile Broadband modems" href="cdc_mbim.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="dccp-protocol">
+<h1>DCCP protocol<a class="headerlink" href="#dccp-protocol" title="Permalink to this headline">¶</a></h1>
+<section id="introduction">
+<h2>Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>Datagram Congestion Control Protocol (DCCP) is an unreliable, connection
+oriented protocol designed to solve issues present in UDP and TCP, particularly
+for real-time and multimedia (streaming) traffic.
+It divides into a base protocol (RFC 4340) and pluggable congestion control
+modules called CCIDs. Like pluggable TCP congestion control, at least one CCID
+needs to be enabled in order for the protocol to function properly. In the Linux
+implementation, this is the TCP-like CCID2 (RFC 4341). Additional CCIDs, such as
+the TCP-friendly CCID3 (RFC 4342), are optional.
+For a brief introduction to CCIDs and suggestions for choosing a CCID to match
+given applications, see section 10 of RFC 4340.</p>
+<p>It has a base protocol and pluggable congestion control IDs (CCIDs).</p>
+<p>DCCP is a Proposed Standard (RFC 2026), and the homepage for DCCP as a protocol
+is at <a class="reference external" href="http://www.ietf.org/html.charters/dccp-charter.html">http://www.ietf.org/html.charters/dccp-charter.html</a></p>
+</section>
+<section id="missing-features">
+<h2>Missing features<a class="headerlink" href="#missing-features" title="Permalink to this headline">¶</a></h2>
+<p>The Linux DCCP implementation does not currently support all the features that are
+specified in RFCs 4340…42.</p>
+<p>The known bugs are at:</p>
+<blockquote>
+<div><p><a class="reference external" href="http://www.linuxfoundation.org/collaborate/workgroups/networking/todo#DCCP">http://www.linuxfoundation.org/collaborate/workgroups/networking/todo#DCCP</a></p>
+</div></blockquote>
+<p>For more up-to-date versions of the DCCP implementation, please consider using
+the experimental DCCP test tree; instructions for checking this out are on:
+<a class="reference external" href="http://www.linuxfoundation.org/collaborate/workgroups/networking/dccp_testing#Experimental_DCCP_source_tree">http://www.linuxfoundation.org/collaborate/workgroups/networking/dccp_testing#Experimental_DCCP_source_tree</a></p>
+</section>
+<section id="socket-options">
+<h2>Socket options<a class="headerlink" href="#socket-options" title="Permalink to this headline">¶</a></h2>
+<p>DCCP_SOCKOPT_QPOLICY_ID sets the dequeuing policy for outgoing packets. It takes
+a policy ID as argument and can only be set before the connection (i.e. changes
+during an established connection are not supported). Currently, two policies are
+defined: the “simple” policy (DCCPQ_POLICY_SIMPLE), which does nothing special,
+and a priority-based variant (DCCPQ_POLICY_PRIO). The latter allows to pass an
+u32 priority value as ancillary data to sendmsg(), where higher numbers indicate
+a higher packet priority (similar to SO_PRIORITY). This ancillary data needs to
+be formatted using a cmsg(3) message header filled in as follows:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>cmsg-&gt;cmsg_level = SOL_DCCP;
+cmsg-&gt;cmsg_type  = DCCP_SCM_PRIORITY;
+cmsg-&gt;cmsg_len   = CMSG_LEN(sizeof(uint32_t));  /* or CMSG_LEN(4) */
+</pre></div>
+</div>
+<p>DCCP_SOCKOPT_QPOLICY_TXQLEN sets the maximum length of the output queue. A zero
+value is always interpreted as unbounded queue length. If different from zero,
+the interpretation of this parameter depends on the current dequeuing policy
+(see above): the “simple” policy will enforce a fixed queue size by returning
+EAGAIN, whereas the “prio” policy enforces a fixed queue length by dropping the
+lowest-priority packet first. The default value for this parameter is
+initialised from /proc/sys/net/dccp/default/tx_qlen.</p>
+<p>DCCP_SOCKOPT_SERVICE sets the service. The specification mandates use of
+service codes (RFC 4340, sec. 8.1.2); if this socket option is not set,
+the socket will fall back to 0 (which means that no meaningful service code
+is present). On active sockets this is set before connect(); specifying more
+than one code has no effect (all subsequent service codes are ignored). The
+case is different for passive sockets, where multiple service codes (up to 32)
+can be set before calling bind().</p>
+<p>DCCP_SOCKOPT_GET_CUR_MPS is read-only and retrieves the current maximum packet
+size (application payload size) in bytes, see RFC 4340, section 14.</p>
+<p>DCCP_SOCKOPT_AVAILABLE_CCIDS is also read-only and returns the list of CCIDs
+supported by the endpoint. The option value is an array of type uint8_t whose
+size is passed as option length. The minimum array size is 4 elements, the
+value returned in the optlen argument always reflects the true number of
+built-in CCIDs.</p>
+<p>DCCP_SOCKOPT_CCID is write-only and sets both the TX and RX CCIDs at the same
+time, combining the operation of the next two socket options. This option is
+preferable over the latter two, since often applications will use the same
+type of CCID for both directions; and mixed use of CCIDs is not currently well
+understood. This socket option takes as argument at least one uint8_t value, or
+an array of uint8_t values, which must match available CCIDS (see above). CCIDs
+must be registered on the socket before calling connect() or listen().</p>
+<p>DCCP_SOCKOPT_TX_CCID is read/write. It returns the current CCID (if set) or sets
+the preference list for the TX CCID, using the same format as DCCP_SOCKOPT_CCID.
+Please note that the getsockopt argument type here is <code class="docutils literal notranslate"><span class="pre">int</span></code>, not uint8_t.</p>
+<p>DCCP_SOCKOPT_RX_CCID is analogous to DCCP_SOCKOPT_TX_CCID, but for the RX CCID.</p>
+<p>DCCP_SOCKOPT_SERVER_TIMEWAIT enables the server (listening socket) to hold
+timewait state when closing the connection (RFC 4340, 8.3). The usual case is
+that the closing server sends a CloseReq, whereupon the client holds timewait
+state. When this boolean socket option is on, the server sends a Close instead
+and will enter TIMEWAIT. This option must be set after accept() returns.</p>
+<p>DCCP_SOCKOPT_SEND_CSCOV and DCCP_SOCKOPT_RECV_CSCOV are used for setting the
+partial checksum coverage (RFC 4340, sec. 9.2). The default is that checksums
+always cover the entire packet and that only fully covered application data is
+accepted by the receiver. Hence, when using this feature on the sender, it must
+be enabled at the receiver, too with suitable choice of CsCov.</p>
+<dl class="simple">
+<dt>DCCP_SOCKOPT_SEND_CSCOV sets the sender checksum coverage. Values in the</dt><dd><p>range 0..15 are acceptable. The default setting is 0 (full coverage),
+values between 1..15 indicate partial coverage.</p>
+</dd>
+<dt>DCCP_SOCKOPT_RECV_CSCOV is for the receiver and has a different meaning: it</dt><dd><p>sets a threshold, where again values 0..15 are acceptable. The default
+of 0 means that all packets with a partial coverage will be discarded.
+Values in the range 1..15 indicate that packets with minimally such a
+coverage value are also acceptable. The higher the number, the more
+restrictive this setting (see [RFC 4340, sec. 9.2.1]). Partial coverage
+settings are inherited to the child socket after accept().</p>
+</dd>
+</dl>
+<p>The following two options apply to CCID 3 exclusively and are getsockopt()-only.
+In either case, a TFRC info struct (defined in &lt;linux/tfrc.h&gt;) is returned.</p>
+<dl class="simple">
+<dt>DCCP_SOCKOPT_CCID_RX_INFO</dt><dd><p>Returns a <code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tfrc_rx_info</span></code> in optval; the buffer for optval and
+optlen must be set to at least sizeof(struct tfrc_rx_info).</p>
+</dd>
+<dt>DCCP_SOCKOPT_CCID_TX_INFO</dt><dd><p>Returns a <code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tfrc_tx_info</span></code> in optval; the buffer for optval and
+optlen must be set to at least sizeof(struct tfrc_tx_info).</p>
+</dd>
+</dl>
+<p>On unidirectional connections it is useful to close the unused half-connection
+via shutdown (SHUT_WR or SHUT_RD): this will reduce per-packet processing costs.</p>
+</section>
+<section id="sysctl-variables">
+<h2>Sysctl variables<a class="headerlink" href="#sysctl-variables" title="Permalink to this headline">¶</a></h2>
+<p>Several DCCP default parameters can be managed by the following sysctls
+(sysctl net.dccp.default or /proc/sys/net/dccp/default):</p>
+<dl class="simple">
+<dt>request_retries</dt><dd><p>The number of active connection initiation retries (the number of
+Requests minus one) before timing out. In addition, it also governs
+the behaviour of the other, passive side: this variable also sets
+the number of times DCCP repeats sending a Response when the initial
+handshake does not progress from RESPOND to OPEN (i.e. when no Ack
+is received after the initial Request).  This value should be greater
+than 0, suggested is less than 10. Analogue of tcp_syn_retries.</p>
+</dd>
+<dt>retries1</dt><dd><p>How often a DCCP Response is retransmitted until the listening DCCP
+side considers its connecting peer dead. Analogue of tcp_retries1.</p>
+</dd>
+<dt>retries2</dt><dd><p>The number of times a general DCCP packet is retransmitted. This has
+importance for retransmitted acknowledgments and feature negotiation,
+data packets are never retransmitted. Analogue of tcp_retries2.</p>
+</dd>
+<dt>tx_ccid = 2</dt><dd><p>Default CCID for the sender-receiver half-connection. Depending on the
+choice of CCID, the Send Ack Vector feature is enabled automatically.</p>
+</dd>
+<dt>rx_ccid = 2</dt><dd><p>Default CCID for the receiver-sender half-connection; see tx_ccid.</p>
+</dd>
+<dt>seq_window = 100</dt><dd><p>The initial sequence window (sec. 7.5.2) of the sender. This influences
+the local ackno validity and the remote seqno validity windows (7.5.1).
+Values in the range Wmin = 32 (RFC 4340, 7.5.2) up to 2^32-1 can be set.</p>
+</dd>
+<dt>tx_qlen = 5</dt><dd><p>The size of the transmit buffer in packets. A value of 0 corresponds
+to an unbounded transmit buffer.</p>
+</dd>
+<dt>sync_ratelimit = 125 ms</dt><dd><p>The timeout between subsequent DCCP-Sync packets sent in response to
+sequence-invalid packets on the same socket (RFC 4340, 7.5.4). The unit
+of this parameter is milliseconds; a value of 0 disables rate-limiting.</p>
+</dd>
+</dl>
+</section>
+<section id="ioctls">
+<h2>IOCTLS<a class="headerlink" href="#ioctls" title="Permalink to this headline">¶</a></h2>
+<dl class="simple">
+<dt>FIONREAD</dt><dd><p>Works as in udp(7): returns in the <code class="docutils literal notranslate"><span class="pre">int</span></code> argument pointer the size of
+the next pending datagram in bytes, or 0 when no datagram is pending.</p>
+</dd>
+<dt>SIOCOUTQ</dt><dd><p>Returns the number of unsent data bytes in the socket send queue as <code class="docutils literal notranslate"><span class="pre">int</span></code>
+into the buffer specified by the argument pointer.</p>
+</dd>
+</dl>
+</section>
+<section id="other-tunables">
+<h2>Other tunables<a class="headerlink" href="#other-tunables" title="Permalink to this headline">¶</a></h2>
+<dl>
+<dt>Per-route rto_min support</dt><dd><p>CCID-2 supports the RTAX_RTO_MIN per-route setting for the minimum value
+of the RTO timer. This setting can be modified via the ‘rto_min’ option
+of iproute2; for example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>&gt; ip route change 10.0.0.0/24   rto_min 250j dev wlan0
+&gt; ip route add    10.0.0.254/32 rto_min 800j dev wlan0
+&gt; ip route show dev wlan0
+</pre></div>
+</div>
+<p>CCID-3 also supports the rto_min setting: it is used to define the lower
+bound for the expiry of the nofeedback timer. This can be useful on LANs
+with very low RTTs (e.g., loopback, Gbit ethernet).</p>
+</dd>
+</dl>
+</section>
+<section id="notes">
+<h2>Notes<a class="headerlink" href="#notes" title="Permalink to this headline">¶</a></h2>
+<p>DCCP does not travel through NAT successfully at present on many boxes. This is
+because the checksum covers the pseudo-header as per TCP and UDP. Linux NAT
+support for DCCP has been added.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">DCCP protocol</a><ul>
+<li><a class="reference internal" href="#introduction">Introduction</a></li>
+<li><a class="reference internal" href="#missing-features">Missing features</a></li>
+<li><a class="reference internal" href="#socket-options">Socket options</a></li>
+<li><a class="reference internal" href="#sysctl-variables">Sysctl variables</a></li>
+<li><a class="reference internal" href="#ioctls">IOCTLS</a></li>
+<li><a class="reference internal" href="#other-tunables">Other tunables</a></li>
+<li><a class="reference internal" href="#notes">Notes</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/networking/dccp.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/networking/dccp.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

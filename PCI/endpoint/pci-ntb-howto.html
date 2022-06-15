@@ -1,0 +1,264 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>9.7. PCI Non-Transparent Bridge (NTB) Endpoint Function (EPF) User Guide &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="9.8. PCI vNTB Function" href="pci-vntb-function.html" />
+    <link rel="prev" title="9.6. PCI NTB Function" href="pci-ntb-function.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="pci-non-transparent-bridge-ntb-endpoint-function-epf-user-guide">
+<h1><span class="section-number">9.7. </span>PCI Non-Transparent Bridge (NTB) Endpoint Function (EPF) User Guide<a class="headerlink" href="#pci-non-transparent-bridge-ntb-endpoint-function-epf-user-guide" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">Author</dt>
+<dd class="field-odd"><p>Kishon Vijay Abraham I &lt;<a class="reference external" href="mailto:kishon&#37;&#52;&#48;ti&#46;com">kishon<span>&#64;</span>ti<span>&#46;</span>com</a>&gt;</p>
+</dd>
+</dl>
+<p>This document is a guide to help users use pci-epf-ntb function driver
+and ntb_hw_epf host driver for NTB functionality. The list of steps to
+be followed in the host side and EP side is given below. For the hardware
+configuration and internals of NTB using configurable endpoints see
+<a class="reference internal" href="pci-ntb-function.html"><span class="doc">PCI NTB Function</span></a></p>
+<section id="endpoint-device">
+<h2><span class="section-number">9.7.1. </span>Endpoint Device<a class="headerlink" href="#endpoint-device" title="Permalink to this headline">¶</a></h2>
+<section id="endpoint-controller-devices">
+<h3><span class="section-number">9.7.1.1. </span>Endpoint Controller Devices<a class="headerlink" href="#endpoint-controller-devices" title="Permalink to this headline">¶</a></h3>
+<p>For implementing NTB functionality at least two endpoint controller devices
+are required.</p>
+<p>To find the list of endpoint controller devices in the system:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># ls /sys/class/pci_epc/
+2900000.pcie-ep  2910000.pcie-ep
+</pre></div>
+</div>
+<p>If PCI_ENDPOINT_CONFIGFS is enabled:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># ls /sys/kernel/config/pci_ep/controllers
+2900000.pcie-ep  2910000.pcie-ep
+</pre></div>
+</div>
+</section>
+<section id="endpoint-function-drivers">
+<h3><span class="section-number">9.7.1.2. </span>Endpoint Function Drivers<a class="headerlink" href="#endpoint-function-drivers" title="Permalink to this headline">¶</a></h3>
+<p>To find the list of endpoint function drivers in the system:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># ls /sys/bus/pci-epf/drivers
+pci_epf_ntb   pci_epf_ntb
+</pre></div>
+</div>
+<p>If PCI_ENDPOINT_CONFIGFS is enabled:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># ls /sys/kernel/config/pci_ep/functions
+pci_epf_ntb   pci_epf_ntb
+</pre></div>
+</div>
+</section>
+<section id="creating-pci-epf-ntb-device">
+<h3><span class="section-number">9.7.1.3. </span>Creating pci-epf-ntb Device<a class="headerlink" href="#creating-pci-epf-ntb-device" title="Permalink to this headline">¶</a></h3>
+<p>PCI endpoint function device can be created using the configfs. To create
+pci-epf-ntb device, the following commands can be used:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># mount -t configfs none /sys/kernel/config
+# cd /sys/kernel/config/pci_ep/
+# mkdir functions/pci_epf_ntb/func1
+</pre></div>
+</div>
+<p>The “mkdir func1” above creates the pci-epf-ntb function device that will
+be probed by pci_epf_ntb driver.</p>
+<p>The PCI endpoint framework populates the directory with the following
+configurable fields:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># ls functions/pci_epf_ntb/func1
+baseclass_code    deviceid          msi_interrupts    pci-epf-ntb.0
+progif_code       secondary         subsys_id         vendorid
+cache_line_size   interrupt_pin     msix_interrupts   primary
+revid             subclass_code     subsys_vendor_id
+</pre></div>
+</div>
+<p>The PCI endpoint function driver populates these entries with default values
+when the device is bound to the driver. The pci-epf-ntb driver populates
+vendorid with 0xffff and interrupt_pin with 0x0001:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># cat functions/pci_epf_ntb/func1/vendorid
+0xffff
+# cat functions/pci_epf_ntb/func1/interrupt_pin
+0x0001
+</pre></div>
+</div>
+</section>
+<section id="configuring-pci-epf-ntb-device">
+<h3><span class="section-number">9.7.1.4. </span>Configuring pci-epf-ntb Device<a class="headerlink" href="#configuring-pci-epf-ntb-device" title="Permalink to this headline">¶</a></h3>
+<p>The user can configure the pci-epf-ntb device using its configfs entry. In order
+to change the vendorid and the deviceid, the following
+commands can be used:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># echo 0x104c &gt; functions/pci_epf_ntb/func1/vendorid
+# echo 0xb00d &gt; functions/pci_epf_ntb/func1/deviceid
+</pre></div>
+</div>
+<p>In order to configure NTB specific attributes, a new sub-directory to func1
+should be created:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># mkdir functions/pci_epf_ntb/func1/pci_epf_ntb.0/
+</pre></div>
+</div>
+<p>The NTB function driver will populate this directory with various attributes
+that can be configured by the user:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># ls functions/pci_epf_ntb/func1/pci_epf_ntb.0/
+db_count    mw1         mw2         mw3         mw4         num_mws
+spad_count
+</pre></div>
+</div>
+<p>A sample configuration for NTB function is given below:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># echo 4 &gt; functions/pci_epf_ntb/func1/pci_epf_ntb.0/db_count
+# echo 128 &gt; functions/pci_epf_ntb/func1/pci_epf_ntb.0/spad_count
+# echo 2 &gt; functions/pci_epf_ntb/func1/pci_epf_ntb.0/num_mws
+# echo 0x100000 &gt; functions/pci_epf_ntb/func1/pci_epf_ntb.0/mw1
+# echo 0x100000 &gt; functions/pci_epf_ntb/func1/pci_epf_ntb.0/mw2
+</pre></div>
+</div>
+</section>
+<section id="binding-pci-epf-ntb-device-to-ep-controller">
+<h3><span class="section-number">9.7.1.5. </span>Binding pci-epf-ntb Device to EP Controller<a class="headerlink" href="#binding-pci-epf-ntb-device-to-ep-controller" title="Permalink to this headline">¶</a></h3>
+<p>NTB function device should be attached to two PCI endpoint controllers
+connected to the two hosts. Use the ‘primary’ and ‘secondary’ entries
+inside NTB function device to attach one PCI endpoint controller to
+primary interface and the other PCI endpoint controller to the secondary
+interface:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># ln -s controllers/2900000.pcie-ep/ functions/pci-epf-ntb/func1/primary
+# ln -s controllers/2910000.pcie-ep/ functions/pci-epf-ntb/func1/secondary
+</pre></div>
+</div>
+<p>Once the above step is completed, both the PCI endpoint controllers are ready to
+establish a link with the host.</p>
+</section>
+<section id="start-the-link">
+<h3><span class="section-number">9.7.1.6. </span>Start the Link<a class="headerlink" href="#start-the-link" title="Permalink to this headline">¶</a></h3>
+<p>In order for the endpoint device to establish a link with the host, the _start_
+field should be populated with ‘1’. For NTB, both the PCI endpoint controllers
+should establish link with the host:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># echo 1 &gt; controllers/2900000.pcie-ep/start
+# echo 1 &gt; controllers/2910000.pcie-ep/start
+</pre></div>
+</div>
+</section>
+</section>
+<section id="rootcomplex-device">
+<h2><span class="section-number">9.7.2. </span>RootComplex Device<a class="headerlink" href="#rootcomplex-device" title="Permalink to this headline">¶</a></h2>
+<section id="lspci-output">
+<h3><span class="section-number">9.7.2.1. </span>lspci Output<a class="headerlink" href="#lspci-output" title="Permalink to this headline">¶</a></h3>
+<p>Note that the devices listed here correspond to the values populated in
+“Creating pci-epf-ntb Device” section above:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># lspci
+0000:00:00.0 PCI bridge: Texas Instruments Device b00d
+0000:01:00.0 RAM memory: Texas Instruments Device b00d
+</pre></div>
+</div>
+</section>
+<section id="using-ntb-hw-epf-device">
+<h3><span class="section-number">9.7.2.2. </span>Using ntb_hw_epf Device<a class="headerlink" href="#using-ntb-hw-epf-device" title="Permalink to this headline">¶</a></h3>
+<p>The host side software follows the standard NTB software architecture in Linux.
+All the existing client side NTB utilities like NTB Transport Client and NTB
+Netdev, NTB Ping Pong Test Client and NTB Tool Test Client can be used with NTB
+function device.</p>
+<p>For more information on NTB see
+<a class="reference internal" href="../../driver-api/ntb.html"><span class="doc">Non-Transparent Bridge</span></a></p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">9.7. PCI Non-Transparent Bridge (NTB) Endpoint Function (EPF) User Guide</a><ul>
+<li><a class="reference internal" href="#endpoint-device">9.7.1. Endpoint Device</a><ul>
+<li><a class="reference internal" href="#endpoint-controller-devices">9.7.1.1. Endpoint Controller Devices</a></li>
+<li><a class="reference internal" href="#endpoint-function-drivers">9.7.1.2. Endpoint Function Drivers</a></li>
+<li><a class="reference internal" href="#creating-pci-epf-ntb-device">9.7.1.3. Creating pci-epf-ntb Device</a></li>
+<li><a class="reference internal" href="#configuring-pci-epf-ntb-device">9.7.1.4. Configuring pci-epf-ntb Device</a></li>
+<li><a class="reference internal" href="#binding-pci-epf-ntb-device-to-ep-controller">9.7.1.5. Binding pci-epf-ntb Device to EP Controller</a></li>
+<li><a class="reference internal" href="#start-the-link">9.7.1.6. Start the Link</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#rootcomplex-device">9.7.2. RootComplex Device</a><ul>
+<li><a class="reference internal" href="#lspci-output">9.7.2.1. lspci Output</a></li>
+<li><a class="reference internal" href="#using-ntb-hw-epf-device">9.7.2.2. Using ntb_hw_epf Device</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/PCI/endpoint/pci-ntb-howto.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/PCI/endpoint/pci-ntb-howto.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,817 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>drm/tegra NVIDIA Tegra GPU and display driver &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="drm/tve200 Faraday TV Encoder 200" href="tve200.html" />
+    <link rel="prev" title="drm/pl111 ARM PrimeCell PL110 and PL111 CLCD Driver" href="pl111.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="drm-tegra-nvidia-tegra-gpu-and-display-driver">
+<h1>drm/tegra NVIDIA Tegra GPU and display driver<a class="headerlink" href="#drm-tegra-nvidia-tegra-gpu-and-display-driver" title="Permalink to this headline">¶</a></h1>
+<p>NVIDIA Tegra SoCs support a set of display, graphics and video functions via
+the host1x controller. host1x supplies command streams, gathered from a push
+buffer provided directly by the CPU, to its clients via channels. Software,
+or blocks amongst themselves, can use syncpoints for synchronization.</p>
+<p>Up until, but not including, Tegra124 (aka Tegra K1) the drm/tegra driver
+supports the built-in GPU, comprised of the gr2d and gr3d engines. Starting
+with Tegra124 the GPU is based on the NVIDIA desktop GPU architecture and
+supported by the drm/nouveau driver.</p>
+<p>The drm/tegra driver supports NVIDIA Tegra SoC generations since Tegra20. It
+has three parts:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>A host1x driver that provides infrastructure and access to the host1x
+services.</p></li>
+<li><p>A KMS driver that supports the display controllers as well as a number of
+outputs, such as RGB, HDMI, DSI, and DisplayPort.</p></li>
+<li><p>A set of custom userspace IOCTLs that can be used to submit jobs to the
+GPU and video engines via host1x.</p></li>
+</ul>
+</div></blockquote>
+<section id="driver-infrastructure">
+<h2>Driver Infrastructure<a class="headerlink" href="#driver-infrastructure" title="Permalink to this headline">¶</a></h2>
+<p>The various host1x clients need to be bound together into a logical device in
+order to expose their functionality to users. The infrastructure that supports
+this is implemented in the host1x driver. When a driver is registered with the
+infrastructure it provides a list of compatible strings specifying the devices
+that it needs. The infrastructure creates a logical device and scan the device
+tree for matching device nodes, adding the required clients to a list. Drivers
+for individual clients register with the infrastructure as well and are added
+to the logical host1x device.</p>
+<p>Once all clients are available, the infrastructure will initialize the logical
+device using a driver-provided function which will set up the bits specific to
+the subsystem and in turn initialize each of its clients.</p>
+<p>Similarly, when one of the clients is unregistered, the infrastructure will
+destroy the logical device by calling back into the driver, which ensures that
+the subsystem specific bits are torn down and the clients destroyed in turn.</p>
+<section id="host1x-infrastructure-reference">
+<h3>Host1x Infrastructure Reference<a class="headerlink" href="#host1x-infrastructure-reference" title="Permalink to this headline">¶</a></h3>
+<dl class="type">
+<dt id="c.host1x_bo_cache">
+struct <code class="sig-name descname">host1x_bo_cache</code><a class="headerlink" href="#c.host1x_bo_cache" title="Permalink to this definition">¶</a></dt>
+<dd><p>host1x buffer object cache</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct host1x_bo_cache {
+    struct list_head mappings;
+    struct mutex lock;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">mappings</span></code></dt><dd><p>list of mappings</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">lock</span></code></dt><dd><p>synchronizes accesses to the list of mappings</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>Note that entries are not periodically evicted from this cache and instead need to be
+explicitly released. This is used primarily for DRM/KMS where the cache’s reference is
+released when the last reference to a buffer object represented by a mapping in this
+cache is dropped.</p>
+<dl class="type">
+<dt id="c.host1x_client_ops">
+struct <code class="sig-name descname">host1x_client_ops</code><a class="headerlink" href="#c.host1x_client_ops" title="Permalink to this definition">¶</a></dt>
+<dd><p>host1x client operations</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct host1x_client_ops {
+    int (*early_init)(struct host1x_client *client);
+    int (*init)(struct host1x_client *client);
+    int (*exit)(struct host1x_client *client);
+    int (*late_exit)(struct host1x_client *client);
+    int (*suspend)(struct host1x_client *client);
+    int (*resume)(struct host1x_client *client);
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">early_init</span></code></dt><dd><p>host1x client early initialization code</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">init</span></code></dt><dd><p>host1x client initialization code</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">exit</span></code></dt><dd><p>host1x client tear down code</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">late_exit</span></code></dt><dd><p>host1x client late tear down code</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">suspend</span></code></dt><dd><p>host1x client suspend code</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">resume</span></code></dt><dd><p>host1x client resume code</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.host1x_client">
+struct <code class="sig-name descname">host1x_client</code><a class="headerlink" href="#c.host1x_client" title="Permalink to this definition">¶</a></dt>
+<dd><p>host1x client structure</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct host1x_client {
+    struct list_head list;
+    struct device *host;
+    struct device *dev;
+    struct iommu_group *group;
+    const struct host1x_client_ops *ops;
+    enum host1x_class class;
+    struct host1x_channel *channel;
+    struct host1x_syncpt **syncpts;
+    unsigned int num_syncpts;
+    struct host1x_client *parent;
+    unsigned int usecount;
+    struct mutex lock;
+    struct host1x_bo_cache cache;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">list</span></code></dt><dd><p>list node for the host1x client</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">host</span></code></dt><dd><p>pointer to <a class="reference internal" href="../driver-api/infrastructure.html#c.device" title="device"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span></code></a> representing the host1x controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dev</span></code></dt><dd><p>pointer to <a class="reference internal" href="../driver-api/infrastructure.html#c.device" title="device"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span></code></a> backing this host1x client</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">group</span></code></dt><dd><p>IOMMU group that this client is a member of</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">ops</span></code></dt><dd><p>host1x client operations</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">class</span></code></dt><dd><p>host1x class represented by this client</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">channel</span></code></dt><dd><p>host1x channel associated with this client</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">syncpts</span></code></dt><dd><p>array of syncpoints requested for this client</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">num_syncpts</span></code></dt><dd><p>number of syncpoints requested for this client</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">parent</span></code></dt><dd><p>pointer to parent structure</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">usecount</span></code></dt><dd><p>reference count for this structure</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">lock</span></code></dt><dd><p>mutex for mutually exclusive concurrency</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">cache</span></code></dt><dd><p>host1x buffer object cache</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.host1x_driver">
+struct <code class="sig-name descname">host1x_driver</code><a class="headerlink" href="#c.host1x_driver" title="Permalink to this definition">¶</a></dt>
+<dd><p>host1x logical device driver</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct host1x_driver {
+    struct device_driver driver;
+    const struct of_device_id *subdevs;
+    struct list_head list;
+    int (*probe)(struct host1x_device *device);
+    int (*remove)(struct host1x_device *device);
+    void (*shutdown)(struct host1x_device *device);
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">driver</span></code></dt><dd><p>core driver</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">subdevs</span></code></dt><dd><p>table of OF device IDs matching subdevices for this driver</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">list</span></code></dt><dd><p>list node for the driver</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">probe</span></code></dt><dd><p>called when the host1x logical device is probed</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">remove</span></code></dt><dd><p>called when the host1x logical device is removed</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">shutdown</span></code></dt><dd><p>called when the host1x logical device is shut down</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.host1x_device_init">
+int <code class="sig-name descname">host1x_device_init</code><span class="sig-paren">(</span>struct host1x_device<em> *device</em><span class="sig-paren">)</span><a class="headerlink" href="#c.host1x_device_init" title="Permalink to this definition">¶</a></dt>
+<dd><p>initialize a host1x logical device</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">host1x_device</span> <span class="pre">*device</span></code></dt><dd><p>host1x logical device</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>The driver for the host1x logical device can call this during execution of
+its <a class="reference internal" href="#c.host1x_driver" title="host1x_driver"><code class="xref c c-type docutils literal notranslate"><span class="pre">host1x_driver.probe</span></code></a> implementation to initialize each of its clients.
+The client drivers access the subsystem specific driver data using the
+<a class="reference internal" href="#c.host1x_client" title="host1x_client"><code class="xref c c-type docutils literal notranslate"><span class="pre">host1x_client.parent</span></code></a> field and driver data associated with it (usually by
+calling dev_get_drvdata()).</p>
+</div>
+<dl class="function">
+<dt id="c.host1x_device_exit">
+int <code class="sig-name descname">host1x_device_exit</code><span class="sig-paren">(</span>struct host1x_device<em> *device</em><span class="sig-paren">)</span><a class="headerlink" href="#c.host1x_device_exit" title="Permalink to this definition">¶</a></dt>
+<dd><p>uninitialize host1x logical device</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">host1x_device</span> <span class="pre">*device</span></code></dt><dd><p>host1x logical device</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>When the driver for a host1x logical device is unloaded, it can call this
+function to tear down each of its clients. Typically this is done after a
+subsystem-specific data structure is removed and the functionality can no
+longer be used.</p>
+</div>
+<dl class="function">
+<dt id="c.host1x_driver_register_full">
+int <code class="sig-name descname">host1x_driver_register_full</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.host1x_driver" title="host1x_driver">host1x_driver</a><em> *driver</em>, struct module<em> *owner</em><span class="sig-paren">)</span><a class="headerlink" href="#c.host1x_driver_register_full" title="Permalink to this definition">¶</a></dt>
+<dd><p>register a host1x driver</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">host1x_driver</span> <span class="pre">*driver</span></code></dt><dd><p>host1x driver</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">module</span> <span class="pre">*owner</span></code></dt><dd><p>owner module</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Drivers for host1x logical devices call this function to register a driver
+with the infrastructure. Note that since these drive logical devices, the
+registration of the driver actually triggers tho logical device creation.
+A logical device will be created for each host1x instance.</p>
+</div>
+<dl class="function">
+<dt id="c.host1x_driver_unregister">
+void <code class="sig-name descname">host1x_driver_unregister</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.host1x_driver" title="host1x_driver">host1x_driver</a><em> *driver</em><span class="sig-paren">)</span><a class="headerlink" href="#c.host1x_driver_unregister" title="Permalink to this definition">¶</a></dt>
+<dd><p>unregister a host1x driver</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">host1x_driver</span> <span class="pre">*driver</span></code></dt><dd><p>host1x driver</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Unbinds the driver from each of the host1x logical devices that it is
+bound to, effectively removing the subsystem devices that they represent.</p>
+</div>
+<dl class="function">
+<dt id="c.__host1x_client_init">
+void <code class="sig-name descname">__host1x_client_init</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.host1x_client" title="host1x_client">host1x_client</a><em> *client</em>, struct lock_class_key<em> *key</em><span class="sig-paren">)</span><a class="headerlink" href="#c.__host1x_client_init" title="Permalink to this definition">¶</a></dt>
+<dd><p>initialize a host1x client</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">host1x_client</span> <span class="pre">*client</span></code></dt><dd><p>host1x client</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">lock_class_key</span> <span class="pre">*key</span></code></dt><dd><p>lock class key for the client-specific mutex</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.host1x_client_exit">
+void <code class="sig-name descname">host1x_client_exit</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.host1x_client" title="host1x_client">host1x_client</a><em> *client</em><span class="sig-paren">)</span><a class="headerlink" href="#c.host1x_client_exit" title="Permalink to this definition">¶</a></dt>
+<dd><p>uninitialize a host1x client</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">host1x_client</span> <span class="pre">*client</span></code></dt><dd><p>host1x client</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.__host1x_client_register">
+int <code class="sig-name descname">__host1x_client_register</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.host1x_client" title="host1x_client">host1x_client</a><em> *client</em><span class="sig-paren">)</span><a class="headerlink" href="#c.__host1x_client_register" title="Permalink to this definition">¶</a></dt>
+<dd><p>register a host1x client</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">host1x_client</span> <span class="pre">*client</span></code></dt><dd><p>host1x client</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Registers a host1x client with each host1x controller instance. Note that
+each client will only match their parent host1x controller and will only be
+associated with that instance. Once all clients have been registered with
+their parent host1x controller, the infrastructure will set up the logical
+device and call <a class="reference internal" href="#c.host1x_device_init" title="host1x_device_init"><code class="xref c c-func docutils literal notranslate"><span class="pre">host1x_device_init()</span></code></a>, which will in turn call each client’s
+<a class="reference internal" href="#c.host1x_client_ops" title="host1x_client_ops"><code class="xref c c-type docutils literal notranslate"><span class="pre">host1x_client_ops.init</span></code></a> implementation.</p>
+</div>
+<dl class="function">
+<dt id="c.host1x_client_unregister">
+int <code class="sig-name descname">host1x_client_unregister</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.host1x_client" title="host1x_client">host1x_client</a><em> *client</em><span class="sig-paren">)</span><a class="headerlink" href="#c.host1x_client_unregister" title="Permalink to this definition">¶</a></dt>
+<dd><p>unregister a host1x client</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">host1x_client</span> <span class="pre">*client</span></code></dt><dd><p>host1x client</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Removes a host1x client from its host1x controller instance. If a logical
+device has already been initialized, it will be torn down.</p>
+</div>
+</section>
+<section id="host1x-syncpoint-reference">
+<h3>Host1x Syncpoint Reference<a class="headerlink" href="#host1x-syncpoint-reference" title="Permalink to this headline">¶</a></h3>
+<dl class="function">
+<dt id="c.host1x_syncpt_alloc">
+struct host1x_syncpt * <code class="sig-name descname">host1x_syncpt_alloc</code><span class="sig-paren">(</span>struct host1x<em> *host</em>, unsigned long<em> flags</em>, const char<em> *name</em><span class="sig-paren">)</span><a class="headerlink" href="#c.host1x_syncpt_alloc" title="Permalink to this definition">¶</a></dt>
+<dd><p>allocate a syncpoint</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">host1x</span> <span class="pre">*host</span></code></dt><dd><p>host1x device data</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">flags</span></code></dt><dd><p>bitfield of HOST1X_SYNCPT_* flags</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*name</span></code></dt><dd><p>name for the syncpoint for use in debug prints</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Allocates a hardware syncpoint for the caller’s use. The caller then has
+the sole authority to mutate the syncpoint’s value until it is freed again.</p>
+<p>If no free syncpoints are available, or a NULL name was specified, returns
+NULL.</p>
+</div>
+<dl class="function">
+<dt id="c.host1x_syncpt_id">
+u32 <code class="sig-name descname">host1x_syncpt_id</code><span class="sig-paren">(</span>struct host1x_syncpt<em> *sp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.host1x_syncpt_id" title="Permalink to this definition">¶</a></dt>
+<dd><p>retrieve syncpoint ID</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">host1x_syncpt</span> <span class="pre">*sp</span></code></dt><dd><p>host1x syncpoint</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Given a pointer to a struct host1x_syncpt, retrieves its ID. This ID is
+often used as a value to program into registers that control how hardware
+blocks interact with syncpoints.</p>
+</div>
+<dl class="function">
+<dt id="c.host1x_syncpt_incr_max">
+u32 <code class="sig-name descname">host1x_syncpt_incr_max</code><span class="sig-paren">(</span>struct host1x_syncpt<em> *sp</em>, u32<em> incrs</em><span class="sig-paren">)</span><a class="headerlink" href="#c.host1x_syncpt_incr_max" title="Permalink to this definition">¶</a></dt>
+<dd><p>update the value sent to hardware</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">host1x_syncpt</span> <span class="pre">*sp</span></code></dt><dd><p>host1x syncpoint</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">u32</span> <span class="pre">incrs</span></code></dt><dd><p>number of increments</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.host1x_syncpt_incr">
+int <code class="sig-name descname">host1x_syncpt_incr</code><span class="sig-paren">(</span>struct host1x_syncpt<em> *sp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.host1x_syncpt_incr" title="Permalink to this definition">¶</a></dt>
+<dd><p>increment syncpoint value from CPU, updating cache</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">host1x_syncpt</span> <span class="pre">*sp</span></code></dt><dd><p>host1x syncpoint</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.host1x_syncpt_wait">
+int <code class="sig-name descname">host1x_syncpt_wait</code><span class="sig-paren">(</span>struct host1x_syncpt<em> *sp</em>, u32<em> thresh</em>, long<em> timeout</em>, u32<em> *value</em><span class="sig-paren">)</span><a class="headerlink" href="#c.host1x_syncpt_wait" title="Permalink to this definition">¶</a></dt>
+<dd><p>wait for a syncpoint to reach a given value</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">host1x_syncpt</span> <span class="pre">*sp</span></code></dt><dd><p>host1x syncpoint</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">u32</span> <span class="pre">thresh</span></code></dt><dd><p>threshold</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">long</span> <span class="pre">timeout</span></code></dt><dd><p>maximum time to wait for the syncpoint to reach the given value</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">u32</span> <span class="pre">*value</span></code></dt><dd><p>return location for the syncpoint value</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.host1x_syncpt_request">
+struct host1x_syncpt * <code class="sig-name descname">host1x_syncpt_request</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.host1x_client" title="host1x_client">host1x_client</a><em> *client</em>, unsigned long<em> flags</em><span class="sig-paren">)</span><a class="headerlink" href="#c.host1x_syncpt_request" title="Permalink to this definition">¶</a></dt>
+<dd><p>request a syncpoint</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">host1x_client</span> <span class="pre">*client</span></code></dt><dd><p>client requesting the syncpoint</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">flags</span></code></dt><dd><p>flags</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>host1x client drivers can use this function to allocate a syncpoint for
+subsequent use. A syncpoint returned by this function will be reserved for
+use by the client exclusively. When no longer using a syncpoint, a host1x
+client driver needs to release it using <a class="reference internal" href="#c.host1x_syncpt_put" title="host1x_syncpt_put"><code class="xref c c-func docutils literal notranslate"><span class="pre">host1x_syncpt_put()</span></code></a>.</p>
+</div>
+<dl class="function">
+<dt id="c.host1x_syncpt_put">
+void <code class="sig-name descname">host1x_syncpt_put</code><span class="sig-paren">(</span>struct host1x_syncpt<em> *sp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.host1x_syncpt_put" title="Permalink to this definition">¶</a></dt>
+<dd><p>free a requested syncpoint</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">host1x_syncpt</span> <span class="pre">*sp</span></code></dt><dd><p>host1x syncpoint</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Release a syncpoint previously allocated using <a class="reference internal" href="#c.host1x_syncpt_request" title="host1x_syncpt_request"><code class="xref c c-func docutils literal notranslate"><span class="pre">host1x_syncpt_request()</span></code></a>. A
+host1x client driver should call this when the syncpoint is no longer in
+use.</p>
+</div>
+<dl class="function">
+<dt id="c.host1x_syncpt_read_max">
+u32 <code class="sig-name descname">host1x_syncpt_read_max</code><span class="sig-paren">(</span>struct host1x_syncpt<em> *sp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.host1x_syncpt_read_max" title="Permalink to this definition">¶</a></dt>
+<dd><p>read maximum syncpoint value</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">host1x_syncpt</span> <span class="pre">*sp</span></code></dt><dd><p>host1x syncpoint</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>The maximum syncpoint value indicates how many operations there are in
+queue, either in channel or in a software thread.</p>
+</div>
+<dl class="function">
+<dt id="c.host1x_syncpt_read_min">
+u32 <code class="sig-name descname">host1x_syncpt_read_min</code><span class="sig-paren">(</span>struct host1x_syncpt<em> *sp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.host1x_syncpt_read_min" title="Permalink to this definition">¶</a></dt>
+<dd><p>read minimum syncpoint value</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">host1x_syncpt</span> <span class="pre">*sp</span></code></dt><dd><p>host1x syncpoint</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>The minimum syncpoint value is a shadow of the current sync point value in
+hardware.</p>
+</div>
+<dl class="function">
+<dt id="c.host1x_syncpt_read">
+u32 <code class="sig-name descname">host1x_syncpt_read</code><span class="sig-paren">(</span>struct host1x_syncpt<em> *sp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.host1x_syncpt_read" title="Permalink to this definition">¶</a></dt>
+<dd><p>read the current syncpoint value</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">host1x_syncpt</span> <span class="pre">*sp</span></code></dt><dd><p>host1x syncpoint</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.host1x_syncpt_get_by_id">
+struct host1x_syncpt * <code class="sig-name descname">host1x_syncpt_get_by_id</code><span class="sig-paren">(</span>struct host1x<em> *host</em>, unsigned int<em> id</em><span class="sig-paren">)</span><a class="headerlink" href="#c.host1x_syncpt_get_by_id" title="Permalink to this definition">¶</a></dt>
+<dd><p>obtain a syncpoint by ID</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">host1x</span> <span class="pre">*host</span></code></dt><dd><p>host1x controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">id</span></code></dt><dd><p>syncpoint ID</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.host1x_syncpt_get_by_id_noref">
+struct host1x_syncpt * <code class="sig-name descname">host1x_syncpt_get_by_id_noref</code><span class="sig-paren">(</span>struct host1x<em> *host</em>, unsigned int<em> id</em><span class="sig-paren">)</span><a class="headerlink" href="#c.host1x_syncpt_get_by_id_noref" title="Permalink to this definition">¶</a></dt>
+<dd><p>obtain a syncpoint by ID but don’t increase the refcount.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">host1x</span> <span class="pre">*host</span></code></dt><dd><p>host1x controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">id</span></code></dt><dd><p>syncpoint ID</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.host1x_syncpt_get">
+struct host1x_syncpt * <code class="sig-name descname">host1x_syncpt_get</code><span class="sig-paren">(</span>struct host1x_syncpt<em> *sp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.host1x_syncpt_get" title="Permalink to this definition">¶</a></dt>
+<dd><p>increment syncpoint refcount</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">host1x_syncpt</span> <span class="pre">*sp</span></code></dt><dd><p>syncpoint</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.host1x_syncpt_get_base">
+struct host1x_syncpt_base * <code class="sig-name descname">host1x_syncpt_get_base</code><span class="sig-paren">(</span>struct host1x_syncpt<em> *sp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.host1x_syncpt_get_base" title="Permalink to this definition">¶</a></dt>
+<dd><p>obtain the wait base associated with a syncpoint</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">host1x_syncpt</span> <span class="pre">*sp</span></code></dt><dd><p>host1x syncpoint</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.host1x_syncpt_base_id">
+u32 <code class="sig-name descname">host1x_syncpt_base_id</code><span class="sig-paren">(</span>struct host1x_syncpt_base<em> *base</em><span class="sig-paren">)</span><a class="headerlink" href="#c.host1x_syncpt_base_id" title="Permalink to this definition">¶</a></dt>
+<dd><p>retrieve the ID of a syncpoint wait base</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">host1x_syncpt_base</span> <span class="pre">*base</span></code></dt><dd><p>host1x syncpoint wait base</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.host1x_syncpt_release_vblank_reservation">
+void <code class="sig-name descname">host1x_syncpt_release_vblank_reservation</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.host1x_client" title="host1x_client">host1x_client</a><em> *client</em>, u32<em> syncpt_id</em><span class="sig-paren">)</span><a class="headerlink" href="#c.host1x_syncpt_release_vblank_reservation" title="Permalink to this definition">¶</a></dt>
+<dd><p>Make VBLANK syncpoint available for allocation</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">host1x_client</span> <span class="pre">*client</span></code></dt><dd><p>host1x bus client</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">u32</span> <span class="pre">syncpt_id</span></code></dt><dd><p>syncpoint ID to make available</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Makes VBLANK&lt;i&gt; syncpoint available for allocatation if it was
+reserved at initialization time. This should be called by the display
+driver after it has ensured that any VBLANK increment programming configured
+by the boot chain has been disabled.</p>
+</div>
+</section>
+</section>
+<section id="kms-driver">
+<h2>KMS driver<a class="headerlink" href="#kms-driver" title="Permalink to this headline">¶</a></h2>
+<p>The display hardware has remained mostly backwards compatible over the various
+Tegra SoC generations, up until Tegra186 which introduces several changes that
+make it difficult to support with a parameterized driver.</p>
+<section id="display-controllers">
+<h3>Display Controllers<a class="headerlink" href="#display-controllers" title="Permalink to this headline">¶</a></h3>
+<p>Tegra SoCs have two display controllers, each of which can be associated with
+zero or more outputs. Outputs can also share a single display controller, but
+only if they run with compatible display timings. Two display controllers can
+also share a single framebuffer, allowing cloned configurations even if modes
+on two outputs don’t match. A display controller is modelled as a CRTC in KMS
+terms.</p>
+<p>On Tegra186, the number of display controllers has been increased to three. A
+display controller can no longer drive all of the outputs. While two of these
+controllers can drive both DSI outputs and both SOR outputs, the third cannot
+drive any DSI.</p>
+<section id="windows">
+<h4>Windows<a class="headerlink" href="#windows" title="Permalink to this headline">¶</a></h4>
+<p>A display controller controls a set of windows that can be used to composite
+multiple buffers onto the screen. While it is possible to assign arbitrary Z
+ordering to individual windows (by programming the corresponding blending
+registers), this is currently not supported by the driver. Instead, it will
+assume a fixed Z ordering of the windows (window A is the root window, that
+is, the lowest, while windows B and C are overlaid on top of window A). The
+overlay windows support multiple pixel formats and can automatically convert
+from YUV to RGB at scanout time. This makes them useful for displaying video
+content. In KMS, each window is modelled as a plane. Each display controller
+has a hardware cursor that is exposed as a cursor plane.</p>
+</section>
+</section>
+<section id="outputs">
+<h3>Outputs<a class="headerlink" href="#outputs" title="Permalink to this headline">¶</a></h3>
+<p>The type and number of supported outputs varies between Tegra SoC generations.
+All generations support at least HDMI. While earlier generations supported the
+very simple RGB interfaces (one per display controller), recent generations no
+longer do and instead provide standard interfaces such as DSI and eDP/DP.</p>
+<p>Outputs are modelled as a composite encoder/connector pair.</p>
+<section id="rgb-lvds">
+<h4>RGB/LVDS<a class="headerlink" href="#rgb-lvds" title="Permalink to this headline">¶</a></h4>
+<p>This interface is no longer available since Tegra124. It has been replaced by
+the more standard DSI and eDP interfaces.</p>
+</section>
+<section id="hdmi">
+<h4>HDMI<a class="headerlink" href="#hdmi" title="Permalink to this headline">¶</a></h4>
+<p>HDMI is supported on all Tegra SoCs. Starting with Tegra210, HDMI is provided
+by the versatile SOR output, which supports eDP, DP and HDMI. The SOR is able
+to support HDMI 2.0, though support for this is currently not merged.</p>
+</section>
+<section id="dsi">
+<h4>DSI<a class="headerlink" href="#dsi" title="Permalink to this headline">¶</a></h4>
+<p>Although Tegra has supported DSI since Tegra30, the controller has changed in
+several ways in Tegra114. Since none of the publicly available development
+boards prior to Dalmore (Tegra114) have made use of DSI, only Tegra114 and
+later are supported by the drm/tegra driver.</p>
+</section>
+<section id="edp-dp">
+<h4>eDP/DP<a class="headerlink" href="#edp-dp" title="Permalink to this headline">¶</a></h4>
+<p>eDP was first introduced in Tegra124 where it was used to drive the display
+panel for notebook form factors. Tegra210 added support for full DisplayPort
+support, though this is currently not implemented in the drm/tegra driver.</p>
+</section>
+</section>
+</section>
+<section id="userspace-interface">
+<h2>Userspace Interface<a class="headerlink" href="#userspace-interface" title="Permalink to this headline">¶</a></h2>
+<p>The userspace interface provided by drm/tegra allows applications to create
+GEM buffers, access and control syncpoints as well as submit command streams
+to host1x.</p>
+<section id="gem-buffers">
+<h3>GEM Buffers<a class="headerlink" href="#gem-buffers" title="Permalink to this headline">¶</a></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">DRM_IOCTL_TEGRA_GEM_CREATE</span></code> IOCTL is used to create a GEM buffer object
+with Tegra-specific flags. This is useful for buffers that should be tiled, or
+that are to be scanned out upside down (useful for 3D content).</p>
+<p>After a GEM buffer object has been created, its memory can be mapped by an
+application using the mmap offset returned by the <code class="docutils literal notranslate"><span class="pre">DRM_IOCTL_TEGRA_GEM_MMAP</span></code>
+IOCTL.</p>
+</section>
+<section id="syncpoints">
+<h3>Syncpoints<a class="headerlink" href="#syncpoints" title="Permalink to this headline">¶</a></h3>
+<p>The current value of a syncpoint can be obtained by executing the
+<code class="docutils literal notranslate"><span class="pre">DRM_IOCTL_TEGRA_SYNCPT_READ</span></code> IOCTL. Incrementing the syncpoint is achieved
+using the <code class="docutils literal notranslate"><span class="pre">DRM_IOCTL_TEGRA_SYNCPT_INCR</span></code> IOCTL.</p>
+<p>Userspace can also request blocking on a syncpoint. To do so, it needs to
+execute the <code class="docutils literal notranslate"><span class="pre">DRM_IOCTL_TEGRA_SYNCPT_WAIT</span></code> IOCTL, specifying the value of
+the syncpoint to wait for. The kernel will release the application when the
+syncpoint reaches that value or after a specified timeout.</p>
+</section>
+<section id="command-stream-submission">
+<h3>Command Stream Submission<a class="headerlink" href="#command-stream-submission" title="Permalink to this headline">¶</a></h3>
+<p>Before an application can submit command streams to host1x it needs to open a
+channel to an engine using the <code class="docutils literal notranslate"><span class="pre">DRM_IOCTL_TEGRA_OPEN_CHANNEL</span></code> IOCTL. Client
+IDs are used to identify the target of the channel. When a channel is no
+longer needed, it can be closed using the <code class="docutils literal notranslate"><span class="pre">DRM_IOCTL_TEGRA_CLOSE_CHANNEL</span></code>
+IOCTL. To retrieve the syncpoint associated with a channel, an application
+can use the <code class="docutils literal notranslate"><span class="pre">DRM_IOCTL_TEGRA_GET_SYNCPT</span></code>.</p>
+<p>After opening a channel, submitting command streams is easy. The application
+writes commands into the memory backing a GEM buffer object and passes these
+to the <code class="docutils literal notranslate"><span class="pre">DRM_IOCTL_TEGRA_SUBMIT</span></code> IOCTL along with various other parameters,
+such as the syncpoints or relocations used in the job submission.</p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">drm/tegra NVIDIA Tegra GPU and display driver</a><ul>
+<li><a class="reference internal" href="#driver-infrastructure">Driver Infrastructure</a><ul>
+<li><a class="reference internal" href="#host1x-infrastructure-reference">Host1x Infrastructure Reference</a></li>
+<li><a class="reference internal" href="#host1x-syncpoint-reference">Host1x Syncpoint Reference</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#kms-driver">KMS driver</a><ul>
+<li><a class="reference internal" href="#display-controllers">Display Controllers</a><ul>
+<li><a class="reference internal" href="#windows">Windows</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#outputs">Outputs</a><ul>
+<li><a class="reference internal" href="#rgb-lvds">RGB/LVDS</a></li>
+<li><a class="reference internal" href="#hdmi">HDMI</a></li>
+<li><a class="reference internal" href="#dsi">DSI</a></li>
+<li><a class="reference internal" href="#edp-dp">eDP/DP</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#userspace-interface">Userspace Interface</a><ul>
+<li><a class="reference internal" href="#gem-buffers">GEM Buffers</a></li>
+<li><a class="reference internal" href="#syncpoints">Syncpoints</a></li>
+<li><a class="reference internal" href="#command-stream-submission">Command Stream Submission</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/gpu/tegra.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/gpu/tegra.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

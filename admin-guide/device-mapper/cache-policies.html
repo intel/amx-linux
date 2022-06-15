@@ -1,0 +1,223 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Guidance for writing policies &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Cache" href="cache.html" />
+    <link rel="prev" title="Device Mapper" href="index.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="guidance-for-writing-policies">
+<h1>Guidance for writing policies<a class="headerlink" href="#guidance-for-writing-policies" title="Permalink to this headline">¶</a></h1>
+<p>Try to keep transactionality out of it.  The core is careful to
+avoid asking about anything that is migrating.  This is a pain, but
+makes it easier to write the policies.</p>
+<p>Mappings are loaded into the policy at construction time.</p>
+<p>Every bio that is mapped by the target is referred to the policy.
+The policy can return a simple HIT or MISS or issue a migration.</p>
+<p>Currently there’s no way for the policy to issue background work,
+e.g. to start writing back dirty blocks that are going to be evicted
+soon.</p>
+<p>Because we map bios, rather than requests it’s easy for the policy
+to get fooled by many small bios.  For this reason the core target
+issues periodic ticks to the policy.  It’s suggested that the policy
+doesn’t update states (eg, hit counts) for a block more than once
+for each tick.  The core ticks by watching bios complete, and so
+trying to see when the io scheduler has let the ios run.</p>
+<section id="overview-of-supplied-cache-replacement-policies">
+<h2>Overview of supplied cache replacement policies<a class="headerlink" href="#overview-of-supplied-cache-replacement-policies" title="Permalink to this headline">¶</a></h2>
+<section id="multiqueue-mq">
+<h3>multiqueue (mq)<a class="headerlink" href="#multiqueue-mq" title="Permalink to this headline">¶</a></h3>
+<p>This policy is now an alias for smq (see below).</p>
+<p>The following tunables are accepted, but have no effect:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>&#39;sequential_threshold &lt;#nr_sequential_ios&gt;&#39;
+&#39;random_threshold &lt;#nr_random_ios&gt;&#39;
+&#39;read_promote_adjustment &lt;value&gt;&#39;
+&#39;write_promote_adjustment &lt;value&gt;&#39;
+&#39;discard_promote_adjustment &lt;value&gt;&#39;
+</pre></div>
+</div>
+</section>
+<section id="stochastic-multiqueue-smq">
+<h3>Stochastic multiqueue (smq)<a class="headerlink" href="#stochastic-multiqueue-smq" title="Permalink to this headline">¶</a></h3>
+<p>This policy is the default.</p>
+<p>The stochastic multi-queue (smq) policy addresses some of the problems
+with the multiqueue (mq) policy.</p>
+<p>The smq policy (vs mq) offers the promise of less memory utilization,
+improved performance and increased adaptability in the face of changing
+workloads.  smq also does not have any cumbersome tuning knobs.</p>
+<p>Users may switch from “mq” to “smq” simply by appropriately reloading a
+DM table that is using the cache target.  Doing so will cause all of the
+mq policy’s hints to be dropped.  Also, performance of the cache may
+degrade slightly until smq recalculates the origin device’s hotspots
+that should be cached.</p>
+<section id="memory-usage">
+<h4>Memory usage<a class="headerlink" href="#memory-usage" title="Permalink to this headline">¶</a></h4>
+<p>The mq policy used a lot of memory; 88 bytes per cache block on a 64
+bit machine.</p>
+<p>smq uses 28bit indexes to implement its data structures rather than
+pointers.  It avoids storing an explicit hit count for each block.  It
+has a ‘hotspot’ queue, rather than a pre-cache, which uses a quarter of
+the entries (each hotspot block covers a larger area than a single
+cache block).</p>
+<p>All this means smq uses ~25bytes per cache block.  Still a lot of
+memory, but a substantial improvement nontheless.</p>
+</section>
+<section id="level-balancing">
+<h4>Level balancing<a class="headerlink" href="#level-balancing" title="Permalink to this headline">¶</a></h4>
+<p>mq placed entries in different levels of the multiqueue structures
+based on their hit count (~ln(hit count)).  This meant the bottom
+levels generally had the most entries, and the top ones had very
+few.  Having unbalanced levels like this reduced the efficacy of the
+multiqueue.</p>
+<p>smq does not maintain a hit count, instead it swaps hit entries with
+the least recently used entry from the level above.  The overall
+ordering being a side effect of this stochastic process.  With this
+scheme we can decide how many entries occupy each multiqueue level,
+resulting in better promotion/demotion decisions.</p>
+<p>Adaptability:
+The mq policy maintained a hit count for each cache block.  For a
+different block to get promoted to the cache its hit count has to
+exceed the lowest currently in the cache.  This meant it could take a
+long time for the cache to adapt between varying IO patterns.</p>
+<p>smq doesn’t maintain hit counts, so a lot of this problem just goes
+away.  In addition it tracks performance of the hotspot queue, which
+is used to decide which blocks to promote.  If the hotspot queue is
+performing badly then it starts moving entries more quickly between
+levels.  This lets it adapt to new IO patterns very quickly.</p>
+</section>
+<section id="performance">
+<h4>Performance<a class="headerlink" href="#performance" title="Permalink to this headline">¶</a></h4>
+<p>Testing smq shows substantially better performance than mq.</p>
+</section>
+</section>
+<section id="cleaner">
+<h3>cleaner<a class="headerlink" href="#cleaner" title="Permalink to this headline">¶</a></h3>
+<p>The cleaner writes back all dirty blocks in a cache to decommission it.</p>
+</section>
+</section>
+<section id="examples">
+<h2>Examples<a class="headerlink" href="#examples" title="Permalink to this headline">¶</a></h2>
+<p>The syntax for a table is:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>cache &lt;metadata dev&gt; &lt;cache dev&gt; &lt;origin dev&gt; &lt;block size&gt;
+&lt;#feature_args&gt; [&lt;feature arg&gt;]*
+&lt;policy&gt; &lt;#policy_args&gt; [&lt;policy arg&gt;]*
+</pre></div>
+</div>
+<p>The syntax to send a message using the dmsetup command is:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>dmsetup message &lt;mapped device&gt; 0 sequential_threshold 1024
+dmsetup message &lt;mapped device&gt; 0 random_threshold 8
+</pre></div>
+</div>
+<p>Using dmsetup:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>dmsetup create blah --table &quot;0 268435456 cache /dev/sdb /dev/sdc \
+    /dev/sdd 512 0 mq 4 sequential_threshold 1024 random_threshold 8&quot;
+creates a 128GB large mapped device named &#39;blah&#39; with the
+sequential threshold set to 1024 and the random_threshold set to 8.
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Guidance for writing policies</a><ul>
+<li><a class="reference internal" href="#overview-of-supplied-cache-replacement-policies">Overview of supplied cache replacement policies</a><ul>
+<li><a class="reference internal" href="#multiqueue-mq">multiqueue (mq)</a></li>
+<li><a class="reference internal" href="#stochastic-multiqueue-smq">Stochastic multiqueue (smq)</a><ul>
+<li><a class="reference internal" href="#memory-usage">Memory usage</a></li>
+<li><a class="reference internal" href="#level-balancing">Level balancing</a></li>
+<li><a class="reference internal" href="#performance">Performance</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#cleaner">cleaner</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#examples">Examples</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/admin-guide/device-mapper/cache-policies.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/admin-guide/device-mapper/cache-policies.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

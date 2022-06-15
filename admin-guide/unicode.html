@@ -1,0 +1,409 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Unicode support &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Software cursor for VGA" href="vga-softcursor.html" />
+    <link rel="prev" title="Using UFS" href="ufs.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="unicode-support">
+<h1>Unicode support<a class="headerlink" href="#unicode-support" title="Permalink to this headline">¶</a></h1>
+<blockquote>
+<div><p>Last update: 2005-01-17, version 1.4</p>
+</div></blockquote>
+<p>This file is maintained by H. Peter Anvin &lt;<a class="reference external" href="mailto:unicode&#37;&#52;&#48;lanana&#46;org">unicode<span>&#64;</span>lanana<span>&#46;</span>org</a>&gt; as part
+of the Linux Assigned Names And Numbers Authority (LANANA) project.
+The current version can be found at:</p>
+<blockquote>
+<div><p><a class="reference external" href="http://www.lanana.org/docs/unicode/admin-guide/unicode.rst">http://www.lanana.org/docs/unicode/admin-guide/unicode.rst</a></p>
+</div></blockquote>
+<section id="introduction">
+<h2>Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>The Linux kernel code has been rewritten to use Unicode to map
+characters to fonts.  By downloading a single Unicode-to-font table,
+both the eight-bit character sets and UTF-8 mode are changed to use
+the font as indicated.</p>
+<p>This changes the semantics of the eight-bit character tables subtly.
+The four character tables are now:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 24%" />
+<col style="width: 50%" />
+<col style="width: 26%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Map symbol</p></th>
+<th class="head"><p>Map name</p></th>
+<th class="head"><p>Escape code (G0)</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>LAT1_MAP</p></td>
+<td><p>Latin-1 (ISO 8859-1)</p></td>
+<td><p>ESC ( B</p></td>
+</tr>
+<tr class="row-odd"><td><p>GRAF_MAP</p></td>
+<td><p>DEC VT100 pseudographics</p></td>
+<td><p>ESC ( 0</p></td>
+</tr>
+<tr class="row-even"><td><p>IBMPC_MAP</p></td>
+<td><p>IBM code page 437</p></td>
+<td><p>ESC ( U</p></td>
+</tr>
+<tr class="row-odd"><td><p>USER_MAP</p></td>
+<td><p>User defined</p></td>
+<td><p>ESC ( K</p></td>
+</tr>
+</tbody>
+</table>
+<p>In particular, ESC ( U is no longer “straight to font”, since the font
+might be completely different than the IBM character set.  This
+permits for example the use of block graphics even with a Latin-1 font
+loaded.</p>
+<p>Note that although these codes are similar to ISO 2022, neither the
+codes nor their uses match ISO 2022; Linux has two 8-bit codes (G0 and
+G1), whereas ISO 2022 has four 7-bit codes (G0-G3).</p>
+<p>In accordance with the Unicode standard/ISO 10646 the range U+F000 to
+U+F8FF has been reserved for OS-wide allocation (the Unicode Standard
+refers to this as a “Corporate Zone”, since this is inaccurate for
+Linux we call it the “Linux Zone”).  U+F000 was picked as the starting
+point since it lets the direct-mapping area start on a large power of
+two (in case 1024- or 2048-character fonts ever become necessary).
+This leaves U+E000 to U+EFFF as End User Zone.</p>
+<p>[v1.2]: The Unicodes range from U+F000 and up to U+F7FF have been
+hard-coded to map directly to the loaded font, bypassing the
+translation table.  The user-defined map now defaults to U+F000 to
+U+F0FF, emulating the previous behaviour.  In practice, this range
+might be shorter; for example, vgacon can only handle 256-character
+(U+F000..U+F0FF) or 512-character (U+F000..U+F1FF) fonts.</p>
+</section>
+<section id="actual-characters-assigned-in-the-linux-zone">
+<h2>Actual characters assigned in the Linux Zone<a class="headerlink" href="#actual-characters-assigned-in-the-linux-zone" title="Permalink to this headline">¶</a></h2>
+<p>In addition, the following characters not present in Unicode 1.1.4
+have been defined; these are used by the DEC VT graphics map.  [v1.2]
+THIS USE IS OBSOLETE AND SHOULD NO LONGER BE USED; PLEASE SEE BELOW.</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 14%" />
+<col style="width: 86%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>U+F800</p></td>
+<td><p>DEC VT GRAPHICS HORIZONTAL LINE SCAN 1</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F801</p></td>
+<td><p>DEC VT GRAPHICS HORIZONTAL LINE SCAN 3</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F803</p></td>
+<td><p>DEC VT GRAPHICS HORIZONTAL LINE SCAN 7</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F804</p></td>
+<td><p>DEC VT GRAPHICS HORIZONTAL LINE SCAN 9</p></td>
+</tr>
+</tbody>
+</table>
+<p>The DEC VT220 uses a 6x10 character matrix, and these characters form
+a smooth progression in the DEC VT graphics character set.  I have
+omitted the scan 5 line, since it is also used as a block-graphics
+character, and hence has been coded as U+2500 FORMS LIGHT HORIZONTAL.</p>
+<p>[v1.3]: These characters have been officially added to Unicode 3.2.0;
+they are added at U+23BA, U+23BB, U+23BC, U+23BD.  Linux now uses the
+new values.</p>
+<p>[v1.2]: The following characters have been added to represent common
+keyboard symbols that are unlikely to ever be added to Unicode proper
+since they are horribly vendor-specific.  This, of course, is an
+excellent example of horrible design.</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 14%" />
+<col style="width: 86%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>U+F810</p></td>
+<td><p>KEYBOARD SYMBOL FLYING FLAG</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F811</p></td>
+<td><p>KEYBOARD SYMBOL PULLDOWN MENU</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F812</p></td>
+<td><p>KEYBOARD SYMBOL OPEN APPLE</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F813</p></td>
+<td><p>KEYBOARD SYMBOL SOLID APPLE</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="klingon-language-support">
+<h2>Klingon language support<a class="headerlink" href="#klingon-language-support" title="Permalink to this headline">¶</a></h2>
+<p>In 1996, Linux was the first operating system in the world to add
+support for the artificial language Klingon, created by Marc Okrand
+for the “Star Trek” television series.  This encoding was later
+adopted by the ConScript Unicode Registry and proposed (but ultimately
+rejected) for inclusion in Unicode Plane 1.  Thus, it remains as a
+Linux/CSUR private assignment in the Linux Zone.</p>
+<p>This encoding has been endorsed by the Klingon Language Institute.
+For more information, contact them at:</p>
+<blockquote>
+<div><p><a class="reference external" href="http://www.kli.org/">http://www.kli.org/</a></p>
+</div></blockquote>
+<p>Since the characters in the beginning of the Linux CZ have been more
+of the dingbats/symbols/forms type and this is a language, I have
+located it at the end, on a 16-cell boundary in keeping with standard
+Unicode practice.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>This range is now officially managed by the ConScript Unicode
+Registry.  The normative reference is at:</p>
+<blockquote>
+<div><p><a class="reference external" href="https://www.evertype.com/standards/csur/klingon.html">https://www.evertype.com/standards/csur/klingon.html</a></p>
+</div></blockquote>
+</div>
+<p>Klingon has an alphabet of 26 characters, a positional numeric writing
+system with 10 digits, and is written left-to-right, top-to-bottom.</p>
+<p>Several glyph forms for the Klingon alphabet have been proposed.
+However, since the set of symbols appear to be consistent throughout,
+with only the actual shapes being different, in keeping with standard
+Unicode practice these differences are considered font variants.</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>U+F8D0</p></td>
+<td><p>KLINGON LETTER A</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8D1</p></td>
+<td><p>KLINGON LETTER B</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8D2</p></td>
+<td><p>KLINGON LETTER CH</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8D3</p></td>
+<td><p>KLINGON LETTER D</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8D4</p></td>
+<td><p>KLINGON LETTER E</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8D5</p></td>
+<td><p>KLINGON LETTER GH</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8D6</p></td>
+<td><p>KLINGON LETTER H</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8D7</p></td>
+<td><p>KLINGON LETTER I</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8D8</p></td>
+<td><p>KLINGON LETTER J</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8D9</p></td>
+<td><p>KLINGON LETTER L</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8DA</p></td>
+<td><p>KLINGON LETTER M</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8DB</p></td>
+<td><p>KLINGON LETTER N</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8DC</p></td>
+<td><p>KLINGON LETTER NG</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8DD</p></td>
+<td><p>KLINGON LETTER O</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8DE</p></td>
+<td><p>KLINGON LETTER P</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8DF</p></td>
+<td><p>KLINGON LETTER Q
+- Written &lt;q&gt; in standard Okrand Latin transliteration</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8E0</p></td>
+<td><p>KLINGON LETTER QH
+- Written &lt;Q&gt; in standard Okrand Latin transliteration</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8E1</p></td>
+<td><p>KLINGON LETTER R</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8E2</p></td>
+<td><p>KLINGON LETTER S</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8E3</p></td>
+<td><p>KLINGON LETTER T</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8E4</p></td>
+<td><p>KLINGON LETTER TLH</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8E5</p></td>
+<td><p>KLINGON LETTER U</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8E6</p></td>
+<td><p>KLINGON LETTER V</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8E7</p></td>
+<td><p>KLINGON LETTER W</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8E8</p></td>
+<td><p>KLINGON LETTER Y</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8E9</p></td>
+<td><p>KLINGON LETTER GLOTTAL STOP</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8F0</p></td>
+<td><p>KLINGON DIGIT ZERO</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8F1</p></td>
+<td><p>KLINGON DIGIT ONE</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8F2</p></td>
+<td><p>KLINGON DIGIT TWO</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8F3</p></td>
+<td><p>KLINGON DIGIT THREE</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8F4</p></td>
+<td><p>KLINGON DIGIT FOUR</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8F5</p></td>
+<td><p>KLINGON DIGIT FIVE</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8F6</p></td>
+<td><p>KLINGON DIGIT SIX</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8F7</p></td>
+<td><p>KLINGON DIGIT SEVEN</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8F8</p></td>
+<td><p>KLINGON DIGIT EIGHT</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8F9</p></td>
+<td><p>KLINGON DIGIT NINE</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8FD</p></td>
+<td><p>KLINGON COMMA</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8FE</p></td>
+<td><p>KLINGON FULL STOP</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8FF</p></td>
+<td><p>KLINGON SYMBOL FOR EMPIRE</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="other-fictional-and-artificial-scripts">
+<h2>Other Fictional and Artificial Scripts<a class="headerlink" href="#other-fictional-and-artificial-scripts" title="Permalink to this headline">¶</a></h2>
+<p>Since the assignment of the Klingon Linux Unicode block, a registry of
+fictional and artificial scripts has been established by John Cowan
+&lt;<a class="reference external" href="mailto:jcowan&#37;&#52;&#48;reutershealth&#46;com">jcowan<span>&#64;</span>reutershealth<span>&#46;</span>com</a>&gt; and Michael Everson &lt;<a class="reference external" href="mailto:everson&#37;&#52;&#48;evertype&#46;com">everson<span>&#64;</span>evertype<span>&#46;</span>com</a>&gt;.
+The ConScript Unicode Registry is accessible at:</p>
+<blockquote>
+<div><p><a class="reference external" href="https://www.evertype.com/standards/csur/">https://www.evertype.com/standards/csur/</a></p>
+</div></blockquote>
+<p>The ranges used fall at the low end of the End User Zone and can hence
+not be normatively assigned, but it is recommended that people who
+wish to encode fictional scripts use these codes, in the interest of
+interoperability.  For Klingon, CSUR has adopted the Linux encoding.
+The CSUR people are driving adding Tengwar and Cirth into Unicode
+Plane 1; the addition of Klingon to Unicode Plane 1 has been rejected
+and so the above encoding remains official.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Unicode support</a><ul>
+<li><a class="reference internal" href="#introduction">Introduction</a></li>
+<li><a class="reference internal" href="#actual-characters-assigned-in-the-linux-zone">Actual characters assigned in the Linux Zone</a></li>
+<li><a class="reference internal" href="#klingon-language-support">Klingon language support</a></li>
+<li><a class="reference internal" href="#other-fictional-and-artificial-scripts">Other Fictional and Artificial Scripts</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/admin-guide/unicode.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/admin-guide/unicode.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

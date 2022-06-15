@@ -1,0 +1,172 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Automatically bind swap device to numa node &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Transparent Hugepage Support" href="transhuge.html" />
+    <link rel="prev" title="Soft-Dirty PTEs" href="soft-dirty.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="automatically-bind-swap-device-to-numa-node">
+<span id="swap-numa"></span><h1>Automatically bind swap device to numa node<a class="headerlink" href="#automatically-bind-swap-device-to-numa-node" title="Permalink to this headline">¶</a></h1>
+<p>If the system has more than one swap device and swap device has the node
+information, we can make use of this information to decide which swap
+device to use in get_swap_pages() to get better performance.</p>
+<section id="how-to-use-this-feature">
+<h2>How to use this feature<a class="headerlink" href="#how-to-use-this-feature" title="Permalink to this headline">¶</a></h2>
+<p>Swap device has priority and that decides the order of it to be used. To make
+use of automatically binding, there is no need to manipulate priority settings
+for swap devices. e.g. on a 2 node machine, assume 2 swap devices swapA and
+swapB, with swapA attached to node 0 and swapB attached to node 1, are going
+to be swapped on. Simply swapping them on by doing:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># swapon /dev/swapA
+# swapon /dev/swapB
+</pre></div>
+</div>
+<p>Then node 0 will use the two swap devices in the order of swapA then swapB and
+node 1 will use the two swap devices in the order of swapB then swapA. Note
+that the order of them being swapped on doesn’t matter.</p>
+<p>A more complex example on a 4 node machine. Assume 6 swap devices are going to
+be swapped on: swapA and swapB are attached to node 0, swapC is attached to
+node 1, swapD and swapE are attached to node 2 and swapF is attached to node3.
+The way to swap them on is the same as above:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># swapon /dev/swapA
+# swapon /dev/swapB
+# swapon /dev/swapC
+# swapon /dev/swapD
+# swapon /dev/swapE
+# swapon /dev/swapF
+</pre></div>
+</div>
+<p>Then node 0 will use them in the order of:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>swapA/swapB -&gt; swapC -&gt; swapD -&gt; swapE -&gt; swapF
+</pre></div>
+</div>
+<p>swapA and swapB will be used in a round robin mode before any other swap device.</p>
+<p>node 1 will use them in the order of:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>swapC -&gt; swapA -&gt; swapB -&gt; swapD -&gt; swapE -&gt; swapF
+</pre></div>
+</div>
+<p>node 2 will use them in the order of:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>swapD/swapE -&gt; swapA -&gt; swapB -&gt; swapC -&gt; swapF
+</pre></div>
+</div>
+<p>Similaly, swapD and swapE will be used in a round robin mode before any
+other swap devices.</p>
+<p>node 3 will use them in the order of:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>swapF -&gt; swapA -&gt; swapB -&gt; swapC -&gt; swapD -&gt; swapE
+</pre></div>
+</div>
+</section>
+<section id="implementation-details">
+<h2>Implementation details<a class="headerlink" href="#implementation-details" title="Permalink to this headline">¶</a></h2>
+<p>The current code uses a priority based list, swap_avail_list, to decide
+which swap device to use and if multiple swap devices share the same
+priority, they are used round robin. This change here replaces the single
+global swap_avail_list with a per-numa-node list, i.e. for each numa node,
+it sees its own priority based list of available swap devices. Swap
+device’s priority can be promoted on its matching node’s swap_avail_list.</p>
+<p>The current swap device’s priority is set as: user can set a &gt;=0 value,
+or the system will pick one starting from -1 then downwards. The priority
+value in the swap_avail_list is the negated value of the swap device’s
+due to plist being sorted from low to high. The new policy doesn’t change
+the semantics for priority &gt;=0 cases, the previous starting from -1 then
+downwards now becomes starting from -2 then downwards and -1 is reserved
+as the promoted value. So if multiple swap devices are attached to the same
+node, they will all be promoted to priority -1 on that node’s plist and will
+be used round robin before any other swap devices.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Automatically bind swap device to numa node</a><ul>
+<li><a class="reference internal" href="#how-to-use-this-feature">How to use this feature</a></li>
+<li><a class="reference internal" href="#implementation-details">Implementation details</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/admin-guide/mm/swap_numa.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/admin-guide/mm/swap_numa.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

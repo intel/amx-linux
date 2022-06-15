@@ -1,0 +1,248 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Asymmetric 32-bit SoCs &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Booting AArch64 Linux" href="booting.html" />
+    <link rel="prev" title="ACPI on ARMv8 Servers" href="arm-acpi.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="asymmetric-32-bit-socs">
+<h1>Asymmetric 32-bit SoCs<a class="headerlink" href="#asymmetric-32-bit-socs" title="Permalink to this headline">¶</a></h1>
+<p>Author: Will Deacon &lt;<a class="reference external" href="mailto:will&#37;&#52;&#48;kernel&#46;org">will<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;</p>
+<p>This document describes the impact of asymmetric 32-bit SoCs on the
+execution of 32-bit (<code class="docutils literal notranslate"><span class="pre">AArch32</span></code>) applications.</p>
+<p>Date: 2021-05-17</p>
+<section id="introduction">
+<h2>Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>Some Armv9 SoCs suffer from a big.LITTLE misfeature where only a subset
+of the CPUs are capable of executing 32-bit user applications. On such
+a system, Linux by default treats the asymmetry as a “mismatch” and
+disables support for both the <code class="docutils literal notranslate"><span class="pre">PER_LINUX32</span></code> personality and
+<code class="docutils literal notranslate"><span class="pre">execve(2)</span></code> of 32-bit ELF binaries, with the latter returning
+<code class="docutils literal notranslate"><span class="pre">-ENOEXEC</span></code>. If the mismatch is detected during late onlining of a
+64-bit-only CPU, then the onlining operation fails and the new CPU is
+unavailable for scheduling.</p>
+<p>Surprisingly, these SoCs have been produced with the intention of
+running legacy 32-bit binaries. Unsurprisingly, that doesn’t work very
+well with the default behaviour of Linux.</p>
+<p>It seems inevitable that future SoCs will drop 32-bit support
+altogether, so if you’re stuck in the unenviable position of needing to
+run 32-bit code on one of these transitionary platforms then you would
+be wise to consider alternatives such as recompilation, emulation or
+retirement. If neither of those options are practical, then read on.</p>
+</section>
+<section id="enabling-kernel-support">
+<h2>Enabling kernel support<a class="headerlink" href="#enabling-kernel-support" title="Permalink to this headline">¶</a></h2>
+<p>Since the kernel support is not completely transparent to userspace,
+allowing 32-bit tasks to run on an asymmetric 32-bit system requires an
+explicit “opt-in” and can be enabled by passing the
+<code class="docutils literal notranslate"><span class="pre">allow_mismatched_32bit_el0</span></code> parameter on the kernel command-line.</p>
+<p>For the remainder of this document we will refer to an <em>asymmetric
+system</em> to mean an asymmetric 32-bit SoC running Linux with this kernel
+command-line option enabled.</p>
+</section>
+<section id="userspace-impact">
+<h2>Userspace impact<a class="headerlink" href="#userspace-impact" title="Permalink to this headline">¶</a></h2>
+<p>32-bit tasks running on an asymmetric system behave in mostly the same
+way as on a homogeneous system, with a few key differences relating to
+CPU affinity.</p>
+<section id="sysfs">
+<h3>sysfs<a class="headerlink" href="#sysfs" title="Permalink to this headline">¶</a></h3>
+<p>The subset of CPUs capable of running 32-bit tasks is described in
+<code class="docutils literal notranslate"><span class="pre">/sys/devices/system/cpu/aarch32_el0</span></code> and is documented further in
+<code class="docutils literal notranslate"><span class="pre">Documentation/ABI/testing/sysfs-devices-system-cpu</span></code>.</p>
+<p><strong>Note:</strong> CPUs are advertised by this file as they are detected and so
+late-onlining of 32-bit-capable CPUs can result in the file contents
+being modified by the kernel at runtime. Once advertised, CPUs are never
+removed from the file.</p>
+</section>
+<section id="execve-2">
+<h3><code class="docutils literal notranslate"><span class="pre">execve(2)</span></code><a class="headerlink" href="#execve-2" title="Permalink to this headline">¶</a></h3>
+<p>On a homogeneous system, the CPU affinity of a task is preserved across
+<code class="docutils literal notranslate"><span class="pre">execve(2)</span></code>. This is not always possible on an asymmetric system,
+specifically when the new program being executed is 32-bit yet the
+affinity mask contains 64-bit-only CPUs. In this situation, the kernel
+determines the new affinity mask as follows:</p>
+<blockquote>
+<div><ol class="arabic">
+<li><p>If the 32-bit-capable subset of the affinity mask is not empty,
+then the affinity is restricted to that subset and the old affinity
+mask is saved. This saved mask is inherited over <code class="docutils literal notranslate"><span class="pre">fork(2)</span></code> and
+preserved across <code class="docutils literal notranslate"><span class="pre">execve(2)</span></code> of 32-bit programs.</p>
+<p><strong>Note:</strong> This step does not apply to <code class="docutils literal notranslate"><span class="pre">SCHED_DEADLINE</span></code> tasks.
+See <a class="reference internal" href="#sched-deadline">SCHED_DEADLINE</a>.</p>
+</li>
+<li><p>Otherwise, the cpuset hierarchy of the task is walked until an
+ancestor is found containing at least one 32-bit-capable CPU. The
+affinity of the task is then changed to match the 32-bit-capable
+subset of the cpuset determined by the walk.</p></li>
+<li><p>On failure (i.e. out of memory), the affinity is changed to the set
+of all 32-bit-capable CPUs of which the kernel is aware.</p></li>
+</ol>
+</div></blockquote>
+<p>A subsequent <code class="docutils literal notranslate"><span class="pre">execve(2)</span></code> of a 64-bit program by the 32-bit task will
+invalidate the affinity mask saved in (1) and attempt to restore the CPU
+affinity of the task using the saved mask if it was previously valid.
+This restoration may fail due to intervening changes to the deadline
+policy or cpuset hierarchy, in which case the <code class="docutils literal notranslate"><span class="pre">execve(2)</span></code> continues
+with the affinity unchanged.</p>
+<p>Calls to <code class="docutils literal notranslate"><span class="pre">sched_setaffinity(2)</span></code> for a 32-bit task will consider only
+the 32-bit-capable CPUs of the requested affinity mask. On success, the
+affinity for the task is updated and any saved mask from a prior
+<code class="docutils literal notranslate"><span class="pre">execve(2)</span></code> is invalidated.</p>
+</section>
+<section id="sched-deadline">
+<h3><code class="docutils literal notranslate"><span class="pre">SCHED_DEADLINE</span></code><a class="headerlink" href="#sched-deadline" title="Permalink to this headline">¶</a></h3>
+<p>Explicit admission of a 32-bit deadline task to the default root domain
+(e.g. by calling <code class="docutils literal notranslate"><span class="pre">sched_setattr(2)</span></code>) is rejected on an asymmetric
+32-bit system unless admission control is disabled by writing -1 to
+<code class="docutils literal notranslate"><span class="pre">/proc/sys/kernel/sched_rt_runtime_us</span></code>.</p>
+<p><code class="docutils literal notranslate"><span class="pre">execve(2)</span></code> of a 32-bit program from a 64-bit deadline task will
+return <code class="docutils literal notranslate"><span class="pre">-ENOEXEC</span></code> if the root domain for the task contains any
+64-bit-only CPUs and admission control is enabled. Concurrent offlining
+of 32-bit-capable CPUs may still necessitate the procedure described in
+<a class="reference internal" href="#execve-2">execve(2)</a>, in which case step (1) is skipped and a warning is
+emitted on the console.</p>
+<p><strong>Note:</strong> It is recommended that a set of 32-bit-capable CPUs are placed
+into a separate root domain if <code class="docutils literal notranslate"><span class="pre">SCHED_DEADLINE</span></code> is to be used with
+32-bit tasks on an asymmetric system. Failure to do so is likely to
+result in missed deadlines.</p>
+</section>
+<section id="cpusets">
+<h3>Cpusets<a class="headerlink" href="#cpusets" title="Permalink to this headline">¶</a></h3>
+<p>The affinity of a 32-bit task on an asymmetric system may include CPUs
+that are not explicitly allowed by the cpuset to which it is attached.
+This can occur as a result of the following two situations:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>A 64-bit task attached to a cpuset which allows only 64-bit CPUs
+executes a 32-bit program.</p></li>
+<li><p>All of the 32-bit-capable CPUs allowed by a cpuset containing a
+32-bit task are offlined.</p></li>
+</ul>
+</div></blockquote>
+<p>In both of these cases, the new affinity is calculated according to step
+(2) of the process described in <a class="reference internal" href="#execve-2">execve(2)</a> and the cpuset hierarchy is
+unchanged irrespective of the cgroup version.</p>
+</section>
+<section id="cpu-hotplug">
+<h3>CPU hotplug<a class="headerlink" href="#cpu-hotplug" title="Permalink to this headline">¶</a></h3>
+<p>On an asymmetric system, the first detected 32-bit-capable CPU is
+prevented from being offlined by userspace and any such attempt will
+return <code class="docutils literal notranslate"><span class="pre">-EPERM</span></code>. Note that suspend is still permitted even if the
+primary CPU (i.e. CPU 0) is 64-bit-only.</p>
+</section>
+<section id="kvm">
+<h3>KVM<a class="headerlink" href="#kvm" title="Permalink to this headline">¶</a></h3>
+<p>Although KVM will not advertise 32-bit EL0 support to any vCPUs on an
+asymmetric system, a broken guest at EL1 could still attempt to execute
+32-bit code at EL0. In this case, an exit from a vCPU thread in 32-bit
+mode will return to host userspace with an <code class="docutils literal notranslate"><span class="pre">exit_reason</span></code> of
+<code class="docutils literal notranslate"><span class="pre">KVM_EXIT_FAIL_ENTRY</span></code> and will remain non-runnable until successfully
+re-initialised by a subsequent <code class="docutils literal notranslate"><span class="pre">KVM_ARM_VCPU_INIT</span></code> operation.</p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Asymmetric 32-bit SoCs</a><ul>
+<li><a class="reference internal" href="#introduction">Introduction</a></li>
+<li><a class="reference internal" href="#enabling-kernel-support">Enabling kernel support</a></li>
+<li><a class="reference internal" href="#userspace-impact">Userspace impact</a><ul>
+<li><a class="reference internal" href="#sysfs">sysfs</a></li>
+<li><a class="reference internal" href="#execve-2"><code class="docutils literal notranslate"><span class="pre">execve(2)</span></code></a></li>
+<li><a class="reference internal" href="#sched-deadline"><code class="docutils literal notranslate"><span class="pre">SCHED_DEADLINE</span></code></a></li>
+<li><a class="reference internal" href="#cpusets">Cpusets</a></li>
+<li><a class="reference internal" href="#cpu-hotplug">CPU hotplug</a></li>
+<li><a class="reference internal" href="#kvm">KVM</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/arm64/asymmetric-32bit.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/arm64/asymmetric-32bit.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,119 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Notes &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="TODO LIST" href="todo.html" />
+    <link rel="prev" title="Current State" href="netwinder-fpe.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="notes">
+<h1>Notes<a class="headerlink" href="#notes" title="Permalink to this headline">¶</a></h1>
+<p>There seems to be a problem with exp(double) and our emulator.  I haven’t
+been able to track it down yet.  This does not occur with the emulator
+supplied by Russell King.</p>
+<p>I also found one oddity in the emulator.  I don’t think it is serious but
+will point it out.  The ARM calling conventions require floating point
+registers f4-f7 to be preserved over a function call.  The compiler quite
+often uses an stfe instruction to save f4 on the stack upon entry to a
+function, and an ldfe instruction to restore it before returning.</p>
+<p>I was looking at some code, that calculated a double result, stored it in f4
+then made a function call. Upon return from the function call the number in
+f4 had been converted to an extended value in the emulator.</p>
+<p>This is a side effect of the stfe instruction.  The double in f4 had to be
+converted to extended, then stored.  If an lfm/sfm combination had been used,
+then no conversion would occur.  This has performance considerations.  The
+result from the function call and f4 were used in a multiplication.  If the
+emulator sees a multiply of a double and extended, it promotes the double to
+extended, then does the multiply in extended precision.</p>
+<p>This code will cause this problem:</p>
+<p>double x, y, z;
+z = log(x)/log(y);</p>
+<p>The result of log(x) (a double) will be calculated, returned in f0, then
+moved to f4 to preserve it over the log(y) call.  The division will be done
+in extended precision, due to the stfe instruction used to save f4 in log(y).</p>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/arm/nwfpe/notes.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/arm/nwfpe/notes.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,301 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Linux CAIF &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Using Linux CAIF" href="caif.html" />
+    <link rel="prev" title="CAIF" href="index.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="linux-caif">
+<h1>Linux CAIF<a class="headerlink" href="#linux-caif" title="Permalink to this headline">¶</a></h1>
+<p>Copyright © ST-Ericsson AB 2010</p>
+<dl class="field-list simple">
+<dt class="field-odd">Author</dt>
+<dd class="field-odd"><p>Sjur Brendeland/ <a class="reference external" href="mailto:sjur&#46;brandeland&#37;&#52;&#48;stericsson&#46;com">sjur<span>&#46;</span>brandeland<span>&#64;</span>stericsson<span>&#46;</span>com</a></p>
+</dd>
+<dt class="field-even">License terms</dt>
+<dd class="field-even"><p>GNU General Public License (GPL) version 2</p>
+</dd>
+</dl>
+<section id="introduction">
+<h2>Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>CAIF is a MUX protocol used by ST-Ericsson cellular modems for
+communication between Modem and host. The host processes can open virtual AT
+channels, initiate GPRS Data connections, Video channels and Utility Channels.
+The Utility Channels are general purpose pipes between modem and host.</p>
+<p>ST-Ericsson modems support a number of transports between modem
+and host. Currently, UART and Loopback are available for Linux.</p>
+</section>
+<section id="architecture">
+<h2>Architecture<a class="headerlink" href="#architecture" title="Permalink to this headline">¶</a></h2>
+<p>The implementation of CAIF is divided into:</p>
+<ul class="simple">
+<li><p>CAIF Socket Layer and GPRS IP Interface.</p></li>
+<li><p>CAIF Core Protocol Implementation</p></li>
+<li><p>CAIF Link Layer, implemented as NET devices.</p></li>
+</ul>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>RTNL
+ !
+ !          +------+   +------+
+ !         +------+!  +------+!
+ !         !  IP  !!  !Socket!!
+ +-------&gt; !interf!+  ! API  !+       &lt;- CAIF Client APIs
+ !         +------+   +------!
+ !            !           !
+ !            +-----------+
+ !                  !
+ !               +------+             &lt;- CAIF Core Protocol
+ !               ! CAIF !
+ !               ! Core !
+ !               +------+
+ !       +----------!---------+
+ !       !          !         !
+ !    +------+   +-----+   +------+
+ +--&gt; ! HSI  !   ! TTY !   ! USB  !   &lt;- Link Layer (Net Devices)
+      +------+   +-----+   +------+
+</pre></div>
+</div>
+</section>
+<section id="implementation">
+<h2>Implementation<a class="headerlink" href="#implementation" title="Permalink to this headline">¶</a></h2>
+<section id="caif-core-protocol-layer">
+<h3>CAIF Core Protocol Layer<a class="headerlink" href="#caif-core-protocol-layer" title="Permalink to this headline">¶</a></h3>
+<p>CAIF Core layer implements the CAIF protocol as defined by ST-Ericsson.
+It implements the CAIF protocol stack in a layered approach, where
+each layer described in the specification is implemented as a separate layer.
+The architecture is inspired by the design patterns “Protocol Layer” and
+“Protocol Packet”.</p>
+<section id="caif-structure">
+<h4>CAIF structure<a class="headerlink" href="#caif-structure" title="Permalink to this headline">¶</a></h4>
+<p>The Core CAIF implementation contains:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Simple implementation of CAIF.</p></li>
+<li><p>Layered architecture (a la Streams), each layer in the CAIF
+specification is implemented in a separate c-file.</p></li>
+<li><p>Clients must call configuration function to add PHY layer.</p></li>
+<li><p>Clients must implement CAIF layer to consume/produce
+CAIF payload with receive and transmit functions.</p></li>
+<li><p>Clients must call configuration function to add and connect the
+Client layer.</p></li>
+<li><p>When receiving / transmitting CAIF Packets (cfpkt), ownership is passed
+to the called function (except for framing layers’ receive function)</p></li>
+</ul>
+</div></blockquote>
+</section>
+</section>
+</section>
+<section id="layered-architecture">
+<h2>Layered Architecture<a class="headerlink" href="#layered-architecture" title="Permalink to this headline">¶</a></h2>
+<p>The CAIF protocol can be divided into two parts: Support functions and Protocol
+Implementation. The support functions include:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>CFPKT CAIF Packet. Implementation of CAIF Protocol Packet. The
+CAIF Packet has functions for creating, destroying and adding content
+and for adding/extracting header and trailers to protocol packets.</p></li>
+</ul>
+</div></blockquote>
+<p>The CAIF Protocol implementation contains:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>CFCNFG CAIF Configuration layer. Configures the CAIF Protocol
+Stack and provides a Client interface for adding Link-Layer and
+Driver interfaces on top of the CAIF Stack.</p></li>
+<li><p>CFCTRL CAIF Control layer. Encodes and Decodes control messages
+such as enumeration and channel setup. Also matches request and
+response messages.</p></li>
+<li><p>CFSERVL General CAIF Service Layer functionality; handles flow
+control and remote shutdown requests.</p></li>
+<li><p>CFVEI CAIF VEI layer. Handles CAIF AT Channels on VEI (Virtual
+External Interface). This layer encodes/decodes VEI frames.</p></li>
+<li><p>CFDGML CAIF Datagram layer. Handles CAIF Datagram layer (IP
+traffic), encodes/decodes Datagram frames.</p></li>
+<li><p>CFMUX CAIF Mux layer. Handles multiplexing between multiple
+physical bearers and multiple channels such as VEI, Datagram, etc.
+The MUX keeps track of the existing CAIF Channels and
+Physical Instances and selects the appropriate instance based
+on Channel-Id and Physical-ID.</p></li>
+<li><p>CFFRML CAIF Framing layer. Handles Framing i.e. Frame length
+and frame checksum.</p></li>
+<li><p>CFSERL CAIF Serial layer. Handles concatenation/split of frames
+into CAIF Frames with correct length.</p></li>
+</ul>
+</div></blockquote>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>                +---------+
+                | Config  |
+                | CFCNFG  |
+                +---------+
+                     !
++---------+     +---------+     +---------+
+|   AT    |     | Control |     | Datagram|
+| CFVEIL  |     | CFCTRL  |     | CFDGML  |
++---------+     +---------+     +---------+
+       \_____________!______________/
+                     !
+                +---------+
+                |   MUX   |
+                |         |
+                +---------+
+                _____!_____
+               /           \
+        +---------+     +---------+
+        | CFFRML  |     | CFFRML  |
+        | Framing |     | Framing |
+        +---------+     +---------+
+             !              !
+        +---------+     +---------+
+        |         |     | Serial  |
+        |         |     | CFSERL  |
+        +---------+     +---------+
+</pre></div>
+</div>
+<p>In this layered approach the following “rules” apply.</p>
+<blockquote>
+<div><ul>
+<li><p>All layers embed the same structure “struct cflayer”</p></li>
+<li><p>A layer does not depend on any other layer’s private data.</p></li>
+<li><p>Layers are stacked by setting the pointers:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>layer-&gt;up , layer-&gt;dn
+</pre></div>
+</div>
+</li>
+<li><p>In order to send data upwards, each layer should do:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>layer-&gt;up-&gt;receive(layer-&gt;up, packet);
+</pre></div>
+</div>
+</li>
+<li><p>In order to send data downwards, each layer should do:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>layer-&gt;dn-&gt;transmit(layer-&gt;dn, packet);
+</pre></div>
+</div>
+</li>
+</ul>
+</div></blockquote>
+</section>
+<section id="caif-socket-and-ip-interface">
+<h2>CAIF Socket and IP interface<a class="headerlink" href="#caif-socket-and-ip-interface" title="Permalink to this headline">¶</a></h2>
+<p>The IP interface and CAIF socket API are implemented on top of the
+CAIF Core protocol. The IP Interface and CAIF socket have an instance of
+‘struct cflayer’, just like the CAIF Core protocol stack.
+Net device and Socket implement the ‘receive()’ function defined by
+‘struct cflayer’, just like the rest of the CAIF stack. In this way, transmit and
+receive of packets is handled as by the rest of the layers: the ‘dn-&gt;transmit()’
+function is called in order to transmit data.</p>
+<section id="configuration-of-link-layer">
+<h3>Configuration of Link Layer<a class="headerlink" href="#configuration-of-link-layer" title="Permalink to this headline">¶</a></h3>
+<p>The Link Layer is implemented as Linux network devices (<a class="reference internal" href="../kapi.html#c.net_device" title="net_device"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">net_device</span></code></a>).
+Payload handling and registration is done using standard Linux mechanisms.</p>
+<p>The CAIF Protocol relies on a loss-less link layer without implementing
+retransmission. This implies that packet drops must not happen.
+Therefore a flow-control mechanism is implemented where the physical
+interface can initiate flow stop for all CAIF Channels.</p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Linux CAIF</a><ul>
+<li><a class="reference internal" href="#introduction">Introduction</a></li>
+<li><a class="reference internal" href="#architecture">Architecture</a></li>
+<li><a class="reference internal" href="#implementation">Implementation</a><ul>
+<li><a class="reference internal" href="#caif-core-protocol-layer">CAIF Core Protocol Layer</a><ul>
+<li><a class="reference internal" href="#caif-structure">CAIF structure</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#layered-architecture">Layered Architecture</a></li>
+<li><a class="reference internal" href="#caif-socket-and-ip-interface">CAIF Socket and IP interface</a><ul>
+<li><a class="reference internal" href="#configuration-of-link-layer">Configuration of Link Layer</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/networking/caif/linux_caif.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/networking/caif/linux_caif.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

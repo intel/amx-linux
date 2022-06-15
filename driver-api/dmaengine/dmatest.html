@@ -1,0 +1,327 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>DMA Test Guide &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="PXA/MMP - DMA Slave controller" href="pxa_dma.html" />
+    <link rel="prev" title="DMA Engine API Guide" href="client.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="dma-test-guide">
+<h1>DMA Test Guide<a class="headerlink" href="#dma-test-guide" title="Permalink to this headline">¶</a></h1>
+<p>Andy Shevchenko &lt;<a class="reference external" href="mailto:andriy&#46;shevchenko&#37;&#52;&#48;linux&#46;intel&#46;com">andriy<span>&#46;</span>shevchenko<span>&#64;</span>linux<span>&#46;</span>intel<span>&#46;</span>com</a>&gt;</p>
+<p>This small document introduces how to test DMA drivers using dmatest module.</p>
+<p>The dmatest module tests DMA memcpy, memset, XOR and RAID6 P+Q operations using
+various lengths and various offsets into the source and destination buffers. It
+will initialize both buffers with a repeatable pattern and verify that the DMA
+engine copies the requested region and nothing more. It will also verify that
+the bytes aren’t swapped around, and that the source buffer isn’t modified.</p>
+<p>The dmatest module can be configured to test a specific channel. It can also
+test multiple channels at the same time, and it can start multiple threads
+competing for the same channel.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The test suite works only on the channels that have at least one
+capability of the following: DMA_MEMCPY (memory-to-memory), DMA_MEMSET
+(const-to-memory or memory-to-memory, when emulated), DMA_XOR, DMA_PQ.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>In case of any related questions use the official mailing list
+<a class="reference external" href="mailto:dmaengine&#37;&#52;&#48;vger&#46;kernel&#46;org">dmaengine<span>&#64;</span>vger<span>&#46;</span>kernel<span>&#46;</span>org</a>.</p>
+</div>
+<section id="part-1-how-to-build-the-test-module">
+<h2>Part 1 - How to build the test module<a class="headerlink" href="#part-1-how-to-build-the-test-module" title="Permalink to this headline">¶</a></h2>
+<p>The menuconfig contains an option that could be found by following path:</p>
+<blockquote>
+<div><p>Device Drivers -&gt; DMA Engine support -&gt; DMA Test client</p>
+</div></blockquote>
+<p>In the configuration file the option called CONFIG_DMATEST. The dmatest could
+be built as module or inside kernel. Let’s consider those cases.</p>
+</section>
+<section id="part-2-when-dmatest-is-built-as-a-module">
+<h2>Part 2 - When dmatest is built as a module<a class="headerlink" href="#part-2-when-dmatest-is-built-as-a-module" title="Permalink to this headline">¶</a></h2>
+<p>Example of usage:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>% modprobe dmatest timeout=2000 iterations=1 channel=dma0chan0 run=1
+</pre></div>
+</div>
+<p>…or:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>% modprobe dmatest
+% echo 2000 &gt; /sys/module/dmatest/parameters/timeout
+% echo 1 &gt; /sys/module/dmatest/parameters/iterations
+% echo dma0chan0 &gt; /sys/module/dmatest/parameters/channel
+% echo 1 &gt; /sys/module/dmatest/parameters/run
+</pre></div>
+</div>
+<p>…or on the kernel command line:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>dmatest.timeout=2000 dmatest.iterations=1 dmatest.channel=dma0chan0 dmatest.run=1
+</pre></div>
+</div>
+<p>Example of multi-channel test usage (new in the 5.0 kernel):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>% modprobe dmatest
+% echo 2000 &gt; /sys/module/dmatest/parameters/timeout
+% echo 1 &gt; /sys/module/dmatest/parameters/iterations
+% echo dma0chan0 &gt; /sys/module/dmatest/parameters/channel
+% echo dma0chan1 &gt; /sys/module/dmatest/parameters/channel
+% echo dma0chan2 &gt; /sys/module/dmatest/parameters/channel
+% echo 1 &gt; /sys/module/dmatest/parameters/run
+</pre></div>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>For all tests, starting in the 5.0 kernel, either single- or multi-channel,
+the channel parameter(s) must be set after all other parameters. It is at
+that time that the existing parameter values are acquired for use by the
+thread(s). All other parameters are shared. Therefore, if changes are made
+to any of the other parameters, and an additional channel specified, the
+(shared) parameters used for all threads will use the new values.
+After the channels are specified, each thread is set as pending. All threads
+begin execution when the run parameter is set to 1.</p>
+</div>
+<div class="admonition hint">
+<p class="admonition-title">Hint</p>
+<p>A list of available channels can be found by running the following command:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>% ls -1 /sys/class/dma/
+</pre></div>
+</div>
+</div>
+<p>Once started a message like ” dmatest: Added 1 threads using dma0chan0” is
+emitted. A thread for that specific channel is created and is now pending, the
+pending thread is started once run is to 1.</p>
+<p>Note that running a new test will not stop any in progress test.</p>
+<p>The following command returns the state of the test.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>% cat /sys/module/dmatest/parameters/run
+</pre></div>
+</div>
+<p>To wait for test completion userpace can poll ‘run’ until it is false, or use
+the wait parameter. Specifying ‘wait=1’ when loading the module causes module
+initialization to pause until a test run has completed, while reading
+/sys/module/dmatest/parameters/wait waits for any running test to complete
+before returning. For example, the following scripts wait for 42 tests
+to complete before exiting. Note that if ‘iterations’ is set to ‘infinite’ then
+waiting is disabled.</p>
+<p>Example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>% modprobe dmatest run=1 iterations=42 wait=1
+% modprobe -r dmatest
+</pre></div>
+</div>
+<p>…or:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>% modprobe dmatest run=1 iterations=42
+% cat /sys/module/dmatest/parameters/wait
+% modprobe -r dmatest
+</pre></div>
+</div>
+</section>
+<section id="part-3-when-built-in-in-the-kernel">
+<h2>Part 3 - When built-in in the kernel<a class="headerlink" href="#part-3-when-built-in-in-the-kernel" title="Permalink to this headline">¶</a></h2>
+<p>The module parameters that is supplied to the kernel command line will be used
+for the first performed test. After user gets a control, the test could be
+re-run with the same or different parameters. For the details see the above
+section <a class="reference internal" href="#part-2-when-dmatest-is-built-as-a-module">Part 2 - When dmatest is built as a module</a>.</p>
+<p>In both cases the module parameters are used as the actual values for the test
+case. You always could check them at run-time by running</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>% grep -H . /sys/module/dmatest/parameters/*
+</pre></div>
+</div>
+</section>
+<section id="part-4-gathering-the-test-results">
+<h2>Part 4 - Gathering the test results<a class="headerlink" href="#part-4-gathering-the-test-results" title="Permalink to this headline">¶</a></h2>
+<p>Test results are printed to the kernel log buffer with the format:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>&quot;dmatest: result &lt;channel&gt;: &lt;test id&gt;: &#39;&lt;error msg&gt;&#39; with src_off=&lt;val&gt; dst_off=&lt;val&gt; len=&lt;val&gt; (&lt;err code&gt;)&quot;
+</pre></div>
+</div>
+<p>Example of output:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>% dmesg | tail -n 1
+dmatest: result dma0chan0-copy0: #1: No errors with src_off=0x7bf dst_off=0x8ad len=0x3fea (0)
+</pre></div>
+</div>
+<p>The message format is unified across the different types of errors. A
+number in the parentheses represents additional information, e.g. error
+code, error counter, or status. A test thread also emits a summary line at
+completion listing the number of tests executed, number that failed, and a
+result code.</p>
+<p>Example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>% dmesg | tail -n 1
+dmatest: dma0chan0-copy0: summary 1 test, 0 failures 1000 iops 100000 KB/s (0)
+</pre></div>
+</div>
+<p>The details of a data miscompare error are also emitted, but do not follow the
+above format.</p>
+</section>
+<section id="part-5-handling-channel-allocation">
+<h2>Part 5 - Handling channel allocation<a class="headerlink" href="#part-5-handling-channel-allocation" title="Permalink to this headline">¶</a></h2>
+<section id="allocating-channels">
+<h3>Allocating Channels<a class="headerlink" href="#allocating-channels" title="Permalink to this headline">¶</a></h3>
+<p>Channels do not need to be configured prior to starting a test run. Attempting
+to run the test without configuring the channels will result in testing any
+channels that are available.</p>
+<p>Example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>% echo 1 &gt; /sys/module/dmatest/parameters/run
+dmatest: No channels configured, continue with any
+</pre></div>
+</div>
+<p>Channels are registered using the “channel” parameter. Channels can be requested by their
+name, once requested, the channel is registered and a pending thread is added to the test list.</p>
+<p>Example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>% echo dma0chan2 &gt; /sys/module/dmatest/parameters/channel
+dmatest: Added 1 threads using dma0chan2
+</pre></div>
+</div>
+<p>More channels can be added by repeating the example above.
+Reading back the channel parameter will return the name of last channel that was added successfully.</p>
+<p>Example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>% echo dma0chan1 &gt; /sys/module/dmatest/parameters/channel
+dmatest: Added 1 threads using dma0chan1
+% echo dma0chan2 &gt; /sys/module/dmatest/parameters/channel
+dmatest: Added 1 threads using dma0chan2
+% cat /sys/module/dmatest/parameters/channel
+dma0chan2
+</pre></div>
+</div>
+<p>Another method of requesting channels is to request a channel with an empty string, Doing so
+will request all channels available to be tested:</p>
+<p>Example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>% echo &quot;&quot; &gt; /sys/module/dmatest/parameters/channel
+dmatest: Added 1 threads using dma0chan0
+dmatest: Added 1 threads using dma0chan3
+dmatest: Added 1 threads using dma0chan4
+dmatest: Added 1 threads using dma0chan5
+dmatest: Added 1 threads using dma0chan6
+dmatest: Added 1 threads using dma0chan7
+dmatest: Added 1 threads using dma0chan8
+</pre></div>
+</div>
+<p>At any point during the test configuration, reading the “test_list” parameter will
+print the list of currently pending tests.</p>
+<p>Example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>% cat /sys/module/dmatest/parameters/test_list
+dmatest: 1 threads using dma0chan0
+dmatest: 1 threads using dma0chan3
+dmatest: 1 threads using dma0chan4
+dmatest: 1 threads using dma0chan5
+dmatest: 1 threads using dma0chan6
+dmatest: 1 threads using dma0chan7
+dmatest: 1 threads using dma0chan8
+</pre></div>
+</div>
+<p>Note: Channels will have to be configured for each test run as channel configurations do not
+carry across to the next test run.</p>
+</section>
+<section id="releasing-channels">
+<h3>Releasing Channels<a class="headerlink" href="#releasing-channels" title="Permalink to this headline">¶</a></h3>
+<p>Channels can be freed by setting run to 0.</p>
+<p>Example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>% echo dma0chan1 &gt; /sys/module/dmatest/parameters/channel
+dmatest: Added 1 threads using dma0chan1
+% cat /sys/class/dma/dma0chan1/in_use
+1
+% echo 0 &gt; /sys/module/dmatest/parameters/run
+% cat /sys/class/dma/dma0chan1/in_use
+0
+</pre></div>
+</div>
+<p>Channels allocated by previous test runs are automatically freed when a new
+channel is requested after completing a successful test run.</p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">DMA Test Guide</a><ul>
+<li><a class="reference internal" href="#part-1-how-to-build-the-test-module">Part 1 - How to build the test module</a></li>
+<li><a class="reference internal" href="#part-2-when-dmatest-is-built-as-a-module">Part 2 - When dmatest is built as a module</a></li>
+<li><a class="reference internal" href="#part-3-when-built-in-in-the-kernel">Part 3 - When built-in in the kernel</a></li>
+<li><a class="reference internal" href="#part-4-gathering-the-test-results">Part 4 - Gathering the test results</a></li>
+<li><a class="reference internal" href="#part-5-handling-channel-allocation">Part 5 - Handling channel allocation</a><ul>
+<li><a class="reference internal" href="#allocating-channels">Allocating Channels</a></li>
+<li><a class="reference internal" href="#releasing-channels">Releasing Channels</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/dmaengine/dmatest.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/dmaengine/dmatest.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

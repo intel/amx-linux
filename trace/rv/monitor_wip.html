@@ -1,0 +1,160 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Monitor wip &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Monitor wwnr" href="monitor_wwnr.html" />
+    <link rel="prev" title="Deterministic Automata Instrumentation" href="da_monitor_instrumentation.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="monitor-wip">
+<h1>Monitor wip<a class="headerlink" href="#monitor-wip" title="Permalink to this headline">¶</a></h1>
+<ul class="simple">
+<li><p>Name: wip - wakeup in preemptive</p></li>
+<li><p>Type: per-cpu deterministic automaton</p></li>
+<li><p>Author: Daniel Bristot de Oliveira &lt;<a class="reference external" href="mailto:bristot&#37;&#52;&#48;kernel&#46;org">bristot<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;</p></li>
+</ul>
+<section id="description">
+<h2>Description<a class="headerlink" href="#description" title="Permalink to this headline">¶</a></h2>
+<p>The wakeup in preemptive (wip) monitor is a sample per-cpu monitor
+that verifies if the wakeup events always take place with
+preemption disabled:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>                   |
+                   |
+                   v
+                 #==================#
+                 H    preemptive    H &lt;+
+                 #==================#  |
+                   |                   |
+                   | preempt_disable   | preempt_enable
+                   v                   |
+  sched_waking   +------------------+  |
++--------------- |                  |  |
+|                |  non_preemptive  |  |
++--------------&gt; |                  | -+
+                 +------------------+
+</pre></div>
+</div>
+<p>The wakeup event always takes place with preemption disabled because
+of the scheduler synchronization. However, because the preempt_count
+and its trace event are not atomic with regard to interrupts, some
+inconsistencies might happen. For example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>preempt_disable() {
+      __preempt_count_add(1)
+      -------&gt;        smp_apic_timer_interrupt() {
+                              preempt_disable()
+                                      do not trace (preempt count &gt;= 1)
+
+                              wake up a thread
+
+                              preempt_enable()
+                                       do not trace (preempt count &gt;= 1)
+                      }
+      &lt;------
+      trace_preempt_disable();
+}
+</pre></div>
+</div>
+<dl class="simple">
+<dt>This problem was reported and discussed here:</dt><dd><p><a class="reference external" href="https://lore.kernel.org/r/cover.1559051152.git.bristot&#64;redhat.com/">https://lore.kernel.org/r/cover.1559051152.git.bristot&#64;redhat.com/</a></p>
+</dd>
+</dl>
+</section>
+<section id="specification">
+<h2>Specification<a class="headerlink" href="#specification" title="Permalink to this headline">¶</a></h2>
+<p>Grapviz Dot file in tools/verification/models/wip.dot</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Monitor wip</a><ul>
+<li><a class="reference internal" href="#description">Description</a></li>
+<li><a class="reference internal" href="#specification">Specification</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/trace/rv/monitor_wip.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/trace/rv/monitor_wip.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

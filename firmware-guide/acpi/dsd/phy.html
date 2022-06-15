@@ -1,0 +1,291 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>MDIO bus and PHYs in ACPI &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="ACPI Based Device Enumeration" href="../enumeration.html" />
+    <link rel="prev" title="Describing and referring to LEDs in ACPI" href="leds.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="mdio-bus-and-phys-in-acpi">
+<h1>MDIO bus and PHYs in ACPI<a class="headerlink" href="#mdio-bus-and-phys-in-acpi" title="Permalink to this headline">¶</a></h1>
+<p>The PHYs on an MDIO bus [phy] are probed and registered using
+fwnode_mdiobus_register_phy().</p>
+<p>Later, for connecting these PHYs to their respective MACs, the PHYs registered
+on the MDIO bus have to be referenced.</p>
+<p>This document introduces two _DSD properties that are to be used
+for connecting PHYs on the MDIO bus [dsd-properties-rules] to the MAC layer.</p>
+<p>These properties are defined in accordance with the “Device
+Properties UUID For _DSD” [dsd-guide] document and the
+daffd814-6eba-4d8c-8a91-bc9bbf4aa301 UUID must be used in the Device
+Data Descriptors containing them.</p>
+<section id="phy-handle">
+<h2>phy-handle<a class="headerlink" href="#phy-handle" title="Permalink to this headline">¶</a></h2>
+<p>For each MAC node, a device property “phy-handle” is used to reference
+the PHY that is registered on an MDIO bus. This is mandatory for
+network interfaces that have PHYs connected to MAC via MDIO bus.</p>
+<p>During the MDIO bus driver initialization, PHYs on this bus are probed
+using the _ADR object as shown below and are registered on the MDIO bus.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Scope(\_SB.MDI0)
+{
+  Device(PHY1) {
+    Name (_ADR, 0x1)
+  } // end of PHY1
+
+  Device(PHY2) {
+    Name (_ADR, 0x2)
+  } // end of PHY2
+}
+</pre></div>
+</div>
+<p>Later, during the MAC driver initialization, the registered PHY devices
+have to be retrieved from the MDIO bus. For this, the MAC driver needs
+references to the previously registered PHYs which are provided
+as device object references (e.g. _SB.MDI0.PHY1).</p>
+</section>
+<section id="phy-mode">
+<h2>phy-mode<a class="headerlink" href="#phy-mode" title="Permalink to this headline">¶</a></h2>
+<p>The “phy-mode” _DSD property is used to describe the connection to
+the PHY. The valid values for “phy-mode” are defined in [ethernet-controller].</p>
+</section>
+<section id="managed">
+<h2>managed<a class="headerlink" href="#managed" title="Permalink to this headline">¶</a></h2>
+<p>Optional property, which specifies the PHY management type.
+The valid values for “managed” are defined in [ethernet-controller].</p>
+</section>
+<section id="fixed-link">
+<h2>fixed-link<a class="headerlink" href="#fixed-link" title="Permalink to this headline">¶</a></h2>
+<p>The “fixed-link” is described by a data-only subnode of the
+MAC port, which is linked in the _DSD package via
+hierarchical data extension (UUID dbb8e3e6-5886-4ba6-8795-1319f52a966b
+in accordance with [dsd-guide] “_DSD Implementation Guide” document).
+The subnode should comprise a required property (“speed”) and
+possibly the optional ones - complete list of parameters and
+their values are specified in [ethernet-controller].</p>
+<p>The following ASL example illustrates the usage of these properties.</p>
+</section>
+<section id="dsdt-entry-for-mdio-node">
+<h2>DSDT entry for MDIO node<a class="headerlink" href="#dsdt-entry-for-mdio-node" title="Permalink to this headline">¶</a></h2>
+<p>The MDIO bus has an SoC component (MDIO controller) and a platform
+component (PHYs on the MDIO bus).</p>
+<p>a) Silicon Component
+This node describes the MDIO controller, MDI0
+———————————————</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Scope(_SB)
+{
+  Device(MDI0) {
+    Name(_HID, &quot;NXP0006&quot;)
+    Name(_CCA, 1)
+    Name(_UID, 0)
+    Name(_CRS, ResourceTemplate() {
+      Memory32Fixed(ReadWrite, MDI0_BASE, MDI_LEN)
+      Interrupt(ResourceConsumer, Level, ActiveHigh, Shared)
+       {
+         MDI0_IT
+       }
+    }) // end of _CRS for MDI0
+  } // end of MDI0
+}
+</pre></div>
+</div>
+<p>b) Platform Component
+The PHY1 and PHY2 nodes represent the PHYs connected to MDIO bus MDI0
+———————————————————————</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Scope(\_SB.MDI0)
+{
+  Device(PHY1) {
+    Name (_ADR, 0x1)
+  } // end of PHY1
+
+  Device(PHY2) {
+    Name (_ADR, 0x2)
+  } // end of PHY2
+}
+</pre></div>
+</div>
+</section>
+<section id="dsdt-entries-representing-mac-nodes">
+<h2>DSDT entries representing MAC nodes<a class="headerlink" href="#dsdt-entries-representing-mac-nodes" title="Permalink to this headline">¶</a></h2>
+<p>Below are the MAC nodes where PHY nodes are referenced.
+phy-mode and phy-handle are used as explained earlier.
+——————————————————</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Scope(\_SB.MCE0.PR17)
+{
+  Name (_DSD, Package () {
+     ToUUID(&quot;daffd814-6eba-4d8c-8a91-bc9bbf4aa301&quot;),
+         Package () {
+             Package (2) {&quot;phy-mode&quot;, &quot;rgmii-id&quot;},
+             Package (2) {&quot;phy-handle&quot;, \_SB.MDI0.PHY1}
+      }
+   })
+}
+
+Scope(\_SB.MCE0.PR18)
+{
+  Name (_DSD, Package () {
+    ToUUID(&quot;daffd814-6eba-4d8c-8a91-bc9bbf4aa301&quot;),
+        Package () {
+            Package (2) {&quot;phy-mode&quot;, &quot;rgmii-id&quot;},
+            Package (2) {&quot;phy-handle&quot;, \_SB.MDI0.PHY2}}
+    }
+  })
+}
+</pre></div>
+</div>
+</section>
+<section id="mac-node-example-where-managed-property-is-specified">
+<h2>MAC node example where “managed” property is specified.<a class="headerlink" href="#mac-node-example-where-managed-property-is-specified" title="Permalink to this headline">¶</a></h2>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Scope(\_SB.PP21.ETH0)
+{
+  Name (_DSD, Package () {
+     ToUUID(&quot;daffd814-6eba-4d8c-8a91-bc9bbf4aa301&quot;),
+         Package () {
+             Package () {&quot;phy-mode&quot;, &quot;sgmii&quot;},
+             Package () {&quot;managed&quot;, &quot;in-band-status&quot;}
+         }
+   })
+}
+</pre></div>
+</div>
+</section>
+<section id="mac-node-example-with-a-fixed-link-subnode">
+<h2>MAC node example with a “fixed-link” subnode.<a class="headerlink" href="#mac-node-example-with-a-fixed-link-subnode" title="Permalink to this headline">¶</a></h2>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Scope(\_SB.PP21.ETH1)
+{
+  Name (_DSD, Package () {
+    ToUUID(&quot;daffd814-6eba-4d8c-8a91-bc9bbf4aa301&quot;),
+         Package () {
+             Package () {&quot;phy-mode&quot;, &quot;sgmii&quot;},
+         },
+    ToUUID(&quot;dbb8e3e6-5886-4ba6-8795-1319f52a966b&quot;),
+         Package () {
+             Package () {&quot;fixed-link&quot;, &quot;LNK0&quot;}
+         }
+  })
+  Name (LNK0, Package(){ // Data-only subnode of port
+    ToUUID(&quot;daffd814-6eba-4d8c-8a91-bc9bbf4aa301&quot;),
+         Package () {
+             Package () {&quot;speed&quot;, 1000},
+             Package () {&quot;full-duplex&quot;, 1}
+         }
+  })
+}
+</pre></div>
+</div>
+<section id="references">
+<h3>References<a class="headerlink" href="#references" title="Permalink to this headline">¶</a></h3>
+<p>[phy] <a class="reference internal" href="../../../networking/phy.html"><span class="doc">PHY Abstraction Layer</span></a></p>
+<dl class="simple">
+<dt>[dsd-properties-rules]</dt><dd><p><a class="reference internal" href="../DSD-properties-rules.html"><span class="doc">_DSD Device Properties Usage Rules</span></a></p>
+</dd>
+<dt>[ethernet-controller]</dt><dd><p>Documentation/devicetree/bindings/net/ethernet-controller.yaml</p>
+</dd>
+<dt>[dsd-guide] DSD Guide.</dt><dd><p><a class="reference external" href="https://github.com/UEFI/DSD-Guide/blob/main/dsd-guide.adoc">https://github.com/UEFI/DSD-Guide/blob/main/dsd-guide.adoc</a>, referenced
+2021-11-30.</p>
+</dd>
+</dl>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">MDIO bus and PHYs in ACPI</a><ul>
+<li><a class="reference internal" href="#phy-handle">phy-handle</a></li>
+<li><a class="reference internal" href="#phy-mode">phy-mode</a></li>
+<li><a class="reference internal" href="#managed">managed</a></li>
+<li><a class="reference internal" href="#fixed-link">fixed-link</a></li>
+<li><a class="reference internal" href="#dsdt-entry-for-mdio-node">DSDT entry for MDIO node</a></li>
+<li><a class="reference internal" href="#dsdt-entries-representing-mac-nodes">DSDT entries representing MAC nodes</a></li>
+<li><a class="reference internal" href="#mac-node-example-where-managed-property-is-specified">MAC node example where “managed” property is specified.</a></li>
+<li><a class="reference internal" href="#mac-node-example-with-a-fixed-link-subnode">MAC node example with a “fixed-link” subnode.</a><ul>
+<li><a class="reference internal" href="#references">References</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/firmware-guide/acpi/dsd/phy.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/firmware-guide/acpi/dsd/phy.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

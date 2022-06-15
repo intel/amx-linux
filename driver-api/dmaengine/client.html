@@ -1,0 +1,436 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>DMA Engine API Guide &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="DMA Test Guide" href="dmatest.html" />
+    <link rel="prev" title="DMAengine controller documentation" href="provider.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="dma-engine-api-guide">
+<h1>DMA Engine API Guide<a class="headerlink" href="#dma-engine-api-guide" title="Permalink to this headline">¶</a></h1>
+<p>Vinod Koul &lt;vinod dot koul at intel.com&gt;</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>For DMA Engine usage in async_tx please see:
+<code class="docutils literal notranslate"><span class="pre">Documentation/crypto/async-tx-api.rst</span></code></p>
+</div>
+<p>Below is a guide to device driver writers on how to use the Slave-DMA API of the
+DMA Engine. This is applicable only for slave DMA usage only.</p>
+<section id="dma-usage">
+<h2>DMA usage<a class="headerlink" href="#dma-usage" title="Permalink to this headline">¶</a></h2>
+<p>The slave DMA usage consists of following steps:</p>
+<ul class="simple">
+<li><p>Allocate a DMA slave channel</p></li>
+<li><p>Set slave and controller specific parameters</p></li>
+<li><p>Get a descriptor for transaction</p></li>
+<li><p>Submit the transaction</p></li>
+<li><p>Issue pending requests and wait for callback notification</p></li>
+</ul>
+<p>The details of these operations are:</p>
+<ol class="arabic">
+<li><p>Allocate a DMA slave channel</p>
+<p>Channel allocation is slightly different in the slave DMA context,
+client drivers typically need a channel from a particular DMA
+controller only and even in some cases a specific channel is desired.
+To request a channel dma_request_chan() API is used.</p>
+<p>Interface:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="k">struct</span> <span class="nc">dma_chan</span><span class="w"> </span><span class="o">*</span><span class="n">dma_request_chan</span><span class="p">(</span><span class="k">struct</span> <span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">dev</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="o">*</span><span class="n">name</span><span class="p">);</span><span class="w"></span>
+</pre></div>
+</div>
+<p>Which will find and return the <code class="docutils literal notranslate"><span class="pre">name</span></code> DMA channel associated with the ‘dev’
+device. The association is done via DT, ACPI or board file based
+dma_slave_map matching table.</p>
+<p>A channel allocated via this interface is exclusive to the caller,
+until dma_release_channel() is called.</p>
+</li>
+<li><p>Set slave and controller specific parameters</p>
+<p>Next step is always to pass some specific information to the DMA
+driver. Most of the generic information which a slave DMA can use
+is in struct dma_slave_config. This allows the clients to specify
+DMA direction, DMA addresses, bus widths, DMA burst lengths etc
+for the peripheral.</p>
+<p>If some DMA controllers have more parameters to be sent then they
+should try to embed struct dma_slave_config in their controller
+specific structure. That gives flexibility to client to pass more
+parameters, if required.</p>
+<p>Interface:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">int</span><span class="w"> </span><span class="n">dmaengine_slave_config</span><span class="p">(</span><span class="k">struct</span> <span class="nc">dma_chan</span><span class="w"> </span><span class="o">*</span><span class="n">chan</span><span class="p">,</span><span class="w"></span>
+<span class="w">                  </span><span class="k">struct</span> <span class="nc">dma_slave_config</span><span class="w"> </span><span class="o">*</span><span class="n">config</span><span class="p">)</span><span class="w"></span>
+</pre></div>
+</div>
+<p>Please see the dma_slave_config structure definition in dmaengine.h
+for a detailed explanation of the struct members. Please note
+that the ‘direction’ member will be going away as it duplicates the
+direction given in the prepare call.</p>
+</li>
+<li><p>Get a descriptor for transaction</p></li>
+</ol>
+<blockquote>
+<div><p>For slave usage the various modes of slave transfers supported by the
+DMA-engine are:</p>
+<ul class="simple">
+<li><p>slave_sg: DMA a list of scatter gather buffers from/to a peripheral</p></li>
+<li><p>dma_cyclic: Perform a cyclic DMA operation from/to a peripheral till the
+operation is explicitly stopped.</p></li>
+<li><p>interleaved_dma: This is common to Slave as well as M2M clients. For slave
+address of devices’ fifo could be already known to the driver.
+Various types of operations could be expressed by setting
+appropriate values to the ‘dma_interleaved_template’ members. Cyclic
+interleaved DMA transfers are also possible if supported by the channel by
+setting the DMA_PREP_REPEAT transfer flag.</p></li>
+</ul>
+<p>A non-NULL return of this transfer API represents a “descriptor” for
+the given transaction.</p>
+<p>Interface:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="k">struct</span> <span class="nc">dma_async_tx_descriptor</span><span class="w"> </span><span class="o">*</span><span class="n">dmaengine_prep_slave_sg</span><span class="p">(</span><span class="w"></span>
+<span class="w">           </span><span class="k">struct</span> <span class="nc">dma_chan</span><span class="w"> </span><span class="o">*</span><span class="n">chan</span><span class="p">,</span><span class="w"> </span><span class="k">struct</span> <span class="nc">scatterlist</span><span class="w"> </span><span class="o">*</span><span class="n">sgl</span><span class="p">,</span><span class="w"></span>
+<span class="w">           </span><span class="kt">unsigned</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">sg_len</span><span class="p">,</span><span class="w"> </span><span class="k">enum</span><span class="w"> </span><span class="n">dma_data_direction</span><span class="w"> </span><span class="n">direction</span><span class="p">,</span><span class="w"></span>
+<span class="w">           </span><span class="kt">unsigned</span><span class="w"> </span><span class="kt">long</span><span class="w"> </span><span class="n">flags</span><span class="p">);</span><span class="w"></span>
+
+<span class="k">struct</span> <span class="nc">dma_async_tx_descriptor</span><span class="w"> </span><span class="o">*</span><span class="n">dmaengine_prep_dma_cyclic</span><span class="p">(</span><span class="w"></span>
+<span class="w">           </span><span class="k">struct</span> <span class="nc">dma_chan</span><span class="w"> </span><span class="o">*</span><span class="n">chan</span><span class="p">,</span><span class="w"> </span><span class="n">dma_addr_t</span><span class="w"> </span><span class="n">buf_addr</span><span class="p">,</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">buf_len</span><span class="p">,</span><span class="w"></span>
+<span class="w">           </span><span class="kt">size_t</span><span class="w"> </span><span class="n">period_len</span><span class="p">,</span><span class="w"> </span><span class="k">enum</span><span class="w"> </span><span class="n">dma_data_direction</span><span class="w"> </span><span class="n">direction</span><span class="p">);</span><span class="w"></span>
+
+<span class="k">struct</span> <span class="nc">dma_async_tx_descriptor</span><span class="w"> </span><span class="o">*</span><span class="n">dmaengine_prep_interleaved_dma</span><span class="p">(</span><span class="w"></span>
+<span class="w">           </span><span class="k">struct</span> <span class="nc">dma_chan</span><span class="w"> </span><span class="o">*</span><span class="n">chan</span><span class="p">,</span><span class="w"> </span><span class="k">struct</span> <span class="nc">dma_interleaved_template</span><span class="w"> </span><span class="o">*</span><span class="n">xt</span><span class="p">,</span><span class="w"></span>
+<span class="w">           </span><span class="kt">unsigned</span><span class="w"> </span><span class="kt">long</span><span class="w"> </span><span class="n">flags</span><span class="p">);</span><span class="w"></span>
+</pre></div>
+</div>
+<p>The peripheral driver is expected to have mapped the scatterlist for
+the DMA operation prior to calling dmaengine_prep_slave_sg(), and must
+keep the scatterlist mapped until the DMA operation has completed.
+The scatterlist must be mapped using the DMA <a class="reference internal" href="../infrastructure.html#c.device" title="device"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span></code></a>.
+If a mapping needs to be synchronized later, dma_sync_*_for_*() must be
+called using the DMA <a class="reference internal" href="../infrastructure.html#c.device" title="device"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span></code></a>, too.
+So, normal setup should look like this:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="k">struct</span> <span class="nc">device</span><span class="w"> </span><span class="o">*</span><span class="n">dma_dev</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">dmaengine_get_dma_device</span><span class="p">(</span><span class="n">chan</span><span class="p">);</span><span class="w"></span>
+
+<span class="n">nr_sg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">dma_map_sg</span><span class="p">(</span><span class="n">dma_dev</span><span class="p">,</span><span class="w"> </span><span class="n">sgl</span><span class="p">,</span><span class="w"> </span><span class="n">sg_len</span><span class="p">);</span><span class="w"></span>
+<span class="w">   </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">nr_sg</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"></span>
+<span class="w">           </span><span class="cm">/* error */</span><span class="w"></span>
+
+<span class="w">   </span><span class="n">desc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">dmaengine_prep_slave_sg</span><span class="p">(</span><span class="n">chan</span><span class="p">,</span><span class="w"> </span><span class="n">sgl</span><span class="p">,</span><span class="w"> </span><span class="n">nr_sg</span><span class="p">,</span><span class="w"> </span><span class="n">direction</span><span class="p">,</span><span class="w"> </span><span class="n">flags</span><span class="p">);</span><span class="w"></span>
+</pre></div>
+</div>
+<p>Once a descriptor has been obtained, the callback information can be
+added and the descriptor must then be submitted. Some DMA engine
+drivers may hold a spinlock between a successful preparation and
+submission so it is important that these two operations are closely
+paired.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Although the async_tx API specifies that completion callback
+routines cannot submit any new operations, this is not the
+case for slave/cyclic DMA.</p>
+<p>For slave DMA, the subsequent transaction may not be available
+for submission prior to callback function being invoked, so
+slave DMA callbacks are permitted to prepare and submit a new
+transaction.</p>
+<p>For cyclic DMA, a callback function may wish to terminate the
+DMA via dmaengine_terminate_async().</p>
+<p>Therefore, it is important that DMA engine drivers drop any
+locks before calling the callback function which may cause a
+deadlock.</p>
+<p>Note that callbacks will always be invoked from the DMA
+engines tasklet, never from interrupt context.</p>
+</div>
+<p><strong>Optional: per descriptor metadata</strong></p>
+<p>DMAengine provides two ways for metadata support.</p>
+<p>DESC_METADATA_CLIENT</p>
+<blockquote>
+<div><p>The metadata buffer is allocated/provided by the client driver and it is
+attached to the descriptor.</p>
+</div></blockquote>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">int</span><span class="w"> </span><span class="nf">dmaengine_desc_attach_metadata</span><span class="p">(</span><span class="k">struct</span> <span class="nc">dma_async_tx_descriptor</span><span class="w"> </span><span class="o">*</span><span class="n">desc</span><span class="p">,</span><span class="w"></span>
+<span class="w">                              </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">data</span><span class="p">,</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="n">len</span><span class="p">);</span><span class="w"></span>
+</pre></div>
+</div>
+<p>DESC_METADATA_ENGINE</p>
+<blockquote>
+<div><p>The metadata buffer is allocated/managed by the DMA driver. The client
+driver can ask for the pointer, maximum size and the currently used size of
+the metadata and can directly update or read it.</p>
+<p>Becasue the DMA driver manages the memory area containing the metadata,
+clients must make sure that they do not try to access or get the pointer
+after their transfer completion callback has run for the descriptor.
+If no completion callback has been defined for the transfer, then the
+metadata must not be accessed after issue_pending.
+In other words: if the aim is to read back metadata after the transfer is
+completed, then the client must use completion callback.</p>
+</div></blockquote>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="nf">dmaengine_desc_get_metadata_ptr</span><span class="p">(</span><span class="k">struct</span> <span class="nc">dma_async_tx_descriptor</span><span class="w"> </span><span class="o">*</span><span class="n">desc</span><span class="p">,</span><span class="w"></span>
+<span class="w">           </span><span class="kt">size_t</span><span class="w"> </span><span class="o">*</span><span class="n">payload_len</span><span class="p">,</span><span class="w"> </span><span class="kt">size_t</span><span class="w"> </span><span class="o">*</span><span class="n">max_len</span><span class="p">);</span><span class="w"></span>
+
+<span class="kt">int</span><span class="w"> </span><span class="nf">dmaengine_desc_set_metadata_len</span><span class="p">(</span><span class="k">struct</span> <span class="nc">dma_async_tx_descriptor</span><span class="w"> </span><span class="o">*</span><span class="n">desc</span><span class="p">,</span><span class="w"></span>
+<span class="w">           </span><span class="kt">size_t</span><span class="w"> </span><span class="n">payload_len</span><span class="p">);</span><span class="w"></span>
+</pre></div>
+</div>
+<p>Client drivers can query if a given mode is supported with:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">bool</span><span class="w"> </span><span class="nf">dmaengine_is_metadata_mode_supported</span><span class="p">(</span><span class="k">struct</span> <span class="nc">dma_chan</span><span class="w"> </span><span class="o">*</span><span class="n">chan</span><span class="p">,</span><span class="w"></span>
+<span class="w">           </span><span class="k">enum</span><span class="w"> </span><span class="n">dma_desc_metadata_mode</span><span class="w"> </span><span class="n">mode</span><span class="p">);</span><span class="w"></span>
+</pre></div>
+</div>
+<p>Depending on the used mode client drivers must follow different flow.</p>
+<p>DESC_METADATA_CLIENT</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>DMA_MEM_TO_DEV / DEV_MEM_TO_MEM:</p>
+<ol class="arabic simple">
+<li><p>prepare the descriptor (dmaengine_prep_*)
+construct the metadata in the client’s buffer</p></li>
+<li><p>use dmaengine_desc_attach_metadata() to attach the buffer to the
+descriptor</p></li>
+<li><p>submit the transfer</p></li>
+</ol>
+</li>
+<li><p>DMA_DEV_TO_MEM:</p>
+<ol class="arabic simple">
+<li><p>prepare the descriptor (dmaengine_prep_*)</p></li>
+<li><p>use dmaengine_desc_attach_metadata() to attach the buffer to the
+descriptor</p></li>
+<li><p>submit the transfer</p></li>
+<li><p>when the transfer is completed, the metadata should be available in the
+attached buffer</p></li>
+</ol>
+</li>
+</ul>
+</div></blockquote>
+<p>DESC_METADATA_ENGINE</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>DMA_MEM_TO_DEV / DEV_MEM_TO_MEM:</p>
+<ol class="arabic simple">
+<li><p>prepare the descriptor (dmaengine_prep_*)</p></li>
+<li><p>use dmaengine_desc_get_metadata_ptr() to get the pointer to the
+engine’s metadata area</p></li>
+<li><p>update the metadata at the pointer</p></li>
+<li><p>use dmaengine_desc_set_metadata_len()  to tell the DMA engine the
+amount of data the client has placed into the metadata buffer</p></li>
+<li><p>submit the transfer</p></li>
+</ol>
+</li>
+<li><p>DMA_DEV_TO_MEM:</p>
+<ol class="arabic simple">
+<li><p>prepare the descriptor (dmaengine_prep_*)</p></li>
+<li><p>submit the transfer</p></li>
+<li><p>on transfer completion, use dmaengine_desc_get_metadata_ptr() to get
+the pointer to the engine’s metadata area</p></li>
+<li><p>read out the metadata from the pointer</p></li>
+</ol>
+</li>
+</ul>
+</div></blockquote>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>When DESC_METADATA_ENGINE mode is used the metadata area for the descriptor
+is no longer valid after the transfer has been completed (valid up to the
+point when the completion callback returns if used).</p>
+<p>Mixed use of DESC_METADATA_CLIENT / DESC_METADATA_ENGINE is not allowed,
+client drivers must use either of the modes per descriptor.</p>
+</div>
+</div></blockquote>
+<ol class="arabic" start="4">
+<li><p>Submit the transaction</p>
+<p>Once the descriptor has been prepared and the callback information
+added, it must be placed on the DMA engine drivers pending queue.</p>
+<p>Interface:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">dma_cookie_t</span><span class="w"> </span><span class="n">dmaengine_submit</span><span class="p">(</span><span class="k">struct</span> <span class="nc">dma_async_tx_descriptor</span><span class="w"> </span><span class="o">*</span><span class="n">desc</span><span class="p">)</span><span class="w"></span>
+</pre></div>
+</div>
+<p>This returns a cookie can be used to check the progress of DMA engine
+activity via other DMA engine calls not covered in this document.</p>
+<p>dmaengine_submit() will not start the DMA operation, it merely adds
+it to the pending queue. For this, see step 5, dma_async_issue_pending.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>After calling <code class="docutils literal notranslate"><span class="pre">dmaengine_submit()</span></code> the submitted transfer descriptor
+(<code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">dma_async_tx_descriptor</span></code>) belongs to the DMA engine.
+Consequently, the client must consider invalid the pointer to that
+descriptor.</p>
+</div>
+</li>
+<li><p>Issue pending DMA requests and wait for callback notification</p>
+<p>The transactions in the pending queue can be activated by calling the
+issue_pending API. If channel is idle then the first transaction in
+queue is started and subsequent ones queued up.</p>
+<p>On completion of each DMA operation, the next in queue is started and
+a tasklet triggered. The tasklet will then call the client driver
+completion callback routine for notification, if set.</p>
+<p>Interface:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">void</span><span class="w"> </span><span class="nf">dma_async_issue_pending</span><span class="p">(</span><span class="k">struct</span> <span class="nc">dma_chan</span><span class="w"> </span><span class="o">*</span><span class="n">chan</span><span class="p">);</span><span class="w"></span>
+</pre></div>
+</div>
+</li>
+</ol>
+<section id="further-apis">
+<h3>Further APIs<a class="headerlink" href="#further-apis" title="Permalink to this headline">¶</a></h3>
+<ol class="arabic">
+<li><p>Terminate APIs</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">int</span><span class="w"> </span><span class="n">dmaengine_terminate_sync</span><span class="p">(</span><span class="k">struct</span> <span class="nc">dma_chan</span><span class="w"> </span><span class="o">*</span><span class="n">chan</span><span class="p">)</span><span class="w"></span>
+<span class="kt">int</span><span class="w"> </span><span class="n">dmaengine_terminate_async</span><span class="p">(</span><span class="k">struct</span> <span class="nc">dma_chan</span><span class="w"> </span><span class="o">*</span><span class="n">chan</span><span class="p">)</span><span class="w"></span>
+<span class="kt">int</span><span class="w"> </span><span class="n">dmaengine_terminate_all</span><span class="p">(</span><span class="k">struct</span> <span class="nc">dma_chan</span><span class="w"> </span><span class="o">*</span><span class="n">chan</span><span class="p">)</span><span class="w"> </span><span class="cm">/* DEPRECATED */</span><span class="w"></span>
+</pre></div>
+</div>
+<p>This causes all activity for the DMA channel to be stopped, and may
+discard data in the DMA FIFO which hasn’t been fully transferred.
+No callback functions will be called for any incomplete transfers.</p>
+<p>Two variants of this function are available.</p>
+<p>dmaengine_terminate_async() might not wait until the DMA has been fully
+stopped or until any running complete callbacks have finished. But it is
+possible to call dmaengine_terminate_async() from atomic context or from
+within a complete callback. dmaengine_synchronize() must be called before it
+is safe to free the memory accessed by the DMA transfer or free resources
+accessed from within the complete callback.</p>
+<p>dmaengine_terminate_sync() will wait for the transfer and any running
+complete callbacks to finish before it returns. But the function must not be
+called from atomic context or from within a complete callback.</p>
+<p>dmaengine_terminate_all() is deprecated and should not be used in new code.</p>
+</li>
+<li><p>Pause API</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">int</span><span class="w"> </span><span class="n">dmaengine_pause</span><span class="p">(</span><span class="k">struct</span> <span class="nc">dma_chan</span><span class="w"> </span><span class="o">*</span><span class="n">chan</span><span class="p">)</span><span class="w"></span>
+</pre></div>
+</div>
+<p>This pauses activity on the DMA channel without data loss.</p>
+</li>
+<li><p>Resume API</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">int</span><span class="w"> </span><span class="n">dmaengine_resume</span><span class="p">(</span><span class="k">struct</span> <span class="nc">dma_chan</span><span class="w"> </span><span class="o">*</span><span class="n">chan</span><span class="p">)</span><span class="w"></span>
+</pre></div>
+</div>
+<p>Resume a previously paused DMA channel. It is invalid to resume a
+channel which is not currently paused.</p>
+</li>
+<li><p>Check Txn complete</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="k">enum</span><span class="w"> </span><span class="n">dma_status</span><span class="w"> </span><span class="n">dma_async_is_tx_complete</span><span class="p">(</span><span class="k">struct</span> <span class="nc">dma_chan</span><span class="w"> </span><span class="o">*</span><span class="n">chan</span><span class="p">,</span><span class="w"></span>
+<span class="w">          </span><span class="n">dma_cookie_t</span><span class="w"> </span><span class="n">cookie</span><span class="p">,</span><span class="w"> </span><span class="n">dma_cookie_t</span><span class="w"> </span><span class="o">*</span><span class="n">last</span><span class="p">,</span><span class="w"> </span><span class="n">dma_cookie_t</span><span class="w"> </span><span class="o">*</span><span class="n">used</span><span class="p">)</span><span class="w"></span>
+</pre></div>
+</div>
+<p>This can be used to check the status of the channel. Please see
+the documentation in include/linux/dmaengine.h for a more complete
+description of this API.</p>
+<p>This can be used in conjunction with dma_async_is_complete() and
+the cookie returned from dmaengine_submit() to check for
+completion of a specific DMA transaction.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Not all DMA engine drivers can return reliable information for
+a running DMA channel. It is recommended that DMA engine users
+pause or stop (via dmaengine_terminate_all()) the channel before
+using this API.</p>
+</div>
+</li>
+<li><p>Synchronize termination API</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">void</span><span class="w"> </span><span class="n">dmaengine_synchronize</span><span class="p">(</span><span class="k">struct</span> <span class="nc">dma_chan</span><span class="w"> </span><span class="o">*</span><span class="n">chan</span><span class="p">)</span><span class="w"></span>
+</pre></div>
+</div>
+<p>Synchronize the termination of the DMA channel to the current context.</p>
+<p>This function should be used after dmaengine_terminate_async() to synchronize
+the termination of the DMA channel to the current context. The function will
+wait for the transfer and any running complete callbacks to finish before it
+returns.</p>
+<p>If dmaengine_terminate_async() is used to stop the DMA channel this function
+must be called before it is safe to free memory accessed by previously
+submitted descriptors or to free any resources accessed within the complete
+callback of previously submitted descriptors.</p>
+<p>The behavior of this function is undefined if dma_async_issue_pending() has
+been called between dmaengine_terminate_async() and this function.</p>
+</li>
+</ol>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">DMA Engine API Guide</a><ul>
+<li><a class="reference internal" href="#dma-usage">DMA usage</a><ul>
+<li><a class="reference internal" href="#further-apis">Further APIs</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/dmaengine/client.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/dmaengine/client.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

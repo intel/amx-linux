@@ -1,0 +1,235 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Hyper-V network driver &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../../" src="../../../../_static/documentation_options.js"></script>
+    <script src="../../../../_static/jquery.js"></script>
+    <script src="../../../../_static/underscore.js"></script>
+    <script src="../../../../_static/doctools.js"></script>
+    <script src="../../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" />
+    <link rel="next" title="Neterion’s (Formerly S2io) Xframe I/II PCI-X 10GbE driver" href="../neterion/s2io.html" />
+    <link rel="prev" title="Mellanox ConnectX(R) mlx5 core VPI Network Driver" href="../mellanox/mlx5.html" />
+   
+  <link rel="stylesheet" href="../../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="hyper-v-network-driver">
+<h1>Hyper-V network driver<a class="headerlink" href="#hyper-v-network-driver" title="Permalink to this headline">¶</a></h1>
+<section id="compatibility">
+<h2>Compatibility<a class="headerlink" href="#compatibility" title="Permalink to this headline">¶</a></h2>
+<p>This driver is compatible with Windows Server 2012 R2, 2016 and
+Windows 10.</p>
+</section>
+<section id="features">
+<h2>Features<a class="headerlink" href="#features" title="Permalink to this headline">¶</a></h2>
+<section id="checksum-offload">
+<h3>Checksum offload<a class="headerlink" href="#checksum-offload" title="Permalink to this headline">¶</a></h3>
+<blockquote>
+<div><p>The netvsc driver supports checksum offload as long as the
+Hyper-V host version does. Windows Server 2016 and Azure
+support checksum offload for TCP and UDP for both IPv4 and
+IPv6. Windows Server 2012 only supports checksum offload for TCP.</p>
+</div></blockquote>
+</section>
+<section id="receive-side-scaling">
+<h3>Receive Side Scaling<a class="headerlink" href="#receive-side-scaling" title="Permalink to this headline">¶</a></h3>
+<blockquote>
+<div><p>Hyper-V supports receive side scaling. For TCP &amp; UDP, packets can
+be distributed among available queues based on IP address and port
+number.</p>
+<p>For TCP &amp; UDP, we can switch hash level between L3 and L4 by ethtool
+command. TCP/UDP over IPv4 and v6 can be set differently. The default
+hash level is L4. We currently only allow switching TX hash level
+from within the guests.</p>
+<p>On Azure, fragmented UDP packets have high loss rate with L4
+hashing. Using L3 hashing is recommended in this case.</p>
+<p>For example, for UDP over IPv4 on eth0:</p>
+<p>To include UDP port numbers in hashing:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ethtool -N eth0 rx-flow-hash udp4 sdfn
+</pre></div>
+</div>
+<p>To exclude UDP port numbers in hashing:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ethtool -N eth0 rx-flow-hash udp4 sd
+</pre></div>
+</div>
+<p>To show UDP hash level:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ethtool -n eth0 rx-flow-hash udp4
+</pre></div>
+</div>
+</div></blockquote>
+</section>
+<section id="generic-receive-offload-aka-gro">
+<h3>Generic Receive Offload, aka GRO<a class="headerlink" href="#generic-receive-offload-aka-gro" title="Permalink to this headline">¶</a></h3>
+<blockquote>
+<div><p>The driver supports GRO and it is enabled by default. GRO coalesces
+like packets and significantly reduces CPU usage under heavy Rx
+load.</p>
+</div></blockquote>
+</section>
+<section id="large-receive-offload-lro-or-receive-side-coalescing-rsc">
+<h3>Large Receive Offload (LRO), or Receive Side Coalescing (RSC)<a class="headerlink" href="#large-receive-offload-lro-or-receive-side-coalescing-rsc" title="Permalink to this headline">¶</a></h3>
+<blockquote>
+<div><p>The driver supports LRO/RSC in the vSwitch feature. It reduces the per packet
+processing overhead by coalescing multiple TCP segments when possible. The
+feature is enabled by default on VMs running on Windows Server 2019 and
+later. It may be changed by ethtool command:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ethtool -K eth0 lro on
+ethtool -K eth0 lro off
+</pre></div>
+</div>
+</div></blockquote>
+</section>
+<section id="sr-iov-support">
+<h3>SR-IOV support<a class="headerlink" href="#sr-iov-support" title="Permalink to this headline">¶</a></h3>
+<blockquote>
+<div><p>Hyper-V supports SR-IOV as a hardware acceleration option. If SR-IOV
+is enabled in both the vSwitch and the guest configuration, then the
+Virtual Function (VF) device is passed to the guest as a PCI
+device. In this case, both a synthetic (netvsc) and VF device are
+visible in the guest OS and both NIC’s have the same MAC address.</p>
+<p>The VF is enslaved by netvsc device.  The netvsc driver will transparently
+switch the data path to the VF when it is available and up.
+Network state (addresses, firewall, etc) should be applied only to the
+netvsc device; the slave device should not be accessed directly in
+most cases.  The exceptions are if some special queue discipline or
+flow direction is desired, these should be applied directly to the
+VF slave device.</p>
+</div></blockquote>
+</section>
+<section id="receive-buffer">
+<h3>Receive Buffer<a class="headerlink" href="#receive-buffer" title="Permalink to this headline">¶</a></h3>
+<blockquote>
+<div><p>Packets are received into a receive area which is created when device
+is probed. The receive area is broken into MTU sized chunks and each may
+contain one or more packets. The number of receive sections may be changed
+via ethtool Rx ring parameters.</p>
+<p>There is a similar send buffer which is used to aggregate packets
+for sending.  The send area is broken into chunks, typically of 6144
+bytes, each of section may contain one or more packets. Small
+packets are usually transmitted via copy to the send buffer. However,
+if the buffer is temporarily exhausted, or the packet to be transmitted is
+an LSO packet, the driver will provide the host with pointers to the data
+from the SKB. This attempts to achieve a balance between the overhead of
+data copy and the impact of remapping VM memory to be accessible by the
+host.</p>
+</div></blockquote>
+</section>
+<section id="xdp-support">
+<h3>XDP support<a class="headerlink" href="#xdp-support" title="Permalink to this headline">¶</a></h3>
+<blockquote>
+<div><p>XDP (eXpress Data Path) is a feature that runs eBPF bytecode at the early
+stage when packets arrive at a NIC card. The goal is to increase performance
+for packet processing, reducing the overhead of SKB allocation and other
+upper network layers.</p>
+<p>hv_netvsc supports XDP in native mode, and transparently sets the XDP
+program on the associated VF NIC as well.</p>
+<p>Setting / unsetting XDP program on synthetic NIC (netvsc) propagates to
+VF NIC automatically. Setting / unsetting XDP program on VF NIC directly
+is not recommended, also not propagated to synthetic NIC, and may be
+overwritten by setting of synthetic NIC.</p>
+<p>XDP program cannot run with LRO (RSC) enabled, so you need to disable LRO
+before running XDP:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ethtool -K eth0 lro off
+</pre></div>
+</div>
+<p>XDP_REDIRECT action is not yet supported.</p>
+</div></blockquote>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Hyper-V network driver</a><ul>
+<li><a class="reference internal" href="#compatibility">Compatibility</a></li>
+<li><a class="reference internal" href="#features">Features</a><ul>
+<li><a class="reference internal" href="#checksum-offload">Checksum offload</a></li>
+<li><a class="reference internal" href="#receive-side-scaling">Receive Side Scaling</a></li>
+<li><a class="reference internal" href="#generic-receive-offload-aka-gro">Generic Receive Offload, aka GRO</a></li>
+<li><a class="reference internal" href="#large-receive-offload-lro-or-receive-side-coalescing-rsc">Large Receive Offload (LRO), or Receive Side Coalescing (RSC)</a></li>
+<li><a class="reference internal" href="#sr-iov-support">SR-IOV support</a></li>
+<li><a class="reference internal" href="#receive-buffer">Receive Buffer</a></li>
+<li><a class="reference internal" href="#xdp-support">XDP support</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../../_sources/networking/device_drivers/ethernet/microsoft/netvsc.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../../_sources/networking/device_drivers/ethernet/microsoft/netvsc.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

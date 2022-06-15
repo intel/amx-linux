@@ -1,0 +1,276 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Speculation Control &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="OpenCAPI (Open Coherent Accelerator Processor Interface)" href="accelerators/ocxl.html" />
+    <link rel="prev" title="unshare system call" href="unshare.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="speculation-control">
+<h1>Speculation Control<a class="headerlink" href="#speculation-control" title="Permalink to this headline">¶</a></h1>
+<p>Quite some CPUs have speculation-related misfeatures which are in
+fact vulnerabilities causing data leaks in various forms even across
+privilege domains.</p>
+<p>The kernel provides mitigation for such vulnerabilities in various
+forms. Some of these mitigations are compile-time configurable and some
+can be supplied on the kernel command line.</p>
+<p>There is also a class of mitigations which are very expensive, but they can
+be restricted to a certain set of processes or tasks in controlled
+environments. The mechanism to control these mitigations is via
+<em class="manpage">prctl(2)</em>.</p>
+<p>There are two prctl options which are related to this:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>PR_GET_SPECULATION_CTRL</p></li>
+<li><p>PR_SET_SPECULATION_CTRL</p></li>
+</ul>
+</div></blockquote>
+<section id="pr-get-speculation-ctrl">
+<h2>PR_GET_SPECULATION_CTRL<a class="headerlink" href="#pr-get-speculation-ctrl" title="Permalink to this headline">¶</a></h2>
+<p>PR_GET_SPECULATION_CTRL returns the state of the speculation misfeature
+which is selected with arg2 of prctl(2). The return value uses bits 0-3 with
+the following meaning:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 5%" />
+<col style="width: 29%" />
+<col style="width: 66%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Bit</p></th>
+<th class="head"><p>Define</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>0</p></td>
+<td><p>PR_SPEC_PRCTL</p></td>
+<td><p>Mitigation can be controlled per task by
+PR_SET_SPECULATION_CTRL.</p></td>
+</tr>
+<tr class="row-odd"><td><p>1</p></td>
+<td><p>PR_SPEC_ENABLE</p></td>
+<td><p>The speculation feature is enabled, mitigation is
+disabled.</p></td>
+</tr>
+<tr class="row-even"><td><p>2</p></td>
+<td><p>PR_SPEC_DISABLE</p></td>
+<td><p>The speculation feature is disabled, mitigation is
+enabled.</p></td>
+</tr>
+<tr class="row-odd"><td><p>3</p></td>
+<td><p>PR_SPEC_FORCE_DISABLE</p></td>
+<td><p>Same as PR_SPEC_DISABLE, but cannot be undone. A
+subsequent prctl(…, PR_SPEC_ENABLE) will fail.</p></td>
+</tr>
+<tr class="row-even"><td><p>4</p></td>
+<td><p>PR_SPEC_DISABLE_NOEXEC</p></td>
+<td><p>Same as PR_SPEC_DISABLE, but the state will be
+cleared on <em class="manpage">execve(2)</em>.</p></td>
+</tr>
+</tbody>
+</table>
+<p>If all bits are 0 the CPU is not affected by the speculation misfeature.</p>
+<p>If PR_SPEC_PRCTL is set, then the per-task control of the mitigation is
+available. If not set, prctl(PR_SET_SPECULATION_CTRL) for the speculation
+misfeature will fail.</p>
+</section>
+<section id="pr-set-speculation-ctrl">
+<span id="set-spec-ctrl"></span><h2>PR_SET_SPECULATION_CTRL<a class="headerlink" href="#pr-set-speculation-ctrl" title="Permalink to this headline">¶</a></h2>
+<p>PR_SET_SPECULATION_CTRL allows to control the speculation misfeature, which
+is selected by arg2 of <em class="manpage">prctl(2)</em> per task. arg3 is used to hand
+in the control value, i.e. either PR_SPEC_ENABLE or PR_SPEC_DISABLE or
+PR_SPEC_FORCE_DISABLE.</p>
+</section>
+<section id="common-error-codes">
+<h2>Common error codes<a class="headerlink" href="#common-error-codes" title="Permalink to this headline">¶</a></h2>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Value</p></th>
+<th class="head"><p>Meaning</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>EINVAL</p></td>
+<td><p>The prctl is not implemented by the architecture or unused
+prctl(2) arguments are not 0.</p></td>
+</tr>
+<tr class="row-odd"><td><p>ENODEV</p></td>
+<td><p>arg2 is selecting a not supported speculation misfeature.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="pr-set-speculation-ctrl-error-codes">
+<h2>PR_SET_SPECULATION_CTRL error codes<a class="headerlink" href="#pr-set-speculation-ctrl-error-codes" title="Permalink to this headline">¶</a></h2>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Value</p></th>
+<th class="head"><p>Meaning</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>0</p></td>
+<td><p>Success</p></td>
+</tr>
+<tr class="row-odd"><td><p>ERANGE</p></td>
+<td><p>arg3 is incorrect, i.e. it’s neither PR_SPEC_ENABLE nor
+PR_SPEC_DISABLE nor PR_SPEC_FORCE_DISABLE.</p></td>
+</tr>
+<tr class="row-even"><td><p>ENXIO</p></td>
+<td><p>Control of the selected speculation misfeature is not possible.
+See PR_GET_SPECULATION_CTRL.</p></td>
+</tr>
+<tr class="row-odd"><td><p>EPERM</p></td>
+<td><p>Speculation was disabled with PR_SPEC_FORCE_DISABLE and caller
+tried to enable it again.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="speculation-misfeature-controls">
+<h2>Speculation misfeature controls<a class="headerlink" href="#speculation-misfeature-controls" title="Permalink to this headline">¶</a></h2>
+<ul>
+<li><p>PR_SPEC_STORE_BYPASS: Speculative Store Bypass</p>
+<dl class="simple">
+<dt>Invocations:</dt><dd><ul class="simple">
+<li><p>prctl(PR_GET_SPECULATION_CTRL, PR_SPEC_STORE_BYPASS, 0, 0, 0);</p></li>
+<li><p>prctl(PR_SET_SPECULATION_CTRL, PR_SPEC_STORE_BYPASS, PR_SPEC_ENABLE, 0, 0);</p></li>
+<li><p>prctl(PR_SET_SPECULATION_CTRL, PR_SPEC_STORE_BYPASS, PR_SPEC_DISABLE, 0, 0);</p></li>
+<li><p>prctl(PR_SET_SPECULATION_CTRL, PR_SPEC_STORE_BYPASS, PR_SPEC_FORCE_DISABLE, 0, 0);</p></li>
+<li><p>prctl(PR_SET_SPECULATION_CTRL, PR_SPEC_STORE_BYPASS, PR_SPEC_DISABLE_NOEXEC, 0, 0);</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>PR_SPEC_INDIR_BRANCH: Indirect Branch Speculation in User Processes</dt><dd><p>(Mitigate Spectre V2 style attacks against user processes)</p>
+</dd>
+<dt>Invocations:</dt><dd><ul class="simple">
+<li><p>prctl(PR_GET_SPECULATION_CTRL, PR_SPEC_INDIRECT_BRANCH, 0, 0, 0);</p></li>
+<li><p>prctl(PR_SET_SPECULATION_CTRL, PR_SPEC_INDIRECT_BRANCH, PR_SPEC_ENABLE, 0, 0);</p></li>
+<li><p>prctl(PR_SET_SPECULATION_CTRL, PR_SPEC_INDIRECT_BRANCH, PR_SPEC_DISABLE, 0, 0);</p></li>
+<li><p>prctl(PR_SET_SPECULATION_CTRL, PR_SPEC_INDIRECT_BRANCH, PR_SPEC_FORCE_DISABLE, 0, 0);</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>PR_SPEC_L1D_FLUSH: Flush L1D Cache on context switch out of the task</dt><dd><p>(works only when tasks run on non SMT cores)</p>
+</dd>
+<dt>Invocations:</dt><dd><ul class="simple">
+<li><p>prctl(PR_GET_SPECULATION_CTRL, PR_SPEC_L1D_FLUSH, 0, 0, 0);</p></li>
+<li><p>prctl(PR_SET_SPECULATION_CTRL, PR_SPEC_L1D_FLUSH, PR_SPEC_ENABLE, 0, 0);</p></li>
+<li><p>prctl(PR_SET_SPECULATION_CTRL, PR_SPEC_L1D_FLUSH, PR_SPEC_DISABLE, 0, 0);</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+</ul>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Speculation Control</a><ul>
+<li><a class="reference internal" href="#pr-get-speculation-ctrl">PR_GET_SPECULATION_CTRL</a></li>
+<li><a class="reference internal" href="#pr-set-speculation-ctrl">PR_SET_SPECULATION_CTRL</a></li>
+<li><a class="reference internal" href="#common-error-codes">Common error codes</a></li>
+<li><a class="reference internal" href="#pr-set-speculation-ctrl-error-codes">PR_SET_SPECULATION_CTRL error codes</a></li>
+<li><a class="reference internal" href="#speculation-misfeature-controls">Speculation misfeature controls</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/userspace-api/spec_ctrl.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/userspace-api/spec_ctrl.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

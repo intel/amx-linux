@@ -1,0 +1,583 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Intel Integrated Sensor Hub (ISH) &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="AMD Sensor Fusion Hub" href="amd-sfh-hid.html" />
+    <link rel="prev" title="ALPS HID Touchpad Protocol" href="hid-alps.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="intel-integrated-sensor-hub-ish">
+<h1>Intel Integrated Sensor Hub (ISH)<a class="headerlink" href="#intel-integrated-sensor-hub-ish" title="Permalink to this headline">¶</a></h1>
+<p>A sensor hub enables the ability to offload sensor polling and algorithm
+processing to a dedicated low power co-processor. This allows the core
+processor to go into low power modes more often, resulting in increased
+battery life.</p>
+<p>There are many vendors providing external sensor hubs conforming to HID
+Sensor usage tables. These may be found in tablets, 2-in-1 convertible laptops
+and embedded products. Linux has had this support since Linux 3.9.</p>
+<p>Intel® introduced integrated sensor hubs as a part of the SoC starting from
+Cherry Trail and now supported on multiple generations of CPU packages. There
+are many commercial devices already shipped with Integrated Sensor Hubs (ISH).
+These ISH also comply to HID sensor specification, but the difference is the
+transport protocol used for communication. The current external sensor hubs
+mainly use HID over I2C or USB. But ISH doesn’t use either I2C or USB.</p>
+<section id="overview">
+<h2>1. Overview<a class="headerlink" href="#overview" title="Permalink to this headline">¶</a></h2>
+<p>Using a analogy with a usbhid implementation, the ISH follows a similar model
+for a very high speed communication:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>-----------------               ----------------------
+|    USB HID    |       --&gt;     |    ISH HID         |
+-----------------               ----------------------
+-----------------               ----------------------
+|  USB protocol |       --&gt;     |    ISH Transport   |
+-----------------               ----------------------
+-----------------               ----------------------
+|  EHCI/XHCI    |       --&gt;     |    ISH IPC         |
+-----------------               ----------------------
+      PCI                                PCI
+-----------------               ----------------------
+|Host controller|       --&gt;     |    ISH processor   |
+-----------------               ----------------------
+     USB Link
+-----------------               ----------------------
+| USB End points|       --&gt;     |    ISH Clients     |
+-----------------               ----------------------
+</pre></div>
+</div>
+<p>Like USB protocol provides a method for device enumeration, link management
+and user data encapsulation, the ISH also provides similar services. But it is
+very light weight tailored to manage and communicate with ISH client
+applications implemented in the firmware.</p>
+<p>The ISH allows multiple sensor management applications executing in the
+firmware. Like USB endpoints the messaging can be to/from a client. As part of
+enumeration process, these clients are identified. These clients can be simple
+HID sensor applications, sensor calibration applications or sensor firmware
+update applications.</p>
+<p>The implementation model is similar, like USB bus, ISH transport is also
+implemented as a bus. Each client application executing in the ISH processor
+is registered as a device on this bus. The driver, which binds each device
+(ISH HID driver) identifies the device type and registers with the HID core.</p>
+</section>
+<section id="ish-implementation-block-diagram">
+<h2>2. ISH Implementation: Block Diagram<a class="headerlink" href="#ish-implementation-block-diagram" title="Permalink to this headline">¶</a></h2>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>       ---------------------------
+      |  User Space Applications  |
+       ---------------------------
+
+----------------IIO ABI----------------
+       --------------------------
+      |  IIO Sensor Drivers     |
+       --------------------------
+       --------------------------
+      |        IIO core         |
+       --------------------------
+       --------------------------
+      |   HID Sensor Hub MFD    |
+       --------------------------
+       --------------------------
+      |       HID Core          |
+       --------------------------
+       --------------------------
+      |   HID over ISH Client   |
+       --------------------------
+       --------------------------
+      |   ISH Transport (ISHTP) |
+       --------------------------
+       --------------------------
+      |      IPC Drivers        |
+       --------------------------
+OS
+---------------- PCI -----------------
+Hardware + Firmware
+       ----------------------------
+      | ISH Hardware/Firmware(FW) |
+       ----------------------------
+</pre></div>
+</div>
+</section>
+<section id="high-level-processing-in-above-blocks">
+<h2>3. High level processing in above blocks<a class="headerlink" href="#high-level-processing-in-above-blocks" title="Permalink to this headline">¶</a></h2>
+<section id="hardware-interface">
+<h3>3.1 Hardware Interface<a class="headerlink" href="#hardware-interface" title="Permalink to this headline">¶</a></h3>
+<p>The ISH is exposed as “Non-VGA unclassified PCI device” to the host. The PCI
+product and vendor IDs are changed from different generations of processors. So
+the source code which enumerates drivers needs to update from generation to
+generation.</p>
+</section>
+<section id="inter-processor-communication-ipc-driver">
+<h3>3.2 Inter Processor Communication (IPC) driver<a class="headerlink" href="#inter-processor-communication-ipc-driver" title="Permalink to this headline">¶</a></h3>
+<p>Location: drivers/hid/intel-ish-hid/ipc</p>
+<p>The IPC message uses memory mapped I/O. The registers are defined in
+hw-ish-regs.h.</p>
+<section id="ipc-fw-message-types">
+<h4>3.2.1 IPC/FW message types<a class="headerlink" href="#ipc-fw-message-types" title="Permalink to this headline">¶</a></h4>
+<p>There are two types of messages, one for management of link and another for
+messages to and from transport layers.</p>
+<section id="tx-and-rx-of-transport-messages">
+<h5>TX and RX of Transport messages<a class="headerlink" href="#tx-and-rx-of-transport-messages" title="Permalink to this headline">¶</a></h5>
+<p>A set of memory mapped register offers support of multi-byte messages TX and
+RX (e.g. IPC_REG_ISH2HOST_MSG, IPC_REG_HOST2ISH_MSG). The IPC layer maintains
+internal queues to sequence messages and send them in order to the firmware.
+Optionally the caller can register handler to get notification of completion.
+A doorbell mechanism is used in messaging to trigger processing in host and
+client firmware side. When ISH interrupt handler is called, the ISH2HOST
+doorbell register is used by host drivers to determine that the interrupt
+is for ISH.</p>
+<p>Each side has 32 32-bit message registers and a 32-bit doorbell. Doorbell
+register has the following format:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Bits 0..6: fragment length (7 bits are used)
+Bits 10..13: encapsulated protocol
+Bits 16..19: management command (for IPC management protocol)
+Bit 31: doorbell trigger (signal H/W interrupt to the other side)
+Other bits are reserved, should be 0.
+</pre></div>
+</div>
+</section>
+</section>
+<section id="transport-layer-interface">
+<h4>3.2.2 Transport layer interface<a class="headerlink" href="#transport-layer-interface" title="Permalink to this headline">¶</a></h4>
+<p>To abstract HW level IPC communication, a set of callbacks is registered.
+The transport layer uses them to send and receive messages.
+Refer to struct ishtp_hw_ops for callbacks.</p>
+</section>
+</section>
+<section id="ish-transport-layer">
+<h3>3.3 ISH Transport layer<a class="headerlink" href="#ish-transport-layer" title="Permalink to this headline">¶</a></h3>
+<p>Location: drivers/hid/intel-ish-hid/ishtp/</p>
+<section id="a-generic-transport-layer">
+<h4>3.3.1 A Generic Transport Layer<a class="headerlink" href="#a-generic-transport-layer" title="Permalink to this headline">¶</a></h4>
+<p>The transport layer is a bi-directional protocol, which defines:
+- Set of commands to start, stop, connect, disconnect and flow control
+(see ishtp/hbm.h for details)
+- A flow control mechanism to avoid buffer overflows</p>
+<p>This protocol resembles bus messages described in the following document:
+<a class="reference external" href="http://www.intel.com/content/dam/www/public/us/en/documents/technical">http://www.intel.com/content/dam/www/public/us/en/documents/technical</a>-specifications/dcmi-hi-1-0-spec.pdf “Chapter 7: Bus Message Layer”</p>
+</section>
+<section id="connection-and-flow-control-mechanism">
+<h4>3.3.2 Connection and Flow Control Mechanism<a class="headerlink" href="#connection-and-flow-control-mechanism" title="Permalink to this headline">¶</a></h4>
+<p>Each FW client and a protocol is identified by a UUID. In order to communicate
+to a FW client, a connection must be established using connect request and
+response bus messages. If successful, a pair (host_client_id and fw_client_id)
+will identify the connection.</p>
+<p>Once connection is established, peers send each other flow control bus messages
+independently. Every peer may send a message only if it has received a
+flow-control credit before. Once it has sent a message, it may not send another one
+before receiving the next flow control credit.
+Either side can send disconnect request bus message to end communication. Also
+the link will be dropped if major FW reset occurs.</p>
+</section>
+<section id="peer-to-peer-data-transfer">
+<h4>3.3.3 Peer to Peer data transfer<a class="headerlink" href="#peer-to-peer-data-transfer" title="Permalink to this headline">¶</a></h4>
+<p>Peer to Peer data transfer can happen with or without using DMA. Depending on
+the sensor bandwidth requirement DMA can be enabled by using module parameter
+ishtp_use_dma under intel_ishtp.</p>
+<p>Each side (host and FW) manages its DMA transfer memory independently. When an
+ISHTP client from either host or FW side wants to send something, it decides
+whether to send over IPC or over DMA; for each transfer the decision is
+independent. The sending side sends DMA_XFER message when the message is in
+the respective host buffer (TX when host client sends, RX when FW client
+sends). The recipient of DMA message responds with DMA_XFER_ACK, indicating
+the sender that the memory region for that message may be reused.</p>
+<p>DMA initialization is started with host sending DMA_ALLOC_NOTIFY bus message
+(that includes RX buffer) and FW responds with DMA_ALLOC_NOTIFY_ACK.
+Additionally to DMA address communication, this sequence checks capabilities:
+if thw host doesn’t support DMA, then it won’t send DMA allocation, so FW can’t
+send DMA; if FW doesn’t support DMA then it won’t respond with
+DMA_ALLOC_NOTIFY_ACK, in which case host will not use DMA transfers.
+Here ISH acts as busmaster DMA controller. Hence when host sends DMA_XFER,
+it’s request to do host-&gt;ISH DMA transfer; when FW sends DMA_XFER, it means
+that it already did DMA and the message resides at host. Thus, DMA_XFER
+and DMA_XFER_ACK act as ownership indicators.</p>
+<p>At initial state all outgoing memory belongs to the sender (TX to host, RX to
+FW), DMA_XFER transfers ownership on the region that contains ISHTP message to
+the receiving side, DMA_XFER_ACK returns ownership to the sender. A sender
+need not wait for previous DMA_XFER to be ack’ed, and may send another message
+as long as remaining continuous memory in its ownership is enough.
+In principle, multiple DMA_XFER and DMA_XFER_ACK messages may be sent at once
+(up to IPC MTU), thus allowing for interrupt throttling.
+Currently, ISH FW decides to send over DMA if ISHTP message is more than 3 IPC
+fragments and via IPC otherwise.</p>
+</section>
+<section id="ring-buffers">
+<h4>3.3.4 Ring Buffers<a class="headerlink" href="#ring-buffers" title="Permalink to this headline">¶</a></h4>
+<p>When a client initiates a connection, a ring of RX and TX buffers is allocated.
+The size of ring can be specified by the client. HID client sets 16 and 32 for
+TX and RX buffers respectively. On send request from client, the data to be
+sent is copied to one of the send ring buffer and scheduled to be sent using
+bus message protocol. These buffers are required because the FW may have not
+have processed the last message and may not have enough flow control credits
+to send. Same thing holds true on receive side and flow control is required.</p>
+</section>
+<section id="host-enumeration">
+<h4>3.3.5 Host Enumeration<a class="headerlink" href="#host-enumeration" title="Permalink to this headline">¶</a></h4>
+<p>The host enumeration bus command allows discovery of clients present in the FW.
+There can be multiple sensor clients and clients for calibration function.</p>
+<p>To ease implementation and allow independent drivers to handle each client,
+this transport layer takes advantage of Linux Bus driver model. Each
+client is registered as device on the transport bus (ishtp bus).</p>
+<p>Enumeration sequence of messages:</p>
+<ul class="simple">
+<li><p>Host sends HOST_START_REQ_CMD, indicating that host ISHTP layer is up.</p></li>
+<li><p>FW responds with HOST_START_RES_CMD</p></li>
+<li><p>Host sends HOST_ENUM_REQ_CMD (enumerate FW clients)</p></li>
+<li><p>FW responds with HOST_ENUM_RES_CMD that includes bitmap of available FW
+client IDs</p></li>
+<li><p>For each FW ID found in that bitmap host sends
+HOST_CLIENT_PROPERTIES_REQ_CMD</p></li>
+<li><p>FW responds with HOST_CLIENT_PROPERTIES_RES_CMD. Properties include UUID,
+max ISHTP message size, etc.</p></li>
+<li><p>Once host received properties for that last discovered client, it considers
+ISHTP device fully functional (and allocates DMA buffers)</p></li>
+</ul>
+</section>
+</section>
+<section id="hid-over-ish-client">
+<h3>3.4 HID over ISH Client<a class="headerlink" href="#hid-over-ish-client" title="Permalink to this headline">¶</a></h3>
+<p>Location: drivers/hid/intel-ish-hid</p>
+<p>The ISHTP client driver is responsible for:</p>
+<ul class="simple">
+<li><p>enumerate HID devices under FW ISH client</p></li>
+<li><p>Get Report descriptor</p></li>
+<li><p>Register with HID core as a LL driver</p></li>
+<li><p>Process Get/Set feature request</p></li>
+<li><p>Get input reports</p></li>
+</ul>
+</section>
+<section id="hid-sensor-hub-mfd-and-iio-sensor-drivers">
+<h3>3.5 HID Sensor Hub MFD and IIO sensor drivers<a class="headerlink" href="#hid-sensor-hub-mfd-and-iio-sensor-drivers" title="Permalink to this headline">¶</a></h3>
+<p>The functionality in these drivers is the same as an external sensor hub.
+Refer to
+<a class="reference internal" href="hid-sensor.html"><span class="doc">HID Sensors Framework</span></a> for HID sensor
+Documentation/ABI/testing/sysfs-bus-iio for IIO ABIs to user space.</p>
+</section>
+<section id="end-to-end-hid-transport-sequence-diagram">
+<h3>3.6 End to End HID transport Sequence Diagram<a class="headerlink" href="#end-to-end-hid-transport-sequence-diagram" title="Permalink to this headline">¶</a></h3>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>HID-ISH-CLN                    ISHTP                    IPC                             HW
+        |                        |                       |                               |
+        |                        |                       |-----WAKE UP------------------&gt;|
+        |                        |                       |                               |
+        |                        |                       |-----HOST READY---------------&gt;|
+        |                        |                       |                               |
+        |                        |                       |&lt;----MNG_RESET_NOTIFY_ACK----- |
+        |                        |                       |                               |
+        |                        |&lt;----ISHTP_START------ |                               |
+        |                        |                       |                               |
+        |                        |&lt;-----------------HOST_START_RES_CMD-------------------|
+        |                        |                       |                               |
+        |                        |------------------QUERY_SUBSCRIBER--------------------&gt;|
+        |                        |                       |                               |
+        |                        |------------------HOST_ENUM_REQ_CMD-------------------&gt;|
+        |                        |                       |                               |
+        |                        |&lt;-----------------HOST_ENUM_RES_CMD--------------------|
+        |                        |                       |                               |
+        |                        |------------------HOST_CLIENT_PROPERTIES_REQ_CMD------&gt;|
+        |                        |                       |                               |
+        |                        |&lt;-----------------HOST_CLIENT_PROPERTIES_RES_CMD-------|
+        |       Create new device on in ishtp bus        |                               |
+        |                        |                       |                               |
+        |                        |------------------HOST_CLIENT_PROPERTIES_REQ_CMD------&gt;|
+        |                        |                       |                               |
+        |                        |&lt;-----------------HOST_CLIENT_PROPERTIES_RES_CMD-------|
+        |       Create new device on in ishtp bus        |                               |
+        |                        |                       |                               |
+        |                        |--Repeat HOST_CLIENT_PROPERTIES_REQ_CMD-till last one--|
+        |                        |                       |                               |
+     probed()
+        |----ishtp_cl_connect---&gt;|----------------- CLIENT_CONNECT_REQ_CMD--------------&gt;|
+        |                        |                       |                               |
+        |                        |&lt;----------------CLIENT_CONNECT_RES_CMD----------------|
+        |                        |                       |                               |
+        |register event callback |                       |                               |
+        |                        |                       |                               |
+        |ishtp_cl_send(
+        HOSTIF_DM_ENUM_DEVICES)  |----------fill ishtp_msg_hdr struct write to HW-----  &gt;|
+        |                        |                       |                               |
+        |                        |                       |&lt;-----IRQ(IPC_PROTOCOL_ISHTP---|
+        |                        |                       |                               |
+        |&lt;--ENUM_DEVICE RSP------|                       |                               |
+        |                        |                       |                               |
+for each enumerated device
+        |ishtp_cl_send(
+        HOSTIF_GET_HID_DESCRIPTOR|----------fill ishtp_msg_hdr struct write to HW-----  &gt;|
+        |                        |                       |                               |
+        ...Response
+        |                        |                       |                               |
+for each enumerated device
+        |ishtp_cl_send(
+     HOSTIF_GET_REPORT_DESCRIPTOR|--------------fill ishtp_msg_hdr struct write to HW-- &gt;|
+        |                        |                       |                               |
+        |                        |                       |                               |
+ hid_allocate_device
+        |                        |                       |                               |
+ hid_add_device                  |                       |                               |
+        |                        |                       |                               |
+</pre></div>
+</div>
+</section>
+<section id="ish-debugging">
+<h3>3.7 ISH Debugging<a class="headerlink" href="#ish-debugging" title="Permalink to this headline">¶</a></h3>
+<p>To debug ISH, event tracing mechanism is used. To enable debug logs:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>echo 1 &gt; /sys/kernel/debug/tracing/events/intel_ish/enable
+cat /sys/kernel/debug/tracing/trace
+</pre></div>
+</div>
+</section>
+<section id="ish-iio-sysfs-example-on-lenovo-thinkpad-yoga-260">
+<h3>3.8 ISH IIO sysfs Example on Lenovo thinkpad Yoga 260<a class="headerlink" href="#ish-iio-sysfs-example-on-lenovo-thinkpad-yoga-260" title="Permalink to this headline">¶</a></h3>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>root@otcpl-ThinkPad-Yoga-260:~# tree -l /sys/bus/iio/devices/
+/sys/bus/iio/devices/
+├── iio:device0 -&gt; ../../../devices/0044:8086:22D8.0001/HID-SENSOR-200073.9.auto/iio:device0
+│   ├── buffer
+│   │   ├── enable
+│   │   ├── length
+│   │   └── watermark
+...
+│   ├── in_accel_hysteresis
+│   ├── in_accel_offset
+│   ├── in_accel_sampling_frequency
+│   ├── in_accel_scale
+│   ├── in_accel_x_raw
+│   ├── in_accel_y_raw
+│   ├── in_accel_z_raw
+│   ├── name
+│   ├── scan_elements
+│   │   ├── in_accel_x_en
+│   │   ├── in_accel_x_index
+│   │   ├── in_accel_x_type
+│   │   ├── in_accel_y_en
+│   │   ├── in_accel_y_index
+│   │   ├── in_accel_y_type
+│   │   ├── in_accel_z_en
+│   │   ├── in_accel_z_index
+│   │   └── in_accel_z_type
+...
+│   │   ├── devices
+│   │   │   │   ├── buffer
+│   │   │   │   │   ├── enable
+│   │   │   │   │   ├── length
+│   │   │   │   │   └── watermark
+│   │   │   │   ├── dev
+│   │   │   │   ├── in_intensity_both_raw
+│   │   │   │   ├── in_intensity_hysteresis
+│   │   │   │   ├── in_intensity_offset
+│   │   │   │   ├── in_intensity_sampling_frequency
+│   │   │   │   ├── in_intensity_scale
+│   │   │   │   ├── name
+│   │   │   │   ├── scan_elements
+│   │   │   │   │   ├── in_intensity_both_en
+│   │   │   │   │   ├── in_intensity_both_index
+│   │   │   │   │   └── in_intensity_both_type
+│   │   │   │   ├── trigger
+│   │   │   │   │   └── current_trigger
+...
+│   │   │   │   ├── buffer
+│   │   │   │   │   ├── enable
+│   │   │   │   │   ├── length
+│   │   │   │   │   └── watermark
+│   │   │   │   ├── dev
+│   │   │   │   ├── in_magn_hysteresis
+│   │   │   │   ├── in_magn_offset
+│   │   │   │   ├── in_magn_sampling_frequency
+│   │   │   │   ├── in_magn_scale
+│   │   │   │   ├── in_magn_x_raw
+│   │   │   │   ├── in_magn_y_raw
+│   │   │   │   ├── in_magn_z_raw
+│   │   │   │   ├── in_rot_from_north_magnetic_tilt_comp_raw
+│   │   │   │   ├── in_rot_hysteresis
+│   │   │   │   ├── in_rot_offset
+│   │   │   │   ├── in_rot_sampling_frequency
+│   │   │   │   ├── in_rot_scale
+│   │   │   │   ├── name
+...
+│   │   │   │   ├── scan_elements
+│   │   │   │   │   ├── in_magn_x_en
+│   │   │   │   │   ├── in_magn_x_index
+│   │   │   │   │   ├── in_magn_x_type
+│   │   │   │   │   ├── in_magn_y_en
+│   │   │   │   │   ├── in_magn_y_index
+│   │   │   │   │   ├── in_magn_y_type
+│   │   │   │   │   ├── in_magn_z_en
+│   │   │   │   │   ├── in_magn_z_index
+│   │   │   │   │   ├── in_magn_z_type
+│   │   │   │   │   ├── in_rot_from_north_magnetic_tilt_comp_en
+│   │   │   │   │   ├── in_rot_from_north_magnetic_tilt_comp_index
+│   │   │   │   │   └── in_rot_from_north_magnetic_tilt_comp_type
+│   │   │   │   ├── trigger
+│   │   │   │   │   └── current_trigger
+...
+│   │   │   │   ├── buffer
+│   │   │   │   │   ├── enable
+│   │   │   │   │   ├── length
+│   │   │   │   │   └── watermark
+│   │   │   │   ├── dev
+│   │   │   │   ├── in_anglvel_hysteresis
+│   │   │   │   ├── in_anglvel_offset
+│   │   │   │   ├── in_anglvel_sampling_frequency
+│   │   │   │   ├── in_anglvel_scale
+│   │   │   │   ├── in_anglvel_x_raw
+│   │   │   │   ├── in_anglvel_y_raw
+│   │   │   │   ├── in_anglvel_z_raw
+│   │   │   │   ├── name
+│   │   │   │   ├── scan_elements
+│   │   │   │   │   ├── in_anglvel_x_en
+│   │   │   │   │   ├── in_anglvel_x_index
+│   │   │   │   │   ├── in_anglvel_x_type
+│   │   │   │   │   ├── in_anglvel_y_en
+│   │   │   │   │   ├── in_anglvel_y_index
+│   │   │   │   │   ├── in_anglvel_y_type
+│   │   │   │   │   ├── in_anglvel_z_en
+│   │   │   │   │   ├── in_anglvel_z_index
+│   │   │   │   │   └── in_anglvel_z_type
+│   │   │   │   ├── trigger
+│   │   │   │   │   └── current_trigger
+...
+│   │   │   │   ├── buffer
+│   │   │   │   │   ├── enable
+│   │   │   │   │   ├── length
+│   │   │   │   │   └── watermark
+│   │   │   │   ├── dev
+│   │   │   │   ├── in_anglvel_hysteresis
+│   │   │   │   ├── in_anglvel_offset
+│   │   │   │   ├── in_anglvel_sampling_frequency
+│   │   │   │   ├── in_anglvel_scale
+│   │   │   │   ├── in_anglvel_x_raw
+│   │   │   │   ├── in_anglvel_y_raw
+│   │   │   │   ├── in_anglvel_z_raw
+│   │   │   │   ├── name
+│   │   │   │   ├── scan_elements
+│   │   │   │   │   ├── in_anglvel_x_en
+│   │   │   │   │   ├── in_anglvel_x_index
+│   │   │   │   │   ├── in_anglvel_x_type
+│   │   │   │   │   ├── in_anglvel_y_en
+│   │   │   │   │   ├── in_anglvel_y_index
+│   │   │   │   │   ├── in_anglvel_y_type
+│   │   │   │   │   ├── in_anglvel_z_en
+│   │   │   │   │   ├── in_anglvel_z_index
+│   │   │   │   │   └── in_anglvel_z_type
+│   │   │   │   ├── trigger
+│   │   │   │   │   └── current_trigger
+...
+</pre></div>
+</div>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Intel Integrated Sensor Hub (ISH)</a><ul>
+<li><a class="reference internal" href="#overview">1. Overview</a></li>
+<li><a class="reference internal" href="#ish-implementation-block-diagram">2. ISH Implementation: Block Diagram</a></li>
+<li><a class="reference internal" href="#high-level-processing-in-above-blocks">3. High level processing in above blocks</a><ul>
+<li><a class="reference internal" href="#hardware-interface">3.1 Hardware Interface</a></li>
+<li><a class="reference internal" href="#inter-processor-communication-ipc-driver">3.2 Inter Processor Communication (IPC) driver</a><ul>
+<li><a class="reference internal" href="#ipc-fw-message-types">3.2.1 IPC/FW message types</a><ul>
+<li><a class="reference internal" href="#tx-and-rx-of-transport-messages">TX and RX of Transport messages</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#transport-layer-interface">3.2.2 Transport layer interface</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#ish-transport-layer">3.3 ISH Transport layer</a><ul>
+<li><a class="reference internal" href="#a-generic-transport-layer">3.3.1 A Generic Transport Layer</a></li>
+<li><a class="reference internal" href="#connection-and-flow-control-mechanism">3.3.2 Connection and Flow Control Mechanism</a></li>
+<li><a class="reference internal" href="#peer-to-peer-data-transfer">3.3.3 Peer to Peer data transfer</a></li>
+<li><a class="reference internal" href="#ring-buffers">3.3.4 Ring Buffers</a></li>
+<li><a class="reference internal" href="#host-enumeration">3.3.5 Host Enumeration</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#hid-over-ish-client">3.4 HID over ISH Client</a></li>
+<li><a class="reference internal" href="#hid-sensor-hub-mfd-and-iio-sensor-drivers">3.5 HID Sensor Hub MFD and IIO sensor drivers</a></li>
+<li><a class="reference internal" href="#end-to-end-hid-transport-sequence-diagram">3.6 End to End HID transport Sequence Diagram</a></li>
+<li><a class="reference internal" href="#ish-debugging">3.7 ISH Debugging</a></li>
+<li><a class="reference internal" href="#ish-iio-sysfs-example-on-lenovo-thinkpad-yoga-260">3.8 ISH IIO sysfs Example on Lenovo thinkpad Yoga 260</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/hid/intel-ish-hid.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/hid/intel-ish-hid.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

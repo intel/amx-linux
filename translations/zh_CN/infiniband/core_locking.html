@@ -1,0 +1,226 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>infiniband中间层锁 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../infiniband/core_locking.html"><span class="doc">InfiniBand Midlayer Locking</span></a></p>
+</dd>
+<dt class="field-even">翻译</dt>
+<dd class="field-even"><p>司延腾 Yanteng Si &lt;<a class="reference external" href="mailto:siyanteng&#37;&#52;&#48;loongson&#46;cn">siyanteng<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+<dt class="field-odd">校译</dt>
+<dd class="field-odd"><p>王普宇 Puyu Wang &lt;<a class="reference external" href="mailto:realpuyuwang&#37;&#52;&#48;gmail&#46;com">realpuyuwang<span>&#64;</span>gmail<span>&#46;</span>com</a>&gt;
+时奎亮 Alex Shi &lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;</p>
+</dd>
+</dl>
+<section id="infiniband">
+<span id="cn-infiniband-core-locking"></span><h1>infiniband中间层锁<a class="headerlink" href="#infiniband" title="Permalink to this headline">¶</a></h1>
+<blockquote>
+<div><p>本指南试图明确infiniband中间层的锁假设。它描述了对位于中间层以下的低
+级驱动程序和使用中间层的上层协议的要求。</p>
+</div></blockquote>
+<section id="id1">
+<h2>睡眠和中断环境<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>除了以下异常情况，ib_device结构体中所有方法的低级驱动实现都可以睡眠。
+这些异常情况是列表中的任意的方法:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>create_ah</p></li>
+<li><p>modify_ah</p></li>
+<li><p>query_ah</p></li>
+<li><p>destroy_ah</p></li>
+<li><p>post_send</p></li>
+<li><p>post_recv</p></li>
+<li><p>poll_cq</p></li>
+<li><p>req_notify_cq</p></li>
+</ul>
+<p>他们可能不可以睡眠，而且必须可以从任何上下文中调用。</p>
+<p>向上层协议使用者输出的相应函数:</p>
+<ul class="simple">
+<li><p>rdma_create_ah</p></li>
+<li><p>rdma_modify_ah</p></li>
+<li><p>rdma_query_ah</p></li>
+<li><p>rdma_destroy_ah</p></li>
+<li><p>ib_post_send</p></li>
+<li><p>ib_post_recv</p></li>
+<li><p>ib_req_notify_cq</p></li>
+</ul>
+<p>因此，在任何情况下都可以安全调用（它们）。</p>
+</div></blockquote>
+<p>此外，该函数</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>ib_dispatch_event</p></li>
+</ul>
+</div></blockquote>
+<p>被底层驱动用来通过中间层调度异步事件的“A”，也可以从任何上下文中安全调
+用。</p>
+</div></blockquote>
+<section id="id2">
+<h3>可重入性<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h3>
+<blockquote>
+<div><p>由低级驱动程序导出的ib_device结构体中的所有方法必须是完全可重入的。
+即使使用同一对象的多个函数调用被同时运行，低级驱动程序也需要执行所有
+必要的同步以保持一致性。</p>
+<p>IB中间层不执行任何函数调用的序列化。</p>
+<p>因为低级驱动程序是可重入的，所以不要求上层协议使用者任何顺序执行。然
+而，为了得到合理的结果，可能需要一些顺序。例如，一个使用者可以在多个
+CPU上同时安全地调用ib_poll_cq()。然而，不同的ib_poll_cq()调用之间
+的工作完成信息的顺序没有被定义。</p>
+</div></blockquote>
+</section>
+<section id="id3">
+<h3>回调<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h3>
+<blockquote>
+<div><p>低级驱动程序不得直接从与ib_device方法调用相同的调用链中执行回调。例
+如，低级驱动程序不允许从post_send方法直接调用使用者的完成事件处理程
+序。相反，低级驱动程序应该推迟这个回调，例如，调度一个tasklet来执行
+这个回调。</p>
+<p>低层驱动负责确保同一CQ的多个完成事件处理程序不被同时调用。驱动程序必
+须保证一个给定的CQ的事件处理程序在同一时间只有一个在运行。换句话说，
+以下情况是不允许的:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>      CPU1                                    CPU2
+
+low-level driver -&gt;
+  consumer CQ event callback:
+    /* ... */
+    ib_req_notify_cq(cq, ...);
+                                      low-level driver -&gt;
+    /* ... */                           consumer CQ event callback:
+                                          /* ... */
+    return from CQ event handler
+</pre></div>
+</div>
+<p>完成事件和异步事件回调的运行环境没有被定义。 根据低级别的驱动程序，它可能是
+进程上下文、softirq上下文或中断上下文。上层协议使用者可能不会在回调中睡眠。</p>
+</div></blockquote>
+</section>
+<section id="id4">
+<h3>热插拔<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h3>
+<blockquote>
+<div><p>当一个低级驱动程序调用<a class="reference internal" href="../../../driver-api/infiniband.html#c.ib_register_device" title="ib_register_device"><code class="xref c c-func docutils literal notranslate"><span class="pre">ib_register_device()</span></code></a>时，它宣布一个设备已经
+准备好供使用者使用，所有的初始化必须在这个调用之前完成。设备必须保
+持可用，直到驱动对<a class="reference internal" href="../../../driver-api/infiniband.html#c.ib_unregister_device" title="ib_unregister_device"><code class="xref c c-func docutils literal notranslate"><span class="pre">ib_unregister_device()</span></code></a>的调用返回。</p>
+<p>低级驱动程序必须从进程上下文调用<a class="reference internal" href="../../../driver-api/infiniband.html#c.ib_register_device" title="ib_register_device"><code class="xref c c-func docutils literal notranslate"><span class="pre">ib_register_device()</span></code></a>和
+<a class="reference internal" href="../../../driver-api/infiniband.html#c.ib_unregister_device" title="ib_unregister_device"><code class="xref c c-func docutils literal notranslate"><span class="pre">ib_unregister_device()</span></code></a>。如果使用者在这些调用中回调到驱动程序，它
+不能持有任何可能导致死锁的semaphores。</p>
+<p>一旦其结构体ib_client的add方法被调用，上层协议使用者就可以开始使用
+一个IB设备。使用者必须在从移除方法返回之前完成所有的清理工作并释放
+与设备相关的所有资源。</p>
+<p>使用者被允许在其添加和删除方法中睡眠。</p>
+</div></blockquote>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">infiniband中间层锁</a><ul>
+<li><a class="reference internal" href="#id1">睡眠和中断环境</a><ul>
+<li><a class="reference internal" href="#id2">可重入性</a></li>
+<li><a class="reference internal" href="#id3">回调</a></li>
+<li><a class="reference internal" href="#id4">热插拔</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/infiniband/core_locking.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/infiniband/core_locking.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

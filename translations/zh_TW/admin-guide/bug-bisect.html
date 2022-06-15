@@ -1,0 +1,197 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>二分（bisect）缺陷 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="受汙染的內核" href="tainted-kernels.html" />
+    <link rel="prev" title="追蹤缺陷" href="bug-hunting.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是爲讓中文讀者更容易閱讀和理解，而不是作爲一個分支。因此，
+如果您對此文件有任何意見或改動，請先嘗試更新原始英文文件。如果要更改或
+修正某處翻譯文件，請將意見或補丁發送給維護者（聯繫方式見下）。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您發現本文檔與原始文件有任何不同或者有翻譯問題，請聯繫該文件的譯者，
+或者發送電子郵件給胡皓文以獲取幫助：&lt;<a class="reference external" href="mailto:src&#46;res&#37;&#52;&#48;email&#46;cn">src<span>&#46;</span>res<span>&#64;</span>email<span>&#46;</span>cn</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../admin-guide/bug-bisect.html"><span class="doc">Bisecting a bug</span></a></p>
+</dd>
+<dt class="field-even">譯者</dt>
+<dd class="field-even"><p>吳想成 Wu XiangCheng &lt;<a class="reference external" href="mailto:bobwxc&#37;&#52;&#48;email&#46;cn">bobwxc<span>&#64;</span>email<span>&#46;</span>cn</a>&gt;
+胡皓文 Hu Haowen &lt;<a class="reference external" href="mailto:src&#46;res&#37;&#52;&#48;email&#46;cn">src<span>&#46;</span>res<span>&#64;</span>email<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+</dl>
+<section id="bisect">
+<h1>二分（bisect）缺陷<a class="headerlink" href="#bisect" title="Permalink to this headline">¶</a></h1>
+<p>（英文版）最後更新：2016年10月28日</p>
+<section id="id1">
+<h2>引言<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>始終嘗試由來自kernel.org的原始碼構建的最新內核。如果您沒有信心這樣做，請將
+錯誤報告給您的發行版供應商，而不是內核開發人員。</p>
+<p>找到缺陷（bug）並不總是那麼容易，不過仍然得去找。如果你找不到它，不要放棄。
+儘可能多的向相關維護人員報告您發現的信息。請參閱MAINTAINERS文件以了解您所
+關注的子系統的維護人員。</p>
+<p>在提交錯誤報告之前，請閱讀「<a class="reference internal" href="../../../admin-guide/reporting-issues.html"><span class="doc">Reporting issues</span></a>」。</p>
+</section>
+<section id="devices-not-appearing">
+<h2>設備未出現（Devices not appearing）<a class="headerlink" href="#devices-not-appearing" title="Permalink to this headline">¶</a></h2>
+<p>這通常是由udev/systemd引起的。在將其歸咎於內核之前先檢查一下。</p>
+</section>
+<section id="id2">
+<h2>查找導致缺陷的補丁<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>使用 <code class="docutils literal notranslate"><span class="pre">git</span></code> 提供的工具可以很容易地找到缺陷，只要缺陷是可復現的。</p>
+<p>操作步驟：</p>
+<ul>
+<li><p>從git原始碼構建內核</p></li>
+<li><p>以此開始二分 <a class="footnote-reference brackets" href="#f1" id="id3">1</a>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ git bisect start
+</pre></div>
+</div>
+</li>
+<li><p>標記損壞的變更集:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ git bisect bad [commit]
+</pre></div>
+</div>
+</li>
+<li><p>標記正常工作的變更集:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ git bisect good [commit]
+</pre></div>
+</div>
+</li>
+<li><p>重新構建內核並測試</p></li>
+<li><p>使用以下任一與git bisect進行交互:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ git bisect good
+</pre></div>
+</div>
+<p>或:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ git bisect bad
+</pre></div>
+</div>
+<p>這取決於您測試的變更集上是否有缺陷</p>
+</li>
+<li><p>在一些交互之後，git bisect將給出可能導致缺陷的變更集。</p></li>
+<li><p>例如，如果您知道當前版本有問題，而4.8版本是正常的，則可以執行以下操作:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ git bisect start
+$ git bisect bad                 # Current version is bad
+$ git bisect good v4.8
+</pre></div>
+</div>
+</li>
+</ul>
+<dl class="footnote brackets">
+<dt class="label" id="f1"><span class="brackets"><a class="fn-backref" href="#id3">1</a></span></dt>
+<dd><p>您可以（可選地）在開始git bisect的時候提供good或bad參數
+<code class="docutils literal notranslate"><span class="pre">git</span> <span class="pre">bisect</span> <span class="pre">start</span> <span class="pre">[BAD]</span> <span class="pre">[GOOD]</span></code></p>
+</dd>
+</dl>
+<p>如需進一步參考，請閱讀：</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">git-bisect</span></code> 的手冊頁</p></li>
+<li><p><a class="reference external" href="https://www.kernel.org/pub/software/scm/git/docs/git-bisect-lk2009.html">Fighting regressions with git bisect（用git bisect解決回歸）</a></p></li>
+<li><p><a class="reference external" href="https://lwn.net/Articles/317154">Fully automated bisecting with “git bisect run”（使用git bisect run
+來全自動二分）</a></p></li>
+<li><p><a class="reference external" href="http://webchick.net/node/99">Using Git bisect to figure out when brokenness was introduced
+（使用Git二分來找出何時引入了錯誤）</a></p></li>
+</ul>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">二分（bisect）缺陷</a><ul>
+<li><a class="reference internal" href="#id1">引言</a></li>
+<li><a class="reference internal" href="#devices-not-appearing">設備未出現（Devices not appearing）</a></li>
+<li><a class="reference internal" href="#id2">查找導致缺陷的補丁</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_TW/admin-guide/bug-bisect.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_TW/admin-guide/bug-bisect.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

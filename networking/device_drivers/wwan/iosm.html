@@ -1,0 +1,204 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>IOSM Driver for Intel M.2 PCIe based Modems &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="t7xx driver for MTK PCIe based T700 5G modem" href="t7xx.html" />
+    <link rel="prev" title="WWAN Device Drivers" href="index.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="iosm-driver-for-intel-m-2-pcie-based-modems">
+<span id="iosm-driver-doc"></span><h1>IOSM Driver for Intel M.2 PCIe based Modems<a class="headerlink" href="#iosm-driver-for-intel-m-2-pcie-based-modems" title="Permalink to this headline">¶</a></h1>
+<p>The IOSM (IPC over Shared Memory) driver is a WWAN PCIe host driver developed
+for linux or chrome platform for data exchange over PCIe interface between
+Host platform &amp; Intel M.2 Modem. The driver exposes interface conforming to the
+MBIM protocol [1]. Any front end application ( eg: Modem Manager) could easily
+manage the MBIM interface to enable data communication towards WWAN.</p>
+<section id="basic-usage">
+<h2>Basic usage<a class="headerlink" href="#basic-usage" title="Permalink to this headline">¶</a></h2>
+<p>MBIM functions are inactive when unmanaged. The IOSM driver only provides a
+userspace interface MBIM “WWAN PORT” representing MBIM control channel and does
+not play any role in managing the functionality. It is the job of a userspace
+application to detect port enumeration and enable MBIM functionality.</p>
+<p>Examples of few such userspace application are:
+- mbimcli (included with the libmbim [2] library), and
+- Modem Manager [3]</p>
+<p>Management Applications to carry out below required actions for establishing
+MBIM IP session:
+- open the MBIM control channel
+- configure network connection settings
+- connect to network
+- configure IP network interface</p>
+</section>
+<section id="management-application-development">
+<h2>Management application development<a class="headerlink" href="#management-application-development" title="Permalink to this headline">¶</a></h2>
+<p>The driver and userspace interfaces are described below. The MBIM protocol is
+described in [1] Mobile Broadband Interface Model v1.0 Errata-1.</p>
+<section id="mbim-control-channel-userspace-abi">
+<h3>MBIM control channel userspace ABI<a class="headerlink" href="#mbim-control-channel-userspace-abi" title="Permalink to this headline">¶</a></h3>
+<section id="dev-wwan0mbim0-character-device">
+<h4>/dev/wwan0mbim0 character device<a class="headerlink" href="#dev-wwan0mbim0-character-device" title="Permalink to this headline">¶</a></h4>
+<p>The driver exposes an MBIM interface to the MBIM function by implementing
+MBIM WWAN Port. The userspace end of the control channel pipe is a
+/dev/wwan0mbim0 character device. Application shall use this interface for
+MBIM protocol communication.</p>
+</section>
+<section id="fragmentation">
+<h4>Fragmentation<a class="headerlink" href="#fragmentation" title="Permalink to this headline">¶</a></h4>
+<p>The userspace application is responsible for all control message fragmentation
+and defragmentation as per MBIM specification.</p>
+</section>
+<section id="dev-wwan0mbim0-write">
+<h4>/dev/wwan0mbim0 write()<a class="headerlink" href="#dev-wwan0mbim0-write" title="Permalink to this headline">¶</a></h4>
+<p>The MBIM control messages from the management application must not exceed the
+negotiated control message size.</p>
+</section>
+<section id="dev-wwan0mbim0-read">
+<h4>/dev/wwan0mbim0 read()<a class="headerlink" href="#dev-wwan0mbim0-read" title="Permalink to this headline">¶</a></h4>
+<p>The management application must accept control messages of up the negotiated
+control message size.</p>
+</section>
+</section>
+<section id="mbim-data-channel-userspace-abi">
+<h3>MBIM data channel userspace ABI<a class="headerlink" href="#mbim-data-channel-userspace-abi" title="Permalink to this headline">¶</a></h3>
+<section id="wwan0-x-network-device">
+<h4>wwan0-X network device<a class="headerlink" href="#wwan0-x-network-device" title="Permalink to this headline">¶</a></h4>
+<p>The IOSM driver exposes IP link interface “wwan0-X” of type “wwan” for IP
+traffic. Iproute network utility is used for creating “wwan0-X” network
+interface and for associating it with MBIM IP session. The Driver supports
+upto 8 IP sessions for simultaneous IP communication.</p>
+<p>The userspace management application is responsible for creating new IP link
+prior to establishing MBIM IP session where the SessionId is greater than 0.</p>
+<p>For example, creating new IP link for a MBIM IP session with SessionId 1:</p>
+<blockquote>
+<div><p>ip link add dev wwan0-1 parentdev-name wwan0 type wwan linkid 1</p>
+</div></blockquote>
+<p>The driver will automatically map the “wwan0-1” network device to MBIM IP
+session 1.</p>
+</section>
+</section>
+</section>
+<section id="references">
+<h2>References<a class="headerlink" href="#references" title="Permalink to this headline">¶</a></h2>
+<dl class="simple">
+<dt>[1] “MBIM (Mobile Broadband Interface Model) Errata-1”</dt><dd><ul class="simple">
+<li><p><a class="reference external" href="https://www.usb.org/document-library/">https://www.usb.org/document-library/</a></p></li>
+</ul>
+</dd>
+<dt>[2] libmbim - “a glib-based library for talking to WWAN modems and</dt><dd><p>devices which speak the Mobile Interface Broadband Model (MBIM)
+protocol”
+- <a class="reference external" href="http://www.freedesktop.org/wiki/Software/libmbim/">http://www.freedesktop.org/wiki/Software/libmbim/</a></p>
+</dd>
+<dt>[3] Modem Manager - “a DBus-activated daemon which controls mobile</dt><dd><p>broadband (2G/3G/4G) devices and connections”
+- <a class="reference external" href="http://www.freedesktop.org/wiki/Software/ModemManager/">http://www.freedesktop.org/wiki/Software/ModemManager/</a></p>
+</dd>
+</dl>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">IOSM Driver for Intel M.2 PCIe based Modems</a><ul>
+<li><a class="reference internal" href="#basic-usage">Basic usage</a></li>
+<li><a class="reference internal" href="#management-application-development">Management application development</a><ul>
+<li><a class="reference internal" href="#mbim-control-channel-userspace-abi">MBIM control channel userspace ABI</a><ul>
+<li><a class="reference internal" href="#dev-wwan0mbim0-character-device">/dev/wwan0mbim0 character device</a></li>
+<li><a class="reference internal" href="#fragmentation">Fragmentation</a></li>
+<li><a class="reference internal" href="#dev-wwan0mbim0-write">/dev/wwan0mbim0 write()</a></li>
+<li><a class="reference internal" href="#dev-wwan0mbim0-read">/dev/wwan0mbim0 read()</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#mbim-data-channel-userspace-abi">MBIM data channel userspace ABI</a><ul>
+<li><a class="reference internal" href="#wwan0-x-network-device">wwan0-X network device</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#references">References</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/networking/device_drivers/wwan/iosm.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/networking/device_drivers/wwan/iosm.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

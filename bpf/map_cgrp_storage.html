@@ -1,0 +1,201 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>BPF_MAP_TYPE_CGRP_STORAGE &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="BPF_MAP_TYPE_CPUMAP" href="map_cpumap.html" />
+    <link rel="prev" title="BPF_MAP_TYPE_CGROUP_STORAGE" href="map_cgroup_storage.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="bpf-map-type-cgrp-storage">
+<h1>BPF_MAP_TYPE_CGRP_STORAGE<a class="headerlink" href="#bpf-map-type-cgrp-storage" title="Permalink to this headline">¶</a></h1>
+<p>The <code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_CGRP_STORAGE</span></code> map type represents a local fix-sized
+storage for cgroups. It is only available with <code class="docutils literal notranslate"><span class="pre">CONFIG_CGROUPS</span></code>.
+The programs are made available by the same Kconfig. The
+data for a particular cgroup can be retrieved by looking up the map
+with that cgroup.</p>
+<p>This document describes the usage and semantics of the
+<code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_CGRP_STORAGE</span></code> map type.</p>
+<section id="usage">
+<h2>Usage<a class="headerlink" href="#usage" title="Permalink to this headline">¶</a></h2>
+<p>The map key must be <code class="docutils literal notranslate"><span class="pre">sizeof(int)</span></code> representing a cgroup fd.
+To access the storage in a program, use <code class="docutils literal notranslate"><span class="pre">bpf_cgrp_storage_get</span></code>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void *bpf_cgrp_storage_get(struct bpf_map *map, struct cgroup *cgroup, void *value, u64 flags)
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">flags</span></code> could be 0 or <code class="docutils literal notranslate"><span class="pre">BPF_LOCAL_STORAGE_GET_F_CREATE</span></code> which indicates that
+a new local storage will be created if one does not exist.</p>
+<p>The local storage can be removed with <code class="docutils literal notranslate"><span class="pre">bpf_cgrp_storage_delete</span></code>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>long bpf_cgrp_storage_delete(struct bpf_map *map, struct cgroup *cgroup)
+</pre></div>
+</div>
+<p>The map is available to all program types.</p>
+</section>
+<section id="examples">
+<h2>Examples<a class="headerlink" href="#examples" title="Permalink to this headline">¶</a></h2>
+<p>A BPF program example with BPF_MAP_TYPE_CGRP_STORAGE:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#include &lt;vmlinux.h&gt;
+#include &lt;bpf/bpf_helpers.h&gt;
+#include &lt;bpf/bpf_tracing.h&gt;
+
+struct {
+        __uint(type, BPF_MAP_TYPE_CGRP_STORAGE);
+        __uint(map_flags, BPF_F_NO_PREALLOC);
+        __type(key, int);
+        __type(value, long);
+} cgrp_storage SEC(&quot;.maps&quot;);
+
+SEC(&quot;tp_btf/sys_enter&quot;)
+int BPF_PROG(on_enter, struct pt_regs *regs, long id)
+{
+        struct task_struct *task = bpf_get_current_task_btf();
+        long *ptr;
+
+        ptr = bpf_cgrp_storage_get(&amp;cgrp_storage, task-&gt;cgroups-&gt;dfl_cgrp, 0,
+                                   BPF_LOCAL_STORAGE_GET_F_CREATE);
+        if (ptr)
+            __sync_fetch_and_add(ptr, 1);
+
+        return 0;
+}
+</pre></div>
+</div>
+<p>Userspace accessing map declared above:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#include &lt;linux/bpf.h&gt;
+#include &lt;linux/libbpf.h&gt;
+
+__u32 map_lookup(struct bpf_map *map, int cgrp_fd)
+{
+        __u32 *value;
+        value = bpf_map_lookup_elem(bpf_map__fd(map), &amp;cgrp_fd);
+        if (value)
+            return *value;
+        return 0;
+}
+</pre></div>
+</div>
+</section>
+<section id="difference-between-bpf-map-type-cgrp-storage-and-bpf-map-type-cgroup-storage">
+<h2>Difference Between BPF_MAP_TYPE_CGRP_STORAGE and BPF_MAP_TYPE_CGROUP_STORAGE<a class="headerlink" href="#difference-between-bpf-map-type-cgrp-storage-and-bpf-map-type-cgroup-storage" title="Permalink to this headline">¶</a></h2>
+<p>The old cgroup storage map <code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_CGROUP_STORAGE</span></code> has been marked as
+deprecated (renamed to <code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_CGROUP_STORAGE_DEPRECATED</span></code>). The new
+<code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_CGRP_STORAGE</span></code> map should be used instead. The following
+illusates the main difference between <code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_CGRP_STORAGE</span></code> and
+<code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_CGROUP_STORAGE_DEPRECATED</span></code>.</p>
+<dl class="simple">
+<dt>(1). <code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_CGRP_STORAGE</span></code> can be used by all program types while</dt><dd><p><code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_CGROUP_STORAGE_DEPRECATED</span></code> is available only to cgroup program types
+like BPF_CGROUP_INET_INGRESS or BPF_CGROUP_SOCK_OPS, etc.</p>
+</dd>
+<dt>(2). <code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_CGRP_STORAGE</span></code> supports local storage for more than one</dt><dd><p>cgroup while <code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_CGROUP_STORAGE_DEPRECATED</span></code> only supports one cgroup
+which is attached by a BPF program.</p>
+</dd>
+<dt>(3). <code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_CGROUP_STORAGE_DEPRECATED</span></code> allocates local storage at attach time so</dt><dd><p><code class="docutils literal notranslate"><span class="pre">bpf_get_local_storage()</span></code> always returns non-NULL local storage.
+<code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_CGRP_STORAGE</span></code> allocates local storage at runtime so
+it is possible that <code class="docutils literal notranslate"><span class="pre">bpf_cgrp_storage_get()</span></code> may return null local storage.
+To avoid such null local storage issue, user space can do
+<code class="docutils literal notranslate"><span class="pre">bpf_map_update_elem()</span></code> to pre-allocate local storage before a BPF program
+is attached.</p>
+</dd>
+<dt>(4). <code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_CGRP_STORAGE</span></code> supports deleting local storage by a BPF program</dt><dd><p>while <code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_CGROUP_STORAGE_DEPRECATED</span></code> only deletes storage during
+prog detach time.</p>
+</dd>
+</dl>
+<p>So overall, <code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_CGRP_STORAGE</span></code> supports all <code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_CGROUP_STORAGE_DEPRECATED</span></code>
+functionality and beyond. It is recommended to use <code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_CGRP_STORAGE</span></code>
+instead of <code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_CGROUP_STORAGE_DEPRECATED</span></code>.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">BPF_MAP_TYPE_CGRP_STORAGE</a><ul>
+<li><a class="reference internal" href="#usage">Usage</a></li>
+<li><a class="reference internal" href="#examples">Examples</a></li>
+<li><a class="reference internal" href="#difference-between-bpf-map-type-cgrp-storage-and-bpf-map-type-cgroup-storage">Difference Between BPF_MAP_TYPE_CGRP_STORAGE and BPF_MAP_TYPE_CGROUP_STORAGE</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/bpf/map_cgrp_storage.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/bpf/map_cgrp_storage.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

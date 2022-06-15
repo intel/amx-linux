@@ -1,0 +1,543 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Energy Model of devices &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Freezing of tasks" href="freezing-of-tasks.html" />
+    <link rel="prev" title="Testing suspend and resume support in device drivers" href="drivers-testing.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="energy-model-of-devices">
+<h1>Energy Model of devices<a class="headerlink" href="#energy-model-of-devices" title="Permalink to this headline">¶</a></h1>
+<section id="overview">
+<h2>1. Overview<a class="headerlink" href="#overview" title="Permalink to this headline">¶</a></h2>
+<p>The Energy Model (EM) framework serves as an interface between drivers knowing
+the power consumed by devices at various performance levels, and the kernel
+subsystems willing to use that information to make energy-aware decisions.</p>
+<p>The source of the information about the power consumed by devices can vary greatly
+from one platform to another. These power costs can be estimated using
+devicetree data in some cases. In others, the firmware will know better.
+Alternatively, userspace might be best positioned. And so on. In order to avoid
+each and every client subsystem to re-implement support for each and every
+possible source of information on its own, the EM framework intervenes as an
+abstraction layer which standardizes the format of power cost tables in the
+kernel, hence enabling to avoid redundant work.</p>
+<p>The power values might be expressed in micro-Watts or in an ‘abstract scale’.
+Multiple subsystems might use the EM and it is up to the system integrator to
+check that the requirements for the power value scale types are met. An example
+can be found in the Energy-Aware Scheduler documentation
+<a class="reference internal" href="../scheduler/sched-energy.html"><span class="doc">Energy Aware Scheduling</span></a>. For some subsystems like thermal or
+powercap power values expressed in an ‘abstract scale’ might cause issues.
+These subsystems are more interested in estimation of power used in the past,
+thus the real micro-Watts might be needed. An example of these requirements can
+be found in the Intelligent Power Allocation in
+<a class="reference internal" href="../driver-api/thermal/power_allocator.html"><span class="doc">Power allocator governor tunables</span></a>.
+Kernel subsystems might implement automatic detection to check whether EM
+registered devices have inconsistent scale (based on EM internal flag).
+Important thing to keep in mind is that when the power values are expressed in
+an ‘abstract scale’ deriving real energy in micro-Joules would not be possible.</p>
+<p>The figure below depicts an example of drivers (Arm-specific here, but the
+approach is applicable to any architecture) providing power costs to the EM
+framework, and interested clients reading the data from it:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>+---------------+  +-----------------+  +---------------+
+| Thermal (IPA) |  | Scheduler (EAS) |  |     Other     |
++---------------+  +-----------------+  +---------------+
+        |                   | em_cpu_energy()   |
+        |                   | em_cpu_get()      |
+        +---------+         |         +---------+
+                  |         |         |
+                  v         v         v
+                 +---------------------+
+                 |    Energy Model     |
+                 |     Framework       |
+                 +---------------------+
+                    ^       ^       ^
+                    |       |       | em_dev_register_perf_domain()
+         +----------+       |       +---------+
+         |                  |                 |
+ +---------------+  +---------------+  +--------------+
+ |  cpufreq-dt   |  |   arm_scmi    |  |    Other     |
+ +---------------+  +---------------+  +--------------+
+         ^                  ^                 ^
+         |                  |                 |
+ +--------------+   +---------------+  +--------------+
+ | Device Tree  |   |   Firmware    |  |      ?       |
+ +--------------+   +---------------+  +--------------+
+</pre></div>
+</div>
+<p>In case of CPU devices the EM framework manages power cost tables per
+‘performance domain’ in the system. A performance domain is a group of CPUs
+whose performance is scaled together. Performance domains generally have a
+1-to-1 mapping with CPUFreq policies. All CPUs in a performance domain are
+required to have the same micro-architecture. CPUs in different performance
+domains can have different micro-architectures.</p>
+</section>
+<section id="core-apis">
+<h2>2. Core APIs<a class="headerlink" href="#core-apis" title="Permalink to this headline">¶</a></h2>
+<section id="config-options">
+<h3>2.1 Config options<a class="headerlink" href="#config-options" title="Permalink to this headline">¶</a></h3>
+<p>CONFIG_ENERGY_MODEL must be enabled to use the EM framework.</p>
+</section>
+<section id="registration-of-performance-domains">
+<h3>2.2 Registration of performance domains<a class="headerlink" href="#registration-of-performance-domains" title="Permalink to this headline">¶</a></h3>
+<section id="registration-of-advanced-em">
+<h4>Registration of ‘advanced’ EM<a class="headerlink" href="#registration-of-advanced-em" title="Permalink to this headline">¶</a></h4>
+<p>The ‘advanced’ EM gets it’s name due to the fact that the driver is allowed
+to provide more precised power model. It’s not limited to some implemented math
+formula in the framework (like it’s in ‘simple’ EM case). It can better reflect
+the real power measurements performed for each performance state. Thus, this
+registration method should be preferred in case considering EM static power
+(leakage) is important.</p>
+<p>Drivers are expected to register performance domains into the EM framework by
+calling the following API:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int em_dev_register_perf_domain(struct device *dev, unsigned int nr_states,
+              struct em_data_callback *cb, cpumask_t *cpus, bool microwatts);
+</pre></div>
+</div>
+<p>Drivers must provide a callback function returning &lt;frequency, power&gt; tuples
+for each performance state. The callback function provided by the driver is free
+to fetch data from any relevant location (DT, firmware, …), and by any mean
+deemed necessary. Only for CPU devices, drivers must specify the CPUs of the
+performance domains using cpumask. For other devices than CPUs the last
+argument must be set to NULL.
+The last argument ‘microwatts’ is important to set with correct value. Kernel
+subsystems which use EM might rely on this flag to check if all EM devices use
+the same scale. If there are different scales, these subsystems might decide
+to return warning/error, stop working or panic.
+See Section 3. for an example of driver implementing this
+callback, or Section 2.4 for further documentation on this API</p>
+</section>
+<section id="registration-of-em-using-dt">
+<h4>Registration of EM using DT<a class="headerlink" href="#registration-of-em-using-dt" title="Permalink to this headline">¶</a></h4>
+<p>The  EM can also be registered using OPP framework and information in DT
+“operating-points-v2”. Each OPP entry in DT can be extended with a property
+“opp-microwatt” containing micro-Watts power value. This OPP DT property
+allows a platform to register EM power values which are reflecting total power
+(static + dynamic). These power values might be coming directly from
+experiments and measurements.</p>
+</section>
+<section id="registration-of-artificial-em">
+<h4>Registration of ‘artificial’ EM<a class="headerlink" href="#registration-of-artificial-em" title="Permalink to this headline">¶</a></h4>
+<p>There is an option to provide a custom callback for drivers missing detailed
+knowledge about power value for each performance state. The callback
+.get_cost() is optional and provides the ‘cost’ values used by the EAS.
+This is useful for platforms that only provide information on relative
+efficiency between CPU types, where one could use the information to
+create an abstract power model. But even an abstract power model can
+sometimes be hard to fit in, given the input power value size restrictions.
+The .get_cost() allows to provide the ‘cost’ values which reflect the
+efficiency of the CPUs. This would allow to provide EAS information which
+has different relation than what would be forced by the EM internal
+formulas calculating ‘cost’ values. To register an EM for such platform, the
+driver must set the flag ‘microwatts’ to 0, provide .get_power() callback
+and provide .get_cost() callback. The EM framework would handle such platform
+properly during registration. A flag EM_PERF_DOMAIN_ARTIFICIAL is set for such
+platform. Special care should be taken by other frameworks which are using EM
+to test and treat this flag properly.</p>
+</section>
+<section id="registration-of-simple-em">
+<h4>Registration of ‘simple’ EM<a class="headerlink" href="#registration-of-simple-em" title="Permalink to this headline">¶</a></h4>
+<p>The ‘simple’ EM is registered using the framework helper function
+cpufreq_register_em_with_opp(). It implements a power model which is tight to
+math formula:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Power = C * V^2 * f
+</pre></div>
+</div>
+<p>The EM which is registered using this method might not reflect correctly the
+physics of a real device, e.g. when static power (leakage) is important.</p>
+</section>
+</section>
+<section id="accessing-performance-domains">
+<h3>2.3 Accessing performance domains<a class="headerlink" href="#accessing-performance-domains" title="Permalink to this headline">¶</a></h3>
+<p>There are two API functions which provide the access to the energy model:
+<a class="reference internal" href="#c.em_cpu_get" title="em_cpu_get"><code class="xref c c-func docutils literal notranslate"><span class="pre">em_cpu_get()</span></code></a> which takes CPU id as an argument and <a class="reference internal" href="#c.em_pd_get" title="em_pd_get"><code class="xref c c-func docutils literal notranslate"><span class="pre">em_pd_get()</span></code></a> with device
+pointer as an argument. It depends on the subsystem which interface it is
+going to use, but in case of CPU devices both functions return the same
+performance domain.</p>
+<p>Subsystems interested in the energy model of a CPU can retrieve it using the
+<a class="reference internal" href="#c.em_cpu_get" title="em_cpu_get"><code class="xref c c-func docutils literal notranslate"><span class="pre">em_cpu_get()</span></code></a> API. The energy model tables are allocated once upon creation of
+the performance domains, and kept in memory untouched.</p>
+<p>The energy consumed by a performance domain can be estimated using the
+<a class="reference internal" href="#c.em_cpu_energy" title="em_cpu_energy"><code class="xref c c-func docutils literal notranslate"><span class="pre">em_cpu_energy()</span></code></a> API. The estimation is performed assuming that the schedutil
+CPUfreq governor is in use in case of CPU device. Currently this calculation is
+not provided for other type of devices.</p>
+<p>More details about the above APIs can be found in <code class="docutils literal notranslate"><span class="pre">&lt;linux/energy_model.h&gt;</span></code>
+or in Section 2.4</p>
+</section>
+<section id="description-details-of-this-api">
+<h3>2.4 Description details of this API<a class="headerlink" href="#description-details-of-this-api" title="Permalink to this headline">¶</a></h3>
+<dl class="type">
+<dt id="c.em_perf_state">
+struct <code class="sig-name descname">em_perf_state</code><a class="headerlink" href="#c.em_perf_state" title="Permalink to this definition">¶</a></dt>
+<dd><p>Performance state of a performance domain</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct em_perf_state {
+    unsigned long frequency;
+    unsigned long power;
+    unsigned long cost;
+    unsigned long flags;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">frequency</span></code></dt><dd><p>The frequency in KHz, for consistency with CPUFreq</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">power</span></code></dt><dd><p>The power consumed at this level (by 1 CPU or by a registered
+device). It can be a total power: static and dynamic.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">cost</span></code></dt><dd><p>The cost coefficient associated with this level, used during
+energy calculation. Equal to: power * max_frequency / frequency</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">flags</span></code></dt><dd><p>see “em_perf_state flags” description below.</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.em_perf_domain">
+struct <code class="sig-name descname">em_perf_domain</code><a class="headerlink" href="#c.em_perf_domain" title="Permalink to this definition">¶</a></dt>
+<dd><p>Performance domain</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct em_perf_domain {
+    struct em_perf_state *table;
+    int nr_perf_states;
+    unsigned long flags;
+    unsigned long cpus[];
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">table</span></code></dt><dd><p>List of performance states, in ascending order</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">nr_perf_states</span></code></dt><dd><p>Number of performance states</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">flags</span></code></dt><dd><p>See “em_perf_domain flags”</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">cpus</span></code></dt><dd><p>Cpumask covering the CPUs of the domain. It’s here
+for performance reasons to avoid potential cache
+misses during energy calculations in the scheduler
+and simplifies allocating/freeing that memory region.</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>In case of CPU device, a “performance domain” represents a group of CPUs
+whose performance is scaled together. All CPUs of a performance domain
+must have the same micro-architecture. Performance domains often have
+a 1-to-1 mapping with CPUFreq policies. In case of other devices the <strong>cpus</strong>
+field is unused.</p>
+<dl class="function">
+<dt id="c.em_pd_get_efficient_state">
+struct <a class="reference internal" href="#c.em_perf_state" title="em_perf_state">em_perf_state</a> * <code class="sig-name descname">em_pd_get_efficient_state</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.em_perf_domain" title="em_perf_domain">em_perf_domain</a><em> *pd</em>, unsigned long<em> freq</em><span class="sig-paren">)</span><a class="headerlink" href="#c.em_pd_get_efficient_state" title="Permalink to this definition">¶</a></dt>
+<dd><p>Get an efficient performance state from the EM</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">em_perf_domain</span> <span class="pre">*pd</span></code></dt><dd><p>Performance domain for which we want an efficient frequency</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">freq</span></code></dt><dd><p>Frequency to map with the EM</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>It is called from the scheduler code quite frequently and as a consequence
+doesn’t implement any check.</p>
+<p><strong>Return</strong></p>
+<p>An efficient performance state, high enough to meet <strong>freq</strong>
+requirement.</p>
+</div>
+<dl class="function">
+<dt id="c.em_cpu_energy">
+unsigned long <code class="sig-name descname">em_cpu_energy</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.em_perf_domain" title="em_perf_domain">em_perf_domain</a><em> *pd</em>, unsigned long<em> max_util</em>, unsigned long<em> sum_util</em>, unsigned long<em> allowed_cpu_cap</em><span class="sig-paren">)</span><a class="headerlink" href="#c.em_cpu_energy" title="Permalink to this definition">¶</a></dt>
+<dd><p>Estimates the energy consumed by the CPUs of a performance domain</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">em_perf_domain</span> <span class="pre">*pd</span></code></dt><dd><p>performance domain for which energy has to be estimated</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">max_util</span></code></dt><dd><p>highest utilization among CPUs of the domain</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">sum_util</span></code></dt><dd><p>sum of the utilization of all CPUs in the domain</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">allowed_cpu_cap</span></code></dt><dd><p>maximum allowed CPU capacity for the <strong>pd</strong>, which
+might reflect reduced frequency (due to thermal)</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This function must be used only for CPU devices. There is no validation,
+i.e. if the EM is a CPU type and has cpumask allocated. It is called from
+the scheduler code quite frequently and that is why there is not checks.</p>
+<p><strong>Return</strong></p>
+<p>the sum of the energy consumed by the CPUs of the domain assuming
+a capacity state satisfying the max utilization of the domain.</p>
+</div>
+<dl class="function">
+<dt id="c.em_pd_nr_perf_states">
+int <code class="sig-name descname">em_pd_nr_perf_states</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.em_perf_domain" title="em_perf_domain">em_perf_domain</a><em> *pd</em><span class="sig-paren">)</span><a class="headerlink" href="#c.em_pd_nr_perf_states" title="Permalink to this definition">¶</a></dt>
+<dd><p>Get the number of performance states of a perf. domain</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">em_perf_domain</span> <span class="pre">*pd</span></code></dt><dd><p>performance domain for which this must be done</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p>the number of performance states in the performance domain table</p>
+</div>
+<dl class="function">
+<dt id="c.em_pd_get">
+struct <a class="reference internal" href="#c.em_perf_domain" title="em_perf_domain">em_perf_domain</a> * <code class="sig-name descname">em_pd_get</code><span class="sig-paren">(</span>struct <a class="reference internal" href="../driver-api/infrastructure.html#c.device" title="device">device</a><em> *dev</em><span class="sig-paren">)</span><a class="headerlink" href="#c.em_pd_get" title="Permalink to this definition">¶</a></dt>
+<dd><p>Return the performance domain for a device</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>Device to find the performance domain for</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Returns the performance domain to which <strong>dev</strong> belongs, or NULL if it doesn’t
+exist.</p>
+</div>
+<dl class="function">
+<dt id="c.em_cpu_get">
+struct <a class="reference internal" href="#c.em_perf_domain" title="em_perf_domain">em_perf_domain</a> * <code class="sig-name descname">em_cpu_get</code><span class="sig-paren">(</span>int<em> cpu</em><span class="sig-paren">)</span><a class="headerlink" href="#c.em_cpu_get" title="Permalink to this definition">¶</a></dt>
+<dd><p>Return the performance domain for a CPU</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">cpu</span></code></dt><dd><p>CPU to find the performance domain for</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Returns the performance domain to which <strong>cpu</strong> belongs, or NULL if it doesn’t
+exist.</p>
+</div>
+<dl class="function">
+<dt id="c.em_dev_register_perf_domain">
+int <code class="sig-name descname">em_dev_register_perf_domain</code><span class="sig-paren">(</span>struct <a class="reference internal" href="../driver-api/infrastructure.html#c.device" title="device">device</a><em> *dev</em>, unsigned int<em> nr_states</em>, struct em_data_callback<em> *cb</em>, cpumask_t<em> *cpus</em>, bool<em> microwatts</em><span class="sig-paren">)</span><a class="headerlink" href="#c.em_dev_register_perf_domain" title="Permalink to this definition">¶</a></dt>
+<dd><p>Register the Energy Model (EM) for a device</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>Device for which the EM is to register</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">nr_states</span></code></dt><dd><p>Number of performance states to register</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">em_data_callback</span> <span class="pre">*cb</span></code></dt><dd><p>Callback functions providing the data of the Energy Model</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">cpumask_t</span> <span class="pre">*cpus</span></code></dt><dd><p>Pointer to cpumask_t, which in case of a CPU device is
+obligatory. It can be taken from i.e. ‘policy-&gt;cpus’. For other
+type of devices this should be set to NULL.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">bool</span> <span class="pre">microwatts</span></code></dt><dd><p>Flag indicating that the power values are in micro-Watts or
+in some other scale. It must be set properly.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Create Energy Model tables for a performance domain using the callbacks
+defined in cb.</p>
+<p>The <strong>microwatts</strong> is important to set with correct value. Some kernel
+sub-systems might rely on this flag and check if all devices in the EM are
+using the same scale.</p>
+<p>If multiple clients register the same performance domain, all but the first
+registration will be ignored.</p>
+<p>Return 0 on success</p>
+</div>
+<dl class="function">
+<dt id="c.em_dev_unregister_perf_domain">
+void <code class="sig-name descname">em_dev_unregister_perf_domain</code><span class="sig-paren">(</span>struct <a class="reference internal" href="../driver-api/infrastructure.html#c.device" title="device">device</a><em> *dev</em><span class="sig-paren">)</span><a class="headerlink" href="#c.em_dev_unregister_perf_domain" title="Permalink to this definition">¶</a></dt>
+<dd><p>Unregister Energy Model (EM) for a device</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>Device for which the EM is registered</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Unregister the EM for the specified <strong>dev</strong> (but not a CPU device).</p>
+</div>
+</section>
+</section>
+<section id="example-driver">
+<h2>3. Example driver<a class="headerlink" href="#example-driver" title="Permalink to this headline">¶</a></h2>
+<p>The CPUFreq framework supports dedicated callback for registering
+the EM for a given CPU(s) ‘policy’ object: cpufreq_driver::register_em().
+That callback has to be implemented properly for a given driver,
+because the framework would call it at the right time during setup.
+This section provides a simple example of a CPUFreq driver registering a
+performance domain in the Energy Model framework using the (fake) ‘foo’
+protocol. The driver implements an est_power() function to be provided to the
+EM framework:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>-&gt; drivers/cpufreq/foo_cpufreq.c
+
+01    static int est_power(struct device *dev, unsigned long *mW,
+02                    unsigned long *KHz)
+03    {
+04            long freq, power;
+05
+06            /* Use the &#39;foo&#39; protocol to ceil the frequency */
+07            freq = foo_get_freq_ceil(dev, *KHz);
+08            if (freq &lt; 0);
+09                    return freq;
+10
+11            /* Estimate the power cost for the dev at the relevant freq. */
+12            power = foo_estimate_power(dev, freq);
+13            if (power &lt; 0);
+14                    return power;
+15
+16            /* Return the values to the EM framework */
+17            *mW = power;
+18            *KHz = freq;
+19
+20            return 0;
+21    }
+22
+23    static void foo_cpufreq_register_em(struct cpufreq_policy *policy)
+24    {
+25            struct em_data_callback em_cb = EM_DATA_CB(est_power);
+26            struct device *cpu_dev;
+27            int nr_opp;
+28
+29            cpu_dev = get_cpu_device(cpumask_first(policy-&gt;cpus));
+30
+31            /* Find the number of OPPs for this policy */
+32            nr_opp = foo_get_nr_opp(policy);
+33
+34            /* And register the new performance domain */
+35            em_dev_register_perf_domain(cpu_dev, nr_opp, &amp;em_cb, policy-&gt;cpus,
+36                                        true);
+37    }
+38
+39    static struct cpufreq_driver foo_cpufreq_driver = {
+40            .register_em = foo_cpufreq_register_em,
+41    };
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Energy Model of devices</a><ul>
+<li><a class="reference internal" href="#overview">1. Overview</a></li>
+<li><a class="reference internal" href="#core-apis">2. Core APIs</a><ul>
+<li><a class="reference internal" href="#config-options">2.1 Config options</a></li>
+<li><a class="reference internal" href="#registration-of-performance-domains">2.2 Registration of performance domains</a><ul>
+<li><a class="reference internal" href="#registration-of-advanced-em">Registration of ‘advanced’ EM</a></li>
+<li><a class="reference internal" href="#registration-of-em-using-dt">Registration of EM using DT</a></li>
+<li><a class="reference internal" href="#registration-of-artificial-em">Registration of ‘artificial’ EM</a></li>
+<li><a class="reference internal" href="#registration-of-simple-em">Registration of ‘simple’ EM</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#accessing-performance-domains">2.3 Accessing performance domains</a></li>
+<li><a class="reference internal" href="#description-details-of-this-api">2.4 Description details of this API</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#example-driver">3. Example driver</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/power/energy-model.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/power/energy-model.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

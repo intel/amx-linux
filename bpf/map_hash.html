@@ -1,0 +1,303 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>BPF_MAP_TYPE_HASH, with PERCPU and LRU Variants &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="BPF_MAP_TYPE_LPM_TRIE" href="map_lpm_trie.html" />
+    <link rel="prev" title="BPF_MAP_TYPE_DEVMAP and BPF_MAP_TYPE_DEVMAP_HASH" href="map_devmap.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="bpf-map-type-hash-with-percpu-and-lru-variants">
+<h1>BPF_MAP_TYPE_HASH, with PERCPU and LRU Variants<a class="headerlink" href="#bpf-map-type-hash-with-percpu-and-lru-variants" title="Permalink to this headline">¶</a></h1>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_HASH</span></code> was introduced in kernel version 3.19</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_PERCPU_HASH</span></code> was introduced in version 4.6</p></li>
+<li><p>Both <code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_LRU_HASH</span></code> and <code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_LRU_PERCPU_HASH</span></code>
+were introduced in version 4.10</p></li>
+</ul>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_HASH</span></code> and <code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_PERCPU_HASH</span></code> provide general
+purpose hash map storage. Both the key and the value can be structs,
+allowing for composite keys and values.</p>
+<p>The kernel is responsible for allocating and freeing key/value pairs, up
+to the max_entries limit that you specify. Hash maps use pre-allocation
+of hash table elements by default. The <code class="docutils literal notranslate"><span class="pre">BPF_F_NO_PREALLOC</span></code> flag can be
+used to disable pre-allocation when it is too memory expensive.</p>
+<p><code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_PERCPU_HASH</span></code> provides a separate value slot per
+CPU. The per-cpu values are stored internally in an array.</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_LRU_HASH</span></code> and <code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_LRU_PERCPU_HASH</span></code>
+variants add LRU semantics to their respective hash tables. An LRU hash
+will automatically evict the least recently used entries when the hash
+table reaches capacity. An LRU hash maintains an internal LRU list that
+is used to select elements for eviction. This internal LRU list is
+shared across CPUs but it is possible to request a per CPU LRU list with
+the <code class="docutils literal notranslate"><span class="pre">BPF_F_NO_COMMON_LRU</span></code> flag when calling <code class="docutils literal notranslate"><span class="pre">bpf_map_create</span></code>.</p>
+<section id="usage">
+<h2>Usage<a class="headerlink" href="#usage" title="Permalink to this headline">¶</a></h2>
+<section id="kernel-bpf">
+<h3>Kernel BPF<a class="headerlink" href="#kernel-bpf" title="Permalink to this headline">¶</a></h3>
+<section id="bpf-map-update-elem">
+<h4>bpf_map_update_elem()<a class="headerlink" href="#bpf-map-update-elem" title="Permalink to this headline">¶</a></h4>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">long</span><span class="w"> </span><span class="n">bpf_map_update_elem</span><span class="p">(</span><span class="k">struct</span> <span class="nc">bpf_map</span><span class="w"> </span><span class="o">*</span><span class="n">map</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">key</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">value</span><span class="p">,</span><span class="w"> </span><span class="n">u64</span><span class="w"> </span><span class="n">flags</span><span class="p">)</span><span class="w"></span>
+</pre></div>
+</div>
+<p>Hash entries can be added or updated using the <code class="docutils literal notranslate"><span class="pre">bpf_map_update_elem()</span></code>
+helper. This helper replaces existing elements atomically. The <code class="docutils literal notranslate"><span class="pre">flags</span></code>
+parameter can be used to control the update behaviour:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">BPF_ANY</span></code> will create a new element or update an existing element</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">BPF_NOEXIST</span></code> will create a new element only if one did not already
+exist</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">BPF_EXIST</span></code> will update an existing element</p></li>
+</ul>
+<p><code class="docutils literal notranslate"><span class="pre">bpf_map_update_elem()</span></code> returns 0 on success, or negative error in
+case of failure.</p>
+</section>
+<section id="bpf-map-lookup-elem">
+<h4>bpf_map_lookup_elem()<a class="headerlink" href="#bpf-map-lookup-elem" title="Permalink to this headline">¶</a></h4>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">bpf_map_lookup_elem</span><span class="p">(</span><span class="k">struct</span> <span class="nc">bpf_map</span><span class="w"> </span><span class="o">*</span><span class="n">map</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">key</span><span class="p">)</span><span class="w"></span>
+</pre></div>
+</div>
+<p>Hash entries can be retrieved using the <code class="docutils literal notranslate"><span class="pre">bpf_map_lookup_elem()</span></code>
+helper. This helper returns a pointer to the value associated with
+<code class="docutils literal notranslate"><span class="pre">key</span></code>, or <code class="docutils literal notranslate"><span class="pre">NULL</span></code> if no entry was found.</p>
+</section>
+<section id="bpf-map-delete-elem">
+<h4>bpf_map_delete_elem()<a class="headerlink" href="#bpf-map-delete-elem" title="Permalink to this headline">¶</a></h4>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">long</span><span class="w"> </span><span class="n">bpf_map_delete_elem</span><span class="p">(</span><span class="k">struct</span> <span class="nc">bpf_map</span><span class="w"> </span><span class="o">*</span><span class="n">map</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">key</span><span class="p">)</span><span class="w"></span>
+</pre></div>
+</div>
+<p>Hash entries can be deleted using the <code class="docutils literal notranslate"><span class="pre">bpf_map_delete_elem()</span></code>
+helper. This helper will return 0 on success, or negative error in case
+of failure.</p>
+</section>
+</section>
+<section id="per-cpu-hashes">
+<h3>Per CPU Hashes<a class="headerlink" href="#per-cpu-hashes" title="Permalink to this headline">¶</a></h3>
+<p>For <code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_PERCPU_HASH</span></code> and <code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_LRU_PERCPU_HASH</span></code>
+the <code class="docutils literal notranslate"><span class="pre">bpf_map_update_elem()</span></code> and <code class="docutils literal notranslate"><span class="pre">bpf_map_lookup_elem()</span></code> helpers
+automatically access the hash slot for the current CPU.</p>
+<section id="bpf-map-lookup-percpu-elem">
+<h4>bpf_map_lookup_percpu_elem()<a class="headerlink" href="#bpf-map-lookup-percpu-elem" title="Permalink to this headline">¶</a></h4>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">bpf_map_lookup_percpu_elem</span><span class="p">(</span><span class="k">struct</span> <span class="nc">bpf_map</span><span class="w"> </span><span class="o">*</span><span class="n">map</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">key</span><span class="p">,</span><span class="w"> </span><span class="n">u32</span><span class="w"> </span><span class="n">cpu</span><span class="p">)</span><span class="w"></span>
+</pre></div>
+</div>
+<p>The <code class="docutils literal notranslate"><span class="pre">bpf_map_lookup_percpu_elem()</span></code> helper can be used to lookup the
+value in the hash slot for a specific CPU. Returns value associated with
+<code class="docutils literal notranslate"><span class="pre">key</span></code> on <code class="docutils literal notranslate"><span class="pre">cpu</span></code> , or <code class="docutils literal notranslate"><span class="pre">NULL</span></code> if no entry was found or <code class="docutils literal notranslate"><span class="pre">cpu</span></code> is
+invalid.</p>
+</section>
+</section>
+<section id="concurrency">
+<h3>Concurrency<a class="headerlink" href="#concurrency" title="Permalink to this headline">¶</a></h3>
+<p>Values stored in <code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_HASH</span></code> can be accessed concurrently by
+programs running on different CPUs.  Since Kernel version 5.1, the BPF
+infrastructure provides <code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">bpf_spin_lock</span></code> to synchronise access.
+See <code class="docutils literal notranslate"><span class="pre">tools/testing/selftests/bpf/progs/test_spin_lock.c</span></code>.</p>
+</section>
+<section id="userspace">
+<h3>Userspace<a class="headerlink" href="#userspace" title="Permalink to this headline">¶</a></h3>
+<section id="bpf-map-get-next-key">
+<h4>bpf_map_get_next_key()<a class="headerlink" href="#bpf-map-get-next-key" title="Permalink to this headline">¶</a></h4>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">int</span><span class="w"> </span><span class="n">bpf_map_get_next_key</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">fd</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">cur_key</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">next_key</span><span class="p">)</span><span class="w"></span>
+</pre></div>
+</div>
+<p>In userspace, it is possible to iterate through the keys of a hash using
+libbpf’s <code class="docutils literal notranslate"><span class="pre">bpf_map_get_next_key()</span></code> function. The first key can be fetched by
+calling <code class="docutils literal notranslate"><span class="pre">bpf_map_get_next_key()</span></code> with <code class="docutils literal notranslate"><span class="pre">cur_key</span></code> set to
+<code class="docutils literal notranslate"><span class="pre">NULL</span></code>. Subsequent calls will fetch the next key that follows the
+current key. <code class="docutils literal notranslate"><span class="pre">bpf_map_get_next_key()</span></code> returns 0 on success, -ENOENT if
+cur_key is the last key in the hash, or negative error in case of
+failure.</p>
+<p>Note that if <code class="docutils literal notranslate"><span class="pre">cur_key</span></code> gets deleted then <code class="docutils literal notranslate"><span class="pre">bpf_map_get_next_key()</span></code>
+will instead return the <em>first</em> key in the hash table which is
+undesirable. It is recommended to use batched lookup if there is going
+to be key deletion intermixed with <code class="docutils literal notranslate"><span class="pre">bpf_map_get_next_key()</span></code>.</p>
+</section>
+</section>
+</section>
+<section id="examples">
+<h2>Examples<a class="headerlink" href="#examples" title="Permalink to this headline">¶</a></h2>
+<p>Please see the <code class="docutils literal notranslate"><span class="pre">tools/testing/selftests/bpf</span></code> directory for functional
+examples.  The code snippets below demonstrates API usage.</p>
+<p>This example shows how to declare an LRU Hash with a struct key and a
+struct value.</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;linux/bpf.h&gt;</span><span class="cp"></span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;bpf/bpf_helpers.h&gt;</span><span class="cp"></span>
+
+<span class="k">struct</span> <span class="nc">key</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="n">__u32</span><span class="w"> </span><span class="n">srcip</span><span class="p">;</span><span class="w"></span>
+<span class="p">};</span><span class="w"></span>
+
+<span class="k">struct</span> <span class="nc">value</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="n">__u64</span><span class="w"> </span><span class="n">packets</span><span class="p">;</span><span class="w"></span>
+<span class="w">    </span><span class="n">__u64</span><span class="w"> </span><span class="n">bytes</span><span class="p">;</span><span class="w"></span>
+<span class="p">};</span><span class="w"></span>
+
+<span class="k">struct</span> <span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="n">__uint</span><span class="p">(</span><span class="n">type</span><span class="p">,</span><span class="w"> </span><span class="n">BPF_MAP_TYPE_LRU_HASH</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="n">__uint</span><span class="p">(</span><span class="n">max_entries</span><span class="p">,</span><span class="w"> </span><span class="mi">32</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="n">__type</span><span class="p">(</span><span class="n">key</span><span class="p">,</span><span class="w"> </span><span class="k">struct</span> <span class="nc">key</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="n">__type</span><span class="p">(</span><span class="n">value</span><span class="p">,</span><span class="w"> </span><span class="k">struct</span> <span class="nc">value</span><span class="p">);</span><span class="w"></span>
+<span class="p">}</span><span class="w"> </span><span class="n">packet_stats</span><span class="w"> </span><span class="n">SEC</span><span class="p">(</span><span class="s">&quot;.maps&quot;</span><span class="p">);</span><span class="w"></span>
+</pre></div>
+</div>
+<p>This example shows how to create or update hash values using atomic
+instructions:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="k">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">update_stats</span><span class="p">(</span><span class="n">__u32</span><span class="w"> </span><span class="n">srcip</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">bytes</span><span class="p">)</span><span class="w"></span>
+<span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="k">struct</span> <span class="nc">key</span><span class="w"> </span><span class="n">key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">                </span><span class="p">.</span><span class="n">srcip</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">srcip</span><span class="p">,</span><span class="w"></span>
+<span class="w">        </span><span class="p">};</span><span class="w"></span>
+<span class="w">        </span><span class="k">struct</span> <span class="nc">value</span><span class="w"> </span><span class="o">*</span><span class="n">value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">bpf_map_lookup_elem</span><span class="p">(</span><span class="o">&amp;</span><span class="n">packet_stats</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">key</span><span class="p">);</span><span class="w"></span>
+
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">value</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">                </span><span class="n">__sync_fetch_and_add</span><span class="p">(</span><span class="o">&amp;</span><span class="n">value</span><span class="o">-&gt;</span><span class="n">packets</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span><span class="w"></span>
+<span class="w">                </span><span class="n">__sync_fetch_and_add</span><span class="p">(</span><span class="o">&amp;</span><span class="n">value</span><span class="o">-&gt;</span><span class="n">bytes</span><span class="p">,</span><span class="w"> </span><span class="n">bytes</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">                </span><span class="k">struct</span> <span class="nc">value</span><span class="w"> </span><span class="n">newval</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">bytes</span><span class="w"> </span><span class="p">};</span><span class="w"></span>
+
+<span class="w">                </span><span class="n">bpf_map_update_elem</span><span class="p">(</span><span class="o">&amp;</span><span class="n">packet_stats</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">key</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">newval</span><span class="p">,</span><span class="w"> </span><span class="n">BPF_NOEXIST</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="p">}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+<p>Userspace walking the map elements from the map declared above:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;bpf/libbpf.h&gt;</span><span class="cp"></span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;bpf/bpf.h&gt;</span><span class="cp"></span>
+
+<span class="k">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">walk_hash_elements</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">map_fd</span><span class="p">)</span><span class="w"></span>
+<span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="k">struct</span> <span class="nc">key</span><span class="w"> </span><span class="o">*</span><span class="n">cur_key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">NULL</span><span class="p">;</span><span class="w"></span>
+<span class="w">        </span><span class="k">struct</span> <span class="nc">key</span><span class="w"> </span><span class="n">next_key</span><span class="p">;</span><span class="w"></span>
+<span class="w">        </span><span class="k">struct</span> <span class="nc">value</span><span class="w"> </span><span class="n">value</span><span class="p">;</span><span class="w"></span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">err</span><span class="p">;</span><span class="w"></span>
+
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="p">(;;)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">                </span><span class="n">err</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">bpf_map_get_next_key</span><span class="p">(</span><span class="n">map_fd</span><span class="p">,</span><span class="w"> </span><span class="n">cur_key</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">next_key</span><span class="p">);</span><span class="w"></span>
+<span class="w">                </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">err</span><span class="p">)</span><span class="w"></span>
+<span class="w">                        </span><span class="k">break</span><span class="p">;</span><span class="w"></span>
+
+<span class="w">                </span><span class="n">bpf_map_lookup_elem</span><span class="p">(</span><span class="n">map_fd</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">next_key</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">value</span><span class="p">);</span><span class="w"></span>
+
+<span class="w">                </span><span class="c1">// Use key and value here</span>
+
+<span class="w">                </span><span class="n">cur_key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">next_key</span><span class="p">;</span><span class="w"></span>
+<span class="w">        </span><span class="p">}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">BPF_MAP_TYPE_HASH, with PERCPU and LRU Variants</a><ul>
+<li><a class="reference internal" href="#usage">Usage</a><ul>
+<li><a class="reference internal" href="#kernel-bpf">Kernel BPF</a><ul>
+<li><a class="reference internal" href="#bpf-map-update-elem">bpf_map_update_elem()</a></li>
+<li><a class="reference internal" href="#bpf-map-lookup-elem">bpf_map_lookup_elem()</a></li>
+<li><a class="reference internal" href="#bpf-map-delete-elem">bpf_map_delete_elem()</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#per-cpu-hashes">Per CPU Hashes</a><ul>
+<li><a class="reference internal" href="#bpf-map-lookup-percpu-elem">bpf_map_lookup_percpu_elem()</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#concurrency">Concurrency</a></li>
+<li><a class="reference internal" href="#userspace">Userspace</a><ul>
+<li><a class="reference internal" href="#bpf-map-get-next-key">bpf_map_get_next_key()</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#examples">Examples</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/bpf/map_hash.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/bpf/map_hash.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,403 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Unicode（統一碼）支持 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="與Linux 內核社區一起工作" href="../process/index.html" />
+    <link rel="prev" title="CPU 負載" href="cpu-load.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是爲讓中文讀者更容易閱讀和理解，而不是作爲一個分支。因此，
+如果您對此文件有任何意見或改動，請先嘗試更新原始英文文件。如果要更改或
+修正某處翻譯文件，請將意見或補丁發送給維護者（聯繫方式見下）。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您發現本文檔與原始文件有任何不同或者有翻譯問題，請聯繫該文件的譯者，
+或者發送電子郵件給胡皓文以獲取幫助：&lt;<a class="reference external" href="mailto:src&#46;res&#37;&#52;&#48;email&#46;cn">src<span>&#46;</span>res<span>&#64;</span>email<span>&#46;</span>cn</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../admin-guide/unicode.html"><span class="doc">Unicode support</span></a></p>
+</dd>
+<dt class="field-even">譯者</dt>
+<dd class="field-even"><p>吳想成 Wu XiangCheng &lt;<a class="reference external" href="mailto:bobwxc&#37;&#52;&#48;email&#46;cn">bobwxc<span>&#64;</span>email<span>&#46;</span>cn</a>&gt;
+胡皓文 Hu Haowen &lt;<a class="reference external" href="mailto:src&#46;res&#37;&#52;&#48;email&#46;cn">src<span>&#46;</span>res<span>&#64;</span>email<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+</dl>
+<section id="unicode">
+<h1>Unicode（統一碼）支持<a class="headerlink" href="#unicode" title="Permalink to this headline">¶</a></h1>
+<blockquote>
+<div><p>（英文版）上次更新：2005-01-17，版本號 1.4</p>
+</div></blockquote>
+<p>此文檔由H. Peter Anvin &lt;<a class="reference external" href="mailto:unicode&#37;&#52;&#48;lanana&#46;org">unicode<span>&#64;</span>lanana<span>&#46;</span>org</a>&gt;管理，是Linux註冊名稱與編號管理局
+（Linux Assigned Names And Numbers Authority，LANANA）項目的一部分。
+現行版本請見：</p>
+<blockquote>
+<div><p><a class="reference external" href="http://www.lanana.org/docs/unicode/admin-guide/unicode.rst">http://www.lanana.org/docs/unicode/admin-guide/unicode.rst</a></p>
+</div></blockquote>
+<section id="id1">
+<h2>簡介<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>Linux內核代碼已被重寫以使用Unicode來將字符映射到字體。下載一個Unicode到字體
+（Unicode-to-font）表，八位字符集與UTF-8模式都將改用此字體來顯示。</p>
+<p>這微妙地改變了八位字符表的語義。現在的四個字符表是：</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 24%" />
+<col style="width: 50%" />
+<col style="width: 26%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>映射代號</p></th>
+<th class="head"><p>映射名稱</p></th>
+<th class="head"><p>Escape代碼 (G0)</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>LAT1_MAP</p></td>
+<td><p>Latin-1 (ISO 8859-1)</p></td>
+<td><p>ESC ( B</p></td>
+</tr>
+<tr class="row-odd"><td><p>GRAF_MAP</p></td>
+<td><p>DEC VT100 pseudographics</p></td>
+<td><p>ESC ( 0</p></td>
+</tr>
+<tr class="row-even"><td><p>IBMPC_MAP</p></td>
+<td><p>IBM code page 437</p></td>
+<td><p>ESC ( U</p></td>
+</tr>
+<tr class="row-odd"><td><p>USER_MAP</p></td>
+<td><p>User defined</p></td>
+<td><p>ESC ( K</p></td>
+</tr>
+</tbody>
+</table>
+<p>特別是 ESC ( U 不再是「直通字體」，因爲字體可能與IBM字符集完全不同。
+例如，即使加載了一個Latin-1字體，也允許使用塊圖形（block graphics）。</p>
+<p>請注意，儘管這些代碼與ISO 2022類似，但這些代碼及其用途都與ISO 2022不匹配；
+Linux有兩個八位代碼（G0和G1），而ISO 2022有四個七位代碼（G0-G3）。</p>
+<p>根據Unicode標準/ISO 10646，U+F000到U+F8FF被保留用於作業系統範圍內的分配
+（Unicode標準將其稱爲「團體區域（Corporate Zone）」，因爲這對於Linux是不準確
+的，所以我們稱之爲「Linux區域」）。選擇U+F000作爲起點，因爲它允許直接映射
+區域以2的大倍數開始（以防需要1024或2048個字符的字體）。這就留下U+E000到
+U+EFFF作爲最終用戶區。</p>
+<p>[v1.2]：Unicodes範圍從U+F000到U+F7FF已經被硬編碼爲直接映射到加載的字體，
+繞過了翻譯表。用戶定義的映射現在默認爲U+F000到U+F0FF，模擬前述行爲。實際上，
+此範圍可能較短；例如，vgacon只能處理256字符（U+F000..U+F0FF）或512字符
+（U+F000..U+F1FF）字體。</p>
+</section>
+<section id="linux">
+<h2>Linux 區域中定義的實際字符<a class="headerlink" href="#linux" title="Permalink to this headline">¶</a></h2>
+<p>此外，還定義了Unicode 1.1.4中不存在的以下字符；這些字符由DEC VT圖形映射使用。
+[v1.2]此用法已過時，不應再使用；請參見下文。</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 14%" />
+<col style="width: 86%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>U+F800</p></td>
+<td><p>DEC VT GRAPHICS HORIZONTAL LINE SCAN 1</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F801</p></td>
+<td><p>DEC VT GRAPHICS HORIZONTAL LINE SCAN 3</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F803</p></td>
+<td><p>DEC VT GRAPHICS HORIZONTAL LINE SCAN 7</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F804</p></td>
+<td><p>DEC VT GRAPHICS HORIZONTAL LINE SCAN 9</p></td>
+</tr>
+</tbody>
+</table>
+<p>DEC VT220使用6x10字符矩陣，這些字符在DEC VT圖形字符集中形成一個平滑的過渡。
+我省略了掃描5行，因爲它也被用作塊圖形字符，因此被編碼爲U+2500 FORMS LIGHT
+HORIZONTAL。</p>
+<p>[v1.3]：這些字符已正式添加到Unicode 3.2.0中；它們在U+23BA、U+23BB、U+23BC、
+U+23BD處添加。Linux現在使用新值。</p>
+<p>[v1.2]：添加了以下字符來表示常見的鍵盤符號，這些符號不太可能被添加到Unicode
+中，因爲它們非常討厭地取決於特定供應商。當然，這是糟糕設計的一個好例子。</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 14%" />
+<col style="width: 86%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>U+F810</p></td>
+<td><p>KEYBOARD SYMBOL FLYING FLAG</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F811</p></td>
+<td><p>KEYBOARD SYMBOL PULLDOWN MENU</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F812</p></td>
+<td><p>KEYBOARD SYMBOL OPEN APPLE</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F813</p></td>
+<td><p>KEYBOARD SYMBOL SOLID APPLE</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="klingon">
+<h2>克林貢（Klingon）語支持<a class="headerlink" href="#klingon" title="Permalink to this headline">¶</a></h2>
+<p>1996年，Linux是世界上第一個添加對人工語言克林貢支持的作業系統，克林貢是由
+Marc Okrand爲《星際迷航》電視連續劇創造的。這種編碼後來被徵募Unicode註冊表
+（ConScript Unicode Registry，CSUR）採用，並建議（但最終被拒絕）納入Unicode
+平面一。不過，它仍然是Linux區域中的Linux/CSUR私有分配。</p>
+<p>這種編碼已經得到克林貢語言研究所（Klingon Language Institute）的認可。
+有關更多信息，請聯繫他們：</p>
+<blockquote>
+<div><p><a class="reference external" href="http://www.kli.org/">http://www.kli.org/</a></p>
+</div></blockquote>
+<p>由於Linux CZ開頭部分的字符大多是dingbats/symbols/forms類型，而且這是一種
+語言，因此根據標準Unicode慣例，我將它放置在16單元的邊界上。</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>這個範圍現在由徵募Unicode註冊表正式管理。規範性引用文件爲：</p>
+<blockquote>
+<div><p><a class="reference external" href="https://www.evertype.com/standards/csur/klingon.html">https://www.evertype.com/standards/csur/klingon.html</a></p>
+</div></blockquote>
+</div>
+<p>克林貢語有一個26個字符的字母表，一個10位數的位置數字書寫系統，從左到右
+，從上到下書寫。</p>
+<p>克林貢字母的幾種字形已經被提出。但是由於這組符號看起來始終是一致的，只有實際
+的形狀不同，因此按照標準Unicode慣例，這些差異被認爲是字體變體。</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>U+F8D0</p></td>
+<td><p>KLINGON LETTER A</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8D1</p></td>
+<td><p>KLINGON LETTER B</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8D2</p></td>
+<td><p>KLINGON LETTER CH</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8D3</p></td>
+<td><p>KLINGON LETTER D</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8D4</p></td>
+<td><p>KLINGON LETTER E</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8D5</p></td>
+<td><p>KLINGON LETTER GH</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8D6</p></td>
+<td><p>KLINGON LETTER H</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8D7</p></td>
+<td><p>KLINGON LETTER I</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8D8</p></td>
+<td><p>KLINGON LETTER J</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8D9</p></td>
+<td><p>KLINGON LETTER L</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8DA</p></td>
+<td><p>KLINGON LETTER M</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8DB</p></td>
+<td><p>KLINGON LETTER N</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8DC</p></td>
+<td><p>KLINGON LETTER NG</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8DD</p></td>
+<td><p>KLINGON LETTER O</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8DE</p></td>
+<td><p>KLINGON LETTER P</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8DF</p></td>
+<td><p>KLINGON LETTER Q
+- Written &lt;q&gt; in standard Okrand Latin transliteration</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8E0</p></td>
+<td><p>KLINGON LETTER QH
+- Written &lt;Q&gt; in standard Okrand Latin transliteration</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8E1</p></td>
+<td><p>KLINGON LETTER R</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8E2</p></td>
+<td><p>KLINGON LETTER S</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8E3</p></td>
+<td><p>KLINGON LETTER T</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8E4</p></td>
+<td><p>KLINGON LETTER TLH</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8E5</p></td>
+<td><p>KLINGON LETTER U</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8E6</p></td>
+<td><p>KLINGON LETTER V</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8E7</p></td>
+<td><p>KLINGON LETTER W</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8E8</p></td>
+<td><p>KLINGON LETTER Y</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8E9</p></td>
+<td><p>KLINGON LETTER GLOTTAL STOP</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8F0</p></td>
+<td><p>KLINGON DIGIT ZERO</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8F1</p></td>
+<td><p>KLINGON DIGIT ONE</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8F2</p></td>
+<td><p>KLINGON DIGIT TWO</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8F3</p></td>
+<td><p>KLINGON DIGIT THREE</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8F4</p></td>
+<td><p>KLINGON DIGIT FOUR</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8F5</p></td>
+<td><p>KLINGON DIGIT FIVE</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8F6</p></td>
+<td><p>KLINGON DIGIT SIX</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8F7</p></td>
+<td><p>KLINGON DIGIT SEVEN</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8F8</p></td>
+<td><p>KLINGON DIGIT EIGHT</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8F9</p></td>
+<td><p>KLINGON DIGIT NINE</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8FD</p></td>
+<td><p>KLINGON COMMA</p></td>
+</tr>
+<tr class="row-even"><td><p>U+F8FE</p></td>
+<td><p>KLINGON FULL STOP</p></td>
+</tr>
+<tr class="row-odd"><td><p>U+F8FF</p></td>
+<td><p>KLINGON SYMBOL FOR EMPIRE</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="id2">
+<h2>其他虛構和人工字母<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>自從分配了克林貢Linux Unicode塊之後，John Cowan &lt;<a class="reference external" href="mailto:jcowan&#37;&#52;&#48;reutershealth&#46;com">jcowan<span>&#64;</span>reutershealth<span>&#46;</span>com</a>&gt;
+和 Michael Everson &lt;<a class="reference external" href="mailto:everson&#37;&#52;&#48;evertype&#46;com">everson<span>&#64;</span>evertype<span>&#46;</span>com</a>&gt; 建立了一個虛構和人工字母的註冊表。
+徵募Unicode註冊表請訪問：</p>
+<blockquote>
+<div><p><a class="reference external" href="https://www.evertype.com/standards/csur/">https://www.evertype.com/standards/csur/</a></p>
+</div></blockquote>
+<p>所使用的範圍位於最終用戶區域的低端，因此無法進行規範化分配，但建議希望對虛構
+字母進行編碼的人員使用這些代碼，以實現互操作性。對於克林貢語，CSUR採用了Linux
+編碼。CSUR的人正在推動將Tengwar和Cirth添加到Unicode平面一；將克林貢添加到
+Unicode平面一被拒絕，因此上述編碼仍然是官方的。</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Unicode（統一碼）支持</a><ul>
+<li><a class="reference internal" href="#id1">簡介</a></li>
+<li><a class="reference internal" href="#linux">Linux 區域中定義的實際字符</a></li>
+<li><a class="reference internal" href="#klingon">克林貢（Klingon）語支持</a></li>
+<li><a class="reference internal" href="#id2">其他虛構和人工字母</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_TW/admin-guide/unicode.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_TW/admin-guide/unicode.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

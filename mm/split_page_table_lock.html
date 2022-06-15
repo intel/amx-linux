@@ -1,0 +1,216 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Split page table lock &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Transparent Hugepage Support" href="transhuge.html" />
+    <link rel="prev" title="Short users guide for SLUB" href="slub.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="split-page-table-lock">
+<span id="id1"></span><h1>Split page table lock<a class="headerlink" href="#split-page-table-lock" title="Permalink to this headline">¶</a></h1>
+<p>Originally, mm-&gt;page_table_lock spinlock protected all page tables of the
+mm_struct. But this approach leads to poor page fault scalability of
+multi-threaded applications due high contention on the lock. To improve
+scalability, split page table lock was introduced.</p>
+<p>With split page table lock we have separate per-table lock to serialize
+access to the table. At the moment we use split lock for PTE and PMD
+tables. Access to higher level tables protected by mm-&gt;page_table_lock.</p>
+<p>There are helpers to lock/unlock a table and other accessor functions:</p>
+<blockquote>
+<div><ul class="simple">
+<li><dl class="simple">
+<dt>pte_offset_map_lock()</dt><dd><p>maps pte and takes PTE table lock, returns pointer to the taken
+lock;</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>pte_unmap_unlock()</dt><dd><p>unlocks and unmaps PTE table;</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>pte_alloc_map_lock()</dt><dd><p>allocates PTE table if needed and take the lock, returns pointer
+to taken lock or NULL if allocation failed;</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>pte_lockptr()</dt><dd><p>returns pointer to PTE table lock;</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>pmd_lock()</dt><dd><p>takes PMD table lock, returns pointer to taken lock;</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>pmd_lockptr()</dt><dd><p>returns pointer to PMD table lock;</p>
+</dd>
+</dl>
+</li>
+</ul>
+</div></blockquote>
+<p>Split page table lock for PTE tables is enabled compile-time if
+CONFIG_SPLIT_PTLOCK_CPUS (usually 4) is less or equal to NR_CPUS.
+If split lock is disabled, all tables are guarded by mm-&gt;page_table_lock.</p>
+<p>Split page table lock for PMD tables is enabled, if it’s enabled for PTE
+tables and the architecture supports it (see below).</p>
+<section id="hugetlb-and-split-page-table-lock">
+<h2>Hugetlb and split page table lock<a class="headerlink" href="#hugetlb-and-split-page-table-lock" title="Permalink to this headline">¶</a></h2>
+<p>Hugetlb can support several page sizes. We use split lock only for PMD
+level, but not for PUD.</p>
+<p>Hugetlb-specific helpers:</p>
+<blockquote>
+<div><ul class="simple">
+<li><dl class="simple">
+<dt>huge_pte_lock()</dt><dd><p>takes pmd split lock for PMD_SIZE page, mm-&gt;page_table_lock
+otherwise;</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>huge_pte_lockptr()</dt><dd><p>returns pointer to table lock;</p>
+</dd>
+</dl>
+</li>
+</ul>
+</div></blockquote>
+</section>
+<section id="support-of-split-page-table-lock-by-an-architecture">
+<h2>Support of split page table lock by an architecture<a class="headerlink" href="#support-of-split-page-table-lock-by-an-architecture" title="Permalink to this headline">¶</a></h2>
+<p>There’s no need in special enabling of PTE split page table lock: everything
+required is done by pgtable_pte_page_ctor() and pgtable_pte_page_dtor(), which
+must be called on PTE table allocation / freeing.</p>
+<p>Make sure the architecture doesn’t use slab allocator for page table
+allocation: slab uses page-&gt;slab_cache for its pages.
+This field shares storage with page-&gt;ptl.</p>
+<p>PMD split lock only makes sense if you have more than two page table
+levels.</p>
+<p>PMD split lock enabling requires pgtable_pmd_page_ctor() call on PMD table
+allocation and pgtable_pmd_page_dtor() on freeing.</p>
+<p>Allocation usually happens in pmd_alloc_one(), freeing in pmd_free() and
+pmd_free_tlb(), but make sure you cover all PMD table allocation / freeing
+paths: i.e X86_PAE preallocate few PMDs on pgd_alloc().</p>
+<p>With everything in place you can set CONFIG_ARCH_ENABLE_SPLIT_PMD_PTLOCK.</p>
+<p>NOTE: pgtable_pte_page_ctor() and pgtable_pmd_page_ctor() can fail – it must
+be handled properly.</p>
+</section>
+<section id="page-ptl">
+<h2>page-&gt;ptl<a class="headerlink" href="#page-ptl" title="Permalink to this headline">¶</a></h2>
+<p>page-&gt;ptl is used to access split page table lock, where ‘page’ is struct
+page of page containing the table. It shares storage with page-&gt;private
+(and few other fields in union).</p>
+<p>To avoid increasing size of struct page and have best performance, we use a
+trick:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>if spinlock_t fits into long, we use page-&gt;ptr as spinlock, so we
+can avoid indirect access and save a cache line.</p></li>
+<li><p>if size of spinlock_t is bigger then size of long, we use page-&gt;ptl as
+pointer to spinlock_t and allocate it dynamically. This allows to use
+split lock with enabled DEBUG_SPINLOCK or DEBUG_LOCK_ALLOC, but costs
+one more cache line for indirect access;</p></li>
+</ul>
+</div></blockquote>
+<p>The spinlock_t allocated in pgtable_pte_page_ctor() for PTE table and in
+pgtable_pmd_page_ctor() for PMD table.</p>
+<p>Please, never access page-&gt;ptl directly – use appropriate helper.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Split page table lock</a><ul>
+<li><a class="reference internal" href="#hugetlb-and-split-page-table-lock">Hugetlb and split page table lock</a></li>
+<li><a class="reference internal" href="#support-of-split-page-table-lock-by-an-architecture">Support of split page table lock by an architecture</a></li>
+<li><a class="reference internal" href="#page-ptl">page-&gt;ptl</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/mm/split_page_table_lock.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/mm/split_page_table_lock.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,336 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Linux kernel driver for Compute Engine Virtual Ethernet (gve): &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../../" src="../../../../_static/documentation_options.js"></script>
+    <script src="../../../../_static/jquery.js"></script>
+    <script src="../../../../_static/underscore.js"></script>
+    <script src="../../../../_static/doctools.js"></script>
+    <script src="../../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" />
+    <link rel="next" title="Linux Kernel Driver for Huawei Intelligent NIC(HiNIC) family" href="../huawei/hinic.html" />
+    <link rel="prev" title="The Gianfar Ethernet Driver" href="../freescale/gianfar.html" />
+   
+  <link rel="stylesheet" href="../../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="linux-kernel-driver-for-compute-engine-virtual-ethernet-gve">
+<h1>Linux kernel driver for Compute Engine Virtual Ethernet (gve):<a class="headerlink" href="#linux-kernel-driver-for-compute-engine-virtual-ethernet-gve" title="Permalink to this headline">¶</a></h1>
+<section id="supported-hardware">
+<h2>Supported Hardware<a class="headerlink" href="#supported-hardware" title="Permalink to this headline">¶</a></h2>
+<p>The GVE driver binds to a single PCI device id used by the virtual
+Ethernet device found in some Compute Engine VMs.</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 42%" />
+<col style="width: 30%" />
+<col style="width: 27%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Field</p></th>
+<th class="head"><p>Value</p></th>
+<th class="head"><p>Comments</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Vendor ID</p></td>
+<td><p><cite>0x1AE0</cite></p></td>
+<td><p>Google</p></td>
+</tr>
+<tr class="row-odd"><td><p>Device ID</p></td>
+<td><p><cite>0x0042</cite></p></td>
+<td></td>
+</tr>
+<tr class="row-even"><td><p>Sub-vendor ID</p></td>
+<td><p><cite>0x1AE0</cite></p></td>
+<td><p>Google</p></td>
+</tr>
+<tr class="row-odd"><td><p>Sub-device ID</p></td>
+<td><p><cite>0x0058</cite></p></td>
+<td></td>
+</tr>
+<tr class="row-even"><td><p>Revision ID</p></td>
+<td><p><cite>0x0</cite></p></td>
+<td></td>
+</tr>
+<tr class="row-odd"><td><p>Device Class</p></td>
+<td><p><cite>0x200</cite></p></td>
+<td><p>Ethernet</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="pci-bars">
+<h2>PCI Bars<a class="headerlink" href="#pci-bars" title="Permalink to this headline">¶</a></h2>
+<p>The gVNIC PCI device exposes three 32-bit memory BARS:
+- Bar0 - Device configuration and status registers.
+- Bar1 - MSI-X vector table
+- Bar2 - IRQ, RX and TX doorbells</p>
+</section>
+<section id="device-interactions">
+<h2>Device Interactions<a class="headerlink" href="#device-interactions" title="Permalink to this headline">¶</a></h2>
+<dl class="simple">
+<dt>The driver interacts with the device in the following ways:</dt><dd><ul class="simple">
+<li><dl class="simple">
+<dt>Registers</dt><dd><ul>
+<li><p>A block of MMIO registers</p></li>
+<li><p>See gve_register.h for more detail</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>Admin Queue</dt><dd><ul>
+<li><p>See description below</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>Reset</dt><dd><ul>
+<li><p>At any time the device can be reset</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>Interrupts</dt><dd><ul>
+<li><p>See supported interrupts below</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>Transmit and Receive Queues</dt><dd><ul>
+<li><p>See description below</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+</ul>
+</dd>
+</dl>
+<section id="descriptor-formats">
+<h3>Descriptor Formats<a class="headerlink" href="#descriptor-formats" title="Permalink to this headline">¶</a></h3>
+<p>GVE supports two descriptor formats: GQI and DQO. These two formats have
+entirely different descriptors, which will be described below.</p>
+</section>
+<section id="registers">
+<h3>Registers<a class="headerlink" href="#registers" title="Permalink to this headline">¶</a></h3>
+<p>All registers are MMIO.</p>
+<p>The registers are used for initializing and configuring the device as well as
+querying device status in response to management interrupts.</p>
+</section>
+<section id="endianness">
+<h3>Endianness<a class="headerlink" href="#endianness" title="Permalink to this headline">¶</a></h3>
+<ul class="simple">
+<li><p>Admin Queue messages and registers are all Big Endian.</p></li>
+<li><p>GQI descriptors and datapath registers are Big Endian.</p></li>
+<li><p>DQO descriptors and datapath registers are Little Endian.</p></li>
+</ul>
+</section>
+<section id="admin-queue-aq">
+<h3>Admin Queue (AQ)<a class="headerlink" href="#admin-queue-aq" title="Permalink to this headline">¶</a></h3>
+<p>The Admin Queue is a PAGE_SIZE memory block, treated as an array of AQ
+commands, used by the driver to issue commands to the device and set up
+resources.The driver and the device maintain a count of how many commands
+have been submitted and executed. To issue AQ commands, the driver must do
+the following (with proper locking):</p>
+<ol class="arabic simple">
+<li><p>Copy new commands into next available slots in the AQ array</p></li>
+<li><p>Increment its counter by he number of new commands</p></li>
+<li><p>Write the counter into the GVE_ADMIN_QUEUE_DOORBELL register</p></li>
+<li><p>Poll the ADMIN_QUEUE_EVENT_COUNTER register until it equals
+the value written to the doorbell, or until a timeout.</p></li>
+</ol>
+<p>The device will update the status field in each AQ command reported as
+executed through the ADMIN_QUEUE_EVENT_COUNTER register.</p>
+</section>
+<section id="device-resets">
+<h3>Device Resets<a class="headerlink" href="#device-resets" title="Permalink to this headline">¶</a></h3>
+<p>A device reset is triggered by writing 0x0 to the AQ PFN register.
+This causes the device to release all resources allocated by the
+driver, including the AQ itself.</p>
+</section>
+<section id="interrupts">
+<h3>Interrupts<a class="headerlink" href="#interrupts" title="Permalink to this headline">¶</a></h3>
+<p>The following interrupts are supported by the driver:</p>
+<section id="management-interrupt">
+<h4>Management Interrupt<a class="headerlink" href="#management-interrupt" title="Permalink to this headline">¶</a></h4>
+<p>The management interrupt is used by the device to tell the driver to
+look at the GVE_DEVICE_STATUS register.</p>
+<p>The handler for the management irq simply queues the service task in
+the workqueue to check the register and acks the irq.</p>
+</section>
+<section id="notification-block-interrupts">
+<h4>Notification Block Interrupts<a class="headerlink" href="#notification-block-interrupts" title="Permalink to this headline">¶</a></h4>
+<p>The notification block interrupts are used to tell the driver to poll
+the queues associated with that interrupt.</p>
+<p>The handler for these irqs schedule the napi for that block to run
+and poll the queues.</p>
+</section>
+</section>
+<section id="gqi-traffic-queues">
+<h3>GQI Traffic Queues<a class="headerlink" href="#gqi-traffic-queues" title="Permalink to this headline">¶</a></h3>
+<p>GQI queues are composed of a descriptor ring and a buffer and are assigned to a
+notification block.</p>
+<p>The descriptor rings are power-of-two-sized ring buffers consisting of
+fixed-size descriptors. They advance their head pointer using a __be32
+doorbell located in Bar2. The tail pointers are advanced by consuming
+descriptors in-order and updating a __be32 counter. Both the doorbell
+and the counter overflow to zero.</p>
+<p>Each queue’s buffers must be registered in advance with the device as a
+queue page list, and packet data can only be put in those pages.</p>
+<section id="transmit">
+<h4>Transmit<a class="headerlink" href="#transmit" title="Permalink to this headline">¶</a></h4>
+<p>gve maps the buffers for transmit rings into a FIFO and copies the packets
+into the FIFO before sending them to the NIC.</p>
+</section>
+<section id="receive">
+<h4>Receive<a class="headerlink" href="#receive" title="Permalink to this headline">¶</a></h4>
+<p>The buffers for receive rings are put into a data ring that is the same
+length as the descriptor ring and the head and tail pointers advance over
+the rings together.</p>
+</section>
+</section>
+<section id="dqo-traffic-queues">
+<h3>DQO Traffic Queues<a class="headerlink" href="#dqo-traffic-queues" title="Permalink to this headline">¶</a></h3>
+<ul class="simple">
+<li><p>Every TX and RX queue is assigned a notification block.</p></li>
+<li><p>TX and RX buffers queues, which send descriptors to the device, use MMIO
+doorbells to notify the device of new descriptors.</p></li>
+<li><p>RX and TX completion queues, which receive descriptors from the device, use a
+“generation bit” to know when a descriptor was populated by the device. The
+driver initializes all bits with the “current generation”. The device will
+populate received descriptors with the “next generation” which is inverted
+from the current generation. When the ring wraps, the current/next generation
+are swapped.</p></li>
+<li><p>It’s the driver’s responsibility to ensure that the RX and TX completion
+queues are not overrun. This can be accomplished by limiting the number of
+descriptors posted to HW.</p></li>
+<li><p>TX packets have a 16 bit completion_tag and RX buffers have a 16 bit
+buffer_id. These will be returned on the TX completion and RX queues
+respectively to let the driver know which packet/buffer was completed.</p></li>
+</ul>
+<section id="id1">
+<h4>Transmit<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h4>
+<p>A packet’s buffers are DMA mapped for the device to access before transmission.
+After the packet was successfully transmitted, the buffers are unmapped.</p>
+</section>
+<section id="id2">
+<h4>Receive<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h4>
+<p>The driver posts fixed sized buffers to HW on the RX buffer queue. The packet
+received on the associated RX queue may span multiple descriptors.</p>
+</section>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Linux kernel driver for Compute Engine Virtual Ethernet (gve):</a><ul>
+<li><a class="reference internal" href="#supported-hardware">Supported Hardware</a></li>
+<li><a class="reference internal" href="#pci-bars">PCI Bars</a></li>
+<li><a class="reference internal" href="#device-interactions">Device Interactions</a><ul>
+<li><a class="reference internal" href="#descriptor-formats">Descriptor Formats</a></li>
+<li><a class="reference internal" href="#registers">Registers</a></li>
+<li><a class="reference internal" href="#endianness">Endianness</a></li>
+<li><a class="reference internal" href="#admin-queue-aq">Admin Queue (AQ)</a></li>
+<li><a class="reference internal" href="#device-resets">Device Resets</a></li>
+<li><a class="reference internal" href="#interrupts">Interrupts</a><ul>
+<li><a class="reference internal" href="#management-interrupt">Management Interrupt</a></li>
+<li><a class="reference internal" href="#notification-block-interrupts">Notification Block Interrupts</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#gqi-traffic-queues">GQI Traffic Queues</a><ul>
+<li><a class="reference internal" href="#transmit">Transmit</a></li>
+<li><a class="reference internal" href="#receive">Receive</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#dqo-traffic-queues">DQO Traffic Queues</a><ul>
+<li><a class="reference internal" href="#id1">Transmit</a></li>
+<li><a class="reference internal" href="#id2">Receive</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../../_sources/networking/device_drivers/ethernet/google/gve.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../../_sources/networking/device_drivers/ethernet/google/gve.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

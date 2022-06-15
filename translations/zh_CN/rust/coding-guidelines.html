@@ -1,0 +1,277 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>编码指南 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="架构支持" href="arch-support.html" />
+    <link rel="prev" title="基本信息" href="general-information.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../rust/coding-guidelines.html"><span class="doc">Coding Guidelines</span></a></p>
+</dd>
+<dt class="field-even">翻译</dt>
+<dd class="field-even"><p>司延腾 Yanteng Si &lt;<a class="reference external" href="mailto:siyanteng&#37;&#52;&#48;loongson&#46;cn">siyanteng<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+</dl>
+<section id="id1">
+<h1>编码指南<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h1>
+<p>本文档描述了如何在内核中编写Rust代码。</p>
+<section id="id2">
+<h2>风格和格式化<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>代码应该使用 <code class="docutils literal notranslate"><span class="pre">rustfmt</span></code> 进行格式化。这样一来，一个不时为内核做贡献的人就不需要再去学
+习和记忆一个样式指南了。更重要的是，审阅者和维护者不需要再花时间指出风格问题，这样就可以
+减少补丁落地所需的邮件往返。</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p><code class="docutils literal notranslate"><span class="pre">rustfmt</span></code> 不检查注释和文档的约定。因此，这些仍然需要照顾到。</p>
+</div>
+<p>使用 <code class="docutils literal notranslate"><span class="pre">rustfmt</span></code> 的默认设置。这意味着遵循Rust的习惯性风格。例如，缩进时使用4个空格而
+不是制表符。</p>
+<p>在输入、保存或提交时告知编辑器/IDE进行格式化是很方便的。然而，如果因为某些原因需要在某
+个时候重新格式化整个内核Rust的源代码，可以运行以下程序:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>make LLVM=1 rustfmt
+</pre></div>
+</div>
+<p>也可以检查所有的东西是否都是格式化的（否则就打印一个差异），例如对于一个CI，用:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>make LLVM=1 rustfmtcheck
+</pre></div>
+</div>
+<p>像内核其他部分的 <code class="docutils literal notranslate"><span class="pre">clang-format</span></code> 一样， <code class="docutils literal notranslate"><span class="pre">rustfmt</span></code> 在单个文件上工作，并且不需要
+内核配置。有时，它甚至可以与破碎的代码一起工作。</p>
+</section>
+<section id="id3">
+<h2>注释<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h2>
+<p>“普通”注释（即以 <code class="docutils literal notranslate"><span class="pre">//</span></code> 开头，而不是 <code class="docutils literal notranslate"><span class="pre">///</span></code> 或 <code class="docutils literal notranslate"><span class="pre">//!</span></code> 开头的代码文档）的写法与文
+档注释相同，使用Markdown语法，尽管它们不会被渲染。这提高了一致性，简化了规则，并允许在
+这两种注释之间更容易地移动内容。比如说:</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// `object` is ready to be handled now.</span>
+<span class="n">f</span><span class="p">(</span><span class="n">object</span><span class="p">);</span><span class="w"></span>
+</pre></div>
+</div>
+<p>此外，就像文档一样，注释在句子的开头要大写，并以句号结束（即使是单句）。这包括 <code class="docutils literal notranslate"><span class="pre">//</span> <span class="pre">SAFETY:</span></code>,
+<code class="docutils literal notranslate"><span class="pre">//</span> <span class="pre">TODO:</span></code> 和其他“标记”的注释，例如:</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// FIXME: The error should be handled properly.</span>
+</pre></div>
+</div>
+<p>注释不应该被用于文档的目的：注释是为了实现细节，而不是为了用户。即使源文件的读者既是API
+的实现者又是用户，这种区分也是有用的。事实上，有时同时使用注释和文档是很有用的。例如，用
+于 <code class="docutils literal notranslate"><span class="pre">TODO</span></code> 列表或对文档本身的注释。对于后一种情况，注释可以插在中间；也就是说，离要注
+释的文档行更近。对于其他情况，注释会写在文档之后，例如:</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="sd">/// Returns a new [`Foo`].</span>
+<span class="sd">///</span>
+<span class="sd">/// # Examples</span>
+<span class="sd">///</span>
+<span class="c1">// TODO: Find a better example.</span>
+<span class="sd">/// ```</span>
+<span class="sd">/// let foo = f(42);</span>
+<span class="sd">/// ```</span>
+<span class="c1">// FIXME: Use fallible approach.</span>
+<span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">f</span><span class="p">(</span><span class="n">x</span>: <span class="kt">i32</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="nc">Foo</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="c1">// ...</span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+<p>一种特殊的注释是 <code class="docutils literal notranslate"><span class="pre">//</span> <span class="pre">SAFETY:</span></code> 注释。这些注释必须出现在每个 <code class="docutils literal notranslate"><span class="pre">unsafe</span></code> 块之前，它们
+解释了为什么该块内的代码是正确/健全的，即为什么它在任何情况下都不会触发未定义行为，例如:</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// SAFETY: `p` is valid by the safety requirements.</span>
+<span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="o">*</span><span class="n">p</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">//</span> <span class="pre">SAFETY:</span></code> 注释不能与代码文档中的 <code class="docutils literal notranslate"><span class="pre">#</span> <span class="pre">Safety</span></code> 部分相混淆。 <code class="docutils literal notranslate"><span class="pre">#</span> <span class="pre">Safety</span></code> 部
+分指定了（函数）调用者或（特性）实现者需要遵守的契约。
+<code class="docutils literal notranslate"><span class="pre">//</span> <span class="pre">SAFETY:</span></code> 注释显示了为什么一个（函数）调用者或（特性）实现者实际上尊重了
+<code class="docutils literal notranslate"><span class="pre">#</span> <span class="pre">Safety</span></code> 部分或语言参考中的前提条件。</p>
+</section>
+<section id="id4">
+<h2>代码文档<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h2>
+<p>Rust内核代码不像C内核代码那样被记录下来（即通过kernel-doc）。取而代之的是用于记录Rust
+代码的常用系统：rustdoc工具，它使用Markdown（一种轻量级的标记语言）。</p>
+<p>要学习Markdown，外面有很多指南。例如：</p>
+<p><a class="reference external" href="https://commonmark.org/help/">https://commonmark.org/help/</a></p>
+<p>一个记录良好的Rust函数可能是这样的:</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="sd">/// Returns the contained [`Some`] value, consuming the `self` value,</span>
+<span class="sd">/// without checking that the value is not [`None`].</span>
+<span class="sd">///</span>
+<span class="sd">/// # Safety</span>
+<span class="sd">///</span>
+<span class="sd">/// Calling this method on [`None`] is *[undefined behavior]*.</span>
+<span class="sd">///</span>
+<span class="sd">/// [undefined behavior]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html</span>
+<span class="sd">///</span>
+<span class="sd">/// # Examples</span>
+<span class="sd">///</span>
+<span class="sd">/// ```</span>
+<span class="sd">/// let x = Some(&quot;air&quot;);</span>
+<span class="sd">/// assert_eq!(unsafe { x.unwrap_unchecked() }, &quot;air&quot;);</span>
+<span class="sd">/// ```</span>
+<span class="k">pub</span><span class="w"> </span><span class="k">unsafe</span><span class="w"> </span><span class="k">fn</span> <span class="nf">unwrap_unchecked</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="nc">T</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">match</span><span class="w"> </span><span class="bp">self</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="nb">Some</span><span class="p">(</span><span class="n">val</span><span class="p">)</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="n">val</span><span class="p">,</span><span class="w"></span>
+
+<span class="w">        </span><span class="c1">// SAFETY: The safety contract must be upheld by the caller.</span>
+<span class="w">        </span><span class="nb">None</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">hint</span>::<span class="n">unreachable_unchecked</span><span class="p">()</span><span class="w"> </span><span class="p">},</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+<p>这个例子展示了一些 <code class="docutils literal notranslate"><span class="pre">rustdoc</span></code> 的特性和内核中遵循的一些惯例:</p>
+<blockquote>
+<div><ul>
+<li><p>第一段必须是一个简单的句子，简要地描述被记录的项目的作用。进一步的解释必须放在额
+外的段落中。</p></li>
+<li><p>不安全的函数必须在 <code class="docutils literal notranslate"><span class="pre">#</span> <span class="pre">Safety</span></code> 部分记录其安全前提条件。</p></li>
+<li><p>虽然这里没有显示，但如果一个函数可能会恐慌，那么必须在 <code class="docutils literal notranslate"><span class="pre">#</span> <span class="pre">Panics</span></code> 部分描述发
+生这种情况的条件。</p>
+<p>请注意，恐慌应该是非常少见的，只有在有充分理由的情况下才会使用。几乎在所有的情况下，
+都应该使用一个可失败的方法，通常是返回一个 <code class="docutils literal notranslate"><span class="pre">Result</span></code>。</p>
+</li>
+<li><p>如果提供使用实例对读者有帮助的话，必须写在一个叫做``# Examples``的部分。</p></li>
+<li><p>Rust项目（函数、类型、常量……）必须有适当的链接(<code class="docutils literal notranslate"><span class="pre">rustdoc</span></code> 会自动创建一个
+链接)。</p></li>
+<li><p>任何 <code class="docutils literal notranslate"><span class="pre">unsafe</span></code> 的代码块都必须在前面加上一个 <code class="docutils literal notranslate"><span class="pre">//</span> <span class="pre">SAFETY:</span></code> 的注释，描述里面
+的代码为什么是正确的。</p>
+<p>虽然有时原因可能看起来微不足道，但写这些注释不仅是记录已经考虑到的问题的好方法，
+最重要的是，它提供了一种知道没有额外隐含约束的方法。</p>
+</li>
+</ul>
+</div></blockquote>
+<p>要了解更多关于如何编写Rust和拓展功能的文档，请看看 <code class="docutils literal notranslate"><span class="pre">rustdoc</span></code> 这本书，网址是:</p>
+<blockquote>
+<div><p><a class="reference external" href="https://doc.rust-lang.org/rustdoc/how-to-write-documentation.html">https://doc.rust-lang.org/rustdoc/how-to-write-documentation.html</a></p>
+</div></blockquote>
+</section>
+<section id="id5">
+<h2>命名<a class="headerlink" href="#id5" title="Permalink to this headline">¶</a></h2>
+<p>Rust内核代码遵循通常的Rust命名空间:</p>
+<blockquote>
+<div><p><a class="reference external" href="https://rust-lang.github.io/api-guidelines/naming.html">https://rust-lang.github.io/api-guidelines/naming.html</a></p>
+</div></blockquote>
+<p>当现有的C语言概念（如宏、函数、对象……）被包装成Rust抽象时，应该使用尽可能接近C语
+言的名称，以避免混淆，并在C语言和Rust语言之间来回切换时提高可读性。例如，C语言中的
+<code class="docutils literal notranslate"><span class="pre">pr_info</span></code> 这样的宏在Rust中的命名是一样的。</p>
+<p>说到这里，应该调整大小写以遵循Rust的命名惯例，模块和类型引入的命名间隔不应该在项目名称
+中重复。例如，在包装常量时，如:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cp">#define GPIO_LINE_DIRECTION_IN  0</span>
+<span class="cp">#define GPIO_LINE_DIRECTION_OUT 1</span>
+</pre></div>
+</div>
+<p>在Rust中的等价物可能是这样的（忽略文档）。:</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="k">pub</span><span class="w"> </span><span class="k">mod</span> <span class="nn">gpio</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="k">enum</span> <span class="nc">LineDirection</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="n">In</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">bindings</span>::<span class="n">GPIO_LINE_DIRECTION_IN</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="n">_</span><span class="p">,</span><span class="w"></span>
+<span class="w">        </span><span class="n">Out</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">bindings</span>::<span class="n">GPIO_LINE_DIRECTION_OUT</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="n">_</span><span class="p">,</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+<p>也就是说， <code class="docutils literal notranslate"><span class="pre">GPIO_LINE_DIRECTION_IN</span></code> 的等价物将被称为 <code class="docutils literal notranslate"><span class="pre">gpio::LineDirection::In</span></code> 。
+特别是，它不应该被命名为 <code class="docutils literal notranslate"><span class="pre">gpio::gpio_line_direction::GPIO_LINE_DIRECTION_IN</span></code> 。</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">编码指南</a><ul>
+<li><a class="reference internal" href="#id2">风格和格式化</a></li>
+<li><a class="reference internal" href="#id3">注释</a></li>
+<li><a class="reference internal" href="#id4">代码文档</a></li>
+<li><a class="reference internal" href="#id5">命名</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/rust/coding-guidelines.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/rust/coding-guidelines.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

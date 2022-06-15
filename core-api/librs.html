@@ -1,0 +1,586 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Reed-Solomon Library Programming Interface &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="The Linux driver implementer’s API guide" href="../driver-api/index.html" />
+    <link rel="prev" title="Using physical DMA provided by OHCI-1394 FireWire controllers for debugging" href="debugging-via-ohci1394.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="reed-solomon-library-programming-interface">
+<h1>Reed-Solomon Library Programming Interface<a class="headerlink" href="#reed-solomon-library-programming-interface" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">Author</dt>
+<dd class="field-odd"><p>Thomas Gleixner</p>
+</dd>
+</dl>
+<section id="introduction">
+<h2>Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>The generic Reed-Solomon Library provides encoding, decoding and error
+correction functions.</p>
+<p>Reed-Solomon codes are used in communication and storage applications to
+ensure data integrity.</p>
+<p>This documentation is provided for developers who want to utilize the
+functions provided by the library.</p>
+</section>
+<section id="known-bugs-and-assumptions">
+<h2>Known Bugs And Assumptions<a class="headerlink" href="#known-bugs-and-assumptions" title="Permalink to this headline">¶</a></h2>
+<p>None.</p>
+</section>
+<section id="usage">
+<h2>Usage<a class="headerlink" href="#usage" title="Permalink to this headline">¶</a></h2>
+<p>This chapter provides examples of how to use the library.</p>
+<section id="initializing">
+<h3>Initializing<a class="headerlink" href="#initializing" title="Permalink to this headline">¶</a></h3>
+<p>The init function init_rs returns a pointer to an rs decoder structure,
+which holds the necessary information for encoding, decoding and error
+correction with the given polynomial. It either uses an existing
+matching decoder or creates a new one. On creation all the lookup tables
+for fast en/decoding are created. The function may take a while, so make
+sure not to call it in critical code paths.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/* the Reed Solomon control structure */
+static struct rs_control *rs_decoder;
+
+/* Symbolsize is 10 (bits)
+ * Primitive polynomial is x^10+x^3+1
+ * first consecutive root is 0
+ * primitive element to generate roots = 1
+ * generator polynomial degree (number of roots) = 6
+ */
+rs_decoder = init_rs (10, 0x409, 0, 1, 6);
+</pre></div>
+</div>
+</section>
+<section id="encoding">
+<h3>Encoding<a class="headerlink" href="#encoding" title="Permalink to this headline">¶</a></h3>
+<p>The encoder calculates the Reed-Solomon code over the given data length
+and stores the result in the parity buffer. Note that the parity buffer
+must be initialized before calling the encoder.</p>
+<p>The expanded data can be inverted on the fly by providing a non-zero
+inversion mask. The expanded data is XOR’ed with the mask. This is used
+e.g. for FLASH ECC, where the all 0xFF is inverted to an all 0x00. The
+Reed-Solomon code for all 0x00 is all 0x00. The code is inverted before
+storing to FLASH so it is 0xFF too. This prevents that reading from an
+erased FLASH results in ECC errors.</p>
+<p>The databytes are expanded to the given symbol size on the fly. There is
+no support for encoding continuous bitstreams with a symbol size != 8 at
+the moment. If it is necessary it should be not a big deal to implement
+such functionality.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/* Parity buffer. Size = number of roots */
+uint16_t par[6];
+/* Initialize the parity buffer */
+memset(par, 0, sizeof(par));
+/* Encode 512 byte in data8. Store parity in buffer par */
+encode_rs8 (rs_decoder, data8, 512, par, 0);
+</pre></div>
+</div>
+</section>
+<section id="decoding">
+<h3>Decoding<a class="headerlink" href="#decoding" title="Permalink to this headline">¶</a></h3>
+<p>The decoder calculates the syndrome over the given data length and the
+received parity symbols and corrects errors in the data.</p>
+<p>If a syndrome is available from a hardware decoder then the syndrome
+calculation is skipped.</p>
+<p>The correction of the data buffer can be suppressed by providing a
+correction pattern buffer and an error location buffer to the decoder.
+The decoder stores the calculated error location and the correction
+bitmask in the given buffers. This is useful for hardware decoders which
+use a weird bit ordering scheme.</p>
+<p>The databytes are expanded to the given symbol size on the fly. There is
+no support for decoding continuous bitstreams with a symbolsize != 8 at
+the moment. If it is necessary it should be not a big deal to implement
+such functionality.</p>
+<section id="decoding-with-syndrome-calculation-direct-data-correction">
+<h4>Decoding with syndrome calculation, direct data correction<a class="headerlink" href="#decoding-with-syndrome-calculation-direct-data-correction" title="Permalink to this headline">¶</a></h4>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/* Parity buffer. Size = number of roots */
+uint16_t par[6];
+uint8_t  data[512];
+int numerr;
+/* Receive data */
+.....
+/* Receive parity */
+.....
+/* Decode 512 byte in data8.*/
+numerr = decode_rs8 (rs_decoder, data8, par, 512, NULL, 0, NULL, 0, NULL);
+</pre></div>
+</div>
+</section>
+<section id="decoding-with-syndrome-given-by-hardware-decoder-direct-data-correction">
+<h4>Decoding with syndrome given by hardware decoder, direct data correction<a class="headerlink" href="#decoding-with-syndrome-given-by-hardware-decoder-direct-data-correction" title="Permalink to this headline">¶</a></h4>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/* Parity buffer. Size = number of roots */
+uint16_t par[6], syn[6];
+uint8_t  data[512];
+int numerr;
+/* Receive data */
+.....
+/* Receive parity */
+.....
+/* Get syndrome from hardware decoder */
+.....
+/* Decode 512 byte in data8.*/
+numerr = decode_rs8 (rs_decoder, data8, par, 512, syn, 0, NULL, 0, NULL);
+</pre></div>
+</div>
+</section>
+<section id="decoding-with-syndrome-given-by-hardware-decoder-no-direct-data-correction">
+<h4>Decoding with syndrome given by hardware decoder, no direct data correction.<a class="headerlink" href="#decoding-with-syndrome-given-by-hardware-decoder-no-direct-data-correction" title="Permalink to this headline">¶</a></h4>
+<p>Note: It’s not necessary to give data and received parity to the
+decoder.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/* Parity buffer. Size = number of roots */
+uint16_t par[6], syn[6], corr[8];
+uint8_t  data[512];
+int numerr, errpos[8];
+/* Receive data */
+.....
+/* Receive parity */
+.....
+/* Get syndrome from hardware decoder */
+.....
+/* Decode 512 byte in data8.*/
+numerr = decode_rs8 (rs_decoder, NULL, NULL, 512, syn, 0, errpos, 0, corr);
+for (i = 0; i &lt; numerr; i++) {
+    do_error_correction_in_your_buffer(errpos[i], corr[i]);
+}
+</pre></div>
+</div>
+</section>
+</section>
+<section id="cleanup">
+<h3>Cleanup<a class="headerlink" href="#cleanup" title="Permalink to this headline">¶</a></h3>
+<p>The function free_rs frees the allocated resources, if the caller is
+the last user of the decoder.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/* Release resources */
+free_rs(rs_decoder);
+</pre></div>
+</div>
+</section>
+</section>
+<section id="structures">
+<h2>Structures<a class="headerlink" href="#structures" title="Permalink to this headline">¶</a></h2>
+<p>This chapter contains the autogenerated documentation of the structures
+which are used in the Reed-Solomon Library and are relevant for a
+developer.</p>
+<dl class="type">
+<dt id="c.rs_codec">
+struct <code class="sig-name descname">rs_codec</code><a class="headerlink" href="#c.rs_codec" title="Permalink to this definition">¶</a></dt>
+<dd><p>rs codec data</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct rs_codec {
+    int mm;
+    int nn;
+    uint16_t *alpha_to;
+    uint16_t *index_of;
+    uint16_t *genpoly;
+    int nroots;
+    int fcr;
+    int prim;
+    int iprim;
+    int gfpoly;
+    int (*gffunc)(int);
+    int users;
+    struct list_head list;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">mm</span></code></dt><dd><p>Bits per symbol</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">nn</span></code></dt><dd><p>Symbols per block (= (1&lt;&lt;mm)-1)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">alpha_to</span></code></dt><dd><p>log lookup table</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">index_of</span></code></dt><dd><p>Antilog lookup table</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">genpoly</span></code></dt><dd><p>Generator polynomial</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">nroots</span></code></dt><dd><p>Number of generator roots = number of parity symbols</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">fcr</span></code></dt><dd><p>First consecutive root, index form</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">prim</span></code></dt><dd><p>Primitive element, index form</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">iprim</span></code></dt><dd><p>prim-th root of 1, index form</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">gfpoly</span></code></dt><dd><p>The primitive generator polynominal</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">gffunc</span></code></dt><dd><p>Function to generate the field, if non-canonical representation</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">users</span></code></dt><dd><p>Users of this structure</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">list</span></code></dt><dd><p>List entry for the rs codec list</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.rs_control">
+struct <code class="sig-name descname">rs_control</code><a class="headerlink" href="#c.rs_control" title="Permalink to this definition">¶</a></dt>
+<dd><p>rs control structure per instance</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct rs_control {
+    struct rs_codec *codec;
+    uint16_t buffers[];
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">codec</span></code></dt><dd><p>The codec used for this instance</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">buffers</span></code></dt><dd><p>Internal scratch buffers used in calls to decode_rs()</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.init_rs">
+struct <a class="reference internal" href="#c.rs_control" title="rs_control">rs_control</a> * <code class="sig-name descname">init_rs</code><span class="sig-paren">(</span>int<em> symsize</em>, int<em> gfpoly</em>, int<em> fcr</em>, int<em> prim</em>, int<em> nroots</em><span class="sig-paren">)</span><a class="headerlink" href="#c.init_rs" title="Permalink to this definition">¶</a></dt>
+<dd><p>Create a RS control struct and initialize it</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">symsize</span></code></dt><dd><p>the symbol size (number of bits)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">gfpoly</span></code></dt><dd><p>the extended Galois field generator polynomial coefficients,
+with the 0th coefficient in the low order bit. The polynomial
+must be primitive;</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">fcr</span></code></dt><dd><p>the first consecutive root of the rs code generator polynomial
+in index form</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">prim</span></code></dt><dd><p>primitive element to generate polynomial roots</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">nroots</span></code></dt><dd><p>RS code generator polynomial degree (number of roots)</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Allocations use GFP_KERNEL.</p>
+</div>
+</section>
+<section id="public-functions-provided">
+<h2>Public Functions Provided<a class="headerlink" href="#public-functions-provided" title="Permalink to this headline">¶</a></h2>
+<p>This chapter contains the autogenerated documentation of the
+Reed-Solomon functions which are exported.</p>
+<dl class="function">
+<dt id="c.free_rs">
+void <code class="sig-name descname">free_rs</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.rs_control" title="rs_control">rs_control</a><em> *rs</em><span class="sig-paren">)</span><a class="headerlink" href="#c.free_rs" title="Permalink to this definition">¶</a></dt>
+<dd><p>Free the rs control structure</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">rs_control</span> <span class="pre">*rs</span></code></dt><dd><p>The control structure which is not longer used by the
+caller</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Free the control structure. If <strong>rs</strong> is the last user of the associated
+codec, free the codec as well.</p>
+</div>
+<dl class="function">
+<dt id="c.init_rs_gfp">
+struct <a class="reference internal" href="#c.rs_control" title="rs_control">rs_control</a> * <code class="sig-name descname">init_rs_gfp</code><span class="sig-paren">(</span>int<em> symsize</em>, int<em> gfpoly</em>, int<em> fcr</em>, int<em> prim</em>, int<em> nroots</em>, gfp_t<em> gfp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.init_rs_gfp" title="Permalink to this definition">¶</a></dt>
+<dd><p>Create a RS control struct and initialize it</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">symsize</span></code></dt><dd><p>the symbol size (number of bits)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">gfpoly</span></code></dt><dd><p>the extended Galois field generator polynomial coefficients,
+with the 0th coefficient in the low order bit. The polynomial
+must be primitive;</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">fcr</span></code></dt><dd><p>the first consecutive root of the rs code generator polynomial
+in index form</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">prim</span></code></dt><dd><p>primitive element to generate polynomial roots</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">nroots</span></code></dt><dd><p>RS code generator polynomial degree (number of roots)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">gfp_t</span> <span class="pre">gfp</span></code></dt><dd><p>Memory allocation flags.</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.init_rs_non_canonical">
+struct <a class="reference internal" href="#c.rs_control" title="rs_control">rs_control</a> * <code class="sig-name descname">init_rs_non_canonical</code><span class="sig-paren">(</span>int<em> symsize</em>, int (<em>*gffunc</em>)(int), int<em> fcr</em>, int<em> prim</em>, int<em> nroots</em><span class="sig-paren">)</span><a class="headerlink" href="#c.init_rs_non_canonical" title="Permalink to this definition">¶</a></dt>
+<dd><p>Allocate rs control struct for fields with non-canonical representation</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">symsize</span></code></dt><dd><p>the symbol size (number of bits)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">(*gffunc)(int)</span></code></dt><dd><p>pointer to function to generate the next field element,
+or the multiplicative identity element if given 0.  Used
+instead of gfpoly if gfpoly is 0</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">fcr</span></code></dt><dd><p>the first consecutive root of the rs code generator polynomial
+in index form</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">prim</span></code></dt><dd><p>primitive element to generate polynomial roots</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">nroots</span></code></dt><dd><p>RS code generator polynomial degree (number of roots)</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.encode_rs8">
+int <code class="sig-name descname">encode_rs8</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.rs_control" title="rs_control">rs_control</a><em> *rsc</em>, uint8_t<em> *data</em>, int<em> len</em>, uint16_t<em> *par</em>, uint16_t<em> invmsk</em><span class="sig-paren">)</span><a class="headerlink" href="#c.encode_rs8" title="Permalink to this definition">¶</a></dt>
+<dd><p>Calculate the parity for data values (8bit data width)</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">rs_control</span> <span class="pre">*rsc</span></code></dt><dd><p>the rs control structure</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">uint8_t</span> <span class="pre">*data</span></code></dt><dd><p>data field of a given type</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">len</span></code></dt><dd><p>data length</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">uint16_t</span> <span class="pre">*par</span></code></dt><dd><p>parity data, must be initialized by caller (usually all 0)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">uint16_t</span> <span class="pre">invmsk</span></code></dt><dd><p>invert data mask (will be xored on data)</p>
+<p>The parity uses a uint16_t data type to enable
+symbol size &gt; 8. The calling code must take care of encoding of the
+syndrome result for storage itself.</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.decode_rs8">
+int <code class="sig-name descname">decode_rs8</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.rs_control" title="rs_control">rs_control</a><em> *rsc</em>, uint8_t<em> *data</em>, uint16_t<em> *par</em>, int<em> len</em>, uint16_t<em> *s</em>, int<em> no_eras</em>, int<em> *eras_pos</em>, uint16_t<em> invmsk</em>, uint16_t<em> *corr</em><span class="sig-paren">)</span><a class="headerlink" href="#c.decode_rs8" title="Permalink to this definition">¶</a></dt>
+<dd><p>Decode codeword (8bit data width)</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">rs_control</span> <span class="pre">*rsc</span></code></dt><dd><p>the rs control structure</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">uint8_t</span> <span class="pre">*data</span></code></dt><dd><p>data field of a given type</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">uint16_t</span> <span class="pre">*par</span></code></dt><dd><p>received parity data field</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">len</span></code></dt><dd><p>data length</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">uint16_t</span> <span class="pre">*s</span></code></dt><dd><p>syndrome data field, must be in index form
+(if NULL, syndrome is calculated)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">no_eras</span></code></dt><dd><p>number of erasures</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">*eras_pos</span></code></dt><dd><p>position of erasures, can be NULL</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">uint16_t</span> <span class="pre">invmsk</span></code></dt><dd><p>invert data mask (will be xored on data, not on parity!)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">uint16_t</span> <span class="pre">*corr</span></code></dt><dd><p>buffer to store correction bitmask on eras_pos</p>
+<p>The syndrome and parity uses a uint16_t data type to enable
+symbol size &gt; 8. The calling code must take care of decoding of the
+syndrome result and the received parity before calling this code.</p>
+</dd>
+</dl>
+<p><strong>Note</strong></p>
+<dl>
+<dt>The rs_control struct <strong>rsc</strong> contains buffers which are used for</dt><dd><p>decoding, so the caller has to ensure that decoder invocations are
+serialized.</p>
+<p>Returns the number of corrected symbols or -EBADMSG for uncorrectable
+errors. The count includes errors in the parity.</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.encode_rs16">
+int <code class="sig-name descname">encode_rs16</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.rs_control" title="rs_control">rs_control</a><em> *rsc</em>, uint16_t<em> *data</em>, int<em> len</em>, uint16_t<em> *par</em>, uint16_t<em> invmsk</em><span class="sig-paren">)</span><a class="headerlink" href="#c.encode_rs16" title="Permalink to this definition">¶</a></dt>
+<dd><p>Calculate the parity for data values (16bit data width)</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">rs_control</span> <span class="pre">*rsc</span></code></dt><dd><p>the rs control structure</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">uint16_t</span> <span class="pre">*data</span></code></dt><dd><p>data field of a given type</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">len</span></code></dt><dd><p>data length</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">uint16_t</span> <span class="pre">*par</span></code></dt><dd><p>parity data, must be initialized by caller (usually all 0)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">uint16_t</span> <span class="pre">invmsk</span></code></dt><dd><p>invert data mask (will be xored on data, not on parity!)</p>
+<p>Each field in the data array contains up to symbol size bits of valid data.</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.decode_rs16">
+int <code class="sig-name descname">decode_rs16</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.rs_control" title="rs_control">rs_control</a><em> *rsc</em>, uint16_t<em> *data</em>, uint16_t<em> *par</em>, int<em> len</em>, uint16_t<em> *s</em>, int<em> no_eras</em>, int<em> *eras_pos</em>, uint16_t<em> invmsk</em>, uint16_t<em> *corr</em><span class="sig-paren">)</span><a class="headerlink" href="#c.decode_rs16" title="Permalink to this definition">¶</a></dt>
+<dd><p>Decode codeword (16bit data width)</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">rs_control</span> <span class="pre">*rsc</span></code></dt><dd><p>the rs control structure</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">uint16_t</span> <span class="pre">*data</span></code></dt><dd><p>data field of a given type</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">uint16_t</span> <span class="pre">*par</span></code></dt><dd><p>received parity data field</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">len</span></code></dt><dd><p>data length</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">uint16_t</span> <span class="pre">*s</span></code></dt><dd><p>syndrome data field, must be in index form
+(if NULL, syndrome is calculated)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">no_eras</span></code></dt><dd><p>number of erasures</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">*eras_pos</span></code></dt><dd><p>position of erasures, can be NULL</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">uint16_t</span> <span class="pre">invmsk</span></code></dt><dd><p>invert data mask (will be xored on data, not on parity!)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">uint16_t</span> <span class="pre">*corr</span></code></dt><dd><p>buffer to store correction bitmask on eras_pos</p>
+<p>Each field in the data array contains up to symbol size bits of valid data.</p>
+</dd>
+</dl>
+<p><strong>Note</strong></p>
+<dl>
+<dt>The rc_control struct <strong>rsc</strong> contains buffers which are used for</dt><dd><p>decoding, so the caller has to ensure that decoder invocations are
+serialized.</p>
+<p>Returns the number of corrected symbols or -EBADMSG for uncorrectable
+errors. The count includes errors in the parity.</p>
+</dd>
+</dl>
+</div>
+</section>
+<section id="credits">
+<h2>Credits<a class="headerlink" href="#credits" title="Permalink to this headline">¶</a></h2>
+<p>The library code for encoding and decoding was written by Phil Karn.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Copyright 2002, Phil Karn, KA9Q
+May be used under the terms of the GNU General Public License (GPL)
+</pre></div>
+</div>
+<p>The wrapper functions and interfaces are written by Thomas Gleixner.</p>
+<p>Many users have provided bugfixes, improvements and helping hands for
+testing. Thanks a lot.</p>
+<p>The following people have contributed to this document:</p>
+<p>Thomas Gleixner<a class="reference external" href="mailto:tglx&#37;&#52;&#48;linutronix&#46;de">tglx<span>&#64;</span>linutronix<span>&#46;</span>de</a></p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Reed-Solomon Library Programming Interface</a><ul>
+<li><a class="reference internal" href="#introduction">Introduction</a></li>
+<li><a class="reference internal" href="#known-bugs-and-assumptions">Known Bugs And Assumptions</a></li>
+<li><a class="reference internal" href="#usage">Usage</a><ul>
+<li><a class="reference internal" href="#initializing">Initializing</a></li>
+<li><a class="reference internal" href="#encoding">Encoding</a></li>
+<li><a class="reference internal" href="#decoding">Decoding</a><ul>
+<li><a class="reference internal" href="#decoding-with-syndrome-calculation-direct-data-correction">Decoding with syndrome calculation, direct data correction</a></li>
+<li><a class="reference internal" href="#decoding-with-syndrome-given-by-hardware-decoder-direct-data-correction">Decoding with syndrome given by hardware decoder, direct data correction</a></li>
+<li><a class="reference internal" href="#decoding-with-syndrome-given-by-hardware-decoder-no-direct-data-correction">Decoding with syndrome given by hardware decoder, no direct data correction.</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#cleanup">Cleanup</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#structures">Structures</a></li>
+<li><a class="reference internal" href="#public-functions-provided">Public Functions Provided</a></li>
+<li><a class="reference internal" href="#credits">Credits</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/core-api/librs.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/core-api/librs.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,251 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Introduction of Uacce &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Xilinx SD-FEC Driver" href="xilinx_sdfec.html" />
+    <link rel="prev" title="Spear PCIe Gadget Driver" href="spear-pcie-gadget.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="introduction-of-uacce">
+<h1>Introduction of Uacce<a class="headerlink" href="#introduction-of-uacce" title="Permalink to this headline">¶</a></h1>
+<p>Uacce (Unified/User-space-access-intended Accelerator Framework) targets to
+provide Shared Virtual Addressing (SVA) between accelerators and processes.
+So accelerator can access any data structure of the main cpu.
+This differs from the data sharing between cpu and io device, which share
+only data content rather than address.
+Because of the unified address, hardware and user space of process can
+share the same virtual address in the communication.
+Uacce takes the hardware accelerator as a heterogeneous processor, while
+IOMMU share the same CPU page tables and as a result the same translation
+from va to pa.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span> __________________________       __________________________
+|                          |     |                          |
+|  User application (CPU)  |     |   Hardware Accelerator   |
+|__________________________|     |__________________________|
+
+             |                                 |
+             | va                              | va
+             V                                 V
+         __________                        __________
+        |          |                      |          |
+        |   MMU    |                      |  IOMMU   |
+        |__________|                      |__________|
+             |                                 |
+             |                                 |
+             V pa                              V pa
+         _______________________________________
+        |                                       |
+        |              Memory                   |
+        |_______________________________________|
+</pre></div>
+</div>
+</section>
+<section id="architecture">
+<h1>Architecture<a class="headerlink" href="#architecture" title="Permalink to this headline">¶</a></h1>
+<p>Uacce is the kernel module, taking charge of iommu and address sharing.
+The user drivers and libraries are called WarpDrive.</p>
+<p>The uacce device, built around the IOMMU SVA API, can access multiple
+address spaces, including the one without PASID.</p>
+<p>A virtual concept, queue, is used for the communication. It provides a
+FIFO-like interface. And it maintains a unified address space between the
+application and all involved hardware.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>                         ___________________                  ________________
+                        |                   |   user API     |                |
+                        | WarpDrive library | ------------&gt;  |  user driver   |
+                        |___________________|                |________________|
+                                 |                                    |
+                                 |                                    |
+                                 | queue fd                           |
+                                 |                                    |
+                                 |                                    |
+                                 v                                    |
+ ___________________         _________                                |
+|                   |       |         |                               | mmap memory
+| Other framework   |       |  uacce  |                               | r/w interface
+| crypto/nic/others |       |_________|                               |
+|___________________|                                                 |
+         |                       |                                    |
+         | register              | register                           |
+         |                       |                                    |
+         |                       |                                    |
+         |                _________________       __________          |
+         |               |                 |     |          |         |
+          -------------  |  Device Driver  |     |  IOMMU   |         |
+                         |_________________|     |__________|         |
+                                 |                                    |
+                                 |                                    V
+                                 |                            ___________________
+                                 |                           |                   |
+                                 --------------------------  |  Device(Hardware) |
+                                                             |___________________|
+</pre></div>
+</div>
+</section>
+<section id="how-does-it-work">
+<h1>How does it work<a class="headerlink" href="#how-does-it-work" title="Permalink to this headline">¶</a></h1>
+<p>Uacce uses mmap and IOMMU to play the trick.</p>
+<p>Uacce creates a chrdev for every device registered to it. New queue is
+created when user application open the chrdev. The file descriptor is used
+as the user handle of the queue.
+The accelerator device present itself as an Uacce object, which exports as
+a chrdev to the user space. The user application communicates with the
+hardware by ioctl (as control path) or share memory (as data path).</p>
+<p>The control path to the hardware is via file operation, while data path is
+via mmap space of the queue fd.</p>
+<p>The queue file address space:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span> /**
+ * enum uacce_qfrt: qfrt type
+ * @UACCE_QFRT_MMIO: device mmio region
+ * @UACCE_QFRT_DUS: device user share region
+ */
+enum uacce_qfrt {
+        UACCE_QFRT_MMIO = 0,
+        UACCE_QFRT_DUS = 1,
+};
+</pre></div>
+</div>
+<p>All regions are optional and differ from device type to type.
+Each region can be mmapped only once, otherwise -EEXIST returns.</p>
+<p>The device mmio region is mapped to the hardware mmio space. It is generally
+used for doorbell or other notification to the hardware. It is not fast enough
+as data channel.</p>
+<p>The device user share region is used for share data buffer between user process
+and device.</p>
+</section>
+<section id="the-uacce-register-api">
+<h1>The Uacce register API<a class="headerlink" href="#the-uacce-register-api" title="Permalink to this headline">¶</a></h1>
+<p>The register API is defined in uacce.h.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct uacce_interface {
+  char name[UACCE_MAX_NAME_SIZE];
+  unsigned int flags;
+  const struct uacce_ops *ops;
+};
+</pre></div>
+</div>
+<p>According to the IOMMU capability, uacce_interface flags can be:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/**
+ * UACCE Device flags:
+ * UACCE_DEV_SVA: Shared Virtual Addresses
+ *              Support PASID
+ *              Support device page faults (PCI PRI or SMMU Stall)
+ */
+#define UACCE_DEV_SVA               BIT(0)
+
+struct uacce_device *uacce_alloc(struct device *parent,
+                                 struct uacce_interface *interface);
+int uacce_register(struct uacce_device *uacce);
+void uacce_remove(struct uacce_device *uacce);
+</pre></div>
+</div>
+<p>uacce_register results can be:</p>
+<ol class="loweralpha simple">
+<li><p>If uacce module is not compiled, ERR_PTR(-ENODEV)</p></li>
+<li><p>Succeed with the desired flags</p></li>
+<li><p>Succeed with the negotiated flags, for example</p></li>
+</ol>
+<blockquote>
+<div><p>uacce_interface.flags = UACCE_DEV_SVA but uacce-&gt;flags = ~UACCE_DEV_SVA</p>
+<p>So user driver need check return value as well as the negotiated uacce-&gt;flags.</p>
+</div></blockquote>
+</section>
+<section id="the-user-driver">
+<h1>The user driver<a class="headerlink" href="#the-user-driver" title="Permalink to this headline">¶</a></h1>
+<p>The queue file mmap space will need a user driver to wrap the communication
+protocol. Uacce provides some attributes in sysfs for the user driver to
+match the right accelerator accordingly.
+More details in Documentation/ABI/testing/sysfs-driver-uacce.</p>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Introduction of Uacce</a></li>
+<li><a class="reference internal" href="#architecture">Architecture</a></li>
+<li><a class="reference internal" href="#how-does-it-work">How does it work</a></li>
+<li><a class="reference internal" href="#the-uacce-register-api">The Uacce register API</a></li>
+<li><a class="reference internal" href="#the-user-driver">The user driver</a></li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/misc-devices/uacce.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/misc-devices/uacce.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

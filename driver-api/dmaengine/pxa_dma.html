@@ -1,0 +1,265 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>PXA/MMP - DMA Slave controller &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Linux kernel SLIMbus support" href="../slimbus.html" />
+    <link rel="prev" title="DMA Test Guide" href="dmatest.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="pxa-mmp-dma-slave-controller">
+<h1>PXA/MMP - DMA Slave controller<a class="headerlink" href="#pxa-mmp-dma-slave-controller" title="Permalink to this headline">¶</a></h1>
+<section id="constraints">
+<h2>Constraints<a class="headerlink" href="#constraints" title="Permalink to this headline">¶</a></h2>
+<p>a) Transfers hot queuing
+A driver submitting a transfer and issuing it should be granted the transfer
+is queued even on a running DMA channel.
+This implies that the queuing doesn’t wait for the previous transfer end,
+and that the descriptor chaining is not only done in the irq/tasklet code
+triggered by the end of the transfer.
+A transfer which is submitted and issued on a phy doesn’t wait for a phy to
+stop and restart, but is submitted on a “running channel”. The other
+drivers, especially mmp_pdma waited for the phy to stop before relaunching
+a new transfer.</p>
+<p>b) All transfers having asked for confirmation should be signaled
+Any issued transfer with DMA_PREP_INTERRUPT should trigger a callback call.
+This implies that even if an irq/tasklet is triggered by end of tx1, but
+at the time of irq/dma tx2 is already finished, tx1-&gt;complete() and
+tx2-&gt;complete() should be called.</p>
+<p>c) Channel running state
+A driver should be able to query if a channel is running or not. For the
+multimedia case, such as video capture, if a transfer is submitted and then
+a check of the DMA channel reports a “stopped channel”, the transfer should
+not be issued until the next “start of frame interrupt”, hence the need to
+know if a channel is in running or stopped state.</p>
+<p>d) Bandwidth guarantee
+The PXA architecture has 4 levels of DMAs priorities : high, normal, low.
+The high priorities get twice as much bandwidth as the normal, which get twice
+as much as the low priorities.
+A driver should be able to request a priority, especially the real-time
+ones such as pxa_camera with (big) throughputs.</p>
+</section>
+<section id="design">
+<h2>Design<a class="headerlink" href="#design" title="Permalink to this headline">¶</a></h2>
+<p>a) Virtual channels
+Same concept as in sa11x0 driver, ie. a driver was assigned a “virtual
+channel” linked to the requestor line, and the physical DMA channel is
+assigned on the fly when the transfer is issued.</p>
+<ol class="loweralpha simple" start="2">
+<li><p>Transfer anatomy for a scatter-gather transfer</p></li>
+</ol>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>+------------+-----+---------------+----------------+-----------------+
+| desc-sg[0] | ... | desc-sg[last] | status updater | finisher/linker |
++------------+-----+---------------+----------------+-----------------+
+</pre></div>
+</div>
+<p>This structure is pointed by dma-&gt;sg_cpu.
+The descriptors are used as follows :</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>desc-sg[i]: i-th descriptor, transferring the i-th sg
+element to the video buffer scatter gather</p></li>
+<li><p>status updater
+Transfers a single u32 to a well known dma coherent memory to leave
+a trace that this transfer is done. The “well known” is unique per
+physical channel, meaning that a read of this value will tell which
+is the last finished transfer at that point in time.</p></li>
+<li><p>finisher: has ddadr=DADDR_STOP, dcmd=ENDIRQEN</p></li>
+<li><p>linker: has ddadr= desc-sg[0] of next transfer, dcmd=0</p></li>
+</ul>
+</div></blockquote>
+<p>c) Transfers hot-chaining
+Suppose the running chain is:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Buffer 1              Buffer 2
++---------+----+---+  +----+----+----+---+
+| d0 | .. | dN | l |  | d0 | .. | dN | f |
++---------+----+-|-+  ^----+----+----+---+
+                 |    |
+                 +----+
+</pre></div>
+</div>
+<p>After a call to dmaengine_submit(b3), the chain will look like:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Buffer 1              Buffer 2              Buffer 3
++---------+----+---+  +----+----+----+---+  +----+----+----+---+
+| d0 | .. | dN | l |  | d0 | .. | dN | l |  | d0 | .. | dN | f |
++---------+----+-|-+  ^----+----+----+-|-+  ^----+----+----+---+
+                 |    |                |    |
+                 +----+                +----+
+                                      new_link
+</pre></div>
+</div>
+<p>If while new_link was created the DMA channel stopped, it is _not_
+restarted. Hot-chaining doesn’t break the assumption that
+dma_async_issue_pending() is to be used to ensure the transfer is actually started.</p>
+<p>One exception to this rule :</p>
+<ul class="simple">
+<li><p>if Buffer1 and Buffer2 had all their addresses 8 bytes aligned</p></li>
+<li><p>and if Buffer3 has at least one address not 4 bytes aligned</p></li>
+<li><p>then hot-chaining cannot happen, as the channel must be stopped, the
+“align bit” must be set, and the channel restarted As a consequence,
+such a transfer tx_submit() will be queued on the submitted queue, and
+this specific case if the DMA is already running in aligned mode.</p></li>
+</ul>
+<p>d) Transfers completion updater
+Each time a transfer is completed on a channel, an interrupt might be
+generated or not, up to the client’s request. But in each case, the last
+descriptor of a transfer, the “status updater”, will write the latest
+transfer being completed into the physical channel’s completion mark.</p>
+<p>This will speed up residue calculation, for large transfers such as video
+buffers which hold around 6k descriptors or more. This also allows without
+any lock to find out what is the latest completed transfer in a running
+DMA chain.</p>
+<p>e) Transfers completion, irq and tasklet
+When a transfer flagged as “DMA_PREP_INTERRUPT” is finished, the dma irq
+is raised. Upon this interrupt, a tasklet is scheduled for the physical
+channel.</p>
+<p>The tasklet is responsible for :</p>
+<ul class="simple">
+<li><p>reading the physical channel last updater mark</p></li>
+<li><p>calling all the transfer callbacks of finished transfers, based on
+that mark, and each transfer flags.</p></li>
+</ul>
+<p>If a transfer is completed while this handling is done, a dma irq will
+be raised, and the tasklet will be scheduled once again, having a new
+updater mark.</p>
+<p>f) Residue
+Residue granularity will be descriptor based. The issued but not completed
+transfers will be scanned for all of their descriptors against the
+currently running descriptor.</p>
+<p>g) Most complicated case of driver’s tx queues
+The most tricky situation is when :</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>there are not “acked” transfers (tx0)</p></li>
+<li><p>a driver submitted an aligned tx1, not chained</p></li>
+<li><p>a driver submitted an aligned tx2 =&gt; tx2 is cold chained to tx1</p></li>
+<li><p>a driver issued tx1+tx2 =&gt; channel is running in aligned mode</p></li>
+<li><p>a driver submitted an aligned tx3 =&gt; tx3 is hot-chained</p></li>
+<li><p>a driver submitted an unaligned tx4 =&gt; tx4 is put in submitted queue,
+not chained</p></li>
+<li><p>a driver issued tx4 =&gt; tx4 is put in issued queue, not chained</p></li>
+<li><p>a driver submitted an aligned tx5 =&gt; tx5 is put in submitted queue, not
+chained</p></li>
+<li><p>a driver submitted an aligned tx6 =&gt; tx6 is put in submitted queue,
+cold chained to tx5</p></li>
+</ul>
+<p>This translates into (after tx4 is issued) :</p>
+<ul class="simple">
+<li><p>issued queue</p></li>
+</ul>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>+-----+ +-----+ +-----+ +-----+
+| tx1 | | tx2 | | tx3 | | tx4 |
++---|-+ ^---|-+ ^-----+ +-----+
+    |   |   |   |
+    +---+   +---+
+  - submitted queue
++-----+ +-----+
+| tx5 | | tx6 |
++---|-+ ^-----+
+    |   |
+    +---+
+</pre></div>
+</div>
+</div></blockquote>
+<ul class="simple">
+<li><p>completed queue : empty</p></li>
+<li><p>allocated queue : tx0</p></li>
+</ul>
+<p>It should be noted that after tx3 is completed, the channel is stopped, and
+restarted in “unaligned mode” to handle tx4.</p>
+<p>Author: Robert Jarzmik &lt;<a class="reference external" href="mailto:robert&#46;jarzmik&#37;&#52;&#48;free&#46;fr">robert<span>&#46;</span>jarzmik<span>&#64;</span>free<span>&#46;</span>fr</a>&gt;</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">PXA/MMP - DMA Slave controller</a><ul>
+<li><a class="reference internal" href="#constraints">Constraints</a></li>
+<li><a class="reference internal" href="#design">Design</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/dmaengine/pxa_dma.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/dmaengine/pxa_dma.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

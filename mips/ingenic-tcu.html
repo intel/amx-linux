@@ -1,0 +1,195 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>2. Ingenic JZ47xx SoCs Timer/Counter Unit hardware &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="3. Feature status on mips architecture" href="features.html" />
+    <link rel="prev" title="1. BMIPS DeviceTree Booting" href="booting.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="ingenic-jz47xx-socs-timer-counter-unit-hardware">
+<h1><span class="section-number">2. </span>Ingenic JZ47xx SoCs Timer/Counter Unit hardware<a class="headerlink" href="#ingenic-jz47xx-socs-timer-counter-unit-hardware" title="Permalink to this headline">¶</a></h1>
+<p>The Timer/Counter Unit (TCU) in Ingenic JZ47xx SoCs is a multi-function
+hardware block. It features up to eight channels, that can be used as
+counters, timers, or PWM.</p>
+<ul>
+<li><p>JZ4725B, JZ4750, JZ4755 only have six TCU channels. The other SoCs all
+have eight channels.</p></li>
+<li><p>JZ4725B introduced a separate channel, called Operating System Timer
+(OST). It is a 32-bit programmable timer. On JZ4760B and above, it is
+64-bit.</p></li>
+<li><p>Each one of the TCU channels has its own clock, which can be reparented to three
+different clocks (pclk, ext, rtc), gated, and reclocked, through their TCSR register.</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>The watchdog and OST hardware blocks also feature a TCSR register with the same
+format in their register space.</p></li>
+<li><p>The TCU registers used to gate/ungate can also gate/ungate the watchdog and
+OST clocks.</p></li>
+</ul>
+</div></blockquote>
+</li>
+<li><p>Each TCU channel works in one of two modes:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>mode TCU1: channels cannot work in sleep mode, but are easier to
+operate.</p></li>
+<li><p>mode TCU2: channels can work in sleep mode, but the operation is a bit
+more complicated than with TCU1 channels.</p></li>
+</ul>
+</div></blockquote>
+</li>
+<li><p>The mode of each TCU channel depends on the SoC used:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>On the oldest SoCs (up to JZ4740), all of the eight channels operate in
+TCU1 mode.</p></li>
+<li><p>On JZ4725B, channel 5 operates as TCU2, the others operate as TCU1.</p></li>
+<li><p>On newest SoCs (JZ4750 and above), channels 1-2 operate as TCU2, the
+others operate as TCU1.</p></li>
+</ul>
+</div></blockquote>
+</li>
+<li><p>Each channel can generate an interrupt. Some channels share an interrupt
+line, some don’t, and this changes between SoC versions:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>on older SoCs (JZ4740 and below), channel 0 and channel 1 have their
+own interrupt line; channels 2-7 share the last interrupt line.</p></li>
+<li><p>On JZ4725B, channel 0 has its own interrupt; channels 1-5 share one
+interrupt line; the OST uses the last interrupt line.</p></li>
+<li><p>on newer SoCs (JZ4750 and above), channel 5 has its own interrupt;
+channels 0-4 and (if eight channels) 6-7 all share one interrupt line;
+the OST uses the last interrupt line.</p></li>
+</ul>
+</div></blockquote>
+</li>
+</ul>
+<section id="implementation">
+<h2><span class="section-number">2.1. </span>Implementation<a class="headerlink" href="#implementation" title="Permalink to this headline">¶</a></h2>
+<p>The functionalities of the TCU hardware are spread across multiple drivers:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 24%" />
+<col style="width: 76%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>clocks</p></td>
+<td><p>drivers/clk/ingenic/tcu.c</p></td>
+</tr>
+<tr class="row-even"><td><p>interrupts</p></td>
+<td><p>drivers/irqchip/irq-ingenic-tcu.c</p></td>
+</tr>
+<tr class="row-odd"><td><p>timers</p></td>
+<td><p>drivers/clocksource/ingenic-timer.c</p></td>
+</tr>
+<tr class="row-even"><td><p>OST</p></td>
+<td><p>drivers/clocksource/ingenic-ost.c</p></td>
+</tr>
+<tr class="row-odd"><td><p>PWM</p></td>
+<td><p>drivers/pwm/pwm-jz4740.c</p></td>
+</tr>
+<tr class="row-even"><td><p>watchdog</p></td>
+<td><p>drivers/watchdog/jz4740_wdt.c</p></td>
+</tr>
+</tbody>
+</table>
+<p>Because various functionalities of the TCU that belong to different drivers
+and frameworks can be controlled from the same registers, all of these
+drivers access their registers through the same regmap.</p>
+<p>For more information regarding the devicetree bindings of the TCU drivers,
+have a look at Documentation/devicetree/bindings/timer/ingenic,tcu.yaml.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">2. Ingenic JZ47xx SoCs Timer/Counter Unit hardware</a><ul>
+<li><a class="reference internal" href="#implementation">2.1. Implementation</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/mips/ingenic-tcu.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/mips/ingenic-tcu.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

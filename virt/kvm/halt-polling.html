@@ -1,0 +1,264 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>The KVM halt polling system &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Review checklist for kvm patches" href="review-checklist.html" />
+    <link rel="prev" title="KVM VCPU Requests" href="vcpu-requests.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="the-kvm-halt-polling-system">
+<h1>The KVM halt polling system<a class="headerlink" href="#the-kvm-halt-polling-system" title="Permalink to this headline">¶</a></h1>
+<p>The KVM halt polling system provides a feature within KVM whereby the latency
+of a guest can, under some circumstances, be reduced by polling in the host
+for some time period after the guest has elected to no longer run by cedeing.
+That is, when a guest vcpu has ceded, or in the case of powerpc when all of the
+vcpus of a single vcore have ceded, the host kernel polls for wakeup conditions
+before giving up the cpu to the scheduler in order to let something else run.</p>
+<p>Polling provides a latency advantage in cases where the guest can be run again
+very quickly by at least saving us a trip through the scheduler, normally on
+the order of a few micro-seconds, although performance benefits are workload
+dependant. In the event that no wakeup source arrives during the polling
+interval or some other task on the runqueue is runnable the scheduler is
+invoked. Thus halt polling is especially useful on workloads with very short
+wakeup periods where the time spent halt polling is minimised and the time
+savings of not invoking the scheduler are distinguishable.</p>
+<p>The generic halt polling code is implemented in:</p>
+<blockquote>
+<div><p>virt/kvm/kvm_main.c: kvm_vcpu_block()</p>
+</div></blockquote>
+<p>The powerpc kvm-hv specific case is implemented in:</p>
+<blockquote>
+<div><p>arch/powerpc/kvm/book3s_hv.c: kvmppc_vcore_blocked()</p>
+</div></blockquote>
+<section id="halt-polling-interval">
+<h2>Halt Polling Interval<a class="headerlink" href="#halt-polling-interval" title="Permalink to this headline">¶</a></h2>
+<p>The maximum time for which to poll before invoking the scheduler, referred to
+as the halt polling interval, is increased and decreased based on the perceived
+effectiveness of the polling in an attempt to limit pointless polling.
+This value is stored in either the vcpu struct:</p>
+<blockquote>
+<div><p>kvm_vcpu-&gt;halt_poll_ns</p>
+</div></blockquote>
+<p>or in the case of powerpc kvm-hv, in the vcore struct:</p>
+<blockquote>
+<div><p>kvmppc_vcore-&gt;halt_poll_ns</p>
+</div></blockquote>
+<p>Thus this is a per vcpu (or vcore) value.</p>
+<p>During polling if a wakeup source is received within the halt polling interval,
+the interval is left unchanged. In the event that a wakeup source isn’t
+received during the polling interval (and thus schedule is invoked) there are
+two options, either the polling interval and total block time[0] were less than
+the global max polling interval (see module params below), or the total block
+time was greater than the global max polling interval.</p>
+<p>In the event that both the polling interval and total block time were less than
+the global max polling interval then the polling interval can be increased in
+the hope that next time during the longer polling interval the wake up source
+will be received while the host is polling and the latency benefits will be
+received. The polling interval is grown in the function grow_halt_poll_ns() and
+is multiplied by the module parameters halt_poll_ns_grow and
+halt_poll_ns_grow_start.</p>
+<p>In the event that the total block time was greater than the global max polling
+interval then the host will never poll for long enough (limited by the global
+max) to wakeup during the polling interval so it may as well be shrunk in order
+to avoid pointless polling. The polling interval is shrunk in the function
+shrink_halt_poll_ns() and is divided by the module parameter
+halt_poll_ns_shrink, or set to 0 iff halt_poll_ns_shrink == 0.</p>
+<p>It is worth noting that this adjustment process attempts to hone in on some
+steady state polling interval but will only really do a good job for wakeups
+which come at an approximately constant rate, otherwise there will be constant
+adjustment of the polling interval.</p>
+<dl class="simple">
+<dt>[0] total block time:</dt><dd><p>the time between when the halt polling function is
+invoked and a wakeup source received (irrespective of
+whether the scheduler is invoked within that function).</p>
+</dd>
+</dl>
+</section>
+<section id="module-parameters">
+<h2>Module Parameters<a class="headerlink" href="#module-parameters" title="Permalink to this headline">¶</a></h2>
+<p>The kvm module has 3 tuneable module parameters to adjust the global max
+polling interval as well as the rate at which the polling interval is grown and
+shrunk. These variables are defined in include/linux/kvm_host.h and as module
+parameters in virt/kvm/kvm_main.c, or arch/powerpc/kvm/book3s_hv.c in the
+powerpc kvm-hv case.</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 31%" />
+<col style="width: 36%" />
+<col style="width: 33%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>Module Parameter</p></td>
+<td><p>Description</p></td>
+<td><p>Default Value</p></td>
+</tr>
+<tr class="row-even"><td><p>halt_poll_ns</p></td>
+<td><p>The global max polling
+interval which defines
+the ceiling value of the
+polling interval for
+each vcpu.</p></td>
+<td><p>KVM_HALT_POLL_NS_DEFAULT</p>
+<p>(per arch value)</p>
+</td>
+</tr>
+<tr class="row-odd"><td><p>halt_poll_ns_grow</p></td>
+<td><p>The value by which the
+halt polling interval is
+multiplied in the
+grow_halt_poll_ns()
+function.</p></td>
+<td><p>2</p></td>
+</tr>
+<tr class="row-even"><td><p>halt_poll_ns_grow_start</p></td>
+<td><p>The initial value to grow
+to from zero in the
+grow_halt_poll_ns()
+function.</p></td>
+<td><p>10000</p></td>
+</tr>
+<tr class="row-odd"><td><p>halt_poll_ns_shrink</p></td>
+<td><p>The value by which the
+halt polling interval is
+divided in the
+shrink_halt_poll_ns()
+function.</p></td>
+<td><p>0</p></td>
+</tr>
+</tbody>
+</table>
+<p>These module parameters can be set from the debugfs files in:</p>
+<blockquote>
+<div><p>/sys/module/kvm/parameters/</p>
+</div></blockquote>
+<dl class="simple">
+<dt>Note: that these module parameters are system wide values and are not able to</dt><dd><p>be tuned on a per vm basis.</p>
+</dd>
+</dl>
+<p>Any changes to these parameters will be picked up by new and existing vCPUs the
+next time they halt, with the notable exception of VMs using KVM_CAP_HALT_POLL
+(see next section).</p>
+</section>
+<section id="kvm-cap-halt-poll">
+<h2>KVM_CAP_HALT_POLL<a class="headerlink" href="#kvm-cap-halt-poll" title="Permalink to this headline">¶</a></h2>
+<p>KVM_CAP_HALT_POLL is a VM capability that allows userspace to override halt_poll_ns
+on a per-VM basis. VMs using KVM_CAP_HALT_POLL ignore halt_poll_ns completely (but
+still obey halt_poll_ns_grow, halt_poll_ns_grow_start, and halt_poll_ns_shrink).</p>
+<p>See <a class="reference internal" href="api.html"><span class="doc">The Definitive KVM (Kernel-based Virtual Machine) API Documentation</span></a> for more information on this capability.</p>
+</section>
+<section id="further-notes">
+<h2>Further Notes<a class="headerlink" href="#further-notes" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p>Care should be taken when setting the halt_poll_ns module parameter as a large value
+has the potential to drive the cpu usage to 100% on a machine which would be almost
+entirely idle otherwise. This is because even if a guest has wakeups during which very
+little work is done and which are quite far apart, if the period is shorter than the
+global max polling interval (halt_poll_ns) then the host will always poll for the
+entire block time and thus cpu utilisation will go to 100%.</p></li>
+<li><p>Halt polling essentially presents a trade off between power usage and latency and
+the module parameters should be used to tune the affinity for this. Idle cpu time is
+essentially converted to host kernel time with the aim of decreasing latency when
+entering the guest.</p></li>
+<li><p>Halt polling will only be conducted by the host when no other tasks are runnable on
+that cpu, otherwise the polling will cease immediately and schedule will be invoked to
+allow that other task to run. Thus this doesn’t allow a guest to denial of service the
+cpu.</p></li>
+</ul>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">The KVM halt polling system</a><ul>
+<li><a class="reference internal" href="#halt-polling-interval">Halt Polling Interval</a></li>
+<li><a class="reference internal" href="#module-parameters">Module Parameters</a></li>
+<li><a class="reference internal" href="#kvm-cap-halt-poll">KVM_CAP_HALT_POLL</a></li>
+<li><a class="reference internal" href="#further-notes">Further Notes</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/virt/kvm/halt-polling.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/virt/kvm/halt-polling.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

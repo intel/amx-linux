@@ -1,0 +1,238 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>设备树覆盖说明 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="处理器体系结构" href="../arch.html" />
+    <link rel="prev" title="Devicetree动态解析器说明" href="dynamic-resolution-notes.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../devicetree/overlay-notes.html"><span class="doc">Devicetree Overlay Notes</span></a></p>
+</dd>
+<dt class="field-even">翻译</dt>
+<dd class="field-even"><p>司延腾 Yanteng Si &lt;<a class="reference external" href="mailto:siyanteng&#37;&#52;&#48;loongson&#46;cn">siyanteng<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+<dt class="field-odd">校译</dt>
+<dd class="field-odd"><p></p></dd>
+</dl>
+<section id="id1">
+<h1>设备树覆盖说明<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h1>
+<p>本文档描述了drivers/of/overlay.c中的内核内设备树覆盖功能的实现，是
+<a class="reference internal" href="../../../devicetree/dynamic-resolution-notes.html"><span class="doc">Devicetree Dynamic Resolver Notes</span></a>[1]的配套文档。</p>
+<section id="id2">
+<h2>覆盖如何工作<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>设备树覆盖的目的是修改内核的实时树，并使修改以反映变化的方式影响内核的状态。
+由于内核主要处理的是设备，任何新的设备节点如果导致一个活动的设备，就应该创建它，
+而如果设备节点被禁用或被全部删除，受影响的设备应该被取消注册。</p>
+<p>让我们举个例子，我们有一个foo板，它的基本树形图如下:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>---- foo.dts ---------------------------------------------------------------
+    /* FOO平台 */
+    /dts-v1/;
+    / {
+            compatible = &quot;corp,foo&quot;;
+
+            /* 共享的资源 */
+            res: res {
+            };
+
+            /* 芯片上的外围设备 */
+            ocp: ocp {
+                    /* 总是被实例化的外围设备 */
+                    peripheral1 { ... };
+            };
+    };
+---- foo.dts ---------------------------------------------------------------
+</pre></div>
+</div>
+<p>覆盖bar.dts,</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>---- bar.dts - 按标签覆盖目标位置 ----------------------------
+    /dts-v1/;
+    /插件/;
+    &amp;ocp {
+            /* bar外围 */
+            bar {
+                    compatible = &quot;corp,bar&quot;;
+                    ... /* 各种属性和子节点 */
+            };
+    };
+---- bar.dts ---------------------------------------------------------------
+</pre></div>
+</div>
+<p>当加载（并按照[1]中描述的方式解决）时，应该产生foo+bar.dts:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>---- foo+bar.dts -----------------------------------------------------------
+    /* FOO平台 + bar外围 */
+    / {
+            compatible = &quot;corp,foo&quot;;
+
+            /* 共享资源 */
+            res: res {
+            };
+
+            /* 芯片上的外围设备 */
+            ocp: ocp {
+                    /* 总是被实例化的外围设备 */
+                    peripheral1 { ... };
+
+                    /* bar外围 */
+                    bar {
+                            compatible = &quot;corp,bar&quot;;
+                            ... /* 各种属性和子节点 */
+                    };
+            };
+    };
+---- foo+bar.dts -----------------------------------------------------------
+</pre></div>
+</div>
+<p>作为覆盖的结果，已经创建了一个新的设备节点（bar），因此将注册一个bar平台设备，
+如果加载了匹配的设备驱动程序，将按预期创建设备。</p>
+<p>如果基础DT不是用-&#64;选项编译的，那么“&amp;ocp”标签将不能用于将覆盖节点解析到基础
+DT中的适当位置。在这种情况下，可以提供目标路径。通过标签的目标位置的语法是比
+较好的，因为不管标签在DT中出现在哪里，覆盖都可以被应用到任何包含标签的基础DT上。</p>
+<p>上面的bar.dts例子被修改为使用目标路径语法，即为:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>---- bar.dts - 通过明确的路径覆盖目标位置 --------------------
+    /dts-v1/;
+    /插件/;
+    &amp;{/ocp} {
+            /* bar外围 */
+            bar {
+                    compatible = &quot;corp,bar&quot;;
+                    ... /* 各种外围设备和子节点 */
+            }
+    };
+---- bar.dts ---------------------------------------------------------------
+</pre></div>
+</div>
+</section>
+<section id="api">
+<h2>内核中关于覆盖的API<a class="headerlink" href="#api" title="Permalink to this headline">¶</a></h2>
+<p>该API相当容易使用。</p>
+<ol class="arabic simple">
+<li><p>调用of_overlay_fdt_apply()来创建和应用一个覆盖的变更集。返回值是一个
+错误或一个识别这个覆盖的cookie。</p></li>
+<li><p>调用<a class="reference internal" href="../../../devicetree/kernel-api.html#c.of_overlay_remove" title="of_overlay_remove"><code class="xref c c-func docutils literal notranslate"><span class="pre">of_overlay_remove()</span></code></a>来删除和清理先前通过调用of_overlay_fdt_apply()
+而创建的覆盖变更集。不允许删除一个被另一个覆盖的覆盖变化集。</p></li>
+</ol>
+<p>最后，如果你需要一次性删除所有的覆盖，只需调用<a class="reference internal" href="../../../devicetree/kernel-api.html#c.of_overlay_remove_all" title="of_overlay_remove_all"><code class="xref c c-func docutils literal notranslate"><span class="pre">of_overlay_remove_all()</span></code></a>，
+它将以正确的顺序删除每一个覆盖。</p>
+<p>你可以选择注册在覆盖操作中被调用的通知器。详见
+of_overlay_notifier_register/unregister和enum of_overlay_notify_action。</p>
+<p>OF_OVERLAY_PRE_APPLY、OF_OVERLAY_POST_APPLY或OF_OVERLAY_PRE_REMOVE
+的通知器回调可以存储指向覆盖层中的设备树节点或其内容的指针，但这些指针不能持
+续到OF_OVERLAY_POST_REMOVE的通知器回调。在OF_OVERLAY_POST_REMOVE通
+知器被调用后，包含覆盖层的内存将被<a class="reference internal" href="../../../core-api/mm-api.html#c.kfree" title="kfree"><code class="xref c c-func docutils literal notranslate"><span class="pre">kfree()</span></code></a>ed。请注意，即使OF_OVERLAY_POST_REMOVE
+的通知器返回错误，内存也会被<a class="reference internal" href="../../../core-api/mm-api.html#c.kfree" title="kfree"><code class="xref c c-func docutils literal notranslate"><span class="pre">kfree()</span></code></a>ed。</p>
+<p>drivers/of/dynamic.c中的变更集通知器是第二种类型的通知器，可以通过应用或移除
+覆盖层来触发。这些通知器不允许在覆盖层或其内容中存储指向设备树节点的指针。当包含
+覆盖层的内存因移除覆盖层而被释放时，覆盖层代码并不能防止这类指针仍然有效。</p>
+<p>任何其他保留指向覆盖层节点或数据的指针的代码都被认为是一个错误，因为在移除覆盖层
+后，该指针将指向已释放的内存。</p>
+<p>覆盖层的用户必须特别注意系统上发生的整体操作，以确保其他内核代码不保留任何指向覆
+盖层节点或数据的指针。任何无意中使用这种指针的例子是，如果一个驱动或子系统模块在
+应用了覆盖后被加载，并且该驱动或子系统扫描了整个设备树或其大部分，包括覆盖节点。</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">设备树覆盖说明</a><ul>
+<li><a class="reference internal" href="#id2">覆盖如何工作</a></li>
+<li><a class="reference internal" href="#api">内核中关于覆盖的API</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/devicetree/overlay-notes.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/devicetree/overlay-notes.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

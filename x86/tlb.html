@@ -1,0 +1,175 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>11. The TLB &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="12. MTRR (Memory Type Range Register) control" href="mtrr.html" />
+    <link rel="prev" title="10. Zero Page" href="zero-page.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="the-tlb">
+<h1><span class="section-number">11. </span>The TLB<a class="headerlink" href="#the-tlb" title="Permalink to this headline">¶</a></h1>
+<p>When the kernel unmaps or modified the attributes of a range of
+memory, it has two choices:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>Flush the entire TLB with a two-instruction sequence.  This is
+a quick operation, but it causes collateral damage: TLB entries
+from areas other than the one we are trying to flush will be
+destroyed and must be refilled later, at some cost.</p></li>
+<li><p>Use the invlpg instruction to invalidate a single page at a
+time.  This could potentially cost many more instructions, but
+it is a much more precise operation, causing no collateral
+damage to other TLB entries.</p></li>
+</ol>
+</div></blockquote>
+<p>Which method to do depends on a few things:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>The size of the flush being performed.  A flush of the entire
+address space is obviously better performed by flushing the
+entire TLB than doing 2^48/PAGE_SIZE individual flushes.</p></li>
+<li><p>The contents of the TLB.  If the TLB is empty, then there will
+be no collateral damage caused by doing the global flush, and
+all of the individual flush will have ended up being wasted
+work.</p></li>
+<li><p>The size of the TLB.  The larger the TLB, the more collateral
+damage we do with a full flush.  So, the larger the TLB, the
+more attractive an individual flush looks.  Data and
+instructions have separate TLBs, as do different page sizes.</p></li>
+<li><p>The microarchitecture.  The TLB has become a multi-level
+cache on modern CPUs, and the global flushes have become more
+expensive relative to single-page flushes.</p></li>
+</ol>
+</div></blockquote>
+<p>There is obviously no way the kernel can know all these things,
+especially the contents of the TLB during a given flush.  The
+sizes of the flush will vary greatly depending on the workload as
+well.  There is essentially no “right” point to choose.</p>
+<p>You may be doing too many individual invalidations if you see the
+invlpg instruction (or instructions _near_ it) show up high in
+profiles.  If you believe that individual invalidations being
+called too often, you can lower the tunable:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/sys/kernel/debug/x86/tlb_single_page_flush_ceiling
+</pre></div>
+</div>
+<p>This will cause us to do the global flush for more cases.
+Lowering it to 0 will disable the use of the individual flushes.
+Setting it to 1 is a very conservative setting and it should
+never need to be 0 under normal circumstances.</p>
+<p>Despite the fact that a single individual flush on x86 is
+guaranteed to flush a full 2MB <a class="footnote-reference brackets" href="#id2" id="id1">1</a>, hugetlbfs always uses the full
+flushes.  THP is treated exactly the same as normal memory.</p>
+<p>You might see invlpg inside of flush_tlb_mm_range() show up in
+profiles, or you can use the trace_tlb_flush() tracepoints. to
+determine how long the flush operations are taking.</p>
+<p>Essentially, you are balancing the cycles you spend doing invlpg
+with the cycles that you spend refilling the TLB later.</p>
+<p>You can measure how expensive TLB refills are by using
+performance counters and ‘perf stat’, like this:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>perf stat -e
+  cpu/event=0x8,umask=0x84,name=dtlb_load_misses_walk_duration/,
+  cpu/event=0x8,umask=0x82,name=dtlb_load_misses_walk_completed/,
+  cpu/event=0x49,umask=0x4,name=dtlb_store_misses_walk_duration/,
+  cpu/event=0x49,umask=0x2,name=dtlb_store_misses_walk_completed/,
+  cpu/event=0x85,umask=0x4,name=itlb_misses_walk_duration/,
+  cpu/event=0x85,umask=0x2,name=itlb_misses_walk_completed/
+</pre></div>
+</div>
+<p>That works on an IvyBridge-era CPU (i5-3320M).  Different CPUs
+may have differently-named counters, but they should at least
+be there in some form.  You can use pmu-tools ‘ocperf list’
+(<a class="reference external" href="https://github.com/andikleen/pmu-tools">https://github.com/andikleen/pmu-tools</a>) to find the right
+counters for a given CPU.</p>
+<dl class="footnote brackets">
+<dt class="label" id="id2"><span class="brackets"><a class="fn-backref" href="#id1">1</a></span></dt>
+<dd><p>A footnote in Intel’s SDM “4.10.4.2 Recommended Invalidation”
+says: “One execution of INVLPG is sufficient even for a page
+with size greater than 4 KBytes.”</p>
+</dd>
+</dl>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/x86/tlb.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/x86/tlb.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,165 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>zsmalloc &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="zsmalloc">
+<h1>zsmalloc<a class="headerlink" href="#zsmalloc" title="Permalink to this headline">¶</a></h1>
+<p>这个分配器是为与zram一起使用而设计的。因此，该分配器应该在低内存条件下工作良好。特别是，
+它从未尝试过higher order页面的分配，这在内存压力下很可能会失败。另一方面，如果我们只
+是使用单（0-order）页，它将遭受非常高的碎片化 - 任何大小为PAGE_SIZE/2或更大的对象将
+占据整个页面。这是其前身（xvmalloc）的主要问题之一。</p>
+<p>为了克服这些问题，zsmalloc分配了一堆0-order页面，并使用各种”struct page”字段将它
+们链接起来。这些链接的页面作为一个单一的higher order页面，即一个对象可以跨越0-order
+页面的边界。代码将这些链接的页面作为一个实体，称为zspage。</p>
+<p>为了简单起见，zsmalloc只能分配大小不超过PAGE_SIZE的对象，因为这满足了所有当前用户的
+要求（在最坏的情况下，页面是不可压缩的，因此以”原样”即未压缩的形式存储）。对于大于这
+个大小的分配请求，会返回失败（见zs_malloc）。</p>
+<p>此外，zs_malloc()并不返回一个可重复引用的指针。相反，它返回一个不透明的句柄（无符号
+长），它编码了被分配对象的实际位置。这种间接性的原因是zsmalloc并不保持zspages的永久
+映射，因为这在32位系统上会导致问题，因为内核空间映射的VA区域非常小。因此，在使用分配
+的内存之前，对象必须使用zs_map_object()进行映射以获得一个可用的指针，随后使用
+zs_unmap_object()解除映射。</p>
+<section id="stat">
+<h2>stat<a class="headerlink" href="#stat" title="Permalink to this headline">¶</a></h2>
+<p>通过CONFIG_ZSMALLOC_STAT，我们可以通过 <code class="docutils literal notranslate"><span class="pre">/sys/kernel/debug/zsmalloc/&lt;user</span> <span class="pre">name&gt;</span></code>
+看到zsmalloc内部信息。下面是一个统计输出的例子。:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># cat /sys/kernel/debug/zsmalloc/zram0/classes
+
+class  size almost_full almost_empty obj_allocated   obj_used pages_used pages_per_zspage
+   ...
+   ...
+    9   176           0            1           186        129          8                4
+   10   192           1            0          2880       2872        135                3
+   11   208           0            1           819        795         42                2
+   12   224           0            1           219        159         12                4
+   ...
+   ...
+</pre></div>
+</div>
+<dl class="simple">
+<dt>class</dt><dd><p>索引</p>
+</dd>
+<dt>size</dt><dd><p>zspage存储对象大小</p>
+</dd>
+<dt>almost_empty</dt><dd><p>ZS_ALMOST_EMPTY zspage的数量（见下文）。</p>
+</dd>
+<dt>almost_full</dt><dd><p>ZS_ALMOST_FULL zspage的数量(见下图)</p>
+</dd>
+<dt>obj_allocated</dt><dd><p>已分配对象的数量</p>
+</dd>
+<dt>obj_used</dt><dd><p>分配给用户的对象的数量</p>
+</dd>
+<dt>pages_used</dt><dd><p>为该类分配的页数</p>
+</dd>
+<dt>pages_per_zspage</dt><dd><p>组成一个zspage的0-order页面的数量</p>
+</dd>
+</dl>
+<p>当n &lt;= N / f时，我们将一个zspage分配给ZS_ALMOST_EMPTYfullness组，其中</p>
+<ul class="simple">
+<li><p>n = 已分配对象的数量</p></li>
+<li><p>N = zspage可以存储的对象总数</p></li>
+<li><p>f = fullness_threshold_frac(即，目前是4个)</p></li>
+</ul>
+<p>同样地，我们将zspage分配给:</p>
+<ul class="simple">
+<li><p>ZS_ALMOST_FULL  when n &gt; N / f</p></li>
+<li><p>ZS_EMPTY        when n == 0</p></li>
+<li><p>ZS_FULL         when n == N</p></li>
+</ul>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">zsmalloc</a><ul>
+<li><a class="reference internal" href="#stat">stat</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/mm/zsmalloc.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/mm/zsmalloc.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

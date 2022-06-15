@@ -1,0 +1,318 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Random Number Algorithm Definitions &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Asymmetric Cipher Algorithm Definitions" href="api-akcipher.html" />
+    <link rel="prev" title="Message Digest Algorithm Definitions" href="api-digest.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="random-number-algorithm-definitions">
+<h1>Random Number Algorithm Definitions<a class="headerlink" href="#random-number-algorithm-definitions" title="Permalink to this headline">¶</a></h1>
+<dl class="type">
+<dt id="c.rng_alg">
+struct <code class="sig-name descname">rng_alg</code><a class="headerlink" href="#c.rng_alg" title="Permalink to this definition">¶</a></dt>
+<dd><p>random number generator definition</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct rng_alg {
+    int (*generate)(struct crypto_rng *tfm,const u8 *src, unsigned int slen, u8 *dst, unsigned int dlen);
+    int (*seed)(struct crypto_rng *tfm, const u8 *seed, unsigned int slen);
+    void (*set_ent)(struct crypto_rng *tfm, const u8 *data, unsigned int len);
+    unsigned int seedsize;
+    struct crypto_alg base;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">generate</span></code></dt><dd><p>The function defined by this variable obtains a
+random number. The random number generator transform
+must generate the random number out of the context
+provided with this call, plus any additional data
+if provided to the call.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">seed</span></code></dt><dd><p>Seed or reseed the random number generator.  With the
+invocation of this function call, the random number
+generator shall become ready for generation.  If the
+random number generator requires a seed for setting
+up a new state, the seed must be provided by the
+consumer while invoking this function. The required
+size of the seed is defined with <strong>seedsize</strong> .</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">set_ent</span></code></dt><dd><p>Set entropy that would otherwise be obtained from
+entropy source.  Internal use only.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">seedsize</span></code></dt><dd><p>The seed size required for a random number generator
+initialization defined with this variable. Some
+random number generators does not require a seed
+as the seeding is implemented internally without
+the need of support by the consumer. In this case,
+the seed size is set to zero.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">base</span></code></dt><dd><p>Common crypto API algorithm data structure.</p>
+</dd>
+</dl>
+</div>
+</section>
+<section id="crypto-api-random-number-api">
+<h1>Crypto API Random Number API<a class="headerlink" href="#crypto-api-random-number-api" title="Permalink to this headline">¶</a></h1>
+<p>The random number generator API is used with the ciphers of type
+CRYPTO_ALG_TYPE_RNG (listed as type “rng” in /proc/crypto)</p>
+<dl class="function">
+<dt id="c.crypto_alloc_rng">
+struct crypto_rng * <code class="sig-name descname">crypto_alloc_rng</code><span class="sig-paren">(</span>const char<em> *alg_name</em>, u32<em> type</em>, u32<em> mask</em><span class="sig-paren">)</span><a class="headerlink" href="#c.crypto_alloc_rng" title="Permalink to this definition">¶</a></dt>
+<dd><ul class="simple">
+<li><p>allocate RNG handle</p></li>
+</ul>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*alg_name</span></code></dt><dd><p>is the cra_name / name or cra_driver_name / driver name of the
+message digest cipher</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">u32</span> <span class="pre">type</span></code></dt><dd><p>specifies the type of the cipher</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">u32</span> <span class="pre">mask</span></code></dt><dd><p>specifies the mask for the cipher</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Allocate a cipher handle for a random number generator. The returned struct
+crypto_rng is the cipher handle that is required for any subsequent
+API invocation for that random number generator.</p>
+<p>For all random number generators, this call creates a new private copy of
+the random number generator that does not share a state with other
+instances. The only exception is the “krng” random number generator which
+is a kernel crypto API use case for the get_random_bytes() function of the
+/dev/random driver.</p>
+<p><strong>Return</strong></p>
+<dl class="simple">
+<dt>allocated cipher handle in case of success; IS_ERR() is true in case</dt><dd><p>of an error, PTR_ERR() returns the error code.</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.crypto_rng_alg">
+struct <a class="reference internal" href="#c.rng_alg" title="rng_alg">rng_alg</a> * <code class="sig-name descname">crypto_rng_alg</code><span class="sig-paren">(</span>struct crypto_rng<em> *tfm</em><span class="sig-paren">)</span><a class="headerlink" href="#c.crypto_rng_alg" title="Permalink to this definition">¶</a></dt>
+<dd><p>obtain name of RNG</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">crypto_rng</span> <span class="pre">*tfm</span></code></dt><dd><p>cipher handle</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Return the generic name (cra_name) of the initialized random number generator</p>
+<p><strong>Return</strong></p>
+<p>generic name string</p>
+</div>
+<dl class="function">
+<dt id="c.crypto_free_rng">
+void <code class="sig-name descname">crypto_free_rng</code><span class="sig-paren">(</span>struct crypto_rng<em> *tfm</em><span class="sig-paren">)</span><a class="headerlink" href="#c.crypto_free_rng" title="Permalink to this definition">¶</a></dt>
+<dd><p>zeroize and free RNG handle</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">crypto_rng</span> <span class="pre">*tfm</span></code></dt><dd><p>cipher handle to be freed</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>If <strong>tfm</strong> is a NULL or error pointer, this function does nothing.</p>
+</div>
+<dl class="function">
+<dt id="c.crypto_rng_generate">
+int <code class="sig-name descname">crypto_rng_generate</code><span class="sig-paren">(</span>struct crypto_rng<em> *tfm</em>, const u8<em> *src</em>, unsigned int<em> slen</em>, u8<em> *dst</em>, unsigned int<em> dlen</em><span class="sig-paren">)</span><a class="headerlink" href="#c.crypto_rng_generate" title="Permalink to this definition">¶</a></dt>
+<dd><p>get random number</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">crypto_rng</span> <span class="pre">*tfm</span></code></dt><dd><p>cipher handle</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">u8</span> <span class="pre">*src</span></code></dt><dd><p>Input buffer holding additional data, may be NULL</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">slen</span></code></dt><dd><p>Length of additional data</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">u8</span> <span class="pre">*dst</span></code></dt><dd><p>output buffer holding the random numbers</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">dlen</span></code></dt><dd><p>length of the output buffer</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This function fills the caller-allocated buffer with random
+numbers using the random number generator referenced by the
+cipher handle.</p>
+<p><strong>Return</strong></p>
+<p>0 function was successful; &lt; 0 if an error occurred</p>
+</div>
+<dl class="function">
+<dt id="c.crypto_rng_get_bytes">
+int <code class="sig-name descname">crypto_rng_get_bytes</code><span class="sig-paren">(</span>struct crypto_rng<em> *tfm</em>, u8<em> *rdata</em>, unsigned int<em> dlen</em><span class="sig-paren">)</span><a class="headerlink" href="#c.crypto_rng_get_bytes" title="Permalink to this definition">¶</a></dt>
+<dd><p>get random number</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">crypto_rng</span> <span class="pre">*tfm</span></code></dt><dd><p>cipher handle</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">u8</span> <span class="pre">*rdata</span></code></dt><dd><p>output buffer holding the random numbers</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">dlen</span></code></dt><dd><p>length of the output buffer</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This function fills the caller-allocated buffer with random numbers using the
+random number generator referenced by the cipher handle.</p>
+<p><strong>Return</strong></p>
+<p>0 function was successful; &lt; 0 if an error occurred</p>
+</div>
+<dl class="function">
+<dt id="c.crypto_rng_reset">
+int <code class="sig-name descname">crypto_rng_reset</code><span class="sig-paren">(</span>struct crypto_rng<em> *tfm</em>, const u8<em> *seed</em>, unsigned int<em> slen</em><span class="sig-paren">)</span><a class="headerlink" href="#c.crypto_rng_reset" title="Permalink to this definition">¶</a></dt>
+<dd><p>re-initialize the RNG</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">crypto_rng</span> <span class="pre">*tfm</span></code></dt><dd><p>cipher handle</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">u8</span> <span class="pre">*seed</span></code></dt><dd><p>seed input data</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">slen</span></code></dt><dd><p>length of the seed input data</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>The reset function completely re-initializes the random number generator
+referenced by the cipher handle by clearing the current state. The new state
+is initialized with the caller provided seed or automatically, depending
+on the random number generator type (the ANSI X9.31 RNG requires
+caller-provided seed, the SP800-90A DRBGs perform an automatic seeding).
+The seed is provided as a parameter to this function call. The provided seed
+should have the length of the seed size defined for the random number
+generator as defined by crypto_rng_seedsize.</p>
+<p><strong>Return</strong></p>
+<p>0 if the setting of the key was successful; &lt; 0 if an error occurred</p>
+</div>
+<dl class="function">
+<dt id="c.crypto_rng_seedsize">
+int <code class="sig-name descname">crypto_rng_seedsize</code><span class="sig-paren">(</span>struct crypto_rng<em> *tfm</em><span class="sig-paren">)</span><a class="headerlink" href="#c.crypto_rng_seedsize" title="Permalink to this definition">¶</a></dt>
+<dd><p>obtain seed size of RNG</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">crypto_rng</span> <span class="pre">*tfm</span></code></dt><dd><p>cipher handle</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>The function returns the seed size for the random number generator
+referenced by the cipher handle. This value may be zero if the random
+number generator does not implement or require a reseeding. For example,
+the SP800-90A DRBGs implement an automated reseeding after reaching a
+pre-defined threshold.</p>
+<p><strong>Return</strong></p>
+<p>seed size for the random number generator</p>
+</div>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Random Number Algorithm Definitions</a></li>
+<li><a class="reference internal" href="#crypto-api-random-number-api">Crypto API Random Number API</a></li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/crypto/api-rng.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/crypto/api-rng.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

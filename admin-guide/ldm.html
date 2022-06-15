@@ -1,0 +1,305 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>LDM - Logical Disk Manager (Dynamic Disks) &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Softlockup detector and hardlockup detector (aka nmi_watchdog)" href="lockup-watchdogs.html" />
+    <link rel="prev" title="Parallel port LCD/Keypad Panel support" href="lcd-panel-cgram.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="ldm-logical-disk-manager-dynamic-disks">
+<h1>LDM - Logical Disk Manager (Dynamic Disks)<a class="headerlink" href="#ldm-logical-disk-manager-dynamic-disks" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">Author</dt>
+<dd class="field-odd"><p>Originally Written by FlatCap - Richard Russon &lt;<a class="reference external" href="mailto:ldm&#37;&#52;&#48;flatcap&#46;org">ldm<span>&#64;</span>flatcap<span>&#46;</span>org</a>&gt;.</p>
+</dd>
+<dt class="field-even">Last Updated</dt>
+<dd class="field-even"><p>Anton Altaparmakov on 30 March 2007 for Windows Vista.</p>
+</dd>
+</dl>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Permalink to this headline">¶</a></h2>
+<p>Windows 2000, XP, and Vista use a new partitioning scheme.  It is a complete
+replacement for the MSDOS style partitions.  It stores its information in a
+1MiB journalled database at the end of the physical disk.  The size of
+partitions is limited only by disk space.  The maximum number of partitions is
+nearly 2000.</p>
+<p>Any partitions created under the LDM are called “Dynamic Disks”.  There are no
+longer any primary or extended partitions.  Normal MSDOS style partitions are
+now known as Basic Disks.</p>
+<p>If you wish to use Spanned, Striped, Mirrored or RAID 5 Volumes, you must use
+Dynamic Disks.  The journalling allows Windows to make changes to these
+partitions and filesystems without the need to reboot.</p>
+<p>Once the LDM driver has divided up the disk, you can use the MD driver to
+assemble any multi-partition volumes, e.g.  Stripes, RAID5.</p>
+<p>To prevent legacy applications from repartitioning the disk, the LDM creates a
+dummy MSDOS partition containing one disk-sized partition.  This is what is
+supported with the Linux LDM driver.</p>
+<p>A newer approach that has been implemented with Vista is to put LDM on top of a
+GPT label disk.  This is not supported by the Linux LDM driver yet.</p>
+</section>
+<section id="example">
+<h2>Example<a class="headerlink" href="#example" title="Permalink to this headline">¶</a></h2>
+<p>Below we have a 50MiB disk, divided into seven partitions.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The missing 1MiB at the end of the disk is where the LDM database is
+stored.</p>
+</div>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 11%" />
+<col style="width: 0%" />
+<col style="width: 23%" />
+<col style="width: 15%" />
+<col style="width: 8%" />
+<col style="width: 0%" />
+<col style="width: 23%" />
+<col style="width: 15%" />
+<col style="width: 6%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Device</p></th>
+<th class="head"></th>
+<th class="head"><p>Offset Bytes</p></th>
+<th class="head"><p>Sectors</p></th>
+<th class="head"><p>MiB</p></th>
+<th class="head"></th>
+<th class="head"><p>Size   Bytes</p></th>
+<th class="head"><p>Sectors</p></th>
+<th class="head"><p>MiB</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>hda</p></td>
+<td></td>
+<td><p>0</p></td>
+<td><p>0</p></td>
+<td><p>0</p></td>
+<td></td>
+<td><p>52428800</p></td>
+<td><p>102400</p></td>
+<td><p>50</p></td>
+</tr>
+<tr class="row-odd"><td><p>hda1</p></td>
+<td></td>
+<td><p>51380224</p></td>
+<td><p>100352</p></td>
+<td><p>49</p></td>
+<td></td>
+<td><p>1048576</p></td>
+<td><p>2048</p></td>
+<td><p>1</p></td>
+</tr>
+<tr class="row-even"><td><p>hda2</p></td>
+<td></td>
+<td><p>16384</p></td>
+<td><p>32</p></td>
+<td><p>0</p></td>
+<td></td>
+<td><p>6979584</p></td>
+<td><p>13632</p></td>
+<td><p>6</p></td>
+</tr>
+<tr class="row-odd"><td><p>hda3</p></td>
+<td></td>
+<td><p>6995968</p></td>
+<td><p>13664</p></td>
+<td><p>6</p></td>
+<td></td>
+<td><p>10485760</p></td>
+<td><p>20480</p></td>
+<td><p>10</p></td>
+</tr>
+<tr class="row-even"><td><p>hda4</p></td>
+<td></td>
+<td><p>17481728</p></td>
+<td><p>34144</p></td>
+<td><p>16</p></td>
+<td></td>
+<td><p>4194304</p></td>
+<td><p>8192</p></td>
+<td><p>4</p></td>
+</tr>
+<tr class="row-odd"><td><p>hda5</p></td>
+<td></td>
+<td><p>21676032</p></td>
+<td><p>42336</p></td>
+<td><p>20</p></td>
+<td></td>
+<td><p>5242880</p></td>
+<td><p>10240</p></td>
+<td><p>5</p></td>
+</tr>
+<tr class="row-even"><td><p>hda6</p></td>
+<td></td>
+<td><p>26918912</p></td>
+<td><p>52576</p></td>
+<td><p>25</p></td>
+<td></td>
+<td><p>10485760</p></td>
+<td><p>20480</p></td>
+<td><p>10</p></td>
+</tr>
+<tr class="row-odd"><td><p>hda7</p></td>
+<td></td>
+<td><p>37404672</p></td>
+<td><p>73056</p></td>
+<td><p>35</p></td>
+<td></td>
+<td><p>13959168</p></td>
+<td><p>27264</p></td>
+<td><p>13</p></td>
+</tr>
+</tbody>
+</table>
+<p>The LDM Database may not store the partitions in the order that they appear on
+disk, but the driver will sort them.</p>
+<p>When Linux boots, you will see something like:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>hda: 102400 sectors w/32KiB Cache, CHS=50/64/32
+hda: [LDM] hda1 hda2 hda3 hda4 hda5 hda6 hda7
+</pre></div>
+</div>
+</section>
+<section id="compiling-ldm-support">
+<h2>Compiling LDM Support<a class="headerlink" href="#compiling-ldm-support" title="Permalink to this headline">¶</a></h2>
+<p>To enable LDM, choose the following two options:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>“Advanced partition selection” CONFIG_PARTITION_ADVANCED</p></li>
+<li><p>“Windows Logical Disk Manager (Dynamic Disk) support” CONFIG_LDM_PARTITION</p></li>
+</ul>
+</div></blockquote>
+<p>If you believe the driver isn’t working as it should, you can enable the extra
+debugging code.  This will produce a LOT of output.  The option is:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>“Windows LDM extra logging” CONFIG_LDM_DEBUG</p></li>
+</ul>
+</div></blockquote>
+<p>N.B. The partition code cannot be compiled as a module.</p>
+<p>As with all the partition code, if the driver doesn’t see signs of its type of
+partition, it will pass control to another driver, so there is no harm in
+enabling it.</p>
+<p>If you have Dynamic Disks but don’t enable the driver, then all you will see
+is a dummy MSDOS partition filling the whole disk.  You won’t be able to mount
+any of the volumes on the disk.</p>
+</section>
+<section id="booting">
+<h2>Booting<a class="headerlink" href="#booting" title="Permalink to this headline">¶</a></h2>
+<p>If you enable LDM support, then lilo is capable of booting from any of the
+discovered partitions.  However, grub does not understand the LDM partitioning
+and cannot boot from a Dynamic Disk.</p>
+</section>
+<section id="more-documentation">
+<h2>More Documentation<a class="headerlink" href="#more-documentation" title="Permalink to this headline">¶</a></h2>
+<p>There is an Overview of the LDM together with complete Technical Documentation.
+It is available for download.</p>
+<blockquote>
+<div><p><a class="reference external" href="http://www.linux-ntfs.org/">http://www.linux-ntfs.org/</a></p>
+</div></blockquote>
+<p>If you have any LDM questions that aren’t answered in the documentation, email
+me.</p>
+<dl class="simple">
+<dt>Cheers,</dt><dd><p>FlatCap - Richard Russon
+<a class="reference external" href="mailto:ldm&#37;&#52;&#48;flatcap&#46;org">ldm<span>&#64;</span>flatcap<span>&#46;</span>org</a></p>
+</dd>
+</dl>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">LDM - Logical Disk Manager (Dynamic Disks)</a><ul>
+<li><a class="reference internal" href="#overview">Overview</a></li>
+<li><a class="reference internal" href="#example">Example</a></li>
+<li><a class="reference internal" href="#compiling-ldm-support">Compiling LDM Support</a></li>
+<li><a class="reference internal" href="#booting">Booting</a></li>
+<li><a class="reference internal" href="#more-documentation">More Documentation</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/admin-guide/ldm.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/admin-guide/ldm.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

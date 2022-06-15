@@ -1,0 +1,426 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>kcov: code coverage for fuzzing &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Using gcov with the Linux kernel" href="gcov.html" />
+    <link rel="prev" title="Sparse" href="sparse.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="kcov-code-coverage-for-fuzzing">
+<h1>kcov: code coverage for fuzzing<a class="headerlink" href="#kcov-code-coverage-for-fuzzing" title="Permalink to this headline">¶</a></h1>
+<p>kcov exposes kernel code coverage information in a form suitable for coverage-
+guided fuzzing (randomized testing). Coverage data of a running kernel is
+exported via the “kcov” debugfs file. Coverage collection is enabled on a task
+basis, and thus it can capture precise coverage of a single system call.</p>
+<p>Note that kcov does not aim to collect as much coverage as possible. It aims
+to collect more or less stable coverage that is function of syscall inputs.
+To achieve this goal it does not collect coverage in soft/hard interrupts
+and instrumentation of some inherently non-deterministic parts of kernel is
+disabled (e.g. scheduler, locking).</p>
+<p>kcov is also able to collect comparison operands from the instrumented code
+(this feature currently requires that the kernel is compiled with clang).</p>
+<section id="prerequisites">
+<h2>Prerequisites<a class="headerlink" href="#prerequisites" title="Permalink to this headline">¶</a></h2>
+<p>Configure the kernel with:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>CONFIG_KCOV=y
+</pre></div>
+</div>
+<p>CONFIG_KCOV requires gcc 6.1.0 or later.</p>
+<p>If the comparison operands need to be collected, set:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>CONFIG_KCOV_ENABLE_COMPARISONS=y
+</pre></div>
+</div>
+<p>Profiling data will only become accessible once debugfs has been mounted:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>mount -t debugfs none /sys/kernel/debug
+</pre></div>
+</div>
+</section>
+<section id="coverage-collection">
+<h2>Coverage collection<a class="headerlink" href="#coverage-collection" title="Permalink to this headline">¶</a></h2>
+<p>The following program demonstrates coverage collection from within a test
+program using kcov:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;stdio.h&gt;</span><span class="cp"></span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;stddef.h&gt;</span><span class="cp"></span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;stdint.h&gt;</span><span class="cp"></span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;stdlib.h&gt;</span><span class="cp"></span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;sys/types.h&gt;</span><span class="cp"></span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;sys/stat.h&gt;</span><span class="cp"></span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;sys/ioctl.h&gt;</span><span class="cp"></span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;sys/mman.h&gt;</span><span class="cp"></span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;unistd.h&gt;</span><span class="cp"></span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;fcntl.h&gt;</span><span class="cp"></span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;linux/types.h&gt;</span><span class="cp"></span>
+
+<span class="cp">#define KCOV_INIT_TRACE                     _IOR(&#39;c&#39;, 1, unsigned long)</span>
+<span class="cp">#define KCOV_ENABLE                 _IO(&#39;c&#39;, 100)</span>
+<span class="cp">#define KCOV_DISABLE                        _IO(&#39;c&#39;, 101)</span>
+<span class="cp">#define COVER_SIZE                  (64&lt;&lt;10)</span>
+
+<span class="cp">#define KCOV_TRACE_PC  0</span>
+<span class="cp">#define KCOV_TRACE_CMP 1</span>
+
+<span class="kt">int</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">argc</span><span class="p">,</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="o">**</span><span class="n">argv</span><span class="p">)</span><span class="w"></span>
+<span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">fd</span><span class="p">;</span><span class="w"></span>
+<span class="w">    </span><span class="kt">unsigned</span><span class="w"> </span><span class="kt">long</span><span class="w"> </span><span class="o">*</span><span class="n">cover</span><span class="p">,</span><span class="w"> </span><span class="n">n</span><span class="p">,</span><span class="w"> </span><span class="n">i</span><span class="p">;</span><span class="w"></span>
+
+<span class="w">    </span><span class="cm">/* A single fd descriptor allows coverage collection on a single</span>
+<span class="cm">     * thread.</span>
+<span class="cm">     */</span><span class="w"></span>
+<span class="w">    </span><span class="n">fd</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">open</span><span class="p">(</span><span class="s">&quot;/sys/kernel/debug/kcov&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">O_RDWR</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">fd</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">-1</span><span class="p">)</span><span class="w"></span>
+<span class="w">            </span><span class="n">perror</span><span class="p">(</span><span class="s">&quot;open&quot;</span><span class="p">),</span><span class="w"> </span><span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="cm">/* Setup trace mode and trace size. */</span><span class="w"></span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">ioctl</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span><span class="w"> </span><span class="n">KCOV_INIT_TRACE</span><span class="p">,</span><span class="w"> </span><span class="n">COVER_SIZE</span><span class="p">))</span><span class="w"></span>
+<span class="w">            </span><span class="n">perror</span><span class="p">(</span><span class="s">&quot;ioctl&quot;</span><span class="p">),</span><span class="w"> </span><span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="cm">/* Mmap buffer shared between kernel- and user-space. */</span><span class="w"></span>
+<span class="w">    </span><span class="n">cover</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">unsigned</span><span class="w"> </span><span class="kt">long</span><span class="o">*</span><span class="p">)</span><span class="n">mmap</span><span class="p">(</span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="n">COVER_SIZE</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="kt">unsigned</span><span class="w"> </span><span class="kt">long</span><span class="p">),</span><span class="w"></span>
+<span class="w">                                 </span><span class="n">PROT_READ</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">PROT_WRITE</span><span class="p">,</span><span class="w"> </span><span class="n">MAP_SHARED</span><span class="p">,</span><span class="w"> </span><span class="n">fd</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">((</span><span class="kt">void</span><span class="o">*</span><span class="p">)</span><span class="n">cover</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">MAP_FAILED</span><span class="p">)</span><span class="w"></span>
+<span class="w">            </span><span class="n">perror</span><span class="p">(</span><span class="s">&quot;mmap&quot;</span><span class="p">),</span><span class="w"> </span><span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="cm">/* Enable coverage collection on the current thread. */</span><span class="w"></span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">ioctl</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span><span class="w"> </span><span class="n">KCOV_ENABLE</span><span class="p">,</span><span class="w"> </span><span class="n">KCOV_TRACE_PC</span><span class="p">))</span><span class="w"></span>
+<span class="w">            </span><span class="n">perror</span><span class="p">(</span><span class="s">&quot;ioctl&quot;</span><span class="p">),</span><span class="w"> </span><span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="cm">/* Reset coverage from the tail of the ioctl() call. */</span><span class="w"></span>
+<span class="w">    </span><span class="n">__atomic_store_n</span><span class="p">(</span><span class="o">&amp;</span><span class="n">cover</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">__ATOMIC_RELAXED</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="cm">/* That&#39;s the target syscal call. */</span><span class="w"></span>
+<span class="w">    </span><span class="n">read</span><span class="p">(</span><span class="mi">-1</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="cm">/* Read number of PCs collected. */</span><span class="w"></span>
+<span class="w">    </span><span class="n">n</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">__atomic_load_n</span><span class="p">(</span><span class="o">&amp;</span><span class="n">cover</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span><span class="w"> </span><span class="n">__ATOMIC_RELAXED</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">n</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="o">++</span><span class="p">)</span><span class="w"></span>
+<span class="w">            </span><span class="n">printf</span><span class="p">(</span><span class="s">&quot;0x%lx</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">cover</span><span class="p">[</span><span class="n">i</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">]);</span><span class="w"></span>
+<span class="w">    </span><span class="cm">/* Disable coverage collection for the current thread. After this call</span>
+<span class="cm">     * coverage can be enabled for a different thread.</span>
+<span class="cm">     */</span><span class="w"></span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">ioctl</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span><span class="w"> </span><span class="n">KCOV_DISABLE</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">))</span><span class="w"></span>
+<span class="w">            </span><span class="n">perror</span><span class="p">(</span><span class="s">&quot;ioctl&quot;</span><span class="p">),</span><span class="w"> </span><span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="cm">/* Free resources. */</span><span class="w"></span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">munmap</span><span class="p">(</span><span class="n">cover</span><span class="p">,</span><span class="w"> </span><span class="n">COVER_SIZE</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="kt">unsigned</span><span class="w"> </span><span class="kt">long</span><span class="p">)))</span><span class="w"></span>
+<span class="w">            </span><span class="n">perror</span><span class="p">(</span><span class="s">&quot;munmap&quot;</span><span class="p">),</span><span class="w"> </span><span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">close</span><span class="p">(</span><span class="n">fd</span><span class="p">))</span><span class="w"></span>
+<span class="w">            </span><span class="n">perror</span><span class="p">(</span><span class="s">&quot;close&quot;</span><span class="p">),</span><span class="w"> </span><span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+<p>After piping through addr2line output of the program looks as follows:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>SyS_read
+fs/read_write.c:562
+__fdget_pos
+fs/file.c:774
+__fget_light
+fs/file.c:746
+__fget_light
+fs/file.c:750
+__fget_light
+fs/file.c:760
+__fdget_pos
+fs/file.c:784
+SyS_read
+fs/read_write.c:562
+</pre></div>
+</div>
+<p>If a program needs to collect coverage from several threads (independently),
+it needs to open /sys/kernel/debug/kcov in each thread separately.</p>
+<p>The interface is fine-grained to allow efficient forking of test processes.
+That is, a parent process opens /sys/kernel/debug/kcov, enables trace mode,
+mmaps coverage buffer and then forks child processes in a loop. Child processes
+only need to enable coverage (disable happens automatically on thread end).</p>
+</section>
+<section id="comparison-operands-collection">
+<h2>Comparison operands collection<a class="headerlink" href="#comparison-operands-collection" title="Permalink to this headline">¶</a></h2>
+<p>Comparison operands collection is similar to coverage collection:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cm">/* Same includes and defines as above. */</span><span class="w"></span>
+
+<span class="cm">/* Number of 64-bit words per record. */</span><span class="w"></span>
+<span class="cp">#define KCOV_WORDS_PER_CMP 4</span>
+
+<span class="cm">/*</span>
+<span class="cm"> * The format for the types of collected comparisons.</span>
+<span class="cm"> *</span>
+<span class="cm"> * Bit 0 shows whether one of the arguments is a compile-time constant.</span>
+<span class="cm"> * Bits 1 &amp; 2 contain log2 of the argument size, up to 8 bytes.</span>
+<span class="cm"> */</span><span class="w"></span>
+
+<span class="cp">#define KCOV_CMP_CONST          (1 &lt;&lt; 0)</span>
+<span class="cp">#define KCOV_CMP_SIZE(n)        ((n) &lt;&lt; 1)</span>
+<span class="cp">#define KCOV_CMP_MASK           KCOV_CMP_SIZE(3)</span>
+
+<span class="kt">int</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">argc</span><span class="p">,</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="o">**</span><span class="n">argv</span><span class="p">)</span><span class="w"></span>
+<span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">fd</span><span class="p">;</span><span class="w"></span>
+<span class="w">    </span><span class="kt">uint64_t</span><span class="w"> </span><span class="o">*</span><span class="n">cover</span><span class="p">,</span><span class="w"> </span><span class="n">type</span><span class="p">,</span><span class="w"> </span><span class="n">arg1</span><span class="p">,</span><span class="w"> </span><span class="n">arg2</span><span class="p">,</span><span class="w"> </span><span class="n">is_const</span><span class="p">,</span><span class="w"> </span><span class="n">size</span><span class="p">;</span><span class="w"></span>
+<span class="w">    </span><span class="kt">unsigned</span><span class="w"> </span><span class="kt">long</span><span class="w"> </span><span class="n">n</span><span class="p">,</span><span class="w"> </span><span class="n">i</span><span class="p">;</span><span class="w"></span>
+
+<span class="w">    </span><span class="n">fd</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">open</span><span class="p">(</span><span class="s">&quot;/sys/kernel/debug/kcov&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">O_RDWR</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">fd</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">-1</span><span class="p">)</span><span class="w"></span>
+<span class="w">            </span><span class="n">perror</span><span class="p">(</span><span class="s">&quot;open&quot;</span><span class="p">),</span><span class="w"> </span><span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">ioctl</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span><span class="w"> </span><span class="n">KCOV_INIT_TRACE</span><span class="p">,</span><span class="w"> </span><span class="n">COVER_SIZE</span><span class="p">))</span><span class="w"></span>
+<span class="w">            </span><span class="n">perror</span><span class="p">(</span><span class="s">&quot;ioctl&quot;</span><span class="p">),</span><span class="w"> </span><span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="cm">/*</span>
+<span class="cm">    * Note that the buffer pointer is of type uint64_t*, because all</span>
+<span class="cm">    * the comparison operands are promoted to uint64_t.</span>
+<span class="cm">    */</span><span class="w"></span>
+<span class="w">    </span><span class="n">cover</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">uint64_t</span><span class="w"> </span><span class="o">*</span><span class="p">)</span><span class="n">mmap</span><span class="p">(</span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="n">COVER_SIZE</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="kt">unsigned</span><span class="w"> </span><span class="kt">long</span><span class="p">),</span><span class="w"></span>
+<span class="w">                                 </span><span class="n">PROT_READ</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">PROT_WRITE</span><span class="p">,</span><span class="w"> </span><span class="n">MAP_SHARED</span><span class="p">,</span><span class="w"> </span><span class="n">fd</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">((</span><span class="kt">void</span><span class="o">*</span><span class="p">)</span><span class="n">cover</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">MAP_FAILED</span><span class="p">)</span><span class="w"></span>
+<span class="w">            </span><span class="n">perror</span><span class="p">(</span><span class="s">&quot;mmap&quot;</span><span class="p">),</span><span class="w"> </span><span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="cm">/* Note KCOV_TRACE_CMP instead of KCOV_TRACE_PC. */</span><span class="w"></span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">ioctl</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span><span class="w"> </span><span class="n">KCOV_ENABLE</span><span class="p">,</span><span class="w"> </span><span class="n">KCOV_TRACE_CMP</span><span class="p">))</span><span class="w"></span>
+<span class="w">            </span><span class="n">perror</span><span class="p">(</span><span class="s">&quot;ioctl&quot;</span><span class="p">),</span><span class="w"> </span><span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="n">__atomic_store_n</span><span class="p">(</span><span class="o">&amp;</span><span class="n">cover</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">__ATOMIC_RELAXED</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="n">read</span><span class="p">(</span><span class="mi">-1</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="cm">/* Read number of comparisons collected. */</span><span class="w"></span>
+<span class="w">    </span><span class="n">n</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">__atomic_load_n</span><span class="p">(</span><span class="o">&amp;</span><span class="n">cover</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span><span class="w"> </span><span class="n">__ATOMIC_RELAXED</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">n</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">            </span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">ip</span><span class="p">;</span><span class="w"></span>
+
+<span class="w">            </span><span class="n">type</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">cover</span><span class="p">[</span><span class="n">i</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">KCOV_WORDS_PER_CMP</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">];</span><span class="w"></span>
+<span class="w">            </span><span class="cm">/* arg1 and arg2 - operands of the comparison. */</span><span class="w"></span>
+<span class="w">            </span><span class="n">arg1</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">cover</span><span class="p">[</span><span class="n">i</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">KCOV_WORDS_PER_CMP</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">2</span><span class="p">];</span><span class="w"></span>
+<span class="w">            </span><span class="n">arg2</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">cover</span><span class="p">[</span><span class="n">i</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">KCOV_WORDS_PER_CMP</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">3</span><span class="p">];</span><span class="w"></span>
+<span class="w">            </span><span class="cm">/* ip - caller address. */</span><span class="w"></span>
+<span class="w">            </span><span class="n">ip</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">cover</span><span class="p">[</span><span class="n">i</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">KCOV_WORDS_PER_CMP</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">4</span><span class="p">];</span><span class="w"></span>
+<span class="w">            </span><span class="cm">/* size of the operands. */</span><span class="w"></span>
+<span class="w">            </span><span class="n">size</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="p">((</span><span class="n">type</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="n">KCOV_CMP_MASK</span><span class="p">)</span><span class="w"> </span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span><span class="w"></span>
+<span class="w">            </span><span class="cm">/* is_const - true if either operand is a compile-time constant.*/</span><span class="w"></span>
+<span class="w">            </span><span class="n">is_const</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="n">KCOV_CMP_CONST</span><span class="p">;</span><span class="w"></span>
+<span class="w">            </span><span class="n">printf</span><span class="p">(</span><span class="s">&quot;ip: 0x%lx type: 0x%lx, arg1: 0x%lx, arg2: 0x%lx, &quot;</span><span class="w"></span>
+<span class="w">                    </span><span class="s">&quot;size: %lu, %s</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">,</span><span class="w"></span>
+<span class="w">                    </span><span class="n">ip</span><span class="p">,</span><span class="w"> </span><span class="n">type</span><span class="p">,</span><span class="w"> </span><span class="n">arg1</span><span class="p">,</span><span class="w"> </span><span class="n">arg2</span><span class="p">,</span><span class="w"> </span><span class="n">size</span><span class="p">,</span><span class="w"></span>
+<span class="w">            </span><span class="n">is_const</span><span class="w"> </span><span class="o">?</span><span class="w"> </span><span class="s">&quot;const&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="s">&quot;non-const&quot;</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">ioctl</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span><span class="w"> </span><span class="n">KCOV_DISABLE</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">))</span><span class="w"></span>
+<span class="w">            </span><span class="n">perror</span><span class="p">(</span><span class="s">&quot;ioctl&quot;</span><span class="p">),</span><span class="w"> </span><span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="cm">/* Free resources. */</span><span class="w"></span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">munmap</span><span class="p">(</span><span class="n">cover</span><span class="p">,</span><span class="w"> </span><span class="n">COVER_SIZE</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="kt">unsigned</span><span class="w"> </span><span class="kt">long</span><span class="p">)))</span><span class="w"></span>
+<span class="w">            </span><span class="n">perror</span><span class="p">(</span><span class="s">&quot;munmap&quot;</span><span class="p">),</span><span class="w"> </span><span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">close</span><span class="p">(</span><span class="n">fd</span><span class="p">))</span><span class="w"></span>
+<span class="w">            </span><span class="n">perror</span><span class="p">(</span><span class="s">&quot;close&quot;</span><span class="p">),</span><span class="w"> </span><span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+<p>Note that the kcov modes (coverage collection or comparison operands) are
+mutually exclusive.</p>
+</section>
+<section id="remote-coverage-collection">
+<h2>Remote coverage collection<a class="headerlink" href="#remote-coverage-collection" title="Permalink to this headline">¶</a></h2>
+<p>With KCOV_ENABLE coverage is collected only for syscalls that are issued
+from the current process. With KCOV_REMOTE_ENABLE it’s possible to collect
+coverage for arbitrary parts of the kernel code, provided that those parts
+are annotated with kcov_remote_start()/kcov_remote_stop().</p>
+<p>This allows to collect coverage from two types of kernel background
+threads: the global ones, that are spawned during kernel boot in a limited
+number of instances (e.g. one USB hub_event() worker thread is spawned per
+USB HCD); and the local ones, that are spawned when a user interacts with
+some kernel interface (e.g. vhost workers); as well as from soft
+interrupts.</p>
+<p>To enable collecting coverage from a global background thread or from a
+softirq, a unique global handle must be assigned and passed to the
+corresponding kcov_remote_start() call. Then a userspace process can pass
+a list of such handles to the KCOV_REMOTE_ENABLE ioctl in the handles
+array field of the kcov_remote_arg struct. This will attach the used kcov
+device to the code sections, that are referenced by those handles.</p>
+<p>Since there might be many local background threads spawned from different
+userspace processes, we can’t use a single global handle per annotation.
+Instead, the userspace process passes a non-zero handle through the
+common_handle field of the kcov_remote_arg struct. This common handle gets
+saved to the kcov_handle field in the current task_struct and needs to be
+passed to the newly spawned threads via custom annotations. Those threads
+should in turn be annotated with kcov_remote_start()/kcov_remote_stop().</p>
+<p>Internally kcov stores handles as u64 integers. The top byte of a handle
+is used to denote the id of a subsystem that this handle belongs to, and
+the lower 4 bytes are used to denote the id of a thread instance within
+that subsystem. A reserved value 0 is used as a subsystem id for common
+handles as they don’t belong to a particular subsystem. The bytes 4-7 are
+currently reserved and must be zero. In the future the number of bytes
+used for the subsystem or handle ids might be increased.</p>
+<p>When a particular userspace process collects coverage via a common
+handle, kcov will collect coverage for each code section that is annotated
+to use the common handle obtained as kcov_handle from the current
+task_struct. However non common handles allow to collect coverage
+selectively from different subsystems.</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cm">/* Same includes and defines as above. */</span><span class="w"></span>
+
+<span class="k">struct</span> <span class="nc">kcov_remote_arg</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="n">__u32</span><span class="w">           </span><span class="n">trace_mode</span><span class="p">;</span><span class="w"></span>
+<span class="w">    </span><span class="n">__u32</span><span class="w">           </span><span class="n">area_size</span><span class="p">;</span><span class="w"></span>
+<span class="w">    </span><span class="n">__u32</span><span class="w">           </span><span class="n">num_handles</span><span class="p">;</span><span class="w"></span>
+<span class="w">    </span><span class="n">__aligned_u64</span><span class="w">   </span><span class="n">common_handle</span><span class="p">;</span><span class="w"></span>
+<span class="w">    </span><span class="n">__aligned_u64</span><span class="w">   </span><span class="n">handles</span><span class="p">[</span><span class="mi">0</span><span class="p">];</span><span class="w"></span>
+<span class="p">};</span><span class="w"></span>
+
+<span class="cp">#define KCOV_INIT_TRACE                     _IOR(&#39;c&#39;, 1, unsigned long)</span>
+<span class="cp">#define KCOV_DISABLE                        _IO(&#39;c&#39;, 101)</span>
+<span class="cp">#define KCOV_REMOTE_ENABLE          _IOW(&#39;c&#39;, 102, struct kcov_remote_arg)</span>
+
+<span class="cp">#define COVER_SIZE  (64 &lt;&lt; 10)</span>
+
+<span class="cp">#define KCOV_TRACE_PC       0</span>
+
+<span class="cp">#define KCOV_SUBSYSTEM_COMMON       (0x00ull &lt;&lt; 56)</span>
+<span class="cp">#define KCOV_SUBSYSTEM_USB  (0x01ull &lt;&lt; 56)</span>
+
+<span class="cp">#define KCOV_SUBSYSTEM_MASK (0xffull &lt;&lt; 56)</span>
+<span class="cp">#define KCOV_INSTANCE_MASK  (0xffffffffull)</span>
+
+<span class="k">static</span><span class="w"> </span><span class="kr">inline</span><span class="w"> </span><span class="n">__u64</span><span class="w"> </span><span class="nf">kcov_remote_handle</span><span class="p">(</span><span class="n">__u64</span><span class="w"> </span><span class="n">subsys</span><span class="p">,</span><span class="w"> </span><span class="n">__u64</span><span class="w"> </span><span class="n">inst</span><span class="p">)</span><span class="w"></span>
+<span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">subsys</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="o">~</span><span class="n">KCOV_SUBSYSTEM_MASK</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="n">inst</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="o">~</span><span class="n">KCOV_INSTANCE_MASK</span><span class="p">)</span><span class="w"></span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"></span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">subsys</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">inst</span><span class="p">;</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+
+<span class="cp">#define KCOV_COMMON_ID      0x42</span>
+<span class="cp">#define KCOV_USB_BUS_NUM    1</span>
+
+<span class="kt">int</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">argc</span><span class="p">,</span><span class="w"> </span><span class="kt">char</span><span class="w"> </span><span class="o">**</span><span class="n">argv</span><span class="p">)</span><span class="w"></span>
+<span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">fd</span><span class="p">;</span><span class="w"></span>
+<span class="w">    </span><span class="kt">unsigned</span><span class="w"> </span><span class="kt">long</span><span class="w"> </span><span class="o">*</span><span class="n">cover</span><span class="p">,</span><span class="w"> </span><span class="n">n</span><span class="p">,</span><span class="w"> </span><span class="n">i</span><span class="p">;</span><span class="w"></span>
+<span class="w">    </span><span class="k">struct</span> <span class="nc">kcov_remote_arg</span><span class="w"> </span><span class="o">*</span><span class="n">arg</span><span class="p">;</span><span class="w"></span>
+
+<span class="w">    </span><span class="n">fd</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">open</span><span class="p">(</span><span class="s">&quot;/sys/kernel/debug/kcov&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">O_RDWR</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">fd</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">-1</span><span class="p">)</span><span class="w"></span>
+<span class="w">            </span><span class="n">perror</span><span class="p">(</span><span class="s">&quot;open&quot;</span><span class="p">),</span><span class="w"> </span><span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">ioctl</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span><span class="w"> </span><span class="n">KCOV_INIT_TRACE</span><span class="p">,</span><span class="w"> </span><span class="n">COVER_SIZE</span><span class="p">))</span><span class="w"></span>
+<span class="w">            </span><span class="n">perror</span><span class="p">(</span><span class="s">&quot;ioctl&quot;</span><span class="p">),</span><span class="w"> </span><span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="n">cover</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">unsigned</span><span class="w"> </span><span class="kt">long</span><span class="o">*</span><span class="p">)</span><span class="n">mmap</span><span class="p">(</span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="n">COVER_SIZE</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="kt">unsigned</span><span class="w"> </span><span class="kt">long</span><span class="p">),</span><span class="w"></span>
+<span class="w">                                 </span><span class="n">PROT_READ</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">PROT_WRITE</span><span class="p">,</span><span class="w"> </span><span class="n">MAP_SHARED</span><span class="p">,</span><span class="w"> </span><span class="n">fd</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">((</span><span class="kt">void</span><span class="o">*</span><span class="p">)</span><span class="n">cover</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">MAP_FAILED</span><span class="p">)</span><span class="w"></span>
+<span class="w">            </span><span class="n">perror</span><span class="p">(</span><span class="s">&quot;mmap&quot;</span><span class="p">),</span><span class="w"> </span><span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span><span class="w"></span>
+
+<span class="w">    </span><span class="cm">/* Enable coverage collection via common handle and from USB bus #1. */</span><span class="w"></span>
+<span class="w">    </span><span class="n">arg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">calloc</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="o">*</span><span class="n">arg</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="kt">uint64_t</span><span class="p">));</span><span class="w"></span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">arg</span><span class="p">)</span><span class="w"></span>
+<span class="w">            </span><span class="n">perror</span><span class="p">(</span><span class="s">&quot;calloc&quot;</span><span class="p">),</span><span class="w"> </span><span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="n">arg</span><span class="o">-&gt;</span><span class="n">trace_mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">KCOV_TRACE_PC</span><span class="p">;</span><span class="w"></span>
+<span class="w">    </span><span class="n">arg</span><span class="o">-&gt;</span><span class="n">area_size</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">COVER_SIZE</span><span class="p">;</span><span class="w"></span>
+<span class="w">    </span><span class="n">arg</span><span class="o">-&gt;</span><span class="n">num_handles</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w"></span>
+<span class="w">    </span><span class="n">arg</span><span class="o">-&gt;</span><span class="n">common_handle</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">kcov_remote_handle</span><span class="p">(</span><span class="n">KCOV_SUBSYSTEM_COMMON</span><span class="p">,</span><span class="w"></span>
+<span class="w">                                                    </span><span class="n">KCOV_COMMON_ID</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="n">arg</span><span class="o">-&gt;</span><span class="n">handles</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">kcov_remote_handle</span><span class="p">(</span><span class="n">KCOV_SUBSYSTEM_USB</span><span class="p">,</span><span class="w"></span>
+<span class="w">                                            </span><span class="n">KCOV_USB_BUS_NUM</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">ioctl</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span><span class="w"> </span><span class="n">KCOV_REMOTE_ENABLE</span><span class="p">,</span><span class="w"> </span><span class="n">arg</span><span class="p">))</span><span class="w"></span>
+<span class="w">            </span><span class="n">perror</span><span class="p">(</span><span class="s">&quot;ioctl&quot;</span><span class="p">),</span><span class="w"> </span><span class="n">free</span><span class="p">(</span><span class="n">arg</span><span class="p">),</span><span class="w"> </span><span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="n">free</span><span class="p">(</span><span class="n">arg</span><span class="p">);</span><span class="w"></span>
+
+<span class="w">    </span><span class="cm">/*</span>
+<span class="cm">     * Here the user needs to trigger execution of a kernel code section</span>
+<span class="cm">     * that is either annotated with the common handle, or to trigger some</span>
+<span class="cm">     * activity on USB bus #1.</span>
+<span class="cm">     */</span><span class="w"></span>
+<span class="w">    </span><span class="n">sleep</span><span class="p">(</span><span class="mi">2</span><span class="p">);</span><span class="w"></span>
+
+<span class="w">    </span><span class="n">n</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">__atomic_load_n</span><span class="p">(</span><span class="o">&amp;</span><span class="n">cover</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span><span class="w"> </span><span class="n">__ATOMIC_RELAXED</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">n</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="o">++</span><span class="p">)</span><span class="w"></span>
+<span class="w">            </span><span class="n">printf</span><span class="p">(</span><span class="s">&quot;0x%lx</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">cover</span><span class="p">[</span><span class="n">i</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">]);</span><span class="w"></span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">ioctl</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span><span class="w"> </span><span class="n">KCOV_DISABLE</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">))</span><span class="w"></span>
+<span class="w">            </span><span class="n">perror</span><span class="p">(</span><span class="s">&quot;ioctl&quot;</span><span class="p">),</span><span class="w"> </span><span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">munmap</span><span class="p">(</span><span class="n">cover</span><span class="p">,</span><span class="w"> </span><span class="n">COVER_SIZE</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="kt">unsigned</span><span class="w"> </span><span class="kt">long</span><span class="p">)))</span><span class="w"></span>
+<span class="w">            </span><span class="n">perror</span><span class="p">(</span><span class="s">&quot;munmap&quot;</span><span class="p">),</span><span class="w"> </span><span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">close</span><span class="p">(</span><span class="n">fd</span><span class="p">))</span><span class="w"></span>
+<span class="w">            </span><span class="n">perror</span><span class="p">(</span><span class="s">&quot;close&quot;</span><span class="p">),</span><span class="w"> </span><span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">kcov: code coverage for fuzzing</a><ul>
+<li><a class="reference internal" href="#prerequisites">Prerequisites</a></li>
+<li><a class="reference internal" href="#coverage-collection">Coverage collection</a></li>
+<li><a class="reference internal" href="#comparison-operands-collection">Comparison operands collection</a></li>
+<li><a class="reference internal" href="#remote-coverage-collection">Remote coverage collection</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/dev-tools/kcov.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/dev-tools/kcov.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

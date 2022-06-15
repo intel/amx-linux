@@ -1,0 +1,255 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Locking &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Driver changes" href="driver-changes.html" />
+    <link rel="prev" title="Device table" href="devicetable.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="locking">
+<h1>Locking<a class="headerlink" href="#locking" title="Permalink to this headline">¶</a></h1>
+<p>This file explains the locking and exclusion scheme used in the PCCARD
+and PCMCIA subsystems.</p>
+<section id="a-overview-locking-hierarchy">
+<h2>A) Overview, Locking Hierarchy:<a class="headerlink" href="#a-overview-locking-hierarchy" title="Permalink to this headline">¶</a></h2>
+<dl class="simple">
+<dt>pcmcia_socket_list_rwsem</dt><dd><ul class="simple">
+<li><p>protects only the list of sockets</p></li>
+</ul>
+</dd>
+</dl>
+<ul>
+<li><dl class="simple">
+<dt>skt_mutex</dt><dd><ul class="simple">
+<li><p>serializes card insert / ejection</p></li>
+</ul>
+</dd>
+</dl>
+<ul class="simple">
+<li><dl class="simple">
+<dt>ops_mutex</dt><dd><ul>
+<li><p>serializes socket operation</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+</ul>
+</li>
+</ul>
+</section>
+<section id="b-exclusion">
+<h2>B) Exclusion<a class="headerlink" href="#b-exclusion" title="Permalink to this headline">¶</a></h2>
+<p>The following functions and callbacks to struct pcmcia_socket must
+be called with “skt_mutex” held:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>socket_detect_change()
+send_event()
+socket_reset()
+socket_shutdown()
+socket_setup()
+socket_remove()
+socket_insert()
+socket_early_resume()
+socket_late_resume()
+socket_resume()
+socket_suspend()
+
+struct pcmcia_callback  *callback
+</pre></div>
+</div>
+<p>The following functions and callbacks to struct pcmcia_socket must
+be called with “ops_mutex” held:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>socket_reset()
+socket_setup()
+
+struct pccard_operations        *ops
+struct pccard_resource_ops      *resource_ops;
+</pre></div>
+</div>
+<p>Note that send_event() and <cite>struct pcmcia_callback *callback</cite> must not be
+called with “ops_mutex” held.</p>
+</section>
+<section id="c-protection">
+<h2>C) Protection<a class="headerlink" href="#c-protection" title="Permalink to this headline">¶</a></h2>
+<section id="global-data">
+<h3>1. Global Data:<a class="headerlink" href="#global-data" title="Permalink to this headline">¶</a></h3>
+<p>struct list_head        pcmcia_socket_list;</p>
+<p>protected by pcmcia_socket_list_rwsem;</p>
+</section>
+<section id="per-socket-data">
+<h3>2. Per-Socket Data:<a class="headerlink" href="#per-socket-data" title="Permalink to this headline">¶</a></h3>
+<p>The resource_ops and their data are protected by ops_mutex.</p>
+<p>The “main” struct pcmcia_socket is protected as follows (read-only fields
+or single-use fields not mentioned):</p>
+<ul>
+<li><p>by pcmcia_socket_list_rwsem:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct list_head        socket_list;
+</pre></div>
+</div>
+</li>
+<li><p>by thread_lock:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>unsigned int            thread_events;
+</pre></div>
+</div>
+</li>
+<li><p>by skt_mutex:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>u_int                   suspended_state;
+void                    (*tune_bridge);
+struct pcmcia_callback  *callback;
+int                     resume_status;
+</pre></div>
+</div>
+</li>
+<li><p>by ops_mutex:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>socket_state_t          socket;
+u_int                   state;
+u_short                 lock_count;
+pccard_mem_map          cis_mem;
+void __iomem            *cis_virt;
+struct { }              irq;
+io_window_t             io[];
+pccard_mem_map          win[];
+struct list_head        cis_cache;
+size_t                  fake_cis_len;
+u8                      *fake_cis;
+u_int                   irq_mask;
+void                    (*zoom_video);
+int                     (*power_hook);
+u8                      resource...;
+struct list_head        devices_list;
+u8                      device_count;
+struct                  pcmcia_state;
+</pre></div>
+</div>
+</li>
+</ul>
+</section>
+<section id="per-pcmcia-device-data">
+<h3>3. Per PCMCIA-device Data:<a class="headerlink" href="#per-pcmcia-device-data" title="Permalink to this headline">¶</a></h3>
+<p>The “main” struct pcmcia_device is protected as follows (read-only fields
+or single-use fields not mentioned):</p>
+<ul>
+<li><p>by pcmcia_socket-&gt;ops_mutex:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct list_head        socket_device_list;
+struct config_t         *function_config;
+u16                     _irq:1;
+u16                     _io:1;
+u16                     _win:4;
+u16                     _locked:1;
+u16                     allow_func_id_match:1;
+u16                     suspended:1;
+u16                     _removed:1;
+</pre></div>
+</div>
+</li>
+<li><p>by the PCMCIA driver:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>io_req_t                io;
+irq_req_t               irq;
+config_req_t            conf;
+window_handle_t         win;
+</pre></div>
+</div>
+</li>
+</ul>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Locking</a><ul>
+<li><a class="reference internal" href="#a-overview-locking-hierarchy">A) Overview, Locking Hierarchy:</a></li>
+<li><a class="reference internal" href="#b-exclusion">B) Exclusion</a></li>
+<li><a class="reference internal" href="#c-protection">C) Protection</a><ul>
+<li><a class="reference internal" href="#global-data">1. Global Data:</a></li>
+<li><a class="reference internal" href="#per-socket-data">2. Per-Socket Data:</a></li>
+<li><a class="reference internal" href="#per-pcmcia-device-data">3. Per PCMCIA-device Data:</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/pcmcia/locking.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/pcmcia/locking.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

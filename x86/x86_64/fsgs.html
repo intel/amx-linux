@@ -1,0 +1,351 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>28.8. Using FS and GS segments in user space applications &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="29. In-Field Scan" href="../ifs.html" />
+    <link rel="prev" title="28.7. Configurable sysfs parameters for the x86-64 machine check code" href="machinecheck.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="using-fs-and-gs-segments-in-user-space-applications">
+<h1><span class="section-number">28.8. </span>Using FS and GS segments in user space applications<a class="headerlink" href="#using-fs-and-gs-segments-in-user-space-applications" title="Permalink to this headline">¶</a></h1>
+<p>The x86 architecture supports segmentation. Instructions which access
+memory can use segment register based addressing mode. The following
+notation is used to address a byte within a segment:</p>
+<blockquote>
+<div><p>Segment-register:Byte-address</p>
+</div></blockquote>
+<p>The segment base address is added to the Byte-address to compute the
+resulting virtual address which is accessed. This allows to access multiple
+instances of data with the identical Byte-address, i.e. the same code. The
+selection of a particular instance is purely based on the base-address in
+the segment register.</p>
+<p>In 32-bit mode the CPU provides 6 segments, which also support segment
+limits. The limits can be used to enforce address space protections.</p>
+<p>In 64-bit mode the CS/SS/DS/ES segments are ignored and the base address is
+always 0 to provide a full 64bit address space. The FS and GS segments are
+still functional in 64-bit mode.</p>
+<section id="common-fs-and-gs-usage">
+<h2><span class="section-number">28.8.1. </span>Common FS and GS usage<a class="headerlink" href="#common-fs-and-gs-usage" title="Permalink to this headline">¶</a></h2>
+<p>The FS segment is commonly used to address Thread Local Storage (TLS). FS
+is usually managed by runtime code or a threading library. Variables
+declared with the ‘__thread’ storage class specifier are instantiated per
+thread and the compiler emits the FS: address prefix for accesses to these
+variables. Each thread has its own FS base address so common code can be
+used without complex address offset calculations to access the per thread
+instances. Applications should not use FS for other purposes when they use
+runtimes or threading libraries which manage the per thread FS.</p>
+<p>The GS segment has no common use and can be used freely by
+applications. GCC and Clang support GS based addressing via address space
+identifiers.</p>
+</section>
+<section id="reading-and-writing-the-fs-gs-base-address">
+<h2><span class="section-number">28.8.2. </span>Reading and writing the FS/GS base address<a class="headerlink" href="#reading-and-writing-the-fs-gs-base-address" title="Permalink to this headline">¶</a></h2>
+<p>There exist two mechanisms to read and write the FS/GS base address:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>the arch_prctl() system call</p></li>
+<li><p>the FSGSBASE instruction family</p></li>
+</ul>
+</div></blockquote>
+</section>
+<section id="accessing-fs-gs-base-with-arch-prctl">
+<h2><span class="section-number">28.8.3. </span>Accessing FS/GS base with arch_prctl()<a class="headerlink" href="#accessing-fs-gs-base-with-arch-prctl" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>The arch_prctl(2) based mechanism is available on all 64-bit CPUs and all
+kernel versions.</p>
+<p>Reading the base:</p>
+<blockquote>
+<div><p>arch_prctl(ARCH_GET_FS, &amp;fsbase);
+arch_prctl(ARCH_GET_GS, &amp;gsbase);</p>
+</div></blockquote>
+<p>Writing the base:</p>
+<blockquote>
+<div><p>arch_prctl(ARCH_SET_FS, fsbase);
+arch_prctl(ARCH_SET_GS, gsbase);</p>
+</div></blockquote>
+<p>The ARCH_SET_GS prctl may be disabled depending on kernel configuration
+and security settings.</p>
+</div></blockquote>
+</section>
+<section id="accessing-fs-gs-base-with-the-fsgsbase-instructions">
+<h2><span class="section-number">28.8.4. </span>Accessing FS/GS base with the FSGSBASE instructions<a class="headerlink" href="#accessing-fs-gs-base-with-the-fsgsbase-instructions" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>With the Ivy Bridge CPU generation Intel introduced a new set of
+instructions to access the FS and GS base registers directly from user
+space. These instructions are also supported on AMD Family 17H CPUs. The
+following instructions are available:</p>
+<blockquote>
+<div><table class="docutils align-default">
+<colgroup>
+<col style="width: 36%" />
+<col style="width: 64%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>RDFSBASE %reg</p></td>
+<td><p>Read the FS base register</p></td>
+</tr>
+<tr class="row-even"><td><p>RDGSBASE %reg</p></td>
+<td><p>Read the GS base register</p></td>
+</tr>
+<tr class="row-odd"><td><p>WRFSBASE %reg</p></td>
+<td><p>Write the FS base register</p></td>
+</tr>
+<tr class="row-even"><td><p>WRGSBASE %reg</p></td>
+<td><p>Write the GS base register</p></td>
+</tr>
+</tbody>
+</table>
+</div></blockquote>
+<p>The instructions avoid the overhead of the arch_prctl() syscall and allow
+more flexible usage of the FS/GS addressing modes in user space
+applications. This does not prevent conflicts between threading libraries
+and runtimes which utilize FS and applications which want to use it for
+their own purpose.</p>
+</div></blockquote>
+<section id="fsgsbase-instructions-enablement">
+<h3><span class="section-number">28.8.4.1. </span>FSGSBASE instructions enablement<a class="headerlink" href="#fsgsbase-instructions-enablement" title="Permalink to this headline">¶</a></h3>
+<blockquote>
+<div><p>The instructions are enumerated in CPUID leaf 7, bit 0 of EBX. If
+available /proc/cpuinfo shows ‘fsgsbase’ in the flag entry of the CPUs.</p>
+<p>The availability of the instructions does not enable them
+automatically. The kernel has to enable them explicitly in CR4. The
+reason for this is that older kernels make assumptions about the values in
+the GS register and enforce them when GS base is set via
+arch_prctl(). Allowing user space to write arbitrary values to GS base
+would violate these assumptions and cause malfunction.</p>
+<p>On kernels which do not enable FSGSBASE the execution of the FSGSBASE
+instructions will fault with a #UD exception.</p>
+<p>The kernel provides reliable information about the enabled state in the
+ELF AUX vector. If the HWCAP2_FSGSBASE bit is set in the AUX vector, the
+kernel has FSGSBASE instructions enabled and applications can use them.
+The following code example shows how this detection works:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#include &lt;sys/auxv.h&gt;
+#include &lt;elf.h&gt;
+
+/* Will be eventually in asm/hwcap.h */
+#ifndef HWCAP2_FSGSBASE
+#define HWCAP2_FSGSBASE        (1 &lt;&lt; 1)
+#endif
+
+....
+
+unsigned val = getauxval(AT_HWCAP2);
+
+if (val &amp; HWCAP2_FSGSBASE)
+     printf(&quot;FSGSBASE enabled\n&quot;);
+</pre></div>
+</div>
+</div></blockquote>
+</section>
+<section id="fsgsbase-instructions-compiler-support">
+<h3><span class="section-number">28.8.4.2. </span>FSGSBASE instructions compiler support<a class="headerlink" href="#fsgsbase-instructions-compiler-support" title="Permalink to this headline">¶</a></h3>
+<p>GCC version 4.6.4 and newer provide instrinsics for the FSGSBASE
+instructions. Clang 5 supports them as well.</p>
+<blockquote>
+<div><table class="docutils align-default">
+<colgroup>
+<col style="width: 41%" />
+<col style="width: 59%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>_readfsbase_u64()</p></td>
+<td><p>Read the FS base register</p></td>
+</tr>
+<tr class="row-even"><td><p>_readfsbase_u64()</p></td>
+<td><p>Read the GS base register</p></td>
+</tr>
+<tr class="row-odd"><td><p>_writefsbase_u64()</p></td>
+<td><p>Write the FS base register</p></td>
+</tr>
+<tr class="row-even"><td><p>_writegsbase_u64()</p></td>
+<td><p>Write the GS base register</p></td>
+</tr>
+</tbody>
+</table>
+</div></blockquote>
+<p>To utilize these instrinsics &lt;immintrin.h&gt; must be included in the source
+code and the compiler option -mfsgsbase has to be added.</p>
+</section>
+</section>
+<section id="compiler-support-for-fs-gs-based-addressing">
+<h2><span class="section-number">28.8.5. </span>Compiler support for FS/GS based addressing<a class="headerlink" href="#compiler-support-for-fs-gs-based-addressing" title="Permalink to this headline">¶</a></h2>
+<p>GCC version 6 and newer provide support for FS/GS based addressing via
+Named Address Spaces. GCC implements the following address space
+identifiers for x86:</p>
+<blockquote>
+<div><table class="docutils align-default">
+<colgroup>
+<col style="width: 20%" />
+<col style="width: 80%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>__seg_fs</p></td>
+<td><p>Variable is addressed relative to FS</p></td>
+</tr>
+<tr class="row-even"><td><p>__seg_gs</p></td>
+<td><p>Variable is addressed relative to GS</p></td>
+</tr>
+</tbody>
+</table>
+</div></blockquote>
+<p>The preprocessor symbols __SEG_FS and __SEG_GS are defined when these
+address spaces are supported. Code which implements fallback modes should
+check whether these symbols are defined. Usage example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#ifdef __SEG_GS
+
+long data0 = 0;
+long data1 = 1;
+
+long __seg_gs *ptr;
+
+/* Check whether FSGSBASE is enabled by the kernel (HWCAP2_FSGSBASE) */
+....
+
+/* Set GS base to point to data0 */
+_writegsbase_u64(&amp;data0);
+
+/* Access offset 0 of GS */
+ptr = 0;
+printf(&quot;data0 = %ld\n&quot;, *ptr);
+
+/* Set GS base to point to data1 */
+_writegsbase_u64(&amp;data1);
+/* ptr still addresses offset 0! */
+printf(&quot;data1 = %ld\n&quot;, *ptr);
+</pre></div>
+</div>
+<p>Clang does not provide the GCC address space identifiers, but it provides
+address spaces via an attribute based mechanism in Clang 2.6 and newer
+versions:</p>
+<blockquote>
+<div><table class="docutils align-default">
+<colgroup>
+<col style="width: 49%" />
+<col style="width: 51%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>__attribute__((address_space(256))</p></td>
+<td><p>Variable is addressed relative to GS</p></td>
+</tr>
+<tr class="row-even"><td><p>__attribute__((address_space(257))</p></td>
+<td><p>Variable is addressed relative to FS</p></td>
+</tr>
+</tbody>
+</table>
+</div></blockquote>
+</section>
+<section id="fs-gs-based-addressing-with-inline-assembly">
+<h2><span class="section-number">28.8.6. </span>FS/GS based addressing with inline assembly<a class="headerlink" href="#fs-gs-based-addressing-with-inline-assembly" title="Permalink to this headline">¶</a></h2>
+<p>In case the compiler does not support address spaces, inline assembly can
+be used for FS/GS based addressing mode:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>mov %fs:offset, %reg
+mov %gs:offset, %reg
+
+mov %reg, %fs:offset
+mov %reg, %gs:offset
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">28.8. Using FS and GS segments in user space applications</a><ul>
+<li><a class="reference internal" href="#common-fs-and-gs-usage">28.8.1. Common FS and GS usage</a></li>
+<li><a class="reference internal" href="#reading-and-writing-the-fs-gs-base-address">28.8.2. Reading and writing the FS/GS base address</a></li>
+<li><a class="reference internal" href="#accessing-fs-gs-base-with-arch-prctl">28.8.3. Accessing FS/GS base with arch_prctl()</a></li>
+<li><a class="reference internal" href="#accessing-fs-gs-base-with-the-fsgsbase-instructions">28.8.4. Accessing FS/GS base with the FSGSBASE instructions</a><ul>
+<li><a class="reference internal" href="#fsgsbase-instructions-enablement">28.8.4.1. FSGSBASE instructions enablement</a></li>
+<li><a class="reference internal" href="#fsgsbase-instructions-compiler-support">28.8.4.2. FSGSBASE instructions compiler support</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#compiler-support-for-fs-gs-based-addressing">28.8.5. Compiler support for FS/GS based addressing</a></li>
+<li><a class="reference internal" href="#fs-gs-based-addressing-with-inline-assembly">28.8.6. FS/GS based addressing with inline assembly</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/x86/x86_64/fsgs.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/x86/x86_64/fsgs.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

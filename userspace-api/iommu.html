@@ -1,0 +1,315 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>IOMMU Userspace API &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="IOMMUFD" href="iommufd.html" />
+    <link rel="prev" title="Summary of HDIO_ ioctl calls" href="ioctl/hdio.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="iommu-userspace-api">
+<h1>IOMMU Userspace API<a class="headerlink" href="#iommu-userspace-api" title="Permalink to this headline">¶</a></h1>
+<p>IOMMU UAPI is used for virtualization cases where communications are
+needed between physical and virtual IOMMU drivers. For baremetal
+usage, the IOMMU is a system device which does not need to communicate
+with userspace directly.</p>
+<p>The primary use cases are guest Shared Virtual Address (SVA) and
+guest IO virtual address (IOVA), wherein the vIOMMU implementation
+relies on the physical IOMMU and for this reason requires interactions
+with the host driver.</p>
+<div class="contents local topic" id="contents">
+<ul class="simple">
+<li><p><a class="reference internal" href="#functionalities" id="id1">Functionalities</a></p></li>
+<li><p><a class="reference internal" href="#requirements" id="id2">Requirements</a></p></li>
+<li><p><a class="reference internal" href="#interfaces" id="id3">Interfaces</a></p>
+<ul>
+<li><p><a class="reference internal" href="#extension-rules-precautions" id="id4">Extension Rules &amp; Precautions</a></p></li>
+<li><p><a class="reference internal" href="#compatibility-checking" id="id5">Compatibility Checking</a></p></li>
+<li><p><a class="reference internal" href="#feature-checking" id="id6">Feature Checking</a></p></li>
+<li><p><a class="reference internal" href="#data-passing-example-with-vfio" id="id7">Data Passing Example with VFIO</a></p></li>
+<li><p><a class="reference internal" href="#sharing-uapi-with-in-kernel-users" id="id8">Sharing UAPI with in-kernel users</a></p></li>
+</ul>
+</li>
+</ul>
+</div>
+<section id="functionalities">
+<h2><a class="toc-backref" href="#id1">Functionalities</a><a class="headerlink" href="#functionalities" title="Permalink to this headline">¶</a></h2>
+<p>Communications of user and kernel involve both directions. The
+supported user-kernel APIs are as follows:</p>
+<ol class="arabic simple">
+<li><p>Bind/Unbind guest PASID (e.g. Intel VT-d)</p></li>
+<li><p>Bind/Unbind guest PASID table (e.g. ARM SMMU)</p></li>
+<li><p>Invalidate IOMMU caches upon guest requests</p></li>
+<li><p>Report errors to the guest and serve page requests</p></li>
+</ol>
+</section>
+<section id="requirements">
+<h2><a class="toc-backref" href="#id2">Requirements</a><a class="headerlink" href="#requirements" title="Permalink to this headline">¶</a></h2>
+<p>The IOMMU UAPIs are generic and extensible to meet the following
+requirements:</p>
+<ol class="arabic simple">
+<li><p>Emulated and para-virtualised vIOMMUs</p></li>
+<li><p>Multiple vendors (Intel VT-d, ARM SMMU, etc.)</p></li>
+<li><p>Extensions to the UAPI shall not break existing userspace</p></li>
+</ol>
+</section>
+<section id="interfaces">
+<h2><a class="toc-backref" href="#id3">Interfaces</a><a class="headerlink" href="#interfaces" title="Permalink to this headline">¶</a></h2>
+<p>Although the data structures defined in IOMMU UAPI are self-contained,
+there are no user API functions introduced. Instead, IOMMU UAPI is
+designed to work with existing user driver frameworks such as VFIO.</p>
+<section id="extension-rules-precautions">
+<h3><a class="toc-backref" href="#id4">Extension Rules &amp; Precautions</a><a class="headerlink" href="#extension-rules-precautions" title="Permalink to this headline">¶</a></h3>
+<p>When IOMMU UAPI gets extended, the data structures can <em>only</em> be
+modified in two ways:</p>
+<ol class="arabic simple">
+<li><p>Adding new fields by re-purposing the padding[] field. No size change.</p></li>
+<li><p>Adding new union members at the end. May increase the structure sizes.</p></li>
+</ol>
+<p>No new fields can be added <em>after</em> the variable sized union in that it
+will break backward compatibility when offset moves. A new flag must
+be introduced whenever a change affects the structure using either
+method. The IOMMU driver processes the data based on flags which
+ensures backward compatibility.</p>
+<p>Version field is only reserved for the unlikely event of UAPI upgrade
+at its entirety.</p>
+<p>It’s <em>always</em> the caller’s responsibility to indicate the size of the
+structure passed by setting argsz appropriately.
+Though at the same time, argsz is user provided data which is not
+trusted. The argsz field allows the user app to indicate how much data
+it is providing; it’s still the kernel’s responsibility to validate
+whether it’s correct and sufficient for the requested operation.</p>
+</section>
+<section id="compatibility-checking">
+<h3><a class="toc-backref" href="#id5">Compatibility Checking</a><a class="headerlink" href="#compatibility-checking" title="Permalink to this headline">¶</a></h3>
+<p>When IOMMU UAPI extension results in some structure size increase,
+IOMMU UAPI code shall handle the following cases:</p>
+<ol class="arabic simple">
+<li><p>User and kernel has exact size match</p></li>
+<li><p>An older user with older kernel header (smaller UAPI size) running on a
+newer kernel (larger UAPI size)</p></li>
+<li><p>A newer user with newer kernel header (larger UAPI size) running
+on an older kernel.</p></li>
+<li><p>A malicious/misbehaving user passing illegal/invalid size but within
+range. The data may contain garbage.</p></li>
+</ol>
+</section>
+<section id="feature-checking">
+<h3><a class="toc-backref" href="#id6">Feature Checking</a><a class="headerlink" href="#feature-checking" title="Permalink to this headline">¶</a></h3>
+<p>While launching a guest with vIOMMU, it is strongly advised to check
+the compatibility upfront, as some subsequent errors happening during
+vIOMMU operation, such as cache invalidation failures cannot be nicely
+escalated to the guest due to IOMMU specifications. This can lead to
+catastrophic failures for the users.</p>
+<p>User applications such as QEMU are expected to import kernel UAPI
+headers. Backward compatibility is supported per feature flags.
+For example, an older QEMU (with older kernel header) can run on newer
+kernel. Newer QEMU (with new kernel header) may refuse to initialize
+on an older kernel if new feature flags are not supported by older
+kernel. Simply recompiling existing code with newer kernel header should
+not be an issue in that only existing flags are used.</p>
+<p>IOMMU vendor driver should report the below features to IOMMU UAPI
+consumers (e.g. via VFIO).</p>
+<ol class="arabic simple">
+<li><p>IOMMU_NESTING_FEAT_SYSWIDE_PASID</p></li>
+<li><p>IOMMU_NESTING_FEAT_BIND_PGTBL</p></li>
+<li><p>IOMMU_NESTING_FEAT_BIND_PASID_TABLE</p></li>
+<li><p>IOMMU_NESTING_FEAT_CACHE_INVLD</p></li>
+<li><p>IOMMU_NESTING_FEAT_PAGE_REQUEST</p></li>
+</ol>
+<p>Take VFIO as example, upon request from VFIO userspace (e.g. QEMU),
+VFIO kernel code shall query IOMMU vendor driver for the support of
+the above features. Query result can then be reported back to the
+userspace caller. Details can be found in
+<a class="reference internal" href="../driver-api/vfio.html"><span class="doc">VFIO - “Virtual Function I/O” </span></a>.</p>
+</section>
+<section id="data-passing-example-with-vfio">
+<h3><a class="toc-backref" href="#id7">Data Passing Example with VFIO</a><a class="headerlink" href="#data-passing-example-with-vfio" title="Permalink to this headline">¶</a></h3>
+<p>As the ubiquitous userspace driver framework, VFIO is already IOMMU
+aware and shares many key concepts such as device model, group, and
+protection domain. Other user driver frameworks can also be extended
+to support IOMMU UAPI but it is outside the scope of this document.</p>
+<p>In this tight-knit VFIO-IOMMU interface, the ultimate consumer of the
+IOMMU UAPI data is the host IOMMU driver. VFIO facilitates user-kernel
+transport, capability checking, security, and life cycle management of
+process address space ID (PASID).</p>
+<p>VFIO layer conveys the data structures down to the IOMMU driver. It
+follows the pattern below:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct {
+     __u32 argsz;
+     __u32 flags;
+     __u8  data[];
+};
+</pre></div>
+</div>
+<p>Here data[] contains the IOMMU UAPI data structures. VFIO has the
+freedom to bundle the data as well as parse data size based on its own flags.</p>
+<p>In order to determine the size and feature set of the user data, argsz
+and flags (or the equivalent) are also embedded in the IOMMU UAPI data
+structures.</p>
+<p>A “__u32 argsz” field is <em>always</em> at the beginning of each structure.</p>
+<p>For example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct iommu_cache_invalidate_info {
+     __u32   argsz;
+     #define IOMMU_CACHE_INVALIDATE_INFO_VERSION_1 1
+     __u32   version;
+     /* IOMMU paging structure cache */
+     #define IOMMU_CACHE_INV_TYPE_IOTLB      (1 &lt;&lt; 0) /* IOMMU IOTLB */
+     #define IOMMU_CACHE_INV_TYPE_DEV_IOTLB  (1 &lt;&lt; 1) /* Device IOTLB */
+     #define IOMMU_CACHE_INV_TYPE_PASID      (1 &lt;&lt; 2) /* PASID cache */
+     #define IOMMU_CACHE_INV_TYPE_NR         (3)
+     __u8    cache;
+     __u8    granularity;
+     __u8    padding[6];
+     union {
+             struct iommu_inv_pasid_info pasid_info;
+             struct iommu_inv_addr_info addr_info;
+     } granu;
+};
+</pre></div>
+</div>
+<p>VFIO is responsible for checking its own argsz and flags. It then
+invokes appropriate IOMMU UAPI functions. The user pointers are passed
+to the IOMMU layer for further processing. The responsibilities are
+divided as follows:</p>
+<ul class="simple">
+<li><p>Generic IOMMU layer checks argsz range based on UAPI data in the
+current kernel version.</p></li>
+<li><p>Generic IOMMU layer checks content of the UAPI data for non-zero
+reserved bits in flags, padding fields, and unsupported version.
+This is to ensure not breaking userspace in the future when these
+fields or flags are used.</p></li>
+<li><p>Vendor IOMMU driver checks argsz based on vendor flags. UAPI data
+is consumed based on flags. Vendor driver has access to
+unadulterated argsz value in case of vendor specific future
+extensions. Currently, it does not perform the copy_from_user()
+itself. A __user pointer can be provided in some future scenarios
+where there’s vendor data outside of the structure definition.</p></li>
+</ul>
+<p>IOMMU code treats UAPI data in two categories:</p>
+<ul class="simple">
+<li><p>structure contains vendor data
+(Example: iommu_uapi_cache_invalidate())</p></li>
+<li><p>structure contains only generic data
+(Example: iommu_uapi_sva_bind_gpasid())</p></li>
+</ul>
+</section>
+<section id="sharing-uapi-with-in-kernel-users">
+<h3><a class="toc-backref" href="#id8">Sharing UAPI with in-kernel users</a><a class="headerlink" href="#sharing-uapi-with-in-kernel-users" title="Permalink to this headline">¶</a></h3>
+<p>For UAPIs that are shared with in-kernel users, a wrapper function is
+provided to distinguish the callers. For example,</p>
+<p>Userspace caller</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int iommu_uapi_sva_unbind_gpasid(struct iommu_domain *domain,
+                                 struct device *dev,
+                                 void __user *udata)
+</pre></div>
+</div>
+<p>In-kernel caller</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int iommu_sva_unbind_gpasid(struct iommu_domain *domain,
+                            struct device *dev, ioasid_t ioasid);
+</pre></div>
+</div>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">IOMMU Userspace API</a><ul>
+<li><a class="reference internal" href="#functionalities">Functionalities</a></li>
+<li><a class="reference internal" href="#requirements">Requirements</a></li>
+<li><a class="reference internal" href="#interfaces">Interfaces</a><ul>
+<li><a class="reference internal" href="#extension-rules-precautions">Extension Rules &amp; Precautions</a></li>
+<li><a class="reference internal" href="#compatibility-checking">Compatibility Checking</a></li>
+<li><a class="reference internal" href="#feature-checking">Feature Checking</a></li>
+<li><a class="reference internal" href="#data-passing-example-with-vfio">Data Passing Example with VFIO</a></li>
+<li><a class="reference internal" href="#sharing-uapi-with-in-kernel-users">Sharing UAPI with in-kernel users</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/userspace-api/iommu.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/userspace-api/iommu.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

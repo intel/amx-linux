@@ -1,0 +1,216 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>General description of the CPUFreq core and CPUFreq notifiers &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="How to Implement a new CPUFreq Processor Driver" href="cpu-drivers.html" />
+    <link rel="prev" title="Linux CPUFreq - CPU frequency and voltage scaling code in the Linux(TM) kernel" href="index.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="general-description-of-the-cpufreq-core-and-cpufreq-notifiers">
+<h1>General description of the CPUFreq core and CPUFreq notifiers<a class="headerlink" href="#general-description-of-the-cpufreq-core-and-cpufreq-notifiers" title="Permalink to this headline">¶</a></h1>
+<dl class="simple">
+<dt>Authors:</dt><dd><ul class="simple">
+<li><p>Dominik Brodowski  &lt;<a class="reference external" href="mailto:linux&#37;&#52;&#48;brodo&#46;de">linux<span>&#64;</span>brodo<span>&#46;</span>de</a>&gt;</p></li>
+<li><p>David Kimdon &lt;<a class="reference external" href="mailto:dwhedon&#37;&#52;&#48;debian&#46;org">dwhedon<span>&#64;</span>debian<span>&#46;</span>org</a>&gt;</p></li>
+<li><p>Rafael J. Wysocki &lt;<a class="reference external" href="mailto:rafael&#46;j&#46;wysocki&#37;&#52;&#48;intel&#46;com">rafael<span>&#46;</span>j<span>&#46;</span>wysocki<span>&#64;</span>intel<span>&#46;</span>com</a>&gt;</p></li>
+<li><p>Viresh Kumar &lt;<a class="reference external" href="mailto:viresh&#46;kumar&#37;&#52;&#48;linaro&#46;org">viresh<span>&#46;</span>kumar<span>&#64;</span>linaro<span>&#46;</span>org</a>&gt;</p></li>
+</ul>
+</dd>
+</dl>
+<section id="general-information">
+<h2>1. General Information<a class="headerlink" href="#general-information" title="Permalink to this headline">¶</a></h2>
+<p>The CPUFreq core code is located in drivers/cpufreq/cpufreq.c. This
+cpufreq code offers a standardized interface for the CPUFreq
+architecture drivers (those pieces of code that do actual
+frequency transitions), as well as to “notifiers”. These are device
+drivers or other part of the kernel that need to be informed of
+policy changes (ex. thermal modules like ACPI) or of all
+frequency changes (ex. timing code) or even need to force certain
+speed limits (like LCD drivers on ARM architecture). Additionally, the
+kernel “constant” loops_per_jiffy is updated on frequency changes
+here.</p>
+<p>Reference counting of the cpufreq policies is done by cpufreq_cpu_get
+and cpufreq_cpu_put, which make sure that the cpufreq driver is
+correctly registered with the core, and will not be unloaded until
+cpufreq_put_cpu is called. That also ensures that the respective cpufreq
+policy doesn’t get freed while being used.</p>
+</section>
+<section id="cpufreq-notifiers">
+<h2>2. CPUFreq notifiers<a class="headerlink" href="#cpufreq-notifiers" title="Permalink to this headline">¶</a></h2>
+<p>CPUFreq notifiers conform to the standard kernel notifier interface.
+See linux/include/linux/notifier.h for details on notifiers.</p>
+<p>There are two different CPUFreq notifiers - policy notifiers and
+transition notifiers.</p>
+<section id="cpufreq-policy-notifiers">
+<h3>2.1 CPUFreq policy notifiers<a class="headerlink" href="#cpufreq-policy-notifiers" title="Permalink to this headline">¶</a></h3>
+<p>These are notified when a new policy is created or removed.</p>
+<p>The phase is specified in the second argument to the notifier.  The phase is
+CPUFREQ_CREATE_POLICY when the policy is first created and it is
+CPUFREQ_REMOVE_POLICY when the policy is removed.</p>
+<p>The third argument, a <code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*pointer</span></code>, points to a struct cpufreq_policy
+consisting of several values, including min, max (the lower and upper
+frequencies (in kHz) of the new policy).</p>
+</section>
+<section id="cpufreq-transition-notifiers">
+<h3>2.2 CPUFreq transition notifiers<a class="headerlink" href="#cpufreq-transition-notifiers" title="Permalink to this headline">¶</a></h3>
+<p>These are notified twice for each online CPU in the policy, when the
+CPUfreq driver switches the CPU core frequency and this change has no
+any external implications.</p>
+<p>The second argument specifies the phase - CPUFREQ_PRECHANGE or
+CPUFREQ_POSTCHANGE.</p>
+<p>The third argument is a struct cpufreq_freqs with the following
+values:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 14%" />
+<col style="width: 86%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>policy</p></td>
+<td><p>a pointer to the struct cpufreq_policy</p></td>
+</tr>
+<tr class="row-even"><td><p>old</p></td>
+<td><p>old frequency</p></td>
+</tr>
+<tr class="row-odd"><td><p>new</p></td>
+<td><p>new frequency</p></td>
+</tr>
+<tr class="row-even"><td><p>flags</p></td>
+<td><p>flags of the cpufreq driver</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+</section>
+<section id="cpufreq-table-generation-with-operating-performance-point-opp">
+<h2>3. CPUFreq Table Generation with Operating Performance Point (OPP)<a class="headerlink" href="#cpufreq-table-generation-with-operating-performance-point-opp" title="Permalink to this headline">¶</a></h2>
+<p>For details about OPP, see <a class="reference internal" href="../power/opp.html"><span class="doc">Operating Performance Points (OPP) Library</span></a></p>
+<dl>
+<dt>dev_pm_opp_init_cpufreq_table -</dt><dd><p>This function provides a ready to use conversion routine to translate
+the OPP layer’s internal information about the available frequencies
+into a format readily providable to cpufreq.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Do not use this function in interrupt context.</p>
+</div>
+<p>Example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>soc_pm_init()
+{
+       /* Do things */
+       r = dev_pm_opp_init_cpufreq_table(dev, &amp;freq_table);
+       if (!r)
+               policy-&gt;freq_table = freq_table;
+       /* Do other things */
+}
+</pre></div>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>This function is available only if CONFIG_CPU_FREQ is enabled in
+addition to CONFIG_PM_OPP.</p>
+</div>
+</dd>
+<dt>dev_pm_opp_free_cpufreq_table</dt><dd><p>Free up the table allocated by dev_pm_opp_init_cpufreq_table</p>
+</dd>
+</dl>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">General description of the CPUFreq core and CPUFreq notifiers</a><ul>
+<li><a class="reference internal" href="#general-information">1. General Information</a></li>
+<li><a class="reference internal" href="#cpufreq-notifiers">2. CPUFreq notifiers</a><ul>
+<li><a class="reference internal" href="#cpufreq-policy-notifiers">2.1 CPUFreq policy notifiers</a></li>
+<li><a class="reference internal" href="#cpufreq-transition-notifiers">2.2 CPUFreq transition notifiers</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#cpufreq-table-generation-with-operating-performance-point-opp">3. CPUFreq Table Generation with Operating Performance Point (OPP)</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/cpu-freq/core.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/cpu-freq/core.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

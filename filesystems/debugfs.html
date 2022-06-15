@@ -1,0 +1,328 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>DebugFS &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="DLMFS" href="dlmfs.html" />
+    <link rel="prev" title="Direct Access for files" href="dax.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="debugfs">
+<h1>DebugFS<a class="headerlink" href="#debugfs" title="Permalink to this headline">¶</a></h1>
+<p>Copyright © 2009 Jonathan Corbet &lt;<a class="reference external" href="mailto:corbet&#37;&#52;&#48;lwn&#46;net">corbet<span>&#64;</span>lwn<span>&#46;</span>net</a>&gt;</p>
+<p>Debugfs exists as a simple way for kernel developers to make information
+available to user space.  Unlike /proc, which is only meant for information
+about a process, or sysfs, which has strict one-value-per-file rules,
+debugfs has no rules at all.  Developers can put any information they want
+there.  The debugfs filesystem is also intended to not serve as a stable
+ABI to user space; in theory, there are no stability constraints placed on
+files exported there.  The real world is not always so simple, though <a class="footnote-reference brackets" href="#id2" id="id1">1</a>;
+even debugfs interfaces are best designed with the idea that they will need
+to be maintained forever.</p>
+<p>Debugfs is typically mounted with a command like:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>mount -t debugfs none /sys/kernel/debug
+</pre></div>
+</div>
+<p>(Or an equivalent /etc/fstab line).
+The debugfs root directory is accessible only to the root user by
+default. To change access to the tree the “uid”, “gid” and “mode” mount
+options can be used.</p>
+<p>Note that the debugfs API is exported GPL-only to modules.</p>
+<p>Code using debugfs should include &lt;linux/debugfs.h&gt;.  Then, the first order
+of business will be to create at least one directory to hold a set of
+debugfs files:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct dentry *debugfs_create_dir(const char *name, struct dentry *parent);
+</pre></div>
+</div>
+<p>This call, if successful, will make a directory called name underneath the
+indicated parent directory.  If parent is NULL, the directory will be
+created in the debugfs root.  On success, the return value is a struct
+dentry pointer which can be used to create files in the directory (and to
+clean it up at the end).  An ERR_PTR(-ERROR) return value indicates that
+something went wrong.  If ERR_PTR(-ENODEV) is returned, that is an
+indication that the kernel has been built without debugfs support and none
+of the functions described below will work.</p>
+<p>The most general way to create a file within a debugfs directory is with:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct dentry *debugfs_create_file(const char *name, umode_t mode,
+                                   struct dentry *parent, void *data,
+                                   const struct file_operations *fops);
+</pre></div>
+</div>
+<p>Here, name is the name of the file to create, mode describes the access
+permissions the file should have, parent indicates the directory which
+should hold the file, data will be stored in the i_private field of the
+resulting inode structure, and fops is a set of file operations which
+implement the file’s behavior.  At a minimum, the read() and/or write()
+operations should be provided; others can be included as needed.  Again,
+the return value will be a dentry pointer to the created file,
+ERR_PTR(-ERROR) on error, or ERR_PTR(-ENODEV) if debugfs support is
+missing.</p>
+<p>Create a file with an initial size, the following function can be used
+instead:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void debugfs_create_file_size(const char *name, umode_t mode,
+                              struct dentry *parent, void *data,
+                              const struct file_operations *fops,
+                              loff_t file_size);
+</pre></div>
+</div>
+<p>file_size is the initial file size. The other parameters are the same
+as the function debugfs_create_file.</p>
+<p>In a number of cases, the creation of a set of file operations is not
+actually necessary; the debugfs code provides a number of helper functions
+for simple situations.  Files containing a single integer value can be
+created with any of:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void debugfs_create_u8(const char *name, umode_t mode,
+                       struct dentry *parent, u8 *value);
+void debugfs_create_u16(const char *name, umode_t mode,
+                        struct dentry *parent, u16 *value);
+void debugfs_create_u32(const char *name, umode_t mode,
+                        struct dentry *parent, u32 *value);
+void debugfs_create_u64(const char *name, umode_t mode,
+                        struct dentry *parent, u64 *value);
+</pre></div>
+</div>
+<p>These files support both reading and writing the given value; if a specific
+file should not be written to, simply set the mode bits accordingly.  The
+values in these files are in decimal; if hexadecimal is more appropriate,
+the following functions can be used instead:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void debugfs_create_x8(const char *name, umode_t mode,
+                       struct dentry *parent, u8 *value);
+void debugfs_create_x16(const char *name, umode_t mode,
+                        struct dentry *parent, u16 *value);
+void debugfs_create_x32(const char *name, umode_t mode,
+                        struct dentry *parent, u32 *value);
+void debugfs_create_x64(const char *name, umode_t mode,
+                        struct dentry *parent, u64 *value);
+</pre></div>
+</div>
+<p>These functions are useful as long as the developer knows the size of the
+value to be exported.  Some types can have different widths on different
+architectures, though, complicating the situation somewhat.  There are
+functions meant to help out in such special cases:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void debugfs_create_size_t(const char *name, umode_t mode,
+                           struct dentry *parent, size_t *value);
+</pre></div>
+</div>
+<p>As might be expected, this function will create a debugfs file to represent
+a variable of type size_t.</p>
+<p>Similarly, there are helpers for variables of type unsigned long, in decimal
+and hexadecimal:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct dentry *debugfs_create_ulong(const char *name, umode_t mode,
+                                    struct dentry *parent,
+                                    unsigned long *value);
+void debugfs_create_xul(const char *name, umode_t mode,
+                        struct dentry *parent, unsigned long *value);
+</pre></div>
+</div>
+<p>Boolean values can be placed in debugfs with:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void debugfs_create_bool(const char *name, umode_t mode,
+                         struct dentry *parent, bool *value);
+</pre></div>
+</div>
+<p>A read on the resulting file will yield either Y (for non-zero values) or
+N, followed by a newline.  If written to, it will accept either upper- or
+lower-case values, or 1 or 0.  Any other input will be silently ignored.</p>
+<p>Also, atomic_t values can be placed in debugfs with:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void debugfs_create_atomic_t(const char *name, umode_t mode,
+                             struct dentry *parent, atomic_t *value)
+</pre></div>
+</div>
+<p>A read of this file will get atomic_t values, and a write of this file
+will set atomic_t values.</p>
+<p>Another option is exporting a block of arbitrary binary data, with
+this structure and function:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct debugfs_blob_wrapper {
+    void *data;
+    unsigned long size;
+};
+
+struct dentry *debugfs_create_blob(const char *name, umode_t mode,
+                                   struct dentry *parent,
+                                   struct debugfs_blob_wrapper *blob);
+</pre></div>
+</div>
+<p>A read of this file will return the data pointed to by the
+debugfs_blob_wrapper structure.  Some drivers use “blobs” as a simple way
+to return several lines of (static) formatted text output.  This function
+can be used to export binary information, but there does not appear to be
+any code which does so in the mainline.  Note that all files created with
+<a class="reference internal" href="api-summary.html#c.debugfs_create_blob" title="debugfs_create_blob"><code class="xref c c-func docutils literal notranslate"><span class="pre">debugfs_create_blob()</span></code></a> are read-only.</p>
+<p>If you want to dump a block of registers (something that happens quite
+often during development, even if little such code reaches mainline),
+debugfs offers two functions: one to make a registers-only file, and
+another to insert a register block in the middle of another sequential
+file:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct debugfs_reg32 {
+    char *name;
+    unsigned long offset;
+};
+
+struct debugfs_regset32 {
+    const struct debugfs_reg32 *regs;
+    int nregs;
+    void __iomem *base;
+    struct device *dev;     /* Optional device for Runtime PM */
+};
+
+debugfs_create_regset32(const char *name, umode_t mode,
+                        struct dentry *parent,
+                        struct debugfs_regset32 *regset);
+
+void debugfs_print_regs32(struct seq_file *s, const struct debugfs_reg32 *regs,
+                     int nregs, void __iomem *base, char *prefix);
+</pre></div>
+</div>
+<p>The “base” argument may be 0, but you may want to build the reg32 array
+using __stringify, and a number of register names (macros) are actually
+byte offsets over a base for the register block.</p>
+<p>If you want to dump a u32 array in debugfs, you can create a file with:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct debugfs_u32_array {
+    u32 *array;
+    u32 n_elements;
+};
+
+void debugfs_create_u32_array(const char *name, umode_t mode,
+                    struct dentry *parent,
+                    struct debugfs_u32_array *array);
+</pre></div>
+</div>
+<p>The “array” argument wraps a pointer to the array’s data and the number
+of its elements. Note: Once array is created its size can not be changed.</p>
+<p>There is a helper function to create a device-related seq_file:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void debugfs_create_devm_seqfile(struct device *dev,
+                             const char *name,
+                             struct dentry *parent,
+                             int (*read_fn)(struct seq_file *s,
+                                     void *data));
+</pre></div>
+</div>
+<p>The “dev” argument is the device related to this debugfs file, and
+the “read_fn” is a function pointer which to be called to print the
+seq_file content.</p>
+<p>There are a couple of other directory-oriented helper functions:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct dentry *debugfs_rename(struct dentry *old_dir,
+                              struct dentry *old_dentry,
+                              struct dentry *new_dir,
+                              const char *new_name);
+
+struct dentry *debugfs_create_symlink(const char *name,
+                                      struct dentry *parent,
+                                      const char *target);
+</pre></div>
+</div>
+<p>A call to <a class="reference internal" href="api-summary.html#c.debugfs_rename" title="debugfs_rename"><code class="xref c c-func docutils literal notranslate"><span class="pre">debugfs_rename()</span></code></a> will give a new name to an existing debugfs
+file, possibly in a different directory.  The new_name must not exist prior
+to the call; the return value is old_dentry with updated information.
+Symbolic links can be created with <a class="reference internal" href="api-summary.html#c.debugfs_create_symlink" title="debugfs_create_symlink"><code class="xref c c-func docutils literal notranslate"><span class="pre">debugfs_create_symlink()</span></code></a>.</p>
+<p>There is one important thing that all debugfs users must take into account:
+there is no automatic cleanup of any directories created in debugfs.  If a
+module is unloaded without explicitly removing debugfs entries, the result
+will be a lot of stale pointers and no end of highly antisocial behavior.
+So all debugfs users - at least those which can be built as modules - must
+be prepared to remove all files and directories they create there.  A file
+can be removed with:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void debugfs_remove(struct dentry *dentry);
+</pre></div>
+</div>
+<p>The dentry value can be NULL or an error value, in which case nothing will
+be removed.</p>
+<p>Once upon a time, debugfs users were required to remember the dentry
+pointer for every debugfs file they created so that all files could be
+cleaned up.  We live in more civilized times now, though, and debugfs users
+can call:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void debugfs_remove_recursive(struct dentry *dentry);
+</pre></div>
+</div>
+<p>If this function is passed a pointer for the dentry corresponding to the
+top-level directory, the entire hierarchy below that directory will be
+removed.</p>
+<dl class="footnote brackets">
+<dt class="label" id="id2"><span class="brackets"><a class="fn-backref" href="#id1">1</a></span></dt>
+<dd><p><a class="reference external" href="http://lwn.net/Articles/309298/">http://lwn.net/Articles/309298/</a></p>
+</dd>
+</dl>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/filesystems/debugfs.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/filesystems/debugfs.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

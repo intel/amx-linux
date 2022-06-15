@@ -1,0 +1,250 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>(Un)patching Callbacks &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Atomic Replace &amp; Cumulative Patches" href="cumulative-patches.html" />
+    <link rel="prev" title="Livepatch" href="livepatch.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="un-patching-callbacks">
+<h1>(Un)patching Callbacks<a class="headerlink" href="#un-patching-callbacks" title="Permalink to this headline">¶</a></h1>
+<p>Livepatch (un)patch-callbacks provide a mechanism for livepatch modules
+to execute callback functions when a kernel object is (un)patched.  They
+can be considered a <strong>power feature</strong> that <strong>extends livepatching abilities</strong>
+to include:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Safe updates to global data</p></li>
+<li><p>“Patches” to init and probe functions</p></li>
+<li><p>Patching otherwise unpatchable code (i.e. assembly)</p></li>
+</ul>
+</div></blockquote>
+<p>In most cases, (un)patch callbacks will need to be used in conjunction
+with memory barriers and kernel synchronization primitives, like
+mutexes/spinlocks, or even stop_machine(), to avoid concurrency issues.</p>
+<section id="motivation">
+<h2>1. Motivation<a class="headerlink" href="#motivation" title="Permalink to this headline">¶</a></h2>
+<p>Callbacks differ from existing kernel facilities:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Module init/exit code doesn’t run when disabling and re-enabling a
+patch.</p></li>
+<li><p>A module notifier can’t stop a to-be-patched module from loading.</p></li>
+</ul>
+</div></blockquote>
+<p>Callbacks are part of the klp_object structure and their implementation
+is specific to that klp_object.  Other livepatch objects may or may not
+be patched, irrespective of the target klp_object’s current state.</p>
+</section>
+<section id="callback-types">
+<h2>2. Callback types<a class="headerlink" href="#callback-types" title="Permalink to this headline">¶</a></h2>
+<p>Callbacks can be registered for the following livepatch actions:</p>
+<blockquote>
+<div><ul class="simple">
+<li><dl class="simple">
+<dt>Pre-patch</dt><dd><ul>
+<li><p>before a klp_object is patched</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>Post-patch</dt><dd><ul>
+<li><p>after a klp_object has been patched and is active
+across all tasks</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>Pre-unpatch</dt><dd><ul>
+<li><p>before a klp_object is unpatched (ie, patched code is
+active), used to clean up post-patch callback
+resources</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>Post-unpatch</dt><dd><ul>
+<li><p>after a klp_object has been patched, all code has
+been restored and no tasks are running patched code,
+used to cleanup pre-patch callback resources</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+</ul>
+</div></blockquote>
+</section>
+<section id="how-it-works">
+<h2>3. How it works<a class="headerlink" href="#how-it-works" title="Permalink to this headline">¶</a></h2>
+<p>Each callback is optional, omitting one does not preclude specifying any
+other.  However, the livepatching core executes the handlers in
+symmetry: pre-patch callbacks have a post-unpatch counterpart and
+post-patch callbacks have a pre-unpatch counterpart.  An unpatch
+callback will only be executed if its corresponding patch callback was
+executed.  Typical use cases pair a patch handler that acquires and
+configures resources with an unpatch handler tears down and releases
+those same resources.</p>
+<p>A callback is only executed if its host klp_object is loaded.  For
+in-kernel vmlinux targets, this means that callbacks will always execute
+when a livepatch is enabled/disabled.  For patch target kernel modules,
+callbacks will only execute if the target module is loaded.  When a
+module target is (un)loaded, its callbacks will execute only if the
+livepatch module is enabled.</p>
+<p>The pre-patch callback, if specified, is expected to return a status
+code (0 for success, -ERRNO on error).  An error status code indicates
+to the livepatching core that patching of the current klp_object is not
+safe and to stop the current patching request.  (When no pre-patch
+callback is provided, the transition is assumed to be safe.)  If a
+pre-patch callback returns failure, the kernel’s module loader will:</p>
+<blockquote>
+<div><ul>
+<li><p>Refuse to load a livepatch, if the livepatch is loaded after
+targeted code.</p>
+<p>or:</p>
+</li>
+<li><p>Refuse to load a module, if the livepatch was already successfully
+loaded.</p></li>
+</ul>
+</div></blockquote>
+<p>No post-patch, pre-unpatch, or post-unpatch callbacks will be executed
+for a given klp_object if the object failed to patch, due to a failed
+pre_patch callback or for any other reason.</p>
+<p>If a patch transition is reversed, no pre-unpatch handlers will be run
+(this follows the previously mentioned symmetry – pre-unpatch callbacks
+will only occur if their corresponding post-patch callback executed).</p>
+<p>If the object did successfully patch, but the patch transition never
+started for some reason (e.g., if another object failed to patch),
+only the post-unpatch callback will be called.</p>
+</section>
+<section id="use-cases">
+<h2>4. Use cases<a class="headerlink" href="#use-cases" title="Permalink to this headline">¶</a></h2>
+<p>Sample livepatch modules demonstrating the callback API can be found in
+samples/livepatch/ directory.  These samples were modified for use in
+kselftests and can be found in the lib/livepatch directory.</p>
+<section id="global-data-update">
+<h3>Global data update<a class="headerlink" href="#global-data-update" title="Permalink to this headline">¶</a></h3>
+<p>A pre-patch callback can be useful to update a global variable.  For
+example, 75ff39ccc1bd (“tcp: make challenge acks less predictable”)
+changes a global sysctl, as well as patches the tcp_send_challenge_ack()
+function.</p>
+<p>In this case, if we’re being super paranoid, it might make sense to
+patch the data <em>after</em> patching is complete with a post-patch callback,
+so that tcp_send_challenge_ack() could first be changed to read
+sysctl_tcp_challenge_ack_limit with READ_ONCE.</p>
+</section>
+<section id="init-and-probe-function-patches-support">
+<h3>__init and probe function patches support<a class="headerlink" href="#init-and-probe-function-patches-support" title="Permalink to this headline">¶</a></h3>
+<p>Although __init and probe functions are not directly livepatch-able, it
+may be possible to implement similar updates via pre/post-patch
+callbacks.</p>
+<p>The commit <code class="docutils literal notranslate"><span class="pre">48900cb6af42</span> <span class="pre">(&quot;virtio-net:</span> <span class="pre">drop</span> <span class="pre">NETIF_F_FRAGLIST&quot;)</span></code> change the way that
+virtnet_probe() initialized its driver’s net_device features.  A
+pre/post-patch callback could iterate over all such devices, making a
+similar change to their hw_features value.  (Client functions of the
+value may need to be updated accordingly.)</p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">(Un)patching Callbacks</a><ul>
+<li><a class="reference internal" href="#motivation">1. Motivation</a></li>
+<li><a class="reference internal" href="#callback-types">2. Callback types</a></li>
+<li><a class="reference internal" href="#how-it-works">3. How it works</a></li>
+<li><a class="reference internal" href="#use-cases">4. Use cases</a><ul>
+<li><a class="reference internal" href="#global-data-update">Global data update</a></li>
+<li><a class="reference internal" href="#init-and-probe-function-patches-support">__init and probe function patches support</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/livepatch/callbacks.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/livepatch/callbacks.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,546 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Kernel clients &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="GPU Driver Documentation" href="drivers.html" />
+    <link rel="prev" title="DRM Driver uAPI" href="driver-uapi.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="kernel-clients">
+<h1>Kernel clients<a class="headerlink" href="#kernel-clients" title="Permalink to this headline">¶</a></h1>
+<p>This library provides support for clients running in the kernel like fbdev and bootsplash.</p>
+<p>GEM drivers which provide a GEM based dumb buffer with a virtual address are supported.</p>
+<dl class="type">
+<dt id="c.drm_client_funcs">
+struct <code class="sig-name descname">drm_client_funcs</code><a class="headerlink" href="#c.drm_client_funcs" title="Permalink to this definition">¶</a></dt>
+<dd><p>DRM client callbacks</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct drm_client_funcs {
+    struct module *owner;
+    void (*unregister)(struct drm_client_dev *client);
+    int (*restore)(struct drm_client_dev *client);
+    int (*hotplug)(struct drm_client_dev *client);
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl>
+<dt><code class="docutils literal notranslate"><span class="pre">owner</span></code></dt><dd><p>The module owner</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unregister</span></code></dt><dd><p>Called when <a class="reference internal" href="drm-internals.html#c.drm_device" title="drm_device"><code class="xref c c-type docutils literal notranslate"><span class="pre">drm_device</span></code></a> is unregistered. The client should respond by
+releasing its resources using <a class="reference internal" href="#c.drm_client_release" title="drm_client_release"><code class="xref c c-func docutils literal notranslate"><span class="pre">drm_client_release()</span></code></a>.</p>
+<p>This callback is optional.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">restore</span></code></dt><dd><p>Called on drm_lastclose(). The first client instance in the list that
+returns zero gets the privilege to restore and no more clients are
+called. This callback is not called after <strong>unregister</strong> has been called.</p>
+<p>Note that the core does not guarantee exclusion against concurrent
+<a class="reference internal" href="drm-internals.html#c.drm_open" title="drm_open"><code class="xref c c-func docutils literal notranslate"><span class="pre">drm_open()</span></code></a>. Clients need to ensure this themselves, for example by
+using drm_master_internal_acquire() and
+drm_master_internal_release().</p>
+<p>This callback is optional.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">hotplug</span></code></dt><dd><p>Called on <a class="reference internal" href="drm-kms-helpers.html#c.drm_kms_helper_hotplug_event" title="drm_kms_helper_hotplug_event"><code class="xref c c-func docutils literal notranslate"><span class="pre">drm_kms_helper_hotplug_event()</span></code></a>.
+This callback is not called after <strong>unregister</strong> has been called.</p>
+<p>This callback is optional.</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.drm_client_dev">
+struct <code class="sig-name descname">drm_client_dev</code><a class="headerlink" href="#c.drm_client_dev" title="Permalink to this definition">¶</a></dt>
+<dd><p>DRM client instance</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct drm_client_dev {
+    struct drm_device *dev;
+    const char *name;
+    struct list_head list;
+    const struct drm_client_funcs *funcs;
+    struct drm_file *file;
+    struct mutex modeset_mutex;
+    struct drm_mode_set *modesets;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">dev</span></code></dt><dd><p>DRM device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">name</span></code></dt><dd><p>Name of the client.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">list</span></code></dt><dd><p>List of all clients of a DRM device, linked into
+<a class="reference internal" href="drm-internals.html#c.drm_device" title="drm_device"><code class="xref c c-type docutils literal notranslate"><span class="pre">drm_device.clientlist</span></code></a>. Protected by <a class="reference internal" href="drm-internals.html#c.drm_device" title="drm_device"><code class="xref c c-type docutils literal notranslate"><span class="pre">drm_device.clientlist_mutex</span></code></a>.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">funcs</span></code></dt><dd><p>DRM client functions (optional)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">file</span></code></dt><dd><p>DRM file</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">modeset_mutex</span></code></dt><dd><p>Protects <strong>modesets</strong>.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">modesets</span></code></dt><dd><p>CRTC configurations</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.drm_client_buffer">
+struct <code class="sig-name descname">drm_client_buffer</code><a class="headerlink" href="#c.drm_client_buffer" title="Permalink to this definition">¶</a></dt>
+<dd><p>DRM client buffer</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct drm_client_buffer {
+    struct drm_client_dev *client;
+    u32 handle;
+    u32 pitch;
+    struct drm_gem_object *gem;
+    struct iosys_map map;
+    struct drm_framebuffer *fb;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">client</span></code></dt><dd><p>DRM client</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">handle</span></code></dt><dd><p>Buffer handle</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">pitch</span></code></dt><dd><p>Buffer pitch</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">gem</span></code></dt><dd><p>GEM object backing this buffer</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">map</span></code></dt><dd><p>Virtual address for the buffer</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">fb</span></code></dt><dd><p>DRM framebuffer</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.drm_client_for_each_modeset">
+<code class="sig-name descname">drm_client_for_each_modeset</code><span class="sig-paren">(</span><em>modeset</em>, <em>client</em><span class="sig-paren">)</span><a class="headerlink" href="#c.drm_client_for_each_modeset" title="Permalink to this definition">¶</a></dt>
+<dd><p>Iterate over client modesets</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">modeset</span></code></dt><dd><p><a class="reference internal" href="drm-kms.html#c.drm_mode_set" title="drm_mode_set"><code class="xref c c-type docutils literal notranslate"><span class="pre">drm_mode_set</span></code></a> loop cursor</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">client</span></code></dt><dd><p>DRM client</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.drm_client_for_each_connector_iter">
+<code class="sig-name descname">drm_client_for_each_connector_iter</code><span class="sig-paren">(</span><em>connector</em>, <em>iter</em><span class="sig-paren">)</span><a class="headerlink" href="#c.drm_client_for_each_connector_iter" title="Permalink to this definition">¶</a></dt>
+<dd><p>connector_list iterator macro</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">connector</span></code></dt><dd><p><a class="reference internal" href="drm-kms.html#c.drm_connector" title="drm_connector"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">drm_connector</span></code></a> pointer used as cursor</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">iter</span></code></dt><dd><p><a class="reference internal" href="drm-kms.html#c.drm_connector_list_iter" title="drm_connector_list_iter"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">drm_connector_list_iter</span></code></a></p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This iterates the connectors that are useable for internal clients (excludes
+writeback connectors).</p>
+<p>For more info see <a class="reference internal" href="drm-kms.html#c.drm_for_each_connector_iter" title="drm_for_each_connector_iter"><code class="xref c c-func docutils literal notranslate"><span class="pre">drm_for_each_connector_iter()</span></code></a>.</p>
+</div>
+<dl class="function">
+<dt id="c.drm_client_init">
+int <code class="sig-name descname">drm_client_init</code><span class="sig-paren">(</span>struct <a class="reference internal" href="drm-internals.html#c.drm_device" title="drm_device">drm_device</a><em> *dev</em>, struct <a class="reference internal" href="#c.drm_client_dev" title="drm_client_dev">drm_client_dev</a><em> *client</em>, const char<em> *name</em>, const struct <a class="reference internal" href="#c.drm_client_funcs" title="drm_client_funcs">drm_client_funcs</a><em> *funcs</em><span class="sig-paren">)</span><a class="headerlink" href="#c.drm_client_init" title="Permalink to this definition">¶</a></dt>
+<dd><p>Initialise a DRM client</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">drm_device</span> <span class="pre">*dev</span></code></dt><dd><p>DRM device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">drm_client_dev</span> <span class="pre">*client</span></code></dt><dd><p>DRM client</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*name</span></code></dt><dd><p>Client name</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">struct</span> <span class="pre">drm_client_funcs</span> <span class="pre">*funcs</span></code></dt><dd><p>DRM client functions (optional)</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This initialises the client and opens a <a class="reference internal" href="drm-internals.html#c.drm_file" title="drm_file"><code class="xref c c-type docutils literal notranslate"><span class="pre">drm_file</span></code></a>.
+Use <a class="reference internal" href="#c.drm_client_register" title="drm_client_register"><code class="xref c c-func docutils literal notranslate"><span class="pre">drm_client_register()</span></code></a> to complete the process.
+The caller needs to hold a reference on <strong>dev</strong> before calling this function.
+The client is freed when the <a class="reference internal" href="drm-internals.html#c.drm_device" title="drm_device"><code class="xref c c-type docutils literal notranslate"><span class="pre">drm_device</span></code></a> is unregistered. See <a class="reference internal" href="#c.drm_client_release" title="drm_client_release"><code class="xref c c-func docutils literal notranslate"><span class="pre">drm_client_release()</span></code></a>.</p>
+<p><strong>Return</strong></p>
+<p>Zero on success or negative error code on failure.</p>
+</div>
+<dl class="function">
+<dt id="c.drm_client_register">
+void <code class="sig-name descname">drm_client_register</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.drm_client_dev" title="drm_client_dev">drm_client_dev</a><em> *client</em><span class="sig-paren">)</span><a class="headerlink" href="#c.drm_client_register" title="Permalink to this definition">¶</a></dt>
+<dd><p>Register client</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">drm_client_dev</span> <span class="pre">*client</span></code></dt><dd><p>DRM client</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Add the client to the <a class="reference internal" href="drm-internals.html#c.drm_device" title="drm_device"><code class="xref c c-type docutils literal notranslate"><span class="pre">drm_device</span></code></a> client list to activate its callbacks.
+<strong>client</strong> must be initialized by a call to <a class="reference internal" href="#c.drm_client_init" title="drm_client_init"><code class="xref c c-func docutils literal notranslate"><span class="pre">drm_client_init()</span></code></a>. After
+<a class="reference internal" href="#c.drm_client_register" title="drm_client_register"><code class="xref c c-func docutils literal notranslate"><span class="pre">drm_client_register()</span></code></a> it is no longer permissible to call <a class="reference internal" href="#c.drm_client_release" title="drm_client_release"><code class="xref c c-func docutils literal notranslate"><span class="pre">drm_client_release()</span></code></a>
+directly (outside the unregister callback), instead cleanup will happen
+automatically on driver unload.</p>
+</div>
+<dl class="function">
+<dt id="c.drm_client_release">
+void <code class="sig-name descname">drm_client_release</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.drm_client_dev" title="drm_client_dev">drm_client_dev</a><em> *client</em><span class="sig-paren">)</span><a class="headerlink" href="#c.drm_client_release" title="Permalink to this definition">¶</a></dt>
+<dd><p>Release DRM client resources</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">drm_client_dev</span> <span class="pre">*client</span></code></dt><dd><p>DRM client</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Releases resources by closing the <a class="reference internal" href="drm-internals.html#c.drm_file" title="drm_file"><code class="xref c c-type docutils literal notranslate"><span class="pre">drm_file</span></code></a> that was opened by <a class="reference internal" href="#c.drm_client_init" title="drm_client_init"><code class="xref c c-func docutils literal notranslate"><span class="pre">drm_client_init()</span></code></a>.
+It is called automatically if the <a class="reference internal" href="#c.drm_client_funcs" title="drm_client_funcs"><code class="xref c c-type docutils literal notranslate"><span class="pre">drm_client_funcs.unregister</span></code></a> callback is _not_ set.</p>
+<p>This function should only be called from the unregister callback. An exception
+is fbdev which cannot free the buffer if userspace has open file descriptors.</p>
+<p><strong>Note</strong></p>
+<p>Clients cannot initiate a release by themselves. This is done to keep the code simple.
+The driver has to be unloaded before the client can be unloaded.</p>
+</div>
+<dl class="function">
+<dt id="c.drm_client_dev_hotplug">
+void <code class="sig-name descname">drm_client_dev_hotplug</code><span class="sig-paren">(</span>struct <a class="reference internal" href="drm-internals.html#c.drm_device" title="drm_device">drm_device</a><em> *dev</em><span class="sig-paren">)</span><a class="headerlink" href="#c.drm_client_dev_hotplug" title="Permalink to this definition">¶</a></dt>
+<dd><p>Send hotplug event to clients</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">drm_device</span> <span class="pre">*dev</span></code></dt><dd><p>DRM device</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This function calls the <a class="reference internal" href="#c.drm_client_funcs" title="drm_client_funcs"><code class="xref c c-type docutils literal notranslate"><span class="pre">drm_client_funcs.hotplug</span></code></a> callback on the attached clients.</p>
+<p><a class="reference internal" href="drm-kms-helpers.html#c.drm_kms_helper_hotplug_event" title="drm_kms_helper_hotplug_event"><code class="xref c c-func docutils literal notranslate"><span class="pre">drm_kms_helper_hotplug_event()</span></code></a> calls this function, so drivers that use it
+don’t need to call this function themselves.</p>
+</div>
+<dl class="function">
+<dt id="c.drm_client_buffer_vmap">
+int <code class="sig-name descname">drm_client_buffer_vmap</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.drm_client_buffer" title="drm_client_buffer">drm_client_buffer</a><em> *buffer</em>, struct <a class="reference internal" href="../driver-api/device-io.html#c.iosys_map" title="iosys_map">iosys_map</a><em> *map_copy</em><span class="sig-paren">)</span><a class="headerlink" href="#c.drm_client_buffer_vmap" title="Permalink to this definition">¶</a></dt>
+<dd><p>Map DRM client buffer into address space</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">drm_client_buffer</span> <span class="pre">*buffer</span></code></dt><dd><p>DRM client buffer</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iosys_map</span> <span class="pre">*map_copy</span></code></dt><dd><p>Returns the mapped memory’s address</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This function maps a client buffer into kernel address space. If the
+buffer is already mapped, it returns the existing mapping’s address.</p>
+<p>Client buffer mappings are not ref’counted. Each call to
+<a class="reference internal" href="#c.drm_client_buffer_vmap" title="drm_client_buffer_vmap"><code class="xref c c-func docutils literal notranslate"><span class="pre">drm_client_buffer_vmap()</span></code></a> should be followed by a call to
+<a class="reference internal" href="#c.drm_client_buffer_vunmap" title="drm_client_buffer_vunmap"><code class="xref c c-func docutils literal notranslate"><span class="pre">drm_client_buffer_vunmap()</span></code></a>; or the client buffer should be mapped
+throughout its lifetime.</p>
+<p>The returned address is a copy of the internal value. In contrast to
+other vmap interfaces, you don’t need it for the client’s vunmap
+function. So you can modify it at will during blit and draw operations.</p>
+<p><strong>Return</strong></p>
+<blockquote>
+<div><p>0 on success, or a negative errno code otherwise.</p>
+</div></blockquote>
+</div>
+<dl class="function">
+<dt id="c.drm_client_buffer_vunmap">
+void <code class="sig-name descname">drm_client_buffer_vunmap</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.drm_client_buffer" title="drm_client_buffer">drm_client_buffer</a><em> *buffer</em><span class="sig-paren">)</span><a class="headerlink" href="#c.drm_client_buffer_vunmap" title="Permalink to this definition">¶</a></dt>
+<dd><p>Unmap DRM client buffer</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">drm_client_buffer</span> <span class="pre">*buffer</span></code></dt><dd><p>DRM client buffer</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This function removes a client buffer’s memory mapping. Calling this
+function is only required by clients that manage their buffer mappings
+by themselves.</p>
+</div>
+<dl class="function">
+<dt id="c.drm_client_framebuffer_create">
+struct <a class="reference internal" href="#c.drm_client_buffer" title="drm_client_buffer">drm_client_buffer</a> * <code class="sig-name descname">drm_client_framebuffer_create</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.drm_client_dev" title="drm_client_dev">drm_client_dev</a><em> *client</em>, u32<em> width</em>, u32<em> height</em>, u32<em> format</em><span class="sig-paren">)</span><a class="headerlink" href="#c.drm_client_framebuffer_create" title="Permalink to this definition">¶</a></dt>
+<dd><p>Create a client framebuffer</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">drm_client_dev</span> <span class="pre">*client</span></code></dt><dd><p>DRM client</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">u32</span> <span class="pre">width</span></code></dt><dd><p>Framebuffer width</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">u32</span> <span class="pre">height</span></code></dt><dd><p>Framebuffer height</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">u32</span> <span class="pre">format</span></code></dt><dd><p>Buffer format</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This function creates a <a class="reference internal" href="#c.drm_client_buffer" title="drm_client_buffer"><code class="xref c c-type docutils literal notranslate"><span class="pre">drm_client_buffer</span></code></a> which consists of a
+<a class="reference internal" href="drm-kms.html#c.drm_framebuffer" title="drm_framebuffer"><code class="xref c c-type docutils literal notranslate"><span class="pre">drm_framebuffer</span></code></a> backed by a dumb buffer.
+Call <a class="reference internal" href="#c.drm_client_framebuffer_delete" title="drm_client_framebuffer_delete"><code class="xref c c-func docutils literal notranslate"><span class="pre">drm_client_framebuffer_delete()</span></code></a> to free the buffer.</p>
+<p><strong>Return</strong></p>
+<p>Pointer to a client buffer or an error pointer on failure.</p>
+</div>
+<dl class="function">
+<dt id="c.drm_client_framebuffer_delete">
+void <code class="sig-name descname">drm_client_framebuffer_delete</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.drm_client_buffer" title="drm_client_buffer">drm_client_buffer</a><em> *buffer</em><span class="sig-paren">)</span><a class="headerlink" href="#c.drm_client_framebuffer_delete" title="Permalink to this definition">¶</a></dt>
+<dd><p>Delete a client framebuffer</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">drm_client_buffer</span> <span class="pre">*buffer</span></code></dt><dd><p>DRM client buffer (can be NULL)</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.drm_client_framebuffer_flush">
+int <code class="sig-name descname">drm_client_framebuffer_flush</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.drm_client_buffer" title="drm_client_buffer">drm_client_buffer</a><em> *buffer</em>, struct <a class="reference internal" href="drm-kms-helpers.html#c.drm_rect" title="drm_rect">drm_rect</a><em> *rect</em><span class="sig-paren">)</span><a class="headerlink" href="#c.drm_client_framebuffer_flush" title="Permalink to this definition">¶</a></dt>
+<dd><p>Manually flush client framebuffer</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">drm_client_buffer</span> <span class="pre">*buffer</span></code></dt><dd><p>DRM client buffer (can be NULL)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">drm_rect</span> <span class="pre">*rect</span></code></dt><dd><p>Damage rectangle (if NULL flushes all)</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This calls <a class="reference internal" href="drm-kms.html#c.drm_framebuffer_funcs" title="drm_framebuffer_funcs"><code class="xref c c-type docutils literal notranslate"><span class="pre">drm_framebuffer_funcs-&gt;dirty</span></code></a> (if present) to flush buffer changes
+for drivers that need it.</p>
+<p><strong>Return</strong></p>
+<p>Zero on success or negative error code on failure.</p>
+</div>
+<dl class="function">
+<dt id="c.drm_client_modeset_probe">
+int <code class="sig-name descname">drm_client_modeset_probe</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.drm_client_dev" title="drm_client_dev">drm_client_dev</a><em> *client</em>, unsigned int<em> width</em>, unsigned int<em> height</em><span class="sig-paren">)</span><a class="headerlink" href="#c.drm_client_modeset_probe" title="Permalink to this definition">¶</a></dt>
+<dd><p>Probe for displays</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">drm_client_dev</span> <span class="pre">*client</span></code></dt><dd><p>DRM client</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">width</span></code></dt><dd><p>Maximum display mode width (optional)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">height</span></code></dt><dd><p>Maximum display mode height (optional)</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This function sets up display pipelines for enabled connectors and stores the
+config in the client’s modeset array.</p>
+<p><strong>Return</strong></p>
+<p>Zero on success or negative error code on failure.</p>
+</div>
+<dl class="function">
+<dt id="c.drm_client_rotation">
+bool <code class="sig-name descname">drm_client_rotation</code><span class="sig-paren">(</span>struct <a class="reference internal" href="drm-kms.html#c.drm_mode_set" title="drm_mode_set">drm_mode_set</a><em> *modeset</em>, unsigned int<em> *rotation</em><span class="sig-paren">)</span><a class="headerlink" href="#c.drm_client_rotation" title="Permalink to this definition">¶</a></dt>
+<dd><p>Check the initial rotation value</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">drm_mode_set</span> <span class="pre">*modeset</span></code></dt><dd><p>DRM modeset</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">*rotation</span></code></dt><dd><p>Returned rotation value</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This function checks if the primary plane in <strong>modeset</strong> can hw rotate
+to match the rotation needed on its connector.</p>
+<p><strong>Note</strong></p>
+<p>Currently only 0 and 180 degrees are supported.</p>
+<p><strong>Return</strong></p>
+<p>True if the plane can do the rotation, false otherwise.</p>
+</div>
+<dl class="function">
+<dt id="c.drm_client_modeset_check">
+int <code class="sig-name descname">drm_client_modeset_check</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.drm_client_dev" title="drm_client_dev">drm_client_dev</a><em> *client</em><span class="sig-paren">)</span><a class="headerlink" href="#c.drm_client_modeset_check" title="Permalink to this definition">¶</a></dt>
+<dd><p>Check modeset configuration</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">drm_client_dev</span> <span class="pre">*client</span></code></dt><dd><p>DRM client</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Check modeset configuration.</p>
+<p><strong>Return</strong></p>
+<p>Zero on success or negative error code on failure.</p>
+</div>
+<dl class="function">
+<dt id="c.drm_client_modeset_commit_locked">
+int <code class="sig-name descname">drm_client_modeset_commit_locked</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.drm_client_dev" title="drm_client_dev">drm_client_dev</a><em> *client</em><span class="sig-paren">)</span><a class="headerlink" href="#c.drm_client_modeset_commit_locked" title="Permalink to this definition">¶</a></dt>
+<dd><p>Force commit CRTC configuration</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">drm_client_dev</span> <span class="pre">*client</span></code></dt><dd><p>DRM client</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Commit modeset configuration to crtcs without checking if there is a DRM
+master. The assumption is that the caller already holds an internal DRM
+master reference acquired with drm_master_internal_acquire().</p>
+<p><strong>Return</strong></p>
+<p>Zero on success or negative error code on failure.</p>
+</div>
+<dl class="function">
+<dt id="c.drm_client_modeset_commit">
+int <code class="sig-name descname">drm_client_modeset_commit</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.drm_client_dev" title="drm_client_dev">drm_client_dev</a><em> *client</em><span class="sig-paren">)</span><a class="headerlink" href="#c.drm_client_modeset_commit" title="Permalink to this definition">¶</a></dt>
+<dd><p>Commit CRTC configuration</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">drm_client_dev</span> <span class="pre">*client</span></code></dt><dd><p>DRM client</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Commit modeset configuration to crtcs.</p>
+<p><strong>Return</strong></p>
+<p>Zero on success or negative error code on failure.</p>
+</div>
+<dl class="function">
+<dt id="c.drm_client_modeset_dpms">
+int <code class="sig-name descname">drm_client_modeset_dpms</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.drm_client_dev" title="drm_client_dev">drm_client_dev</a><em> *client</em>, int<em> mode</em><span class="sig-paren">)</span><a class="headerlink" href="#c.drm_client_modeset_dpms" title="Permalink to this definition">¶</a></dt>
+<dd><p>Set DPMS mode</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">drm_client_dev</span> <span class="pre">*client</span></code></dt><dd><p>DRM client</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">mode</span></code></dt><dd><p>DPMS mode</p>
+</dd>
+</dl>
+<p><strong>Note</strong></p>
+<p>For atomic drivers <strong>mode</strong> is reduced to on/off.</p>
+<p><strong>Return</strong></p>
+<p>Zero on success or negative error code on failure.</p>
+</div>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/gpu/drm-client.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/gpu/drm-client.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,275 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Broadcom RoboSwitch Ethernet switch driver &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Broadcom Starfighter 2 Ethernet switch driver" href="bcm_sf2.html" />
+    <link rel="prev" title="Architecture" href="dsa.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="broadcom-roboswitch-ethernet-switch-driver">
+<h1>Broadcom RoboSwitch Ethernet switch driver<a class="headerlink" href="#broadcom-roboswitch-ethernet-switch-driver" title="Permalink to this headline">¶</a></h1>
+<p>The Broadcom RoboSwitch Ethernet switch family is used in quite a range of
+xDSL router, cable modems and other multimedia devices.</p>
+<p>The actual implementation supports the devices BCM5325E, BCM5365, BCM539x,
+BCM53115 and BCM53125 as well as BCM63XX.</p>
+<section id="implementation-details">
+<h2>Implementation details<a class="headerlink" href="#implementation-details" title="Permalink to this headline">¶</a></h2>
+<p>The driver is located in <code class="docutils literal notranslate"><span class="pre">drivers/net/dsa/b53/</span></code> and is implemented as a
+DSA driver; see <code class="docutils literal notranslate"><span class="pre">Documentation/networking/dsa/dsa.rst</span></code> for details on the
+subsystem and what it provides.</p>
+<p>The switch is, if possible, configured to enable a Broadcom specific 4-bytes
+switch tag which gets inserted by the switch for every packet forwarded to the
+CPU interface, conversely, the CPU network interface should insert a similar
+tag for packets entering the CPU port. The tag format is described in
+<code class="docutils literal notranslate"><span class="pre">net/dsa/tag_brcm.c</span></code>.</p>
+<p>The configuration of the device depends on whether or not tagging is
+supported.</p>
+<p>The interface names and example network configuration are used according the
+configuration described in the <a class="reference internal" href="configuration.html#dsa-config-showcases"><span class="std std-ref">Configuration showcases</span></a>.</p>
+<section id="configuration-with-tagging-support">
+<h3>Configuration with tagging support<a class="headerlink" href="#configuration-with-tagging-support" title="Permalink to this headline">¶</a></h3>
+<p>The tagging based configuration is desired. It is not specific to the b53
+DSA driver and will work like all DSA drivers which supports tagging.</p>
+<p>See <a class="reference internal" href="configuration.html#dsa-tagged-configuration"><span class="std std-ref">Configuration with tagging support</span></a>.</p>
+</section>
+<section id="configuration-without-tagging-support">
+<h3>Configuration without tagging support<a class="headerlink" href="#configuration-without-tagging-support" title="Permalink to this headline">¶</a></h3>
+<p>Older models (5325, 5365) support a different tag format that is not supported
+yet. 539x and 531x5 require managed mode and some special handling, which is
+also not yet supported. The tagging support is disabled in these cases and the
+switch need a different configuration.</p>
+<p>The configuration slightly differ from the <a class="reference internal" href="configuration.html#dsa-vlan-configuration"><span class="std std-ref">Configuration without tagging support</span></a>.</p>
+<p>The b53 tags the CPU port in all VLANs, since otherwise any PVID untagged
+VLAN programming would basically change the CPU port’s default PVID and make
+it untagged, undesirable.</p>
+<p>In difference to the configuration described in <a class="reference internal" href="configuration.html#dsa-vlan-configuration"><span class="std std-ref">Configuration without tagging support</span></a>
+the default VLAN 1 has to be removed from the slave interface configuration in
+single port and gateway configuration, while there is no need to add an extra
+VLAN configuration in the bridge showcase.</p>
+<section id="single-port">
+<h4>single port<a class="headerlink" href="#single-port" title="Permalink to this headline">¶</a></h4>
+<p>The configuration can only be set up via VLAN tagging and bridge setup.
+By default packages are tagged with vid 1:</p>
+<div class="highlight-sh notranslate"><div class="highlight"><pre><span></span><span class="c1"># tag traffic on CPU port</span>
+ip link add link eth0 name eth0.1 <span class="nb">type</span> vlan id <span class="m">1</span>
+ip link add link eth0 name eth0.2 <span class="nb">type</span> vlan id <span class="m">2</span>
+ip link add link eth0 name eth0.3 <span class="nb">type</span> vlan id <span class="m">3</span>
+
+<span class="c1"># The master interface needs to be brought up before the slave ports.</span>
+ip link <span class="nb">set</span> eth0 up
+ip link <span class="nb">set</span> eth0.1 up
+ip link <span class="nb">set</span> eth0.2 up
+ip link <span class="nb">set</span> eth0.3 up
+
+<span class="c1"># bring up the slave interfaces</span>
+ip link <span class="nb">set</span> wan up
+ip link <span class="nb">set</span> lan1 up
+ip link <span class="nb">set</span> lan2 up
+
+<span class="c1"># create bridge</span>
+ip link add name br0 <span class="nb">type</span> bridge
+
+<span class="c1"># activate VLAN filtering</span>
+ip link <span class="nb">set</span> dev br0 <span class="nb">type</span> bridge vlan_filtering <span class="m">1</span>
+
+<span class="c1"># add ports to bridges</span>
+ip link <span class="nb">set</span> dev wan master br0
+ip link <span class="nb">set</span> dev lan1 master br0
+ip link <span class="nb">set</span> dev lan2 master br0
+
+<span class="c1"># tag traffic on ports</span>
+bridge vlan add dev lan1 vid <span class="m">2</span> pvid untagged
+bridge vlan del dev lan1 vid <span class="m">1</span>
+bridge vlan add dev lan2 vid <span class="m">3</span> pvid untagged
+bridge vlan del dev lan2 vid <span class="m">1</span>
+
+<span class="c1"># configure the VLANs</span>
+ip addr add <span class="m">192</span>.0.2.1/30 dev eth0.1
+ip addr add <span class="m">192</span>.0.2.5/30 dev eth0.2
+ip addr add <span class="m">192</span>.0.2.9/30 dev eth0.3
+
+<span class="c1"># bring up the bridge devices</span>
+ip link <span class="nb">set</span> br0 up
+</pre></div>
+</div>
+</section>
+<section id="bridge">
+<h4>bridge<a class="headerlink" href="#bridge" title="Permalink to this headline">¶</a></h4>
+<div class="highlight-sh notranslate"><div class="highlight"><pre><span></span><span class="c1"># tag traffic on CPU port</span>
+ip link add link eth0 name eth0.1 <span class="nb">type</span> vlan id <span class="m">1</span>
+
+<span class="c1"># The master interface needs to be brought up before the slave ports.</span>
+ip link <span class="nb">set</span> eth0 up
+ip link <span class="nb">set</span> eth0.1 up
+
+<span class="c1"># bring up the slave interfaces</span>
+ip link <span class="nb">set</span> wan up
+ip link <span class="nb">set</span> lan1 up
+ip link <span class="nb">set</span> lan2 up
+
+<span class="c1"># create bridge</span>
+ip link add name br0 <span class="nb">type</span> bridge
+
+<span class="c1"># activate VLAN filtering</span>
+ip link <span class="nb">set</span> dev br0 <span class="nb">type</span> bridge vlan_filtering <span class="m">1</span>
+
+<span class="c1"># add ports to bridge</span>
+ip link <span class="nb">set</span> dev wan master br0
+ip link <span class="nb">set</span> dev lan1 master br0
+ip link <span class="nb">set</span> dev lan2 master br0
+ip link <span class="nb">set</span> eth0.1 master br0
+
+<span class="c1"># configure the bridge</span>
+ip addr add <span class="m">192</span>.0.2.129/25 dev br0
+
+<span class="c1"># bring up the bridge</span>
+ip link <span class="nb">set</span> dev br0 up
+</pre></div>
+</div>
+</section>
+<section id="gateway">
+<h4>gateway<a class="headerlink" href="#gateway" title="Permalink to this headline">¶</a></h4>
+<div class="highlight-sh notranslate"><div class="highlight"><pre><span></span><span class="c1"># tag traffic on CPU port</span>
+ip link add link eth0 name eth0.1 <span class="nb">type</span> vlan id <span class="m">1</span>
+ip link add link eth0 name eth0.2 <span class="nb">type</span> vlan id <span class="m">2</span>
+
+<span class="c1"># The master interface needs to be brought up before the slave ports.</span>
+ip link <span class="nb">set</span> eth0 up
+ip link <span class="nb">set</span> eth0.1 up
+ip link <span class="nb">set</span> eth0.2 up
+
+<span class="c1"># bring up the slave interfaces</span>
+ip link <span class="nb">set</span> wan up
+ip link <span class="nb">set</span> lan1 up
+ip link <span class="nb">set</span> lan2 up
+
+<span class="c1"># create bridge</span>
+ip link add name br0 <span class="nb">type</span> bridge
+
+<span class="c1"># activate VLAN filtering</span>
+ip link <span class="nb">set</span> dev br0 <span class="nb">type</span> bridge vlan_filtering <span class="m">1</span>
+
+<span class="c1"># add ports to bridges</span>
+ip link <span class="nb">set</span> dev wan master br0
+ip link <span class="nb">set</span> eth0.1 master br0
+ip link <span class="nb">set</span> dev lan1 master br0
+ip link <span class="nb">set</span> dev lan2 master br0
+
+<span class="c1"># tag traffic on ports</span>
+bridge vlan add dev wan vid <span class="m">2</span> pvid untagged
+bridge vlan del dev wan vid <span class="m">1</span>
+
+<span class="c1"># configure the VLANs</span>
+ip addr add <span class="m">192</span>.0.2.1/30 dev eth0.2
+ip addr add <span class="m">192</span>.0.2.129/25 dev br0
+
+<span class="c1"># bring up the bridge devices</span>
+ip link <span class="nb">set</span> br0 up
+</pre></div>
+</div>
+</section>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Broadcom RoboSwitch Ethernet switch driver</a><ul>
+<li><a class="reference internal" href="#implementation-details">Implementation details</a><ul>
+<li><a class="reference internal" href="#configuration-with-tagging-support">Configuration with tagging support</a></li>
+<li><a class="reference internal" href="#configuration-without-tagging-support">Configuration without tagging support</a><ul>
+<li><a class="reference internal" href="#single-port">single port</a></li>
+<li><a class="reference internal" href="#bridge">bridge</a></li>
+<li><a class="reference internal" href="#gateway">gateway</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/networking/dsa/b53.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/networking/dsa/b53.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

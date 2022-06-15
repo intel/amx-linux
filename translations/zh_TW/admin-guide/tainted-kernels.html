@@ -1,0 +1,339 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>受汙染的內核 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="解釋「No working init found.」啓動掛起消息" href="init.html" />
+    <link rel="prev" title="二分（bisect）缺陷" href="bug-bisect.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是爲讓中文讀者更容易閱讀和理解，而不是作爲一個分支。因此，
+如果您對此文件有任何意見或改動，請先嘗試更新原始英文文件。如果要更改或
+修正某處翻譯文件，請將意見或補丁發送給維護者（聯繫方式見下）。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您發現本文檔與原始文件有任何不同或者有翻譯問題，請聯繫該文件的譯者，
+或者發送電子郵件給胡皓文以獲取幫助：&lt;<a class="reference external" href="mailto:src&#46;res&#37;&#52;&#48;email&#46;cn">src<span>&#46;</span>res<span>&#64;</span>email<span>&#46;</span>cn</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../admin-guide/tainted-kernels.html"><span class="doc">Tainted kernels</span></a></p>
+</dd>
+<dt class="field-even">譯者</dt>
+<dd class="field-even"><p>吳想成 Wu XiangCheng &lt;<a class="reference external" href="mailto:bobwxc&#37;&#52;&#48;email&#46;cn">bobwxc<span>&#64;</span>email<span>&#46;</span>cn</a>&gt;
+胡皓文 Hu Haowen &lt;<a class="reference external" href="mailto:src&#46;res&#37;&#52;&#48;email&#46;cn">src<span>&#46;</span>res<span>&#64;</span>email<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+</dl>
+<section id="id1">
+<h1>受汙染的內核<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h1>
+<p>當發生一些在稍後調查問題時可能相關的事件時，內核會將自己標記爲「受汙染
+（tainted）」的。不用太過擔心，大多數情況下運行受汙染的內核沒有問題；這些信息
+主要在有人想調查某個問題時才有意義的，因爲問題的真正原因可能是導致內核受汙染
+的事件。這就是爲什麼來自受汙染內核的缺陷報告常常被開發人員忽略，因此請嘗試用
+未受汙染的內核重現問題。</p>
+<p>請注意，即使在您消除導致汙染的原因（亦即卸載專有內核模塊）之後，內核仍將保持
+汙染狀態，以表示內核仍然不可信。這也是爲什麼內核在注意到內部問題（「kernel
+bug」）、可恢復錯誤（「kernel oops」）或不可恢復錯誤（「kernel panic」）時會列印
+受汙染狀態，並將有關此的調試信息寫入日誌 <code class="docutils literal notranslate"><span class="pre">dmesg</span></code> 輸出。也可以通過
+<code class="docutils literal notranslate"><span class="pre">/proc/</span></code> 中的文件在運行時檢查受汙染的狀態。</p>
+<section id="bugoopspanics">
+<h2>BUG、Oops或Panics消息中的汙染標誌<a class="headerlink" href="#bugoopspanics" title="Permalink to this headline">¶</a></h2>
+<p>在頂部以「CPU:」開頭的一行中可以找到受汙染的狀態；內核是否受到汙染和原因會顯示
+在進程ID（「PID:」）和觸發事件命令的縮寫名稱（「Comm:」）之後:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>BUG: unable to handle kernel NULL pointer dereference at 0000000000000000
+Oops: 0002 [#1] SMP PTI
+CPU: 0 PID: 4424 Comm: insmod Tainted: P        W  O      4.20.0-0.rc6.fc30 #1
+Hardware name: Red Hat KVM, BIOS 0.5.1 01/01/2011
+RIP: 0010:my_oops_init+0x13/0x1000 [kpanic]
+[...]
+</pre></div>
+</div>
+<p>如果內核在事件發生時沒有被汙染，您將在那裡看到「Not-tainted:」；如果被汙染，那
+麼它將是「Tainted:」以及字母或空格。在上面的例子中，它看起來是這樣的:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Tainted: P        W  O
+</pre></div>
+</div>
+<p>下表解釋了這些字符的含義。在本例中，由於加載了專有模塊（ <code class="docutils literal notranslate"><span class="pre">P</span></code> ），出現了
+警告（ <code class="docutils literal notranslate"><span class="pre">W</span></code> ），並且加載了外部構建的模塊（ <code class="docutils literal notranslate"><span class="pre">O</span></code> ），所以內核早些時候受到
+了汙染。要解碼其他字符，請使用下表。</p>
+</section>
+<section id="id2">
+<h2>解碼運行時的汙染狀態<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>在運行時，您可以通過讀取 <code class="docutils literal notranslate"><span class="pre">cat</span> <span class="pre">/proc/sys/kernel/tainted</span></code> 來查詢受汙染狀態。
+如果返回 <code class="docutils literal notranslate"><span class="pre">0</span></code> ，則內核沒有受到汙染；任何其他數字都表示受到汙染的原因。解碼
+這個數字的最簡單方法是使用腳本  <code class="docutils literal notranslate"><span class="pre">tools/debugging/kernel-chktaint</span></code> ，您的
+發行版可能會將其作爲名爲 <code class="docutils literal notranslate"><span class="pre">linux-tools</span></code> 或 <code class="docutils literal notranslate"><span class="pre">kernel-tools</span></code> 的包的一部分提
+供；如果沒有，您可以從
+<a class="reference external" href="https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/plain/tools/debugging/kernel-chktaint">git.kernel.org</a>
+網站下載此腳本並用 <code class="docutils literal notranslate"><span class="pre">sh</span> <span class="pre">kernel-chktaint</span></code> 執行，它會在上面引用的日誌中有類似
+語句的機器上列印這樣的內容:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Kernel is Tainted for following reasons:
+ * Proprietary module was loaded (#0)
+ * Kernel issued warning (#9)
+ * Externally-built (&#39;out-of-tree&#39;) module was loaded  (#12)
+See Documentation/admin-guide/tainted-kernels.rst in the Linux kernel or
+ https://www.kernel.org/doc/html/latest/admin-guide/tainted-kernels.html for
+ a more details explanation of the various taint flags.
+Raw taint value as int/string: 4609/&#39;P        W  O     &#39;
+</pre></div>
+</div>
+<p>你也可以試著自己解碼這個數字。如果內核被汙染的原因只有一個，那麼這很簡單，
+在本例中您可以通過下表找到數字。如果你需要解碼有多個原因的數字，因爲它是一
+個位域（bitfield），其中每個位表示一個特定類型的汙染的存在或不存在，最好讓
+前面提到的腳本來處理。但是如果您需要快速看一下，可以使用這個shell命令來檢查
+設置了哪些位:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ for i in $(seq 18); do echo $(($i-1)) $(($(cat /proc/sys/kernel/tainted)&gt;&gt;($i-1)&amp;1));done
+</pre></div>
+</div>
+</section>
+<section id="id3">
+<h2>汙染狀態代碼表<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h2>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 4%" />
+<col style="width: 7%" />
+<col style="width: 9%" />
+<col style="width: 80%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>位</p></th>
+<th class="head"><p>日誌</p></th>
+<th class="head"><p>數字</p></th>
+<th class="head"><p>內核被汙染的原因</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>0</p></td>
+<td><p>G/P</p></td>
+<td><p>1</p></td>
+<td><p>已加載專用模塊</p></td>
+</tr>
+<tr class="row-odd"><td><p>1</p></td>
+<td><p>_/F</p></td>
+<td><p>2</p></td>
+<td><p>模塊被強制加載</p></td>
+</tr>
+<tr class="row-even"><td><p>2</p></td>
+<td><p>_/S</p></td>
+<td><p>4</p></td>
+<td><p>內核運行在不合規範的系統上</p></td>
+</tr>
+<tr class="row-odd"><td><p>3</p></td>
+<td><p>_/R</p></td>
+<td><p>8</p></td>
+<td><p>模塊被強制卸載</p></td>
+</tr>
+<tr class="row-even"><td><p>4</p></td>
+<td><p>_/M</p></td>
+<td><p>16</p></td>
+<td><p>處理器報告了機器檢測異常（MCE）</p></td>
+</tr>
+<tr class="row-odd"><td><p>5</p></td>
+<td><p>_/B</p></td>
+<td><p>32</p></td>
+<td><p>引用了錯誤的頁或某些意外的頁標誌</p></td>
+</tr>
+<tr class="row-even"><td><p>6</p></td>
+<td><p>_/U</p></td>
+<td><p>64</p></td>
+<td><p>用戶空間應用程式請求的汙染</p></td>
+</tr>
+<tr class="row-odd"><td><p>7</p></td>
+<td><p>_/D</p></td>
+<td><p>128</p></td>
+<td><p>內核最近死機了，即曾出現OOPS或BUG</p></td>
+</tr>
+<tr class="row-even"><td><p>8</p></td>
+<td><p>_/A</p></td>
+<td><p>256</p></td>
+<td><p>ACPI表被用戶覆蓋</p></td>
+</tr>
+<tr class="row-odd"><td><p>9</p></td>
+<td><p>_/W</p></td>
+<td><p>512</p></td>
+<td><p>內核發出警告</p></td>
+</tr>
+<tr class="row-even"><td><p>10</p></td>
+<td><p>_/C</p></td>
+<td><p>1024</p></td>
+<td><p>已加載staging驅動程序</p></td>
+</tr>
+<tr class="row-odd"><td><p>11</p></td>
+<td><p>_/I</p></td>
+<td><p>2048</p></td>
+<td><p>已應用平台固件缺陷的解決方案</p></td>
+</tr>
+<tr class="row-even"><td><p>12</p></td>
+<td><p>_/O</p></td>
+<td><p>4096</p></td>
+<td><p>已加載外部構建（「樹外」）模塊</p></td>
+</tr>
+<tr class="row-odd"><td><p>13</p></td>
+<td><p>_/E</p></td>
+<td><p>8192</p></td>
+<td><p>已加載未簽名的模塊</p></td>
+</tr>
+<tr class="row-even"><td><p>14</p></td>
+<td><p>_/L</p></td>
+<td><p>16384</p></td>
+<td><p>發生軟鎖定</p></td>
+</tr>
+<tr class="row-odd"><td><p>15</p></td>
+<td><p>_/K</p></td>
+<td><p>32768</p></td>
+<td><p>內核已實時打補丁</p></td>
+</tr>
+<tr class="row-even"><td><p>16</p></td>
+<td><p>_/X</p></td>
+<td><p>65536</p></td>
+<td><p>備用汙染，爲發行版定義並使用</p></td>
+</tr>
+<tr class="row-odd"><td><p>17</p></td>
+<td><p>_/T</p></td>
+<td><p>131072</p></td>
+<td><p>內核是用結構隨機化插件構建的</p></td>
+</tr>
+</tbody>
+</table>
+<p>註：字符 <code class="docutils literal notranslate"><span class="pre">_</span></code> 表示空白，以便於閱讀表。</p>
+</section>
+<section id="id4">
+<h2>汙染的更詳細解釋<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><ol class="arabic simple" start="0">
+<li><p><code class="docutils literal notranslate"><span class="pre">G</span></code> 加載的所有模塊都有GPL或兼容許可證， <code class="docutils literal notranslate"><span class="pre">P</span></code> 加載了任何專有模塊。
+沒有MODULE_LICENSE（模塊許可證）或MODULE_LICENSE未被insmod認可爲GPL
+兼容的模塊被認爲是專有的。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">F</span></code> 任何模塊被 <code class="docutils literal notranslate"><span class="pre">insmod</span> <span class="pre">-f</span></code> 強制加載， <code class="docutils literal notranslate"><span class="pre">'</span> <span class="pre">'</span></code> 所有模塊正常加載。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">S</span></code> 內核運行在不合規範的處理器或系統上：硬體已運行在不受支持的配置中，
+因此無法保證正確執行。內核將被汙染，例如：</p>
+<ul class="simple">
+<li><p>在x86上：PAE是通過intel CPU（如Pentium M）上的forcepae強制執行的，這些
+CPU不報告PAE，但可能有功能實現，SMP內核在非官方支持的SMP Athlon CPU上
+運行，MSR被暴露到用戶空間中。</p></li>
+<li><p>在arm上：在某些CPU（如Keystone 2）上運行的內核，沒有啓用某些內核特性。</p></li>
+<li><p>在arm64上：CPU之間存在不匹配的硬體特性，引導加載程序以不同的模式引導CPU。</p></li>
+<li><p>某些驅動程序正在被用在不受支持的體系結構上（例如x86_64以外的其他系統
+上的scsi/snic，非x86/x86_64/itanium上的scsi/ips，已經損壞了arm64上
+irqchip/irq-gic的固件設置…）。</p></li>
+</ul>
+</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">R</span></code> 模塊被 <code class="docutils literal notranslate"><span class="pre">rmmod</span> <span class="pre">-f</span></code> 強制卸載， <code class="docutils literal notranslate"><span class="pre">'</span> <span class="pre">'</span></code> 所有模塊都正常卸載。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">M</span></code> 任何處理器報告了機器檢測異常， <code class="docutils literal notranslate"><span class="pre">'</span> <span class="pre">'</span></code> 未發生機器檢測異常。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">B</span></code> 頁面釋放函數發現錯誤的頁面引用或某些意外的頁面標誌。這表示硬體問題
+或內核錯誤；日誌中應該有其他信息指示發生此汙染的原因。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">U</span></code> 用戶或用戶應用程式特意請求設置受汙染標誌，否則應爲 <code class="docutils literal notranslate"><span class="pre">'</span> <span class="pre">'</span></code> 。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">D</span></code> 內核最近死機了，即出現了OOPS或BUG。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">A</span></code> ACPI表被重寫。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">W</span></code> 內核之前已發出過警告（儘管有些警告可能會設置更具體的汙染標誌）。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">C</span></code> 已加載staging驅動程序。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">I</span></code> 內核正在處理平台固件（BIOS或類似軟體）中的嚴重錯誤。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">O</span></code> 已加載外部構建（「樹外」）模塊。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">E</span></code> 在支持模塊簽名的內核中加載了未簽名的模塊。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">L</span></code> 系統上先前發生過軟鎖定。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">K</span></code> 內核已經實時打了補丁。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">X</span></code> 備用汙染，由Linux發行版定義和使用。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">T</span></code> 內核構建時使用了randstruct插件，它可以有意生成非常不尋常的內核結構
+布局（甚至是性能病態的布局），這在調試時非常有用。於構建時設置。</p></li>
+</ol>
+</div></blockquote>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">受汙染的內核</a><ul>
+<li><a class="reference internal" href="#bugoopspanics">BUG、Oops或Panics消息中的汙染標誌</a></li>
+<li><a class="reference internal" href="#id2">解碼運行時的汙染狀態</a></li>
+<li><a class="reference internal" href="#id3">汙染狀態代碼表</a></li>
+<li><a class="reference internal" href="#id4">汙染的更詳細解釋</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_TW/admin-guide/tainted-kernels.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_TW/admin-guide/tainted-kernels.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

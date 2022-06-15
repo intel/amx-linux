@@ -1,0 +1,547 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>通用关联数组的实现 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="XArray" href="xarray.html" />
+    <link rel="prev" title="为内核对象添加引用计数器（krefs）" href="kref.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../core-api/assoc_array.html"><span class="doc">Generic Associative Array Implementation</span></a></p>
+</dd>
+<dt class="field-even">翻译</dt>
+<dd class="field-even"><p>司延腾 Yanteng Si &lt;<a class="reference external" href="mailto:siyanteng&#37;&#52;&#48;loongson&#46;cn">siyanteng<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+<dt class="field-odd">校译</dt>
+<dd class="field-odd"><p></p></dd>
+</dl>
+<section id="cn-core-api-assoc-array">
+<span id="id1"></span><h1>通用关联数组的实现<a class="headerlink" href="#cn-core-api-assoc-array" title="Permalink to this headline">¶</a></h1>
+<section id="id2">
+<h2>简介<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>这个关联数组的实现是一个具有以下属性的对象容器:</p>
+<ol class="arabic">
+<li><p>对象是不透明的指针。该实现不关心它们指向哪里（如果有的话）或它们指向什么（如果有的
+话）。</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>指向对象的指针 <em>必须</em> 在最小有效位为零。</p>
+</div>
+</li>
+<li><p>对象不需要包含供数组使用的链接块。这允许一个对象同时位于多个数组中。相反，数组是
+由指向对象的元数据块组成的。</p></li>
+<li><p>对象需要索引键来定位它们在阵列中的位置。</p></li>
+<li><p>索引键必须是唯一的。插入一个与已经在数组中的且具有相同键值的对象将取代旧的对象。</p></li>
+<li><p>索引键可以是任何长度，也可以是不同的长度。</p></li>
+<li><p>索引键应该在早期就对长度进行编码，即在任何由于长度引起的变化出现之前。</p></li>
+<li><p>索引键可以包括一个哈希值，以便将对象分散到整个数组中。</p></li>
+<li><p>该数组可以迭代。对象不一定会按索引键的顺序出现。</p></li>
+<li><p>数组可以在被修改的时候进行迭代，只要RCU的读锁被迭代器持有。然而，请注意，在这种情
+况下，一些对象可能会被看到不止一次。如果这是个问题，迭代器应该锁定以防止修改。然
+而，除非删除，否则对象不会被错过。</p></li>
+<li><p>数组中的对象可以通过其索引键进行查询。</p></li>
+<li><p>当数组被修改时，对象可以被查询，前提是进行查询的线程持有RCU的读锁。</p></li>
+</ol>
+<p>该实现在内部使用了一棵由16个指针节点组成的树，这些节点在每一层都由索引键的小数点进行索
+引，其方式与基数树相同。为了提高内存效率，可以放置快捷键，以跳过本来是一系列单占节点的地
+方。此外，节点将叶子对象指针打包到节点的空闲空间中，而不是做一个额外的分支，直到有对象
+需要被添加到一个完整的节点中。</p>
+</section>
+<section id="api">
+<h2>公用API<a class="headerlink" href="#api" title="Permalink to this headline">¶</a></h2>
+<p>公用API可以在 <code class="docutils literal notranslate"><span class="pre">&lt;linux/assoc_array.h&gt;</span></code> 中找到。关联数组的根是以下结构:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct assoc_array {
+        ...
+};
+</pre></div>
+</div>
+<p>该代码是通过启用 <code class="docutils literal notranslate"><span class="pre">CONFIG_ASSOCIATIVE_ARRAY</span></code> 来选择的，以:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>./script/config -e ASSOCIATIVE_ARRAY
+</pre></div>
+</div>
+<section id="id3">
+<h3>编辑脚本<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h3>
+<p>插入和删除功能会产生一个“编辑脚本”，以后可以应用这个脚本来实现更改，而不会造成 <code class="docutils literal notranslate"><span class="pre">ENOMEM</span></code>
+风险。这保留了将被安装在内部树中的预分配的元数据块，并跟踪应用脚本时将从树中删除的元数
+据块。</p>
+<p>在脚本应用后，这也被用来跟踪死块和死对象，以便以后可以释放它们。释放是在RCU宽限期过后
+进行的–因此允许访问功能在RCU读锁下进行。</p>
+<p>脚本在API之外显示为一个类型为:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct assoc_array_edit;
+</pre></div>
+</div>
+<p>有两个处理脚本的功能:</p>
+<ol class="arabic">
+<li><p>应用一个编辑脚本:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void assoc_array_apply_edit(struct assoc_array_edit *edit);
+</pre></div>
+</div>
+</li>
+</ol>
+<p>这将执行编辑功能，插值各种写屏障，以允许在RCU读锁下的访问继续进行。然后，编辑脚本将被
+传递给 <code class="docutils literal notranslate"><span class="pre">call_rcu()</span></code> ，以释放它和它所指向的任何死的东西。</p>
+<ol class="arabic" start="2">
+<li><p>Cancel an edit script:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void assoc_array_cancel_edit(struct assoc_array_edit *edit);
+</pre></div>
+</div>
+</li>
+</ol>
+<p>这将立即释放编辑脚本和所有预分配的内存。如果这是为了插入，新的对象不会被这个函数释放，
+而是必须由调用者释放。</p>
+<p>这些函数保证不会失败。</p>
+</section>
+<section id="id4">
+<h3>操作表<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h3>
+<p>各种功能采用了一个操作表:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct assoc_array_ops {
+        ...
+};
+</pre></div>
+</div>
+<p>这指出了一些方法，所有这些方法都需要提供:</p>
+<ol class="arabic">
+<li><p>从调用者数据中获取索引键的一个块:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>unsigned long (*get_key_chunk)(const void *index_key, int level);
+</pre></div>
+</div>
+</li>
+</ol>
+<p>这应该返回一个由调用者提供的索引键的块，从level参数给出的 <em>比特</em> 位置开始。level参数将
+是 <code class="docutils literal notranslate"><span class="pre">ASSOC_ARRAY_KEY_CHUNK_SIZE</span></code> 的倍数，该函数应返回 <code class="docutils literal notranslate"><span class="pre">ASSOC_ARRAY_KEY_CHUNK_SIZE</span></code>
+位。不可能出现错误。</p>
+<ol class="arabic" start="2">
+<li><p>获取一个对象的索引键的一个块:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>unsigned long (*get_object_key_chunk)(const void *object, int level);
+</pre></div>
+</div>
+</li>
+</ol>
+<p>和前面的函数一样，但是从数组中的一个对象而不是从调用者提供的索引键中获取数据。</p>
+<ol class="arabic" start="3">
+<li><p>看看这是否是我们要找的对象:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>bool (*compare_object)(const void *object, const void *index_key);
+</pre></div>
+</div>
+</li>
+</ol>
+<p>将对象与一个索引键进行比较，如果匹配则返回 <code class="docutils literal notranslate"><span class="pre">true</span></code> ，不匹配则返回 <code class="docutils literal notranslate"><span class="pre">false</span></code> 。</p>
+<ol class="arabic" start="4">
+<li><p>对两个对象的索引键进行比较:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int (*diff_objects)(const void *object, const void *index_key);
+</pre></div>
+</div>
+</li>
+</ol>
+<p>返回指定对象的索引键与给定索引键不同的比特位置，如果它们相同，则返回-1。</p>
+<ol class="arabic" start="5">
+<li><p>释放一个对象:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void (*free_object)(void *object);
+</pre></div>
+</div>
+</li>
+</ol>
+<p>释放指定的对象。注意，这可能是在调用 <code class="docutils literal notranslate"><span class="pre">assoc_array_apply_edit()</span></code> 后的一个RCU宽限期内
+调用的，所以在模块卸载时可能需要 <code class="docutils literal notranslate"><span class="pre">synchronize_rcu()</span></code> 。</p>
+</section>
+<section id="id5">
+<h3>操控函数<a class="headerlink" href="#id5" title="Permalink to this headline">¶</a></h3>
+<p>有一些函数用于操控关联数组:</p>
+<ol class="arabic">
+<li><p>初始化一个关联数组:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void assoc_array_init(struct assoc_array *array);
+</pre></div>
+</div>
+</li>
+</ol>
+<p>这将初始化一个关联数组的基础结构。它不会失败。</p>
+<ol class="arabic" start="2">
+<li><p>在一个关联数组中插入/替换一个对象:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct assoc_array_edit *
+assoc_array_insert(struct assoc_array *array,
+                   const struct assoc_array_ops *ops,
+                   const void *index_key,
+                   void *object);
+</pre></div>
+</div>
+</li>
+</ol>
+<p>这将把给定的对象插入数组中。注意，指针的最小有效位必须是0，因为它被用来在内部标记指针的类
+型。</p>
+<p>如果该键已经存在一个对象，那么它将被新的对象所取代，旧的对象将被自动释放。</p>
+<p><code class="docutils literal notranslate"><span class="pre">index_key</span></code> 参数应持有索引键信息，并在调用OPP表中的方法时传递给它们。</p>
+<p>这个函数不对数组本身做任何改动，而是返回一个必须应用的编辑脚本。如果出现内存不足的错误，会
+返回 <code class="docutils literal notranslate"><span class="pre">-ENOMEM</span></code> 。</p>
+<p>调用者应专门锁定数组的其他修改器。</p>
+<ol class="arabic" start="3">
+<li><p>从一个关联数组中删除一个对象:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct assoc_array_edit *
+assoc_array_delete(struct assoc_array *array,
+                   const struct assoc_array_ops *ops,
+                   const void *index_key);
+</pre></div>
+</div>
+</li>
+</ol>
+<p>这将从数组中删除一个符合指定数据的对象。</p>
+<p><code class="docutils literal notranslate"><span class="pre">index_key</span></code> 参数应持有索引键信息，并在调用OPP表中的方法时传递给它们。</p>
+<p>这个函数不对数组本身做任何改动，而是返回一个必须应用的编辑脚本。 <code class="docutils literal notranslate"><span class="pre">-ENOMEM</span></code> 在出现内存不足
+的错误时返回。如果在数组中没有找到指定的对象，将返回 <code class="docutils literal notranslate"><span class="pre">NULL</span></code> 。</p>
+<p>调用者应该对数组的其他修改者进行专门锁定。</p>
+<ol class="arabic" start="4">
+<li><p>从一个关联数组中删除所有对象:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct assoc_array_edit *
+assoc_array_clear(struct assoc_array *array,
+                  const struct assoc_array_ops *ops);
+</pre></div>
+</div>
+</li>
+</ol>
+<p>这个函数删除了一个关联数组中的所有对象，使其完全为空。</p>
+<p>这个函数没有对数组本身做任何改动，而是返回一个必须应用的编辑脚本。如果出现内存不足
+的错误，则返回 <code class="docutils literal notranslate"><span class="pre">-ENOMEM</span></code> 。</p>
+<p>调用者应专门锁定数组的其他修改者。</p>
+<ol class="arabic" start="5">
+<li><p>销毁一个关联数组，删除所有对象:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void assoc_array_destroy(struct assoc_array *array,
+                         const struct assoc_array_ops *ops);
+</pre></div>
+</div>
+</li>
+</ol>
+<p>这将破坏关联数组的内容，使其完全为空。在这个函数销毁数组的同时，不允许另一个线程在RCU读锁
+下遍历数组，因为在内存释放时不执行RCU延迟，这需要分配内存。</p>
+<p>调用者应该专门针对数组的其他修改者和访问者进行锁定。</p>
+<ol class="arabic" start="6">
+<li><p>垃圾回收一个关联数组:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int assoc_array_gc(struct assoc_array *array,
+                   const struct assoc_array_ops *ops,
+                   bool (*iterator)(void *object, void *iterator_data),
+                   void *iterator_data);
+</pre></div>
+</div>
+</li>
+</ol>
+<p>这是对一个关联数组中的对象进行迭代，并将每个对象传递给 <code class="docutils literal notranslate"><span class="pre">iterator()</span></code> 。如果 <code class="docutils literal notranslate"><span class="pre">iterator()</span></code> 返回
+true，该对象被保留。如果它返回 <code class="docutils literal notranslate"><span class="pre">false</span></code> ，该对象将被释放。如果 <code class="docutils literal notranslate"><span class="pre">iterator()</span></code> 函数返回 <code class="docutils literal notranslate"><span class="pre">true</span></code> ，它必须
+在返回之前对该对象进行适当的 <code class="docutils literal notranslate"><span class="pre">refcount</span></code> 递增。</p>
+<p>如果可能的话，内部树将被打包下来，作为迭代的一部分，以减少其中的节点数量。</p>
+<p><code class="docutils literal notranslate"><span class="pre">iterator_data</span></code> 被直接传递给 <code class="docutils literal notranslate"><span class="pre">iterator()</span></code> ，否则会被函数忽略。</p>
+<p>如果成功，该函数将返回 <code class="docutils literal notranslate"><span class="pre">0</span></code> ，如果没有足够的内存，则返回 <code class="docutils literal notranslate"><span class="pre">-ENOMEM</span></code> 。</p>
+<p>在这个函数执行过程中，其他线程有可能在RCU读锁下迭代或搜索阵列。调用者应该专门针对数组的其他
+修改者进行锁定。</p>
+</section>
+<section id="id6">
+<h3>访问函数<a class="headerlink" href="#id6" title="Permalink to this headline">¶</a></h3>
+<p>有两个函数用于访问一个关联数组:</p>
+<ol class="arabic">
+<li><p>遍历一个关联数组中的所有对象:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int assoc_array_iterate(const struct assoc_array *array,
+                        int (*iterator)(const void *object,
+                                        void *iterator_data),
+                        void *iterator_data);
+</pre></div>
+</div>
+</li>
+</ol>
+<p>这将数组中的每个对象传递给迭代器回调函数。 <code class="docutils literal notranslate"><span class="pre">iterator_data</span></code> 是该函数的私有数据。</p>
+<p>在数组被修改的同时，可以在数组上使用这个方法，前提是RCU读锁被持有。在这种情况下，迭代函数有
+可能两次看到某些对象。如果这是个问题，那么修改应该被锁定。然而，迭代算法不应该错过任何对象。</p>
+<p>如果数组中没有对象，该函数将返回 <code class="docutils literal notranslate"><span class="pre">0</span></code> ，否则将返回最后一次调用的迭代器函数的结果。如果对迭代函数
+的任何调用导致非零返回，迭代立即停止。</p>
+<ol class="arabic" start="2">
+<li><p>在一个关联数组中寻找一个对象:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void *assoc_array_find(const struct assoc_array *array,
+                       const struct assoc_array_ops *ops,
+                       const void *index_key);
+</pre></div>
+</div>
+</li>
+</ol>
+<p>这将直接穿过数组的内部树，到达索引键所指定的对象。</p>
+<p>这个函数可以在修改数组的同时用在数组上，前提是RCU读锁被持有。</p>
+<p>如果找到对象，该函数将返回对象（并将 <code class="docutils literal notranslate"><span class="pre">*_type</span></code> 设置为对象的类型），如果没有找到对象，将返回 <code class="docutils literal notranslate"><span class="pre">NULL</span></code> 。</p>
+</section>
+<section id="id7">
+<h3>索引键形式<a class="headerlink" href="#id7" title="Permalink to this headline">¶</a></h3>
+<p>索引键可以是任何形式的，但是由于算法没有被告知键有多长，所以强烈建议在任何由于长度而产生的变化
+对比较产生影响之前，索引键应该很早就包括其长度。</p>
+<p>这将导致具有不同长度键的叶子相互分散，而具有相同长度键的叶子则聚集在一起。</p>
+<p>我们还建议索引键以键的其余部分的哈希值开始，以最大限度地提高整个键空间的散布情况。</p>
+<p>分散性越好，内部树就越宽，越低。</p>
+<p>分散性差并不是一个太大的问题，因为有快捷键，节点可以包含叶子和元数据指针的混合物。</p>
+<p>索引键是以机器字的块状来读取的。每个块被细分为每层一个nibble（4比特），所以在32位CPU上这适合8层，
+在64位CPU上适合16层。除非散布情况真的很差，否则不太可能有超过一个字的任何特定索引键需要被使用。</p>
+</section>
+</section>
+<section id="id8">
+<h2>内部工作机制<a class="headerlink" href="#id8" title="Permalink to this headline">¶</a></h2>
+<p>关联数组数据结构有一个内部树。这个树由两种类型的元数据块构成：节点和快捷键。</p>
+<p>一个节点是一个槽的数组。每个槽可以包含以下四种东西之一:</p>
+<ul class="simple">
+<li><p>一个NULL的指针，表示槽是空的。</p></li>
+<li><p>一个指向对象（叶子）的指针。</p></li>
+<li><p>一个指向下一级节点的指针。</p></li>
+<li><p>一个指向快捷键的指针。</p></li>
+</ul>
+<section id="id9">
+<h3>基本的内部树形布局<a class="headerlink" href="#id9" title="Permalink to this headline">¶</a></h3>
+<p>暂时不考虑快捷键，节点形成一个多级树。索引键空间被树上的节点严格细分，节点出现在固定的层次上。例如:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Level: 0               1               2               3
+       =============== =============== =============== ===============
+                                                       NODE D
+                       NODE B          NODE C  +------&gt;+---+
+               +------&gt;+---+   +------&gt;+---+   |       | 0 |
+       NODE A  |       | 0 |   |       | 0 |   |       +---+
+       +---+   |       +---+   |       +---+   |       :   :
+       | 0 |   |       :   :   |       :   :   |       +---+
+       +---+   |       +---+   |       +---+   |       | f |
+       | 1 |---+       | 3 |---+       | 7 |---+       +---+
+       +---+           +---+           +---+
+       :   :           :   :           | 8 |---+
+       +---+           +---+           +---+   |       NODE E
+       | e |---+       | f |           :   :   +------&gt;+---+
+       +---+   |       +---+           +---+           | 0 |
+       | f |   |                       | f |           +---+
+       +---+   |                       +---+           :   :
+               |       NODE F                          +---+
+               +------&gt;+---+                           | f |
+                       | 0 |           NODE G          +---+
+                       +---+   +------&gt;+---+
+                       :   :   |       | 0 |
+                       +---+   |       +---+
+                       | 6 |---+       :   :
+                       +---+           +---+
+                       :   :           | f |
+                       +---+           +---+
+                       | f |
+                       +---+
+</pre></div>
+</div>
+<p>在上述例子中，有7个节点（A-G），每个节点有16个槽（0-f）。假设树上没有其他元数据节点，那么密钥空间
+是这样划分的:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>KEY PREFIX      NODE
+==========      ====
+137*            D
+138*            E
+13[0-69-f]*     C
+1[0-24-f]*      B
+e6*             G
+e[0-57-f]*      F
+[02-df]*        A
+</pre></div>
+</div>
+<p>因此，例如，具有以下示例索引键的键将在适当的节点中被找到:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>INDEX KEY       PREFIX  NODE
+=============== ======= ====
+13694892892489  13      C
+13795289025897  137     D
+13889dde88793   138     E
+138bbb89003093  138     E
+1394879524789   12      C
+1458952489      1       B
+9431809de993ba  -       A
+b4542910809cd   -       A
+e5284310def98   e       F
+e68428974237    e6      G
+e7fffcbd443     e       F
+f3842239082     -       A
+</pre></div>
+</div>
+<p>为了节省内存，如果一个节点可以容纳它的那部分键空间中的所有叶子，那么这个节点将有所有这些叶子，而不
+会有任何元数据指针——即使其中一些叶子想在同一个槽中。</p>
+<p>一个节点可以包含叶子和元数据指针的异质性混合。元数据指针必须在与它们的关键空间的细分相匹配的槽中。
+叶子可以在任何没有被元数据指针占据的槽中。保证一个节点中没有一个叶子会与元数据指针占据的槽相匹配。
+如果元数据指针在那里，任何键与元数据键前缀相匹配的叶必须在元数据指针指向的子树中。</p>
+<p>在上面的索引键的例子列表中，节点A将包含:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>SLOT    CONTENT         INDEX KEY (PREFIX)
+====    =============== ==================
+1       PTR TO NODE B   1*
+any     LEAF            9431809de993ba
+any     LEAF            b4542910809cd
+e       PTR TO NODE F   e*
+any     LEAF            f3842239082
+</pre></div>
+</div>
+<p>和节点B:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>3   PTR TO NODE C   13*
+any LEAF            1458952489
+</pre></div>
+</div>
+</section>
+<section id="id10">
+<h3>快捷键<a class="headerlink" href="#id10" title="Permalink to this headline">¶</a></h3>
+<p>快捷键是跳过一块键空间的元数据记录。快捷键是一系列通过层次上升的单占节点的替代物。快捷键的存在是
+为了节省内存和加快遍历速度。</p>
+<p>树的根部有可能是一个快捷键——比如说，树至少包含17个节点，都有键前缀 <code class="docutils literal notranslate"><span class="pre">1111</span></code> 。插入算法将插入一个快捷键，
+以单次跳过 <code class="docutils literal notranslate"><span class="pre">1111</span></code> 的键位，并到达第四层，在这里，这些键位实际上变得不同。</p>
+</section>
+<section id="id11">
+<h3>拆分和合并节点<a class="headerlink" href="#id11" title="Permalink to this headline">¶</a></h3>
+<p>每个节点的最大容量为16个叶子和元数据指针。如果插入算法发现它正试图将一个第17个对象插入到一个节点中，
+该节点将被拆分，使得至少两个在该层有一个共同的关键段的叶子最终在一个单独的节点中，该共同的关键段的根
+在该槽上。</p>
+<p>如果一个完整的节点中的叶子和被插入的叶子足够相似，那么就会在树中插入一个快捷键。</p>
+<p>当根植于某个节点的子树中的对象数量下降到16个或更少时，那么该子树将被合并成一个单独的节点——如果可能的
+话，这将向根部扩散。</p>
+</section>
+<section id="id12">
+<h3>非递归式迭代<a class="headerlink" href="#id12" title="Permalink to this headline">¶</a></h3>
+<p>每个节点和快捷键都包含一个指向其父节点的后置指针，以及该父节点中指向它的槽数。非递归迭代使用这些来
+通过树的根部进行，前往父节点，槽N+1，以确保在没有堆栈的情况下取得进展。</p>
+<p>然而，反向指针使得同时改变和迭代变得很棘手。</p>
+</section>
+<section id="id13">
+<h3>同时改变和迭代<a class="headerlink" href="#id13" title="Permalink to this headline">¶</a></h3>
+<p>有一些情况需要考虑:</p>
+<ol class="arabic">
+<li><p>简单的插入/替换。这涉及到简单地将一个NULL或旧的匹配叶子的指针替换为屏障后的新叶子的指针。否则元数
+据块不会改变。一个旧的叶子直到RCU宽限期过后才会被释放。</p></li>
+<li><p>简单删除。这只是涉及到清除一个旧的匹配叶子。元数据块不会有其他变化。旧的叶子直到RCU宽限期之后才会
+被释放。</p></li>
+<li><p>插入，替换我们还没有进入的子树的一部分。这可能涉及到替换该子树的一部分——但这不会影响迭代，因为我们
+还没有到达它的指针，而且祖先块也不会被替换（这些块的布局不会改变）。</p></li>
+<li><p>插入替换了我们正在处理的节点。这不是一个问题，因为我们已经通过了锚定指针，直到我们跟随后面的指针才
+会切换到新的布局上——这时我们已经检查了被替换节点的叶子（在跟随任何元数据指针之前，我们会迭代一个节
+点的所有叶子）。</p>
+<p>然而，我们可能会重新看到一些叶子，这些叶子已经被分割成一个新的分支，而这个分支的位置比我们之前的位
+置更远。</p>
+</li>
+<li><p>插入替换了我们正在处理的依赖分支的节点。这不会影响到我们，直到我们跟随后面的指针。与（4）类似。</p></li>
+<li><p>删掉我们下面的一个分支。这不会影响我们，因为在我们看到新节点之前，回溯指针会让我们回到新节点的父节
+点。整个崩溃的子树被扔掉了，没有任何变化——而且仍然会在同一个槽上生根，所以我们不应该第二次处理它，
+因为我们会回到槽+1。</p></li>
+</ol>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>在某些情况下，我们需要同时改变一个节点的父指针和父槽指针（比如说，我们在它之前插入了另一个节点，
+并把它往上移了一层）。我们不能在不锁定读取的情况下这样做——所以我们必须同时替换该节点。</p>
+<p>然而，当我们把一个快捷键改成一个节点时，这不是一个问题，因为快捷键只有一个槽，所以当向后遍
+历一个槽时，不会使用父槽号。这意味着先改变槽位号是可以的——只要使用适当的屏障来确保父槽位号在后
+退指针之后被读取。</p>
+</div>
+<p>过时的块和叶子在RCU宽限期过后会被释放，所以只要任何进行遍历或迭代的人持有RCU读锁，旧的上层建筑就不
+应该在他们身上消失。</p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">通用关联数组的实现</a><ul>
+<li><a class="reference internal" href="#id2">简介</a></li>
+<li><a class="reference internal" href="#api">公用API</a><ul>
+<li><a class="reference internal" href="#id3">编辑脚本</a></li>
+<li><a class="reference internal" href="#id4">操作表</a></li>
+<li><a class="reference internal" href="#id5">操控函数</a></li>
+<li><a class="reference internal" href="#id6">访问函数</a></li>
+<li><a class="reference internal" href="#id7">索引键形式</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id8">内部工作机制</a><ul>
+<li><a class="reference internal" href="#id9">基本的内部树形布局</a></li>
+<li><a class="reference internal" href="#id10">快捷键</a></li>
+<li><a class="reference internal" href="#id11">拆分和合并节点</a></li>
+<li><a class="reference internal" href="#id12">非递归式迭代</a></li>
+<li><a class="reference internal" href="#id13">同时改变和迭代</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/core-api/assoc_array.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/core-api/assoc_array.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

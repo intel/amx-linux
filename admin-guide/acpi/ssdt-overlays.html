@@ -1,0 +1,270 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>SSDT Overlays &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Collaborative Processor Performance Control (CPPC)" href="cppc_sysfs.html" />
+    <link rel="prev" title="Upgrading ACPI tables via initrd" href="initrd_table_override.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="ssdt-overlays">
+<h1>SSDT Overlays<a class="headerlink" href="#ssdt-overlays" title="Permalink to this headline">¶</a></h1>
+<p>In order to support ACPI open-ended hardware configurations (e.g. development
+boards) we need a way to augment the ACPI configuration provided by the firmware
+image. A common example is connecting sensors on I2C / SPI buses on development
+boards.</p>
+<p>Although this can be accomplished by creating a kernel platform driver or
+recompiling the firmware image with updated ACPI tables, neither is practical:
+the former proliferates board specific kernel code while the latter requires
+access to firmware tools which are often not publicly available.</p>
+<p>Because ACPI supports external references in AML code a more practical
+way to augment firmware ACPI configuration is by dynamically loading
+user defined SSDT tables that contain the board specific information.</p>
+<p>For example, to enumerate a Bosch BMA222E accelerometer on the I2C bus of the
+Minnowboard MAX development board exposed via the LSE connector [1], the
+following ASL code can be used:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>DefinitionBlock (&quot;minnowmax.aml&quot;, &quot;SSDT&quot;, 1, &quot;Vendor&quot;, &quot;Accel&quot;, 0x00000003)
+{
+    External (\_SB.I2C6, DeviceObj)
+
+    Scope (\_SB.I2C6)
+    {
+        Device (STAC)
+        {
+            Name (_HID, &quot;BMA222E&quot;)
+            Name (RBUF, ResourceTemplate ()
+            {
+                I2cSerialBus (0x0018, ControllerInitiated, 0x00061A80,
+                            AddressingMode7Bit, &quot;\\_SB.I2C6&quot;, 0x00,
+                            ResourceConsumer, ,)
+                GpioInt (Edge, ActiveHigh, Exclusive, PullDown, 0x0000,
+                        &quot;\\_SB.GPO2&quot;, 0x00, ResourceConsumer, , )
+                { // Pin list
+                    0
+                }
+            })
+
+            Method (_CRS, 0, Serialized)
+            {
+                Return (RBUF)
+            }
+        }
+    }
+}
+</pre></div>
+</div>
+<p>which can then be compiled to AML binary format:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ iasl minnowmax.asl
+
+Intel ACPI Component Architecture
+ASL Optimizing Compiler version 20140214-64 [Mar 29 2014]
+Copyright (c) 2000 - 2014 Intel Corporation
+
+ASL Input:     minnomax.asl - 30 lines, 614 bytes, 7 keywords
+AML Output:    minnowmax.aml - 165 bytes, 6 named objects, 1 executable opcodes
+</pre></div>
+</div>
+<p>[1] <a class="reference external" href="https://www.elinux.org/Minnowboard:MinnowMax#Low_Speed_Expansion_.28Top.29">https://www.elinux.org/Minnowboard:MinnowMax#Low_Speed_Expansion_.28Top.29</a></p>
+<p>The resulting AML code can then be loaded by the kernel using one of the methods
+below.</p>
+<section id="loading-acpi-ssdts-from-initrd">
+<h2>Loading ACPI SSDTs from initrd<a class="headerlink" href="#loading-acpi-ssdts-from-initrd" title="Permalink to this headline">¶</a></h2>
+<p>This option allows loading of user defined SSDTs from initrd and it is useful
+when the system does not support EFI or when there is not enough EFI storage.</p>
+<p>It works in a similar way with initrd based ACPI tables override/upgrade: SSDT
+AML code must be placed in the first, uncompressed, initrd under the
+“kernel/firmware/acpi” path. Multiple files can be used and this will translate
+in loading multiple tables. Only SSDT and OEM tables are allowed. See
+<a class="reference internal" href="initrd_table_override.html"><span class="doc">Upgrading ACPI tables via initrd</span></a> for more details.</p>
+<p>Here is an example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># Add the raw ACPI tables to an uncompressed cpio archive.
+# They must be put into a /kernel/firmware/acpi directory inside the
+# cpio archive.
+# The uncompressed cpio archive must be the first.
+# Other, typically compressed cpio archives, must be
+# concatenated on top of the uncompressed one.
+mkdir -p kernel/firmware/acpi
+cp ssdt.aml kernel/firmware/acpi
+
+# Create the uncompressed cpio archive and concatenate the original initrd
+# on top:
+find kernel | cpio -H newc --create &gt; /boot/instrumented_initrd
+cat /boot/initrd &gt;&gt;/boot/instrumented_initrd
+</pre></div>
+</div>
+</section>
+<section id="loading-acpi-ssdts-from-efi-variables">
+<h2>Loading ACPI SSDTs from EFI variables<a class="headerlink" href="#loading-acpi-ssdts-from-efi-variables" title="Permalink to this headline">¶</a></h2>
+<p>This is the preferred method, when EFI is supported on the platform, because it
+allows a persistent, OS independent way of storing the user defined SSDTs. There
+is also work underway to implement EFI support for loading user defined SSDTs
+and using this method will make it easier to convert to the EFI loading
+mechanism when that will arrive. To enable it, the
+CONFIG_EFI_CUSTOM_SSDT_OVERLAYS shoyld be chosen to y.</p>
+<p>In order to load SSDTs from an EFI variable the <code class="docutils literal notranslate"><span class="pre">&quot;efivar_ssdt=...&quot;</span></code> kernel
+command line parameter can be used (the name has a limitation of 16 characters).
+The argument for the option is the variable name to use. If there are multiple
+variables with the same name but with different vendor GUIDs, all of them will
+be loaded.</p>
+<p>In order to store the AML code in an EFI variable the efivarfs filesystem can be
+used. It is enabled and mounted by default in /sys/firmware/efi/efivars in all
+recent distribution.</p>
+<p>Creating a new file in /sys/firmware/efi/efivars will automatically create a new
+EFI variable. Updating a file in /sys/firmware/efi/efivars will update the EFI
+variable. Please note that the file name needs to be specially formatted as
+“Name-GUID” and that the first 4 bytes in the file (little-endian format)
+represent the attributes of the EFI variable (see EFI_VARIABLE_MASK in
+include/linux/efi.h). Writing to the file must also be done with one write
+operation.</p>
+<p>For example, you can use the following bash script to create/update an EFI
+variable with the content from a given file:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#!/bin/sh -e
+
+while [ -n &quot;$1&quot; ]; do
+        case &quot;$1&quot; in
+        &quot;-f&quot;) filename=&quot;$2&quot;; shift;;
+        &quot;-g&quot;) guid=&quot;$2&quot;; shift;;
+        *) name=&quot;$1&quot;;;
+        esac
+        shift
+done
+
+usage()
+{
+        echo &quot;Syntax: ${0##*/} -f filename [ -g guid ] name&quot;
+        exit 1
+}
+
+[ -n &quot;$name&quot; -a -f &quot;$filename&quot; ] || usage
+
+EFIVARFS=&quot;/sys/firmware/efi/efivars&quot;
+
+[ -d &quot;$EFIVARFS&quot; ] || exit 2
+
+if stat -tf $EFIVARFS | grep -q -v de5e81e4; then
+        mount -t efivarfs none $EFIVARFS
+fi
+
+# try to pick up an existing GUID
+[ -n &quot;$guid&quot; ] || guid=$(find &quot;$EFIVARFS&quot; -name &quot;$name-*&quot; | head -n1 | cut -f2- -d-)
+
+# use a randomly generated GUID
+[ -n &quot;$guid&quot; ] || guid=&quot;$(cat /proc/sys/kernel/random/uuid)&quot;
+
+# efivarfs expects all of the data in one write
+tmp=$(mktemp)
+/bin/echo -ne &quot;\007\000\000\000&quot; | cat - $filename &gt; $tmp
+dd if=$tmp of=&quot;$EFIVARFS/$name-$guid&quot; bs=$(stat -c %s $tmp)
+rm $tmp
+</pre></div>
+</div>
+</section>
+<section id="loading-acpi-ssdts-from-configfs">
+<h2>Loading ACPI SSDTs from configfs<a class="headerlink" href="#loading-acpi-ssdts-from-configfs" title="Permalink to this headline">¶</a></h2>
+<p>This option allows loading of user defined SSDTs from user space via the configfs
+interface. The CONFIG_ACPI_CONFIGFS option must be select and configfs must be
+mounted. In the following examples, we assume that configfs has been mounted in
+/sys/kernel/config.</p>
+<p>New tables can be loading by creating new directories in /sys/kernel/config/acpi/table
+and writing the SSDT AML code in the aml attribute:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>cd /sys/kernel/config/acpi/table
+mkdir my_ssdt
+cat ~/ssdt.aml &gt; my_ssdt/aml
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">SSDT Overlays</a><ul>
+<li><a class="reference internal" href="#loading-acpi-ssdts-from-initrd">Loading ACPI SSDTs from initrd</a></li>
+<li><a class="reference internal" href="#loading-acpi-ssdts-from-efi-variables">Loading ACPI SSDTs from EFI variables</a></li>
+<li><a class="reference internal" href="#loading-acpi-ssdts-from-configfs">Loading ACPI SSDTs from configfs</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/admin-guide/acpi/ssdt-overlays.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/admin-guide/acpi/ssdt-overlays.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

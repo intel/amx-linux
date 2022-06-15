@@ -1,0 +1,149 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Chromebook Boot Flow &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Release Notes for Linux on Intel’s IXP4xx Network Processor" href="../ixp4xx.html" />
+    <link rel="prev" title="Feature status on arm architecture" href="../features.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="chromebook-boot-flow">
+<h1>Chromebook Boot Flow<a class="headerlink" href="#chromebook-boot-flow" title="Permalink to this headline">¶</a></h1>
+<p>Most recent Chromebooks that use device tree are using the opensource
+<a class="reference external" href="https://source.chromium.org/chromiumos/chromiumos/codesearch/+/main:src/platform/depthcharge/">depthcharge</a> bootloader. <a class="reference external" href="https://source.chromium.org/chromiumos/chromiumos/codesearch/+/main:src/platform/depthcharge/">Depthcharge</a> expects the OS to be packaged as a <a class="reference external" href="https://doc.coreboot.org/lib/payloads/fit.html">FIT
+Image</a> which contains an OS image as well as a collection of device trees. It
+is up to <a class="reference external" href="https://source.chromium.org/chromiumos/chromiumos/codesearch/+/main:src/platform/depthcharge/">depthcharge</a> to pick the right device tree from the <a class="reference external" href="https://doc.coreboot.org/lib/payloads/fit.html">FIT Image</a> and
+provide it to the OS.</p>
+<p>The scheme that <a class="reference external" href="https://source.chromium.org/chromiumos/chromiumos/codesearch/+/main:src/platform/depthcharge/">depthcharge</a> uses to pick the device tree takes into account
+three variables:</p>
+<ul class="simple">
+<li><p>Board name, specified at <a class="reference external" href="https://source.chromium.org/chromiumos/chromiumos/codesearch/+/main:src/platform/depthcharge/">depthcharge</a> compile time. This is $(BOARD) below.</p></li>
+<li><p>Board revision number, determined at runtime (perhaps by reading GPIO
+strappings, perhaps via some other method). This is $(REV) below.</p></li>
+<li><p>SKU number, read from GPIO strappings at boot time. This is $(SKU) below.</p></li>
+</ul>
+<p>For recent Chromebooks, <a class="reference external" href="https://source.chromium.org/chromiumos/chromiumos/codesearch/+/main:src/platform/depthcharge/">depthcharge</a> creates a match list that looks like this:</p>
+<ul class="simple">
+<li><p>google,$(BOARD)-rev$(REV)-sku$(SKU)</p></li>
+<li><p>google,$(BOARD)-rev$(REV)</p></li>
+<li><p>google,$(BOARD)-sku$(SKU)</p></li>
+<li><p>google,$(BOARD)</p></li>
+</ul>
+<p>Note that some older Chromebooks use a slightly different list that may
+not include SKU matching or may prioritize SKU/rev differently.</p>
+<p>Note that for some boards there may be extra board-specific logic to inject
+extra compatibles into the list, but this is uncommon.</p>
+<p><a class="reference external" href="https://source.chromium.org/chromiumos/chromiumos/codesearch/+/main:src/platform/depthcharge/">Depthcharge</a> will look through all device trees in the <a class="reference external" href="https://doc.coreboot.org/lib/payloads/fit.html">FIT Image</a> trying to
+find one that matches the most specific compatible. It will then look
+through all device trees in the <a class="reference external" href="https://doc.coreboot.org/lib/payloads/fit.html">FIT Image</a> trying to find the one that
+matches the <em>second most</em> specific compatible, etc.</p>
+<p>When searching for a device tree, <a class="reference external" href="https://source.chromium.org/chromiumos/chromiumos/codesearch/+/main:src/platform/depthcharge/">depthcharge</a> doesn’t care where the
+compatible string falls within a device tree’s root compatible string array.
+As an example, if we’re on board “lazor”, rev 4, SKU 0 and we have two device
+trees:</p>
+<ul class="simple">
+<li><p>“google,lazor-rev5-sku0”, “google,lazor-rev4-sku0”, “qcom,sc7180”</p></li>
+<li><p>“google,lazor”, “qcom,sc7180”</p></li>
+</ul>
+<p>Then <a class="reference external" href="https://source.chromium.org/chromiumos/chromiumos/codesearch/+/main:src/platform/depthcharge/">depthcharge</a> will pick the first device tree even though
+“google,lazor-rev4-sku0” was the second compatible listed in that device tree.
+This is because it is a more specific compatible than “google,lazor”.</p>
+<p>It should be noted that <a class="reference external" href="https://source.chromium.org/chromiumos/chromiumos/codesearch/+/main:src/platform/depthcharge/">depthcharge</a> does not have any smarts to try to
+match board or SKU revisions that are “close by”. That is to say that
+if <a class="reference external" href="https://source.chromium.org/chromiumos/chromiumos/codesearch/+/main:src/platform/depthcharge/">depthcharge</a> knows it’s on “rev4” of a board but there is no “rev4”
+device tree then <a class="reference external" href="https://source.chromium.org/chromiumos/chromiumos/codesearch/+/main:src/platform/depthcharge/">depthcharge</a> <em>won’t</em> look for a “rev3” device tree.</p>
+<p>In general when any significant changes are made to a board the board
+revision number is increased even if none of those changes need to
+be reflected in the device tree. Thus it’s fairly common to see device
+trees with multiple revisions.</p>
+<p>It should be noted that, taking into account the above system that
+<a class="reference external" href="https://source.chromium.org/chromiumos/chromiumos/codesearch/+/main:src/platform/depthcharge/">depthcharge</a> has, the most flexibility is achieved if the device tree
+supporting the newest revision(s) of a board omits the “-rev{REV}”
+compatible strings. When this is done then if you get a new board
+revision and try to run old software on it then we’ll at pick the
+newest device tree we know about.</p>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/arm/google/chromebook-boot-flow.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/arm/google/chromebook-boot-flow.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

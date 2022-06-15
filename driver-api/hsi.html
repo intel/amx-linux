@@ -1,0 +1,847 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>High Speed Synchronous Serial Interface (HSI) &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Error Detection And Correction (EDAC) Devices" href="edac.html" />
+    <link rel="prev" title="Device Frequency Scaling" href="devfreq.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="high-speed-synchronous-serial-interface-hsi">
+<h1>High Speed Synchronous Serial Interface (HSI)<a class="headerlink" href="#high-speed-synchronous-serial-interface-hsi" title="Permalink to this headline">¶</a></h1>
+<section id="introduction">
+<h2>Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>High Speed Syncronous Interface (HSI) is a fullduplex, low latency protocol,
+that is optimized for die-level interconnect between an Application Processor
+and a Baseband chipset. It has been specified by the MIPI alliance in 2003 and
+implemented by multiple vendors since then.</p>
+<p>The HSI interface supports full duplex communication over multiple channels
+(typically 8) and is capable of reaching speeds up to 200 Mbit/s.</p>
+<p>The serial protocol uses two signals, DATA and FLAG as combined data and clock
+signals and an additional READY signal for flow control. An additional WAKE
+signal can be used to wakeup the chips from standby modes. The signals are
+commonly prefixed by AC for signals going from the application die to the
+cellular die and CA for signals going the other way around.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>+------------+                                 +---------------+
+|  Cellular  |                                 |  Application  |
+|    Die     |                                 |      Die      |
+|            | - - - - - - CAWAKE - - - - - - &gt;|               |
+|           T|------------ CADATA ------------&gt;|R              |
+|           X|------------ CAFLAG ------------&gt;|X              |
+|            |&lt;----------- ACREADY ------------|               |
+|            |                                 |               |
+|            |                                 |               |
+|            |&lt; - - - - -  ACWAKE - - - - - - -|               |
+|           R|&lt;----------- ACDATA -------------|T              |
+|           X|&lt;----------- ACFLAG -------------|X              |
+|            |------------ CAREADY -----------&gt;|               |
+|            |                                 |               |
+|            |                                 |               |
++------------+                                 +---------------+
+</pre></div>
+</div>
+</section>
+<section id="hsi-subsystem-in-linux">
+<h2>HSI Subsystem in Linux<a class="headerlink" href="#hsi-subsystem-in-linux" title="Permalink to this headline">¶</a></h2>
+<p>In the Linux kernel the hsi subsystem is supposed to be used for HSI devices.
+The hsi subsystem contains drivers for hsi controllers including support for
+multi-port controllers and provides a generic API for using the HSI ports.</p>
+<p>It also contains HSI client drivers, which make use of the generic API to
+implement a protocol used on the HSI interface. These client drivers can
+use an arbitrary number of channels.</p>
+</section>
+<section id="hsi-char-device">
+<h2>hsi-char Device<a class="headerlink" href="#hsi-char-device" title="Permalink to this headline">¶</a></h2>
+<p>Each port automatically registers a generic client driver called hsi_char,
+which provides a charecter device for userspace representing the HSI port.
+It can be used to communicate via HSI from userspace. Userspace may
+configure the hsi_char device using the following ioctl commands:</p>
+<dl class="simple">
+<dt>HSC_RESET</dt><dd><p>flush the HSI port</p>
+</dd>
+<dt>HSC_SET_PM</dt><dd><p>enable or disable the client.</p>
+</dd>
+<dt>HSC_SEND_BREAK</dt><dd><p>send break</p>
+</dd>
+<dt>HSC_SET_RX</dt><dd><p>set RX configuration</p>
+</dd>
+<dt>HSC_GET_RX</dt><dd><p>get RX configuration</p>
+</dd>
+<dt>HSC_SET_TX</dt><dd><p>set TX configuration</p>
+</dd>
+<dt>HSC_GET_TX</dt><dd><p>get TX configuration</p>
+</dd>
+</dl>
+</section>
+<section id="the-kernel-hsi-api">
+<h2>The kernel HSI API<a class="headerlink" href="#the-kernel-hsi-api" title="Permalink to this headline">¶</a></h2>
+<dl class="type">
+<dt id="c.hsi_channel">
+struct <code class="sig-name descname">hsi_channel</code><a class="headerlink" href="#c.hsi_channel" title="Permalink to this definition">¶</a></dt>
+<dd><p>channel resource used by the hsi clients</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct hsi_channel {
+    unsigned int    id;
+    const char      *name;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">id</span></code></dt><dd><p>Channel number</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">name</span></code></dt><dd><p>Channel name</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.hsi_config">
+struct <code class="sig-name descname">hsi_config</code><a class="headerlink" href="#c.hsi_config" title="Permalink to this definition">¶</a></dt>
+<dd><p>Configuration for RX/TX HSI modules</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct hsi_config {
+    unsigned int            mode;
+    struct hsi_channel      *channels;
+    unsigned int            num_channels;
+    unsigned int            num_hw_channels;
+    unsigned int            speed;
+    union {
+        unsigned int    flow;
+        unsigned int    arb_mode;
+    };
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">mode</span></code></dt><dd><p>Bit transmission mode (STREAM or FRAME)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">channels</span></code></dt><dd><p>Channel resources used by the client</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">num_channels</span></code></dt><dd><p>Number of channel resources</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">num_hw_channels</span></code></dt><dd><p>Number of channels the transceiver is configured for [1..16]</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">speed</span></code></dt><dd><p>Max bit transmission speed (Kbit/s)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">{unnamed_union}</span></code></dt><dd><p>anonymous</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">flow</span></code></dt><dd><p>RX flow type (SYNCHRONIZED or PIPELINE)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">arb_mode</span></code></dt><dd><p>Arbitration mode for TX frame (Round robin, priority)</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.hsi_board_info">
+struct <code class="sig-name descname">hsi_board_info</code><a class="headerlink" href="#c.hsi_board_info" title="Permalink to this definition">¶</a></dt>
+<dd><p>HSI client board info</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct hsi_board_info {
+    const char              *name;
+    unsigned int            hsi_id;
+    unsigned int            port;
+    struct hsi_config       tx_cfg;
+    struct hsi_config       rx_cfg;
+    void *platform_data;
+    struct dev_archdata     *archdata;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">name</span></code></dt><dd><p>Name for the HSI device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">hsi_id</span></code></dt><dd><p>HSI controller id where the client sits</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">port</span></code></dt><dd><p>Port number in the controller where the client sits</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">tx_cfg</span></code></dt><dd><p>HSI TX configuration</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">rx_cfg</span></code></dt><dd><p>HSI RX configuration</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">platform_data</span></code></dt><dd><p>Platform related data</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">archdata</span></code></dt><dd><p>Architecture-dependent device data</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.hsi_client">
+struct <code class="sig-name descname">hsi_client</code><a class="headerlink" href="#c.hsi_client" title="Permalink to this definition">¶</a></dt>
+<dd><p>HSI client attached to an HSI port</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct hsi_client {
+    struct device           device;
+    struct hsi_config       tx_cfg;
+    struct hsi_config       rx_cfg;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">device</span></code></dt><dd><p>Driver model representation of the device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">tx_cfg</span></code></dt><dd><p>HSI TX configuration</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">rx_cfg</span></code></dt><dd><p>HSI RX configuration</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.hsi_client_driver">
+struct <code class="sig-name descname">hsi_client_driver</code><a class="headerlink" href="#c.hsi_client_driver" title="Permalink to this definition">¶</a></dt>
+<dd><p>Driver associated to an HSI client</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct hsi_client_driver {
+    struct device_driver    driver;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">driver</span></code></dt><dd><p>Driver model representation of the driver</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.hsi_msg">
+struct <code class="sig-name descname">hsi_msg</code><a class="headerlink" href="#c.hsi_msg" title="Permalink to this definition">¶</a></dt>
+<dd><p>HSI message descriptor</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct hsi_msg {
+    struct list_head        link;
+    struct hsi_client       *cl;
+    struct sg_table         sgt;
+    void *context;
+    void (*complete)(struct hsi_msg *msg);
+    void (*destructor)(struct hsi_msg *msg);
+    int status;
+    unsigned int            actual_len;
+    unsigned int            channel;
+    unsigned int            ttype:1;
+    unsigned int            break_frame:1;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">link</span></code></dt><dd><p>Free to use by the current descriptor owner</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">cl</span></code></dt><dd><p>HSI device client that issues the transfer</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">sgt</span></code></dt><dd><p>Head of the scatterlist array</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">context</span></code></dt><dd><p>Client context data associated to the transfer</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">complete</span></code></dt><dd><p>Transfer completion callback</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">destructor</span></code></dt><dd><p>Destructor to free resources when flushing</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">status</span></code></dt><dd><p>Status of the transfer when completed</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">actual_len</span></code></dt><dd><p>Actual length of data transferred on completion</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">channel</span></code></dt><dd><p>Channel were to TX/RX the message</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">ttype</span></code></dt><dd><p>Transfer type (TX if set, RX otherwise)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">break_frame</span></code></dt><dd><p>if true HSI will send/receive a break frame. Data buffers are
+ignored in the request.</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.hsi_port">
+struct <code class="sig-name descname">hsi_port</code><a class="headerlink" href="#c.hsi_port" title="Permalink to this definition">¶</a></dt>
+<dd><p>HSI port device</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct hsi_port {
+    struct device                   device;
+    struct hsi_config               tx_cfg;
+    struct hsi_config               rx_cfg;
+    unsigned int                    num;
+    unsigned int                    shared:1;
+    int claimed;
+    struct mutex                    lock;
+    int (*async)(struct hsi_msg *msg);
+    int (*setup)(struct hsi_client *cl);
+    int (*flush)(struct hsi_client *cl);
+    int (*start_tx)(struct hsi_client *cl);
+    int (*stop_tx)(struct hsi_client *cl);
+    int (*release)(struct hsi_client *cl);
+    struct blocking_notifier_head   n_head;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">device</span></code></dt><dd><p>Driver model representation of the device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">tx_cfg</span></code></dt><dd><p>Current TX path configuration</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">rx_cfg</span></code></dt><dd><p>Current RX path configuration</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">num</span></code></dt><dd><p>Port number</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">shared</span></code></dt><dd><p>Set when port can be shared by different clients</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">claimed</span></code></dt><dd><p>Reference count of clients which claimed the port</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">lock</span></code></dt><dd><p>Serialize port claim</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">async</span></code></dt><dd><p>Asynchronous transfer callback</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">setup</span></code></dt><dd><p>Callback to set the HSI client configuration</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">flush</span></code></dt><dd><p>Callback to clean the HW state and destroy all pending transfers</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">start_tx</span></code></dt><dd><p>Callback to inform that a client wants to TX data</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">stop_tx</span></code></dt><dd><p>Callback to inform that a client no longer wishes to TX data</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">release</span></code></dt><dd><p>Callback to inform that a client no longer uses the port</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">n_head</span></code></dt><dd><p>Notifier chain for signaling port events to the clients.</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.hsi_controller">
+struct <code class="sig-name descname">hsi_controller</code><a class="headerlink" href="#c.hsi_controller" title="Permalink to this definition">¶</a></dt>
+<dd><p>HSI controller device</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct hsi_controller {
+    struct device           device;
+    struct module           *owner;
+    unsigned int            id;
+    unsigned int            num_ports;
+    struct hsi_port         **port;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">device</span></code></dt><dd><p>Driver model representation of the device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">owner</span></code></dt><dd><p>Pointer to the module owning the controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">id</span></code></dt><dd><p>HSI controller ID</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">num_ports</span></code></dt><dd><p>Number of ports in the HSI controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">port</span></code></dt><dd><p>Array of HSI ports</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.hsi_id">
+unsigned int <code class="sig-name descname">hsi_id</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.hsi_client" title="hsi_client">hsi_client</a><em> *cl</em><span class="sig-paren">)</span><a class="headerlink" href="#c.hsi_id" title="Permalink to this definition">¶</a></dt>
+<dd><p>Get HSI controller ID associated to a client</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hsi_client</span> <span class="pre">*cl</span></code></dt><dd><p>Pointer to a HSI client</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Return the controller id where the client is attached to</p>
+</div>
+<dl class="function">
+<dt id="c.hsi_port_id">
+unsigned int <code class="sig-name descname">hsi_port_id</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.hsi_client" title="hsi_client">hsi_client</a><em> *cl</em><span class="sig-paren">)</span><a class="headerlink" href="#c.hsi_port_id" title="Permalink to this definition">¶</a></dt>
+<dd><p>Gets the port number a client is attached to</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hsi_client</span> <span class="pre">*cl</span></code></dt><dd><p>Pointer to HSI client</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Return the port number associated to the client</p>
+</div>
+<dl class="function">
+<dt id="c.hsi_setup">
+int <code class="sig-name descname">hsi_setup</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.hsi_client" title="hsi_client">hsi_client</a><em> *cl</em><span class="sig-paren">)</span><a class="headerlink" href="#c.hsi_setup" title="Permalink to this definition">¶</a></dt>
+<dd><p>Configure the client’s port</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hsi_client</span> <span class="pre">*cl</span></code></dt><dd><p>Pointer to the HSI client</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>When sharing ports, clients should either relay on a single
+client setup or have the same setup for all of them.</p>
+<p>Return -errno on failure, 0 on success</p>
+</div>
+<dl class="function">
+<dt id="c.hsi_flush">
+int <code class="sig-name descname">hsi_flush</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.hsi_client" title="hsi_client">hsi_client</a><em> *cl</em><span class="sig-paren">)</span><a class="headerlink" href="#c.hsi_flush" title="Permalink to this definition">¶</a></dt>
+<dd><p>Flush all pending transactions on the client’s port</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hsi_client</span> <span class="pre">*cl</span></code></dt><dd><p>Pointer to the HSI client</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This function will destroy all pending hsi_msg in the port and reset
+the HW port so it is ready to receive and transmit from a clean state.</p>
+<p>Return -errno on failure, 0 on success</p>
+</div>
+<dl class="function">
+<dt id="c.hsi_async_read">
+int <code class="sig-name descname">hsi_async_read</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.hsi_client" title="hsi_client">hsi_client</a><em> *cl</em>, struct <a class="reference internal" href="#c.hsi_msg" title="hsi_msg">hsi_msg</a><em> *msg</em><span class="sig-paren">)</span><a class="headerlink" href="#c.hsi_async_read" title="Permalink to this definition">¶</a></dt>
+<dd><p>Submit a read transfer</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hsi_client</span> <span class="pre">*cl</span></code></dt><dd><p>Pointer to the HSI client</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hsi_msg</span> <span class="pre">*msg</span></code></dt><dd><p>HSI message descriptor of the transfer</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Return -errno on failure, 0 on success</p>
+</div>
+<dl class="function">
+<dt id="c.hsi_async_write">
+int <code class="sig-name descname">hsi_async_write</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.hsi_client" title="hsi_client">hsi_client</a><em> *cl</em>, struct <a class="reference internal" href="#c.hsi_msg" title="hsi_msg">hsi_msg</a><em> *msg</em><span class="sig-paren">)</span><a class="headerlink" href="#c.hsi_async_write" title="Permalink to this definition">¶</a></dt>
+<dd><p>Submit a write transfer</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hsi_client</span> <span class="pre">*cl</span></code></dt><dd><p>Pointer to the HSI client</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hsi_msg</span> <span class="pre">*msg</span></code></dt><dd><p>HSI message descriptor of the transfer</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Return -errno on failure, 0 on success</p>
+</div>
+<dl class="function">
+<dt id="c.hsi_start_tx">
+int <code class="sig-name descname">hsi_start_tx</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.hsi_client" title="hsi_client">hsi_client</a><em> *cl</em><span class="sig-paren">)</span><a class="headerlink" href="#c.hsi_start_tx" title="Permalink to this definition">¶</a></dt>
+<dd><p>Signal the port that the client wants to start a TX</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hsi_client</span> <span class="pre">*cl</span></code></dt><dd><p>Pointer to the HSI client</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Return -errno on failure, 0 on success</p>
+</div>
+<dl class="function">
+<dt id="c.hsi_stop_tx">
+int <code class="sig-name descname">hsi_stop_tx</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.hsi_client" title="hsi_client">hsi_client</a><em> *cl</em><span class="sig-paren">)</span><a class="headerlink" href="#c.hsi_stop_tx" title="Permalink to this definition">¶</a></dt>
+<dd><p>Signal the port that the client no longer wants to transmit</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hsi_client</span> <span class="pre">*cl</span></code></dt><dd><p>Pointer to the HSI client</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Return -errno on failure, 0 on success</p>
+</div>
+<dl class="function">
+<dt id="c.hsi_port_unregister_clients">
+void <code class="sig-name descname">hsi_port_unregister_clients</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.hsi_port" title="hsi_port">hsi_port</a><em> *port</em><span class="sig-paren">)</span><a class="headerlink" href="#c.hsi_port_unregister_clients" title="Permalink to this definition">¶</a></dt>
+<dd><p>Unregister an HSI port</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hsi_port</span> <span class="pre">*port</span></code></dt><dd><p>The HSI port to unregister</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.hsi_unregister_controller">
+void <code class="sig-name descname">hsi_unregister_controller</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.hsi_controller" title="hsi_controller">hsi_controller</a><em> *hsi</em><span class="sig-paren">)</span><a class="headerlink" href="#c.hsi_unregister_controller" title="Permalink to this definition">¶</a></dt>
+<dd><p>Unregister an HSI controller</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hsi_controller</span> <span class="pre">*hsi</span></code></dt><dd><p>The HSI controller to register</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.hsi_register_controller">
+int <code class="sig-name descname">hsi_register_controller</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.hsi_controller" title="hsi_controller">hsi_controller</a><em> *hsi</em><span class="sig-paren">)</span><a class="headerlink" href="#c.hsi_register_controller" title="Permalink to this definition">¶</a></dt>
+<dd><p>Register an HSI controller and its ports</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hsi_controller</span> <span class="pre">*hsi</span></code></dt><dd><p>The HSI controller to register</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Returns -errno on failure, 0 on success.</p>
+</div>
+<dl class="function">
+<dt id="c.hsi_register_client_driver">
+int <code class="sig-name descname">hsi_register_client_driver</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.hsi_client_driver" title="hsi_client_driver">hsi_client_driver</a><em> *drv</em><span class="sig-paren">)</span><a class="headerlink" href="#c.hsi_register_client_driver" title="Permalink to this definition">¶</a></dt>
+<dd><p>Register an HSI client to the HSI bus</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hsi_client_driver</span> <span class="pre">*drv</span></code></dt><dd><p>HSI client driver to register</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Returns -errno on failure, 0 on success.</p>
+</div>
+<dl class="function">
+<dt id="c.hsi_put_controller">
+void <code class="sig-name descname">hsi_put_controller</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.hsi_controller" title="hsi_controller">hsi_controller</a><em> *hsi</em><span class="sig-paren">)</span><a class="headerlink" href="#c.hsi_put_controller" title="Permalink to this definition">¶</a></dt>
+<dd><p>Free an HSI controller</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hsi_controller</span> <span class="pre">*hsi</span></code></dt><dd><p>Pointer to the HSI controller to freed</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>HSI controller drivers should only use this function if they need
+to free their allocated hsi_controller structures before a successful
+call to hsi_register_controller. Other use is not allowed.</p>
+</div>
+<dl class="function">
+<dt id="c.hsi_alloc_controller">
+struct <a class="reference internal" href="#c.hsi_controller" title="hsi_controller">hsi_controller</a> * <code class="sig-name descname">hsi_alloc_controller</code><span class="sig-paren">(</span>unsigned int<em> n_ports</em>, gfp_t<em> flags</em><span class="sig-paren">)</span><a class="headerlink" href="#c.hsi_alloc_controller" title="Permalink to this definition">¶</a></dt>
+<dd><p>Allocate an HSI controller and its ports</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">n_ports</span></code></dt><dd><p>Number of ports on the HSI controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">gfp_t</span> <span class="pre">flags</span></code></dt><dd><p>Kernel allocation flags</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Return NULL on failure or a pointer to an hsi_controller on success.</p>
+</div>
+<dl class="function">
+<dt id="c.hsi_free_msg">
+void <code class="sig-name descname">hsi_free_msg</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.hsi_msg" title="hsi_msg">hsi_msg</a><em> *msg</em><span class="sig-paren">)</span><a class="headerlink" href="#c.hsi_free_msg" title="Permalink to this definition">¶</a></dt>
+<dd><p>Free an HSI message</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hsi_msg</span> <span class="pre">*msg</span></code></dt><dd><p>Pointer to the HSI message</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Client is responsible to free the buffers pointed by the scatterlists.</p>
+</div>
+<dl class="function">
+<dt id="c.hsi_alloc_msg">
+struct <a class="reference internal" href="#c.hsi_msg" title="hsi_msg">hsi_msg</a> * <code class="sig-name descname">hsi_alloc_msg</code><span class="sig-paren">(</span>unsigned int<em> nents</em>, gfp_t<em> flags</em><span class="sig-paren">)</span><a class="headerlink" href="#c.hsi_alloc_msg" title="Permalink to this definition">¶</a></dt>
+<dd><p>Allocate an HSI message</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">nents</span></code></dt><dd><p>Number of memory entries</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">gfp_t</span> <span class="pre">flags</span></code></dt><dd><p>Kernel allocation flags</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>nents can be 0. This mainly makes sense for read transfer.
+In that case, HSI drivers will call the complete callback when
+there is data to be read without consuming it.</p>
+<p>Return NULL on failure or a pointer to an hsi_msg on success.</p>
+</div>
+<dl class="function">
+<dt id="c.hsi_async">
+int <code class="sig-name descname">hsi_async</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.hsi_client" title="hsi_client">hsi_client</a><em> *cl</em>, struct <a class="reference internal" href="#c.hsi_msg" title="hsi_msg">hsi_msg</a><em> *msg</em><span class="sig-paren">)</span><a class="headerlink" href="#c.hsi_async" title="Permalink to this definition">¶</a></dt>
+<dd><p>Submit an HSI transfer to the controller</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hsi_client</span> <span class="pre">*cl</span></code></dt><dd><p>HSI client sending the transfer</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hsi_msg</span> <span class="pre">*msg</span></code></dt><dd><p>The HSI transfer passed to controller</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>The HSI message must have the channel, ttype, complete and destructor
+fields set beforehand. If nents &gt; 0 then the client has to initialize
+also the scatterlists to point to the buffers to write to or read from.</p>
+<p>HSI controllers relay on pre-allocated buffers from their clients and they
+do not allocate buffers on their own.</p>
+<p>Once the HSI message transfer finishes, the HSI controller calls the
+complete callback with the status and actual_len fields of the HSI message
+updated. The complete callback can be called before returning from
+hsi_async.</p>
+<p>Returns -errno on failure or 0 on success</p>
+</div>
+<dl class="function">
+<dt id="c.hsi_claim_port">
+int <code class="sig-name descname">hsi_claim_port</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.hsi_client" title="hsi_client">hsi_client</a><em> *cl</em>, unsigned int<em> share</em><span class="sig-paren">)</span><a class="headerlink" href="#c.hsi_claim_port" title="Permalink to this definition">¶</a></dt>
+<dd><p>Claim the HSI client’s port</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hsi_client</span> <span class="pre">*cl</span></code></dt><dd><p>HSI client that wants to claim its port</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">share</span></code></dt><dd><p>Flag to indicate if the client wants to share the port or not.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Returns -errno on failure, 0 on success.</p>
+</div>
+<dl class="function">
+<dt id="c.hsi_release_port">
+void <code class="sig-name descname">hsi_release_port</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.hsi_client" title="hsi_client">hsi_client</a><em> *cl</em><span class="sig-paren">)</span><a class="headerlink" href="#c.hsi_release_port" title="Permalink to this definition">¶</a></dt>
+<dd><p>Release the HSI client’s port</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hsi_client</span> <span class="pre">*cl</span></code></dt><dd><p>HSI client which previously claimed its port</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.hsi_register_port_event">
+int <code class="sig-name descname">hsi_register_port_event</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.hsi_client" title="hsi_client">hsi_client</a><em> *cl</em>, void (<em>*handler</em>)(struct <a class="reference internal" href="#c.hsi_client" title="hsi_client">hsi_client</a> *, unsigned long)<span class="sig-paren">)</span><a class="headerlink" href="#c.hsi_register_port_event" title="Permalink to this definition">¶</a></dt>
+<dd><p>Register a client to receive port events</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hsi_client</span> <span class="pre">*cl</span></code></dt><dd><p>HSI client that wants to receive port events</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">(*handler)(struct</span> <span class="pre">hsi_client</span> <span class="pre">*,</span> <span class="pre">unsigned</span> <span class="pre">long)</span></code></dt><dd><p>Event handler callback</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Clients should register a callback to be able to receive
+events from the ports. Registration should happen after
+claiming the port.
+The handler can be called in interrupt context.</p>
+<p>Returns -errno on error, or 0 on success.</p>
+</div>
+<dl class="function">
+<dt id="c.hsi_unregister_port_event">
+int <code class="sig-name descname">hsi_unregister_port_event</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.hsi_client" title="hsi_client">hsi_client</a><em> *cl</em><span class="sig-paren">)</span><a class="headerlink" href="#c.hsi_unregister_port_event" title="Permalink to this definition">¶</a></dt>
+<dd><p>Stop receiving port events for a client</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hsi_client</span> <span class="pre">*cl</span></code></dt><dd><p>HSI client that wants to stop receiving port events</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Clients should call this function before releasing their associated
+port.</p>
+<p>Returns -errno on error, or 0 on success.</p>
+</div>
+<dl class="function">
+<dt id="c.hsi_event">
+int <code class="sig-name descname">hsi_event</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.hsi_port" title="hsi_port">hsi_port</a><em> *port</em>, unsigned long<em> event</em><span class="sig-paren">)</span><a class="headerlink" href="#c.hsi_event" title="Permalink to this definition">¶</a></dt>
+<dd><p>Notifies clients about port events</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hsi_port</span> <span class="pre">*port</span></code></dt><dd><p>Port where the event occurred</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">event</span></code></dt><dd><p>The event type</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Clients should not be concerned about wake line behavior. However, due
+to a race condition in HSI HW protocol, clients need to be notified
+about wake line changes, so they can implement a workaround for it.</p>
+<p>Events:
+HSI_EVENT_START_RX - Incoming wake line high
+HSI_EVENT_STOP_RX - Incoming wake line down</p>
+<p>Returns -errno on error, or 0 on success.</p>
+</div>
+<dl class="function">
+<dt id="c.hsi_get_channel_id_by_name">
+int <code class="sig-name descname">hsi_get_channel_id_by_name</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.hsi_client" title="hsi_client">hsi_client</a><em> *cl</em>, char<em> *name</em><span class="sig-paren">)</span><a class="headerlink" href="#c.hsi_get_channel_id_by_name" title="Permalink to this definition">¶</a></dt>
+<dd><p>acquire channel id by channel name</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hsi_client</span> <span class="pre">*cl</span></code></dt><dd><p>HSI client, which uses the channel</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">char</span> <span class="pre">*name</span></code></dt><dd><p>name the channel is known under</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Clients can call this function to get the hsi channel ids similar to
+requesting IRQs or GPIOs by name. This function assumes the same
+channel configuration is used for RX and TX.</p>
+<p>Returns -errno on error or channel id on success.</p>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">High Speed Synchronous Serial Interface (HSI)</a><ul>
+<li><a class="reference internal" href="#introduction">Introduction</a></li>
+<li><a class="reference internal" href="#hsi-subsystem-in-linux">HSI Subsystem in Linux</a></li>
+<li><a class="reference internal" href="#hsi-char-device">hsi-char Device</a></li>
+<li><a class="reference internal" href="#the-kernel-hsi-api">The kernel HSI API</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/driver-api/hsi.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/driver-api/hsi.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,257 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>CoreSight - Perf &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Trace Buffer Extension (TRBE)." href="coresight-trbe.html" />
+    <link rel="prev" title="ETMv4 sysfs linux driver programming reference." href="coresight-etm4x-reference.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="coresight-perf">
+<h1>CoreSight - Perf<a class="headerlink" href="#coresight-perf" title="Permalink to this headline">¶</a></h1>
+<blockquote>
+<div><dl class="field-list simple">
+<dt class="field-odd">Author</dt>
+<dd class="field-odd"><p>Carsten Haitzler &lt;<a class="reference external" href="mailto:carsten&#46;haitzler&#37;&#52;&#48;arm&#46;com">carsten<span>&#46;</span>haitzler<span>&#64;</span>arm<span>&#46;</span>com</a>&gt;</p>
+</dd>
+<dt class="field-even">Date</dt>
+<dd class="field-even"><p>June 29th, 2022</p>
+</dd>
+</dl>
+</div></blockquote>
+<p>Perf is able to locally access CoreSight trace data and store it to the
+output perf data files. This data can then be later decoded to give the
+instructions that were traced for debugging or profiling purposes. You
+can log such data with a perf record command like:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>perf record -e cs_etm//u testbinary
+</pre></div>
+</div>
+<p>This would run some test binary (testbinary) until it exits and record
+a perf.data trace file. That file would have AUX sections if CoreSight
+is working correctly. You can dump the content of this file as
+readable text with a command like:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>perf report --stdio --dump -i perf.data
+</pre></div>
+</div>
+<p>You should find some sections of this file have AUX data blocks like:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>0x1e78 [0x30]: PERF_RECORD_AUXTRACE size: 0x11dd0  offset: 0  ref: 0x1b614fc1061b0ad1  idx: 0  tid: 531230  cpu: -1
+
+. ... CoreSight ETM Trace data: size 73168 bytes
+        Idx:0; ID:10;   I_ASYNC : Alignment Synchronisation.
+          Idx:12; ID:10;  I_TRACE_INFO : Trace Info.; INFO=0x0 { CC.0 }
+          Idx:17; ID:10;  I_ADDR_L_64IS0 : Address, Long, 64 bit, IS0.; Addr=0x0000000000000000;
+          Idx:26; ID:10;  I_TRACE_ON : Trace On.
+          Idx:27; ID:10;  I_ADDR_CTXT_L_64IS0 : Address &amp; Context, Long, 64 bit, IS0.; Addr=0x0000FFFFB6069140; Ctxt: AArch64,EL0, NS;
+          Idx:38; ID:10;  I_ATOM_F6 : Atom format 6.; EEEEEEEEEEEEEEEEEEEEEEEE
+          Idx:39; ID:10;  I_ATOM_F6 : Atom format 6.; EEEEEEEEEEEEEEEEEEEEEEEE
+          Idx:40; ID:10;  I_ATOM_F6 : Atom format 6.; EEEEEEEEEEEEEEEEEEEEEEEE
+          Idx:41; ID:10;  I_ATOM_F6 : Atom format 6.; EEEEEEEEEEEN
+          ...
+</pre></div>
+</div>
+<p>If you see these above, then your system is tracing CoreSight data
+correctly.</p>
+<p>To compile perf with CoreSight support in the tools/perf directory do:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>make CORESIGHT=1
+</pre></div>
+</div>
+<p>This requires OpenCSD to build. You may install distribution packages
+for the support such as libopencsd and libopencsd-dev or download it
+and build yourself. Upstream OpenCSD is located at:</p>
+<blockquote>
+<div><p><a class="reference external" href="https://github.com/Linaro/OpenCSD">https://github.com/Linaro/OpenCSD</a></p>
+</div></blockquote>
+<p>For complete information on building perf with CoreSight support and
+more extensive usage look at:</p>
+<blockquote>
+<div><p><a class="reference external" href="https://github.com/Linaro/OpenCSD/blob/master/HOWTO.md">https://github.com/Linaro/OpenCSD/blob/master/HOWTO.md</a></p>
+</div></blockquote>
+<section id="kernel-coresight-support">
+<h2>Kernel CoreSight Support<a class="headerlink" href="#kernel-coresight-support" title="Permalink to this headline">¶</a></h2>
+<p>You will also want CoreSight support enabled in your kernel config.
+Ensure it is enabled with:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>CONFIG_CORESIGHT=y
+</pre></div>
+</div>
+<p>There are various other CoreSight options you probably also want
+enabled like:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>CONFIG_CORESIGHT_LINKS_AND_SINKS=y
+CONFIG_CORESIGHT_LINK_AND_SINK_TMC=y
+CONFIG_CORESIGHT_CATU=y
+CONFIG_CORESIGHT_SINK_TPIU=y
+CONFIG_CORESIGHT_SINK_ETBV10=y
+CONFIG_CORESIGHT_SOURCE_ETM4X=y
+CONFIG_CORESIGHT_CTI=y
+CONFIG_CORESIGHT_CTI_INTEGRATION_REGS=y
+</pre></div>
+</div>
+<p>Please refer to the kernel configuration help for more information.</p>
+</section>
+<section id="perf-test-verify-kernel-and-userspace-perf-coresight-work">
+<h2>Perf test - Verify kernel and userspace perf CoreSight work<a class="headerlink" href="#perf-test-verify-kernel-and-userspace-perf-coresight-work" title="Permalink to this headline">¶</a></h2>
+<p>When you run perf test, it will do a lot of self tests. Some of those
+tests will cover CoreSight (only if enabled and on ARM64). You
+generally would run perf test from the tools/perf directory in the
+kernel tree. Some tests will check some internal perf support like:</p>
+<blockquote>
+<div><p>Check Arm CoreSight trace data recording and synthesized samples
+Check Arm SPE trace data recording and synthesized samples</p>
+</div></blockquote>
+<p>Some others will actually use perf record and some test binaries that
+are in tests/shell/coresight and will collect traces to ensure a
+minimum level of functionality is met. The scripts that launch these
+tests are in the same directory. These will all look like:</p>
+<blockquote>
+<div><p>CoreSight / ASM Pure Loop
+CoreSight / Memcpy 16k 10 Threads
+CoreSight / Thread Loop 10 Threads - Check TID
+etc.</p>
+</div></blockquote>
+<p>These perf record tests will not run if the tool binaries do not exist
+in tests/shell/coresight/*/ and will be skipped. If you do not have
+CoreSight support in hardware then either do not build perf with
+CoreSight support or remove these binaries in order to not have these
+tests fail and have them skip instead.</p>
+<p>These tests will log historical results in the current working
+directory (e.g. tools/perf) and will be named stats-*.csv like:</p>
+<blockquote>
+<div><p>stats-asm_pure_loop-out.csv
+stats-memcpy_thread-16k_10.csv
+…</p>
+</div></blockquote>
+<p>These statistic files log some aspects of the AUX data sections in
+the perf data output counting some numbers of certain encodings (a
+good way to know that it’s working in a very simple way). One problem
+with CoreSight is that given a large enough amount of data needing to
+be logged, some of it can be lost due to the processor not waking up
+in time to read out all the data from buffers etc.. You will notice
+that the amount of data collected can vary a lot per run of perf test.
+If you wish to see how this changes over time, simply run perf test
+multiple times and all these csv files will have more and more data
+appended to it that you can later examine, graph and otherwise use to
+figure out if things have become worse or better.</p>
+<p>This means sometimes these tests fail as they don’t capture all the
+data needed. This is about tracking quality and amount of data
+produced over time and to see when changes to the Linux kernel improve
+quality of traces.</p>
+<p>Be aware that some of these tests take quite a while to run, specifically
+in processing the perf data file and dumping contents to then examine what
+is inside.</p>
+<p>You can change where these csv logs are stored by setting the
+PERF_TEST_CORESIGHT_STATDIR environment variable before running perf
+test like:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>export PERF_TEST_CORESIGHT_STATDIR=/var/tmp
+perf test
+</pre></div>
+</div>
+<p>They will also store resulting perf output data in the current
+directory for later inspection like:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>perf-asm_pure_loop-out.data
+perf-memcpy_thread-16k_10.data
+...
+</pre></div>
+</div>
+<p>You can alter where the perf data files are stored by setting the
+PERF_TEST_CORESIGHT_DATADIR environment variable such as:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>PERF_TEST_CORESIGHT_DATADIR=/var/tmp
+perf test
+</pre></div>
+</div>
+<p>You may wish to set these above environment variables if you wish to
+keep the output of tests outside of the current working directory for
+longer term storage and examination.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">CoreSight - Perf</a><ul>
+<li><a class="reference internal" href="#kernel-coresight-support">Kernel CoreSight Support</a></li>
+<li><a class="reference internal" href="#perf-test-verify-kernel-and-userspace-perf-coresight-work">Perf test - Verify kernel and userspace perf CoreSight work</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/trace/coresight/coresight-perf.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/trace/coresight/coresight-perf.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

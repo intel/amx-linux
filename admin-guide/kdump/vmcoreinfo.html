@@ -1,0 +1,746 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>VMCOREINFO &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Performance monitor support" href="../perf/index.html" />
+    <link rel="prev" title="Documentation for Kdump - The kexec-based Crash Dumping Solution" href="kdump.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="vmcoreinfo">
+<h1>VMCOREINFO<a class="headerlink" href="#vmcoreinfo" title="Permalink to this headline">¶</a></h1>
+<section id="what-is-it">
+<h2>What is it?<a class="headerlink" href="#what-is-it" title="Permalink to this headline">¶</a></h2>
+<p>VMCOREINFO is a special ELF note section. It contains various
+information from the kernel like structure size, page size, symbol
+values, field offsets, etc. These data are packed into an ELF note
+section and used by user-space tools like crash and makedumpfile to
+analyze a kernel’s memory layout.</p>
+</section>
+<section id="common-variables">
+<h2>Common variables<a class="headerlink" href="#common-variables" title="Permalink to this headline">¶</a></h2>
+<section id="init-uts-ns-name-release">
+<h3>init_uts_ns.name.release<a class="headerlink" href="#init-uts-ns-name-release" title="Permalink to this headline">¶</a></h3>
+<p>The version of the Linux kernel. Used to find the corresponding source
+code from which the kernel has been built. For example, crash uses it to
+find the corresponding vmlinux in order to process vmcore.</p>
+</section>
+<section id="page-size">
+<h3>PAGE_SIZE<a class="headerlink" href="#page-size" title="Permalink to this headline">¶</a></h3>
+<p>The size of a page. It is the smallest unit of data used by the memory
+management facilities. It is usually 4096 bytes of size and a page is
+aligned on 4096 bytes. Used for computing page addresses.</p>
+</section>
+<section id="init-uts-ns">
+<h3>init_uts_ns<a class="headerlink" href="#init-uts-ns" title="Permalink to this headline">¶</a></h3>
+<p>The UTS namespace which is used to isolate two specific elements of the
+system that relate to the uname(2) system call. It is named after the
+data structure used to store information returned by the uname(2) system
+call.</p>
+<p>User-space tools can get the kernel name, host name, kernel release
+number, kernel version, architecture name and OS type from it.</p>
+</section>
+<section id="uts-namespace-name">
+<h3>(uts_namespace, name)<a class="headerlink" href="#uts-namespace-name" title="Permalink to this headline">¶</a></h3>
+<p>Offset of the name’s member. Crash Utility and Makedumpfile get
+the start address of the init_uts_ns.name from this.</p>
+</section>
+<section id="node-online-map">
+<h3>node_online_map<a class="headerlink" href="#node-online-map" title="Permalink to this headline">¶</a></h3>
+<p>An array node_states[N_ONLINE] which represents the set of online nodes
+in a system, one bit position per node number. Used to keep track of
+which nodes are in the system and online.</p>
+</section>
+<section id="swapper-pg-dir">
+<h3>swapper_pg_dir<a class="headerlink" href="#swapper-pg-dir" title="Permalink to this headline">¶</a></h3>
+<p>The global page directory pointer of the kernel. Used to translate
+virtual to physical addresses.</p>
+</section>
+<section id="stext">
+<h3>_stext<a class="headerlink" href="#stext" title="Permalink to this headline">¶</a></h3>
+<p>Defines the beginning of the text section. In general, _stext indicates
+the kernel start address. Used to convert a virtual address from the
+direct kernel map to a physical address.</p>
+</section>
+<section id="vmap-area-list">
+<h3>vmap_area_list<a class="headerlink" href="#vmap-area-list" title="Permalink to this headline">¶</a></h3>
+<p>Stores the virtual area list. makedumpfile gets the vmalloc start value
+from this variable and its value is necessary for vmalloc translation.</p>
+</section>
+<section id="mem-map">
+<h3>mem_map<a class="headerlink" href="#mem-map" title="Permalink to this headline">¶</a></h3>
+<p>Physical addresses are translated to struct pages by treating them as
+an index into the mem_map array. Right-shifting a physical address
+PAGE_SHIFT bits converts it into a page frame number which is an index
+into that mem_map array.</p>
+<p>Used to map an address to the corresponding struct page.</p>
+</section>
+<section id="contig-page-data">
+<h3>contig_page_data<a class="headerlink" href="#contig-page-data" title="Permalink to this headline">¶</a></h3>
+<p>Makedumpfile gets the pglist_data structure from this symbol, which is
+used to describe the memory layout.</p>
+<p>User-space tools use this to exclude free pages when dumping memory.</p>
+</section>
+<section id="mem-section-mem-section-nr-section-roots-mem-section-section-mem-map">
+<h3>mem_section|(mem_section, NR_SECTION_ROOTS)|(mem_section, section_mem_map)<a class="headerlink" href="#mem-section-mem-section-nr-section-roots-mem-section-section-mem-map" title="Permalink to this headline">¶</a></h3>
+<p>The address of the mem_section array, its length, structure size, and
+the section_mem_map offset.</p>
+<p>It exists in the sparse memory mapping model, and it is also somewhat
+similar to the mem_map variable, both of them are used to translate an
+address.</p>
+</section>
+<section id="max-physmem-bits">
+<h3>MAX_PHYSMEM_BITS<a class="headerlink" href="#max-physmem-bits" title="Permalink to this headline">¶</a></h3>
+<p>Defines the maximum supported physical address space memory.</p>
+</section>
+<section id="page">
+<h3>page<a class="headerlink" href="#page" title="Permalink to this headline">¶</a></h3>
+<p>The size of a page structure. struct page is an important data structure
+and it is widely used to compute contiguous memory.</p>
+</section>
+<section id="pglist-data">
+<h3>pglist_data<a class="headerlink" href="#pglist-data" title="Permalink to this headline">¶</a></h3>
+<p>The size of a pglist_data structure. This value is used to check if the
+pglist_data structure is valid. It is also used for checking the memory
+type.</p>
+</section>
+<section id="zone">
+<h3>zone<a class="headerlink" href="#zone" title="Permalink to this headline">¶</a></h3>
+<p>The size of a zone structure. This value is used to check if the zone
+structure has been found. It is also used for excluding free pages.</p>
+</section>
+<section id="free-area">
+<h3>free_area<a class="headerlink" href="#free-area" title="Permalink to this headline">¶</a></h3>
+<p>The size of a free_area structure. It indicates whether the free_area
+structure is valid or not. Useful when excluding free pages.</p>
+</section>
+<section id="list-head">
+<h3>list_head<a class="headerlink" href="#list-head" title="Permalink to this headline">¶</a></h3>
+<p>The size of a list_head structure. Used when iterating lists in a
+post-mortem analysis session.</p>
+</section>
+<section id="nodemask-t">
+<h3>nodemask_t<a class="headerlink" href="#nodemask-t" title="Permalink to this headline">¶</a></h3>
+<p>The size of a nodemask_t type. Used to compute the number of online
+nodes.</p>
+</section>
+<section id="page-flags-refcount-mapping-lru-mapcount-private-compound-dtor-compound-order-compound-head">
+<h3>(page, flags|_refcount|mapping|lru|_mapcount|private|compound_dtor|compound_order|compound_head)<a class="headerlink" href="#page-flags-refcount-mapping-lru-mapcount-private-compound-dtor-compound-order-compound-head" title="Permalink to this headline">¶</a></h3>
+<p>User-space tools compute their values based on the offset of these
+variables. The variables are used when excluding unnecessary pages.</p>
+</section>
+<section id="pglist-data-node-zones-nr-zones-node-mem-map-node-start-pfn-node-spanned-pages-node-id">
+<h3>(pglist_data, node_zones|nr_zones|node_mem_map|node_start_pfn|node_spanned_pages|node_id)<a class="headerlink" href="#pglist-data-node-zones-nr-zones-node-mem-map-node-start-pfn-node-spanned-pages-node-id" title="Permalink to this headline">¶</a></h3>
+<p>On NUMA machines, each NUMA node has a pg_data_t to describe its memory
+layout. On UMA machines there is a single pglist_data which describes the
+whole memory.</p>
+<p>These values are used to check the memory type and to compute the
+virtual address for memory map.</p>
+</section>
+<section id="zone-free-area-vm-stat-spanned-pages">
+<h3>(zone, free_area|vm_stat|spanned_pages)<a class="headerlink" href="#zone-free-area-vm-stat-spanned-pages" title="Permalink to this headline">¶</a></h3>
+<p>Each node is divided into a number of blocks called zones which
+represent ranges within memory. A zone is described by a structure zone.</p>
+<p>User-space tools compute required values based on the offset of these
+variables.</p>
+</section>
+<section id="free-area-free-list">
+<h3>(free_area, free_list)<a class="headerlink" href="#free-area-free-list" title="Permalink to this headline">¶</a></h3>
+<p>Offset of the free_list’s member. This value is used to compute the number
+of free pages.</p>
+<p>Each zone has a free_area structure array called free_area[MAX_ORDER].
+The free_list represents a linked list of free page blocks.</p>
+</section>
+<section id="list-head-next-prev">
+<h3>(list_head, next|prev)<a class="headerlink" href="#list-head-next-prev" title="Permalink to this headline">¶</a></h3>
+<p>Offsets of the list_head’s members. list_head is used to define a
+circular linked list. User-space tools need these in order to traverse
+lists.</p>
+</section>
+<section id="vmap-area-va-start-list">
+<h3>(vmap_area, va_start|list)<a class="headerlink" href="#vmap-area-va-start-list" title="Permalink to this headline">¶</a></h3>
+<p>Offsets of the vmap_area’s members. They carry vmalloc-specific
+information. Makedumpfile gets the start address of the vmalloc region
+from this.</p>
+</section>
+<section id="zone-free-area-max-order">
+<h3>(zone.free_area, MAX_ORDER)<a class="headerlink" href="#zone-free-area-max-order" title="Permalink to this headline">¶</a></h3>
+<p>Free areas descriptor. User-space tools use this value to iterate the
+free_area ranges. MAX_ORDER is used by the zone buddy allocator.</p>
+</section>
+<section id="prb">
+<h3>prb<a class="headerlink" href="#prb" title="Permalink to this headline">¶</a></h3>
+<p>A pointer to the printk ringbuffer (struct printk_ringbuffer). This
+may be pointing to the static boot ringbuffer or the dynamically
+allocated ringbuffer, depending on when the core dump occurred.
+Used by user-space tools to read the active kernel log buffer.</p>
+</section>
+<section id="printk-rb-static">
+<h3>printk_rb_static<a class="headerlink" href="#printk-rb-static" title="Permalink to this headline">¶</a></h3>
+<p>A pointer to the static boot printk ringbuffer. If &#64;prb has a
+different value, this is useful for viewing the initial boot messages,
+which may have been overwritten in the dynamically allocated
+ringbuffer.</p>
+</section>
+<section id="clear-seq">
+<h3>clear_seq<a class="headerlink" href="#clear-seq" title="Permalink to this headline">¶</a></h3>
+<p>The sequence number of the <a class="reference internal" href="../../core-api/printk-basics.html#c.printk" title="printk"><code class="xref c c-func docutils literal notranslate"><span class="pre">printk()</span></code></a> record after the last clear
+command. It indicates the first record after the last
+SYSLOG_ACTION_CLEAR, like issued by ‘dmesg -c’. Used by user-space
+tools to dump a subset of the dmesg log.</p>
+</section>
+<section id="printk-ringbuffer">
+<h3>printk_ringbuffer<a class="headerlink" href="#printk-ringbuffer" title="Permalink to this headline">¶</a></h3>
+<p>The size of a printk_ringbuffer structure. This structure contains all
+information required for accessing the various components of the
+kernel log buffer.</p>
+</section>
+<section id="printk-ringbuffer-desc-ring-text-data-ring-dict-data-ring-fail">
+<h3>(printk_ringbuffer, desc_ring|text_data_ring|dict_data_ring|fail)<a class="headerlink" href="#printk-ringbuffer-desc-ring-text-data-ring-dict-data-ring-fail" title="Permalink to this headline">¶</a></h3>
+<p>Offsets for the various components of the printk ringbuffer. Used by
+user-space tools to view the kernel log buffer without requiring the
+declaration of the structure.</p>
+</section>
+<section id="prb-desc-ring">
+<h3>prb_desc_ring<a class="headerlink" href="#prb-desc-ring" title="Permalink to this headline">¶</a></h3>
+<p>The size of the prb_desc_ring structure. This structure contains
+information about the set of record descriptors.</p>
+</section>
+<section id="prb-desc-ring-count-bits-descs-head-id-tail-id">
+<h3>(prb_desc_ring, count_bits|descs|head_id|tail_id)<a class="headerlink" href="#prb-desc-ring-count-bits-descs-head-id-tail-id" title="Permalink to this headline">¶</a></h3>
+<p>Offsets for the fields describing the set of record descriptors. Used
+by user-space tools to be able to traverse the descriptors without
+requiring the declaration of the structure.</p>
+</section>
+<section id="prb-desc">
+<h3>prb_desc<a class="headerlink" href="#prb-desc" title="Permalink to this headline">¶</a></h3>
+<p>The size of the prb_desc structure. This structure contains
+information about a single record descriptor.</p>
+</section>
+<section id="prb-desc-info-state-var-text-blk-lpos-dict-blk-lpos">
+<h3>(prb_desc, info|state_var|text_blk_lpos|dict_blk_lpos)<a class="headerlink" href="#prb-desc-info-state-var-text-blk-lpos-dict-blk-lpos" title="Permalink to this headline">¶</a></h3>
+<p>Offsets for the fields describing a record descriptors. Used by
+user-space tools to be able to read descriptors without requiring
+the declaration of the structure.</p>
+</section>
+<section id="prb-data-blk-lpos">
+<h3>prb_data_blk_lpos<a class="headerlink" href="#prb-data-blk-lpos" title="Permalink to this headline">¶</a></h3>
+<p>The size of the prb_data_blk_lpos structure. This structure contains
+information about where the text or dictionary data (data block) is
+located within the respective data ring.</p>
+</section>
+<section id="prb-data-blk-lpos-begin-next">
+<h3>(prb_data_blk_lpos, begin|next)<a class="headerlink" href="#prb-data-blk-lpos-begin-next" title="Permalink to this headline">¶</a></h3>
+<p>Offsets for the fields describing the location of a data block. Used
+by user-space tools to be able to locate data blocks without
+requiring the declaration of the structure.</p>
+</section>
+<section id="printk-info">
+<h3>printk_info<a class="headerlink" href="#printk-info" title="Permalink to this headline">¶</a></h3>
+<p>The size of the printk_info structure. This structure contains all
+the meta-data for a record.</p>
+</section>
+<section id="printk-info-seq-ts-nsec-text-len-dict-len-caller-id">
+<h3>(printk_info, seq|ts_nsec|text_len|dict_len|caller_id)<a class="headerlink" href="#printk-info-seq-ts-nsec-text-len-dict-len-caller-id" title="Permalink to this headline">¶</a></h3>
+<p>Offsets for the fields providing the meta-data for a record. Used by
+user-space tools to be able to read the information without requiring
+the declaration of the structure.</p>
+</section>
+<section id="prb-data-ring">
+<h3>prb_data_ring<a class="headerlink" href="#prb-data-ring" title="Permalink to this headline">¶</a></h3>
+<p>The size of the prb_data_ring structure. This structure contains
+information about a set of data blocks.</p>
+</section>
+<section id="prb-data-ring-size-bits-data-head-lpos-tail-lpos">
+<h3>(prb_data_ring, size_bits|data|head_lpos|tail_lpos)<a class="headerlink" href="#prb-data-ring-size-bits-data-head-lpos-tail-lpos" title="Permalink to this headline">¶</a></h3>
+<p>Offsets for the fields describing a set of data blocks. Used by
+user-space tools to be able to access the data blocks without
+requiring the declaration of the structure.</p>
+</section>
+<section id="atomic-long-t">
+<h3>atomic_long_t<a class="headerlink" href="#atomic-long-t" title="Permalink to this headline">¶</a></h3>
+<p>The size of the atomic_long_t structure. Used by user-space tools to
+be able to copy the full structure, regardless of its
+architecture-specific implementation.</p>
+</section>
+<section id="atomic-long-t-counter">
+<h3>(atomic_long_t, counter)<a class="headerlink" href="#atomic-long-t-counter" title="Permalink to this headline">¶</a></h3>
+<p>Offset for the long value of an atomic_long_t variable. Used by
+user-space tools to access the long value without requiring the
+architecture-specific declaration.</p>
+</section>
+<section id="free-area-free-list-migrate-types">
+<h3>(free_area.free_list, MIGRATE_TYPES)<a class="headerlink" href="#free-area-free-list-migrate-types" title="Permalink to this headline">¶</a></h3>
+<p>The number of migrate types for pages. The free_list is described by the
+array. Used by tools to compute the number of free pages.</p>
+</section>
+<section id="nr-free-pages">
+<h3>NR_FREE_PAGES<a class="headerlink" href="#nr-free-pages" title="Permalink to this headline">¶</a></h3>
+<p>On linux-2.6.21 or later, the number of free pages is in
+vm_stat[NR_FREE_PAGES]. Used to get the number of free pages.</p>
+</section>
+<section id="pg-lru-pg-private-pg-swapcache-pg-swapbacked-pg-slab-pg-hwpoision-pg-head-mask">
+<h3>PG_lru|PG_private|PG_swapcache|PG_swapbacked|PG_slab|PG_hwpoision|PG_head_mask<a class="headerlink" href="#pg-lru-pg-private-pg-swapcache-pg-swapbacked-pg-slab-pg-hwpoision-pg-head-mask" title="Permalink to this headline">¶</a></h3>
+<p>Page attributes. These flags are used to filter various unnecessary for
+dumping pages.</p>
+</section>
+<section id="page-buddy-mapcount-value-pg-buddy-page-offline-mapcount-value-pg-offline">
+<h3>PAGE_BUDDY_MAPCOUNT_VALUE(~PG_buddy)|PAGE_OFFLINE_MAPCOUNT_VALUE(~PG_offline)<a class="headerlink" href="#page-buddy-mapcount-value-pg-buddy-page-offline-mapcount-value-pg-offline" title="Permalink to this headline">¶</a></h3>
+<p>More page attributes. These flags are used to filter various unnecessary for
+dumping pages.</p>
+</section>
+<section id="hugetlb-page-dtor">
+<h3>HUGETLB_PAGE_DTOR<a class="headerlink" href="#hugetlb-page-dtor" title="Permalink to this headline">¶</a></h3>
+<p>The HUGETLB_PAGE_DTOR flag denotes hugetlbfs pages. Makedumpfile
+excludes these pages.</p>
+</section>
+</section>
+<section id="x86-64">
+<h2>x86_64<a class="headerlink" href="#x86-64" title="Permalink to this headline">¶</a></h2>
+<section id="phys-base">
+<h3>phys_base<a class="headerlink" href="#phys-base" title="Permalink to this headline">¶</a></h3>
+<p>Used to convert the virtual address of an exported kernel symbol to its
+corresponding physical address.</p>
+</section>
+<section id="init-top-pgt">
+<h3>init_top_pgt<a class="headerlink" href="#init-top-pgt" title="Permalink to this headline">¶</a></h3>
+<p>Used to walk through the whole page table and convert virtual addresses
+to physical addresses. The init_top_pgt is somewhat similar to
+swapper_pg_dir, but it is only used in x86_64.</p>
+</section>
+<section id="pgtable-l5-enabled">
+<h3>pgtable_l5_enabled<a class="headerlink" href="#pgtable-l5-enabled" title="Permalink to this headline">¶</a></h3>
+<p>User-space tools need to know whether the crash kernel was in 5-level
+paging mode.</p>
+</section>
+<section id="node-data">
+<h3>node_data<a class="headerlink" href="#node-data" title="Permalink to this headline">¶</a></h3>
+<p>This is a struct pglist_data array and stores all NUMA nodes
+information. Makedumpfile gets the pglist_data structure from it.</p>
+</section>
+<section id="node-data-max-numnodes">
+<h3>(node_data, MAX_NUMNODES)<a class="headerlink" href="#node-data-max-numnodes" title="Permalink to this headline">¶</a></h3>
+<p>The maximum number of nodes in system.</p>
+</section>
+<section id="kerneloffset">
+<h3>KERNELOFFSET<a class="headerlink" href="#kerneloffset" title="Permalink to this headline">¶</a></h3>
+<p>The kernel randomization offset. Used to compute the page offset. If
+KASLR is disabled, this value is zero.</p>
+</section>
+<section id="kernel-image-size">
+<h3>KERNEL_IMAGE_SIZE<a class="headerlink" href="#kernel-image-size" title="Permalink to this headline">¶</a></h3>
+<p>Currently unused by Makedumpfile. Used to compute the module virtual
+address by Crash.</p>
+</section>
+<section id="sme-mask">
+<h3>sme_mask<a class="headerlink" href="#sme-mask" title="Permalink to this headline">¶</a></h3>
+<p>AMD-specific with SME support: it indicates the secure memory encryption
+mask. Makedumpfile tools need to know whether the crash kernel was
+encrypted. If SME is enabled in the first kernel, the crash kernel’s
+page table entries (pgd/pud/pmd/pte) contain the memory encryption
+mask. This is used to remove the SME mask and obtain the true physical
+address.</p>
+<p>Currently, sme_mask stores the value of the C-bit position. If needed,
+additional SME-relevant info can be placed in that variable.</p>
+<p>For example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[ misc                ][ enc bit  ][ other misc SME info       ]
+0000_0000_0000_0000_1000_0000_0000_0000_0000_0000_..._0000
+63   59   55   51   47   43   39   35   31   27   ... 3
+</pre></div>
+</div>
+</section>
+</section>
+<section id="x86-32">
+<h2>x86_32<a class="headerlink" href="#x86-32" title="Permalink to this headline">¶</a></h2>
+<section id="x86-pae">
+<h3>X86_PAE<a class="headerlink" href="#x86-pae" title="Permalink to this headline">¶</a></h3>
+<p>Denotes whether physical address extensions are enabled. It has the cost
+of a higher page table lookup overhead, and also consumes more page
+table space per process. Used to check whether PAE was enabled in the
+crash kernel when converting virtual addresses to physical addresses.</p>
+</section>
+</section>
+<section id="ia64">
+<h2>ia64<a class="headerlink" href="#ia64" title="Permalink to this headline">¶</a></h2>
+<section id="pgdat-list-pgdat-list-max-numnodes">
+<h3>pgdat_list|(pgdat_list, MAX_NUMNODES)<a class="headerlink" href="#pgdat-list-pgdat-list-max-numnodes" title="Permalink to this headline">¶</a></h3>
+<p>pg_data_t array storing all NUMA nodes information. MAX_NUMNODES
+indicates the number of the nodes.</p>
+</section>
+<section id="node-memblk-node-memblk-nr-node-memblks">
+<h3>node_memblk|(node_memblk, NR_NODE_MEMBLKS)<a class="headerlink" href="#node-memblk-node-memblk-nr-node-memblks" title="Permalink to this headline">¶</a></h3>
+<p>List of node memory chunks. Filled when parsing the SRAT table to obtain
+information about memory nodes. NR_NODE_MEMBLKS indicates the number of
+node memory chunks.</p>
+<p>These values are used to compute the number of nodes the crashed kernel used.</p>
+</section>
+<section id="node-memblk-s-node-memblk-s-start-paddr-node-memblk-s-size">
+<h3>node_memblk_s|(node_memblk_s, start_paddr)|(node_memblk_s, size)<a class="headerlink" href="#node-memblk-s-node-memblk-s-start-paddr-node-memblk-s-size" title="Permalink to this headline">¶</a></h3>
+<p>The size of a struct node_memblk_s and the offsets of the
+node_memblk_s’s members. Used to compute the number of nodes.</p>
+</section>
+<section id="pgtable-3-pgtable-4">
+<h3>PGTABLE_3|PGTABLE_4<a class="headerlink" href="#pgtable-3-pgtable-4" title="Permalink to this headline">¶</a></h3>
+<p>User-space tools need to know whether the crash kernel was in 3-level or
+4-level paging mode. Used to distinguish the page table.</p>
+</section>
+</section>
+<section id="arm64">
+<h2>ARM64<a class="headerlink" href="#arm64" title="Permalink to this headline">¶</a></h2>
+<section id="va-bits">
+<h3>VA_BITS<a class="headerlink" href="#va-bits" title="Permalink to this headline">¶</a></h3>
+<p>The maximum number of bits for virtual addresses. Used to compute the
+virtual memory ranges.</p>
+</section>
+<section id="kimage-voffset">
+<h3>kimage_voffset<a class="headerlink" href="#kimage-voffset" title="Permalink to this headline">¶</a></h3>
+<p>The offset between the kernel virtual and physical mappings. Used to
+translate virtual to physical addresses.</p>
+</section>
+<section id="phys-offset">
+<h3>PHYS_OFFSET<a class="headerlink" href="#phys-offset" title="Permalink to this headline">¶</a></h3>
+<p>Indicates the physical address of the start of memory. Similar to
+kimage_voffset, which is used to translate virtual to physical
+addresses.</p>
+</section>
+<section id="id1">
+<h3>KERNELOFFSET<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h3>
+<p>The kernel randomization offset. Used to compute the page offset. If
+KASLR is disabled, this value is zero.</p>
+</section>
+<section id="kernelpacmask">
+<h3>KERNELPACMASK<a class="headerlink" href="#kernelpacmask" title="Permalink to this headline">¶</a></h3>
+<p>The mask to extract the Pointer Authentication Code from a kernel virtual
+address.</p>
+</section>
+<section id="tcr-el1-t1sz">
+<h3>TCR_EL1.T1SZ<a class="headerlink" href="#tcr-el1-t1sz" title="Permalink to this headline">¶</a></h3>
+<p>Indicates the size offset of the memory region addressed by TTBR1_EL1.
+The region size is 2^(64-T1SZ) bytes.</p>
+<p>TTBR1_EL1 is the table base address register specified by ARMv8-A
+architecture which is used to lookup the page-tables for the Virtual
+addresses in the higher VA range (refer to ARMv8 ARM document for
+more details).</p>
+</section>
+<section id="modules-vaddr-modules-end-vmalloc-start-vmalloc-end-vmemmap-start-vmemmap-end">
+<h3>MODULES_VADDR|MODULES_END|VMALLOC_START|VMALLOC_END|VMEMMAP_START|VMEMMAP_END<a class="headerlink" href="#modules-vaddr-modules-end-vmalloc-start-vmalloc-end-vmemmap-start-vmemmap-end" title="Permalink to this headline">¶</a></h3>
+<dl class="simple">
+<dt>Used to get the correct ranges:</dt><dd><p>MODULES_VADDR ~ MODULES_END-1 : Kernel module space.
+VMALLOC_START ~ VMALLOC_END-1 : <a class="reference internal" href="../../core-api/mm-api.html#c.vmalloc" title="vmalloc"><code class="xref c c-func docutils literal notranslate"><span class="pre">vmalloc()</span></code></a> / <a class="reference internal" href="../../driver-api/device-io.html#c.ioremap" title="ioremap"><code class="xref c c-func docutils literal notranslate"><span class="pre">ioremap()</span></code></a> space.
+VMEMMAP_START ~ VMEMMAP_END-1 : vmemmap region, used for struct page array.</p>
+</dd>
+</dl>
+</section>
+</section>
+<section id="arm">
+<h2>arm<a class="headerlink" href="#arm" title="Permalink to this headline">¶</a></h2>
+<section id="arm-lpae">
+<h3>ARM_LPAE<a class="headerlink" href="#arm-lpae" title="Permalink to this headline">¶</a></h3>
+<p>It indicates whether the crash kernel supports large physical address
+extensions. Used to translate virtual to physical addresses.</p>
+</section>
+</section>
+<section id="s390">
+<h2>s390<a class="headerlink" href="#s390" title="Permalink to this headline">¶</a></h2>
+<section id="lowcore-ptr">
+<h3>lowcore_ptr<a class="headerlink" href="#lowcore-ptr" title="Permalink to this headline">¶</a></h3>
+<p>An array with a pointer to the lowcore of every CPU. Used to print the
+psw and all registers information.</p>
+</section>
+<section id="high-memory">
+<h3>high_memory<a class="headerlink" href="#high-memory" title="Permalink to this headline">¶</a></h3>
+<p>Used to get the vmalloc_start address from the high_memory symbol.</p>
+</section>
+<section id="lowcore-ptr-nr-cpus">
+<h3>(lowcore_ptr, NR_CPUS)<a class="headerlink" href="#lowcore-ptr-nr-cpus" title="Permalink to this headline">¶</a></h3>
+<p>The maximum number of CPUs.</p>
+</section>
+</section>
+<section id="powerpc">
+<h2>powerpc<a class="headerlink" href="#powerpc" title="Permalink to this headline">¶</a></h2>
+<section id="node-data-node-data-max-numnodes">
+<h3>node_data|(node_data, MAX_NUMNODES)<a class="headerlink" href="#node-data-node-data-max-numnodes" title="Permalink to this headline">¶</a></h3>
+<p>See above.</p>
+</section>
+<section id="id2">
+<h3>contig_page_data<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h3>
+<p>See above.</p>
+</section>
+<section id="vmemmap-list">
+<h3>vmemmap_list<a class="headerlink" href="#vmemmap-list" title="Permalink to this headline">¶</a></h3>
+<p>The vmemmap_list maintains the entire vmemmap physical mapping. Used
+to get vmemmap list count and populated vmemmap regions info. If the
+vmemmap address translation information is stored in the crash kernel,
+it is used to translate vmemmap kernel virtual addresses.</p>
+</section>
+<section id="mmu-vmemmap-psize">
+<h3>mmu_vmemmap_psize<a class="headerlink" href="#mmu-vmemmap-psize" title="Permalink to this headline">¶</a></h3>
+<p>The size of a page. Used to translate virtual to physical addresses.</p>
+</section>
+<section id="mmu-psize-defs">
+<h3>mmu_psize_defs<a class="headerlink" href="#mmu-psize-defs" title="Permalink to this headline">¶</a></h3>
+<p>Page size definitions, i.e. 4k, 64k, or 16M.</p>
+<p>Used to make vtop translations.</p>
+</section>
+<section id="vmemmap-backing-vmemmap-backing-list-vmemmap-backing-phys-vmemmap-backing-virt-addr">
+<h3>vmemmap_backing|(vmemmap_backing, list)|(vmemmap_backing, phys)|(vmemmap_backing, virt_addr)<a class="headerlink" href="#vmemmap-backing-vmemmap-backing-list-vmemmap-backing-phys-vmemmap-backing-virt-addr" title="Permalink to this headline">¶</a></h3>
+<p>The vmemmap virtual address space management does not have a traditional
+page table to track which virtual struct pages are backed by a physical
+mapping. The virtual to physical mappings are tracked in a simple linked
+list format.</p>
+<p>User-space tools need to know the offset of list, phys and virt_addr
+when computing the count of vmemmap regions.</p>
+</section>
+<section id="mmu-psize-def-mmu-psize-def-shift">
+<h3>mmu_psize_def|(mmu_psize_def, shift)<a class="headerlink" href="#mmu-psize-def-mmu-psize-def-shift" title="Permalink to this headline">¶</a></h3>
+<p>The size of a struct mmu_psize_def and the offset of mmu_psize_def’s
+member.</p>
+<p>Used in vtop translations.</p>
+</section>
+</section>
+<section id="sh">
+<h2>sh<a class="headerlink" href="#sh" title="Permalink to this headline">¶</a></h2>
+<section id="id3">
+<h3>node_data|(node_data, MAX_NUMNODES)<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h3>
+<p>See above.</p>
+</section>
+<section id="x2tlb">
+<h3>X2TLB<a class="headerlink" href="#x2tlb" title="Permalink to this headline">¶</a></h3>
+<p>Indicates whether the crashed kernel enabled SH extended mode.</p>
+</section>
+</section>
+<section id="riscv64">
+<h2>RISCV64<a class="headerlink" href="#riscv64" title="Permalink to this headline">¶</a></h2>
+<section id="id4">
+<h3>VA_BITS<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h3>
+<p>The maximum number of bits for virtual addresses. Used to compute the
+virtual memory ranges.</p>
+</section>
+<section id="page-offset">
+<h3>PAGE_OFFSET<a class="headerlink" href="#page-offset" title="Permalink to this headline">¶</a></h3>
+<p>Indicates the virtual kernel start address of the direct-mapped RAM region.</p>
+</section>
+<section id="phys-ram-base">
+<h3>phys_ram_base<a class="headerlink" href="#phys-ram-base" title="Permalink to this headline">¶</a></h3>
+<p>Indicates the start physical RAM address.</p>
+</section>
+<section id="modules-vaddr-modules-end-vmalloc-start-vmalloc-end-vmemmap-start-vmemmap-end-kernel-link-addr">
+<h3>MODULES_VADDR|MODULES_END|VMALLOC_START|VMALLOC_END|VMEMMAP_START|VMEMMAP_END|KERNEL_LINK_ADDR<a class="headerlink" href="#modules-vaddr-modules-end-vmalloc-start-vmalloc-end-vmemmap-start-vmemmap-end-kernel-link-addr" title="Permalink to this headline">¶</a></h3>
+<p>Used to get the correct ranges:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>MODULES_VADDR ~ MODULES_END : Kernel module space.</p></li>
+<li><p>VMALLOC_START ~ VMALLOC_END : <a class="reference internal" href="../../core-api/mm-api.html#c.vmalloc" title="vmalloc"><code class="xref c c-func docutils literal notranslate"><span class="pre">vmalloc()</span></code></a> / <a class="reference internal" href="../../driver-api/device-io.html#c.ioremap" title="ioremap"><code class="xref c c-func docutils literal notranslate"><span class="pre">ioremap()</span></code></a> space.</p></li>
+<li><p>VMEMMAP_START ~ VMEMMAP_END : vmemmap space, used for struct page array.</p></li>
+<li><p>KERNEL_LINK_ADDR : start address of Kernel link and BPF</p></li>
+</ul>
+</div></blockquote>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">VMCOREINFO</a><ul>
+<li><a class="reference internal" href="#what-is-it">What is it?</a></li>
+<li><a class="reference internal" href="#common-variables">Common variables</a><ul>
+<li><a class="reference internal" href="#init-uts-ns-name-release">init_uts_ns.name.release</a></li>
+<li><a class="reference internal" href="#page-size">PAGE_SIZE</a></li>
+<li><a class="reference internal" href="#init-uts-ns">init_uts_ns</a></li>
+<li><a class="reference internal" href="#uts-namespace-name">(uts_namespace, name)</a></li>
+<li><a class="reference internal" href="#node-online-map">node_online_map</a></li>
+<li><a class="reference internal" href="#swapper-pg-dir">swapper_pg_dir</a></li>
+<li><a class="reference internal" href="#stext">_stext</a></li>
+<li><a class="reference internal" href="#vmap-area-list">vmap_area_list</a></li>
+<li><a class="reference internal" href="#mem-map">mem_map</a></li>
+<li><a class="reference internal" href="#contig-page-data">contig_page_data</a></li>
+<li><a class="reference internal" href="#mem-section-mem-section-nr-section-roots-mem-section-section-mem-map">mem_section|(mem_section, NR_SECTION_ROOTS)|(mem_section, section_mem_map)</a></li>
+<li><a class="reference internal" href="#max-physmem-bits">MAX_PHYSMEM_BITS</a></li>
+<li><a class="reference internal" href="#page">page</a></li>
+<li><a class="reference internal" href="#pglist-data">pglist_data</a></li>
+<li><a class="reference internal" href="#zone">zone</a></li>
+<li><a class="reference internal" href="#free-area">free_area</a></li>
+<li><a class="reference internal" href="#list-head">list_head</a></li>
+<li><a class="reference internal" href="#nodemask-t">nodemask_t</a></li>
+<li><a class="reference internal" href="#page-flags-refcount-mapping-lru-mapcount-private-compound-dtor-compound-order-compound-head">(page, flags|_refcount|mapping|lru|_mapcount|private|compound_dtor|compound_order|compound_head)</a></li>
+<li><a class="reference internal" href="#pglist-data-node-zones-nr-zones-node-mem-map-node-start-pfn-node-spanned-pages-node-id">(pglist_data, node_zones|nr_zones|node_mem_map|node_start_pfn|node_spanned_pages|node_id)</a></li>
+<li><a class="reference internal" href="#zone-free-area-vm-stat-spanned-pages">(zone, free_area|vm_stat|spanned_pages)</a></li>
+<li><a class="reference internal" href="#free-area-free-list">(free_area, free_list)</a></li>
+<li><a class="reference internal" href="#list-head-next-prev">(list_head, next|prev)</a></li>
+<li><a class="reference internal" href="#vmap-area-va-start-list">(vmap_area, va_start|list)</a></li>
+<li><a class="reference internal" href="#zone-free-area-max-order">(zone.free_area, MAX_ORDER)</a></li>
+<li><a class="reference internal" href="#prb">prb</a></li>
+<li><a class="reference internal" href="#printk-rb-static">printk_rb_static</a></li>
+<li><a class="reference internal" href="#clear-seq">clear_seq</a></li>
+<li><a class="reference internal" href="#printk-ringbuffer">printk_ringbuffer</a></li>
+<li><a class="reference internal" href="#printk-ringbuffer-desc-ring-text-data-ring-dict-data-ring-fail">(printk_ringbuffer, desc_ring|text_data_ring|dict_data_ring|fail)</a></li>
+<li><a class="reference internal" href="#prb-desc-ring">prb_desc_ring</a></li>
+<li><a class="reference internal" href="#prb-desc-ring-count-bits-descs-head-id-tail-id">(prb_desc_ring, count_bits|descs|head_id|tail_id)</a></li>
+<li><a class="reference internal" href="#prb-desc">prb_desc</a></li>
+<li><a class="reference internal" href="#prb-desc-info-state-var-text-blk-lpos-dict-blk-lpos">(prb_desc, info|state_var|text_blk_lpos|dict_blk_lpos)</a></li>
+<li><a class="reference internal" href="#prb-data-blk-lpos">prb_data_blk_lpos</a></li>
+<li><a class="reference internal" href="#prb-data-blk-lpos-begin-next">(prb_data_blk_lpos, begin|next)</a></li>
+<li><a class="reference internal" href="#printk-info">printk_info</a></li>
+<li><a class="reference internal" href="#printk-info-seq-ts-nsec-text-len-dict-len-caller-id">(printk_info, seq|ts_nsec|text_len|dict_len|caller_id)</a></li>
+<li><a class="reference internal" href="#prb-data-ring">prb_data_ring</a></li>
+<li><a class="reference internal" href="#prb-data-ring-size-bits-data-head-lpos-tail-lpos">(prb_data_ring, size_bits|data|head_lpos|tail_lpos)</a></li>
+<li><a class="reference internal" href="#atomic-long-t">atomic_long_t</a></li>
+<li><a class="reference internal" href="#atomic-long-t-counter">(atomic_long_t, counter)</a></li>
+<li><a class="reference internal" href="#free-area-free-list-migrate-types">(free_area.free_list, MIGRATE_TYPES)</a></li>
+<li><a class="reference internal" href="#nr-free-pages">NR_FREE_PAGES</a></li>
+<li><a class="reference internal" href="#pg-lru-pg-private-pg-swapcache-pg-swapbacked-pg-slab-pg-hwpoision-pg-head-mask">PG_lru|PG_private|PG_swapcache|PG_swapbacked|PG_slab|PG_hwpoision|PG_head_mask</a></li>
+<li><a class="reference internal" href="#page-buddy-mapcount-value-pg-buddy-page-offline-mapcount-value-pg-offline">PAGE_BUDDY_MAPCOUNT_VALUE(~PG_buddy)|PAGE_OFFLINE_MAPCOUNT_VALUE(~PG_offline)</a></li>
+<li><a class="reference internal" href="#hugetlb-page-dtor">HUGETLB_PAGE_DTOR</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#x86-64">x86_64</a><ul>
+<li><a class="reference internal" href="#phys-base">phys_base</a></li>
+<li><a class="reference internal" href="#init-top-pgt">init_top_pgt</a></li>
+<li><a class="reference internal" href="#pgtable-l5-enabled">pgtable_l5_enabled</a></li>
+<li><a class="reference internal" href="#node-data">node_data</a></li>
+<li><a class="reference internal" href="#node-data-max-numnodes">(node_data, MAX_NUMNODES)</a></li>
+<li><a class="reference internal" href="#kerneloffset">KERNELOFFSET</a></li>
+<li><a class="reference internal" href="#kernel-image-size">KERNEL_IMAGE_SIZE</a></li>
+<li><a class="reference internal" href="#sme-mask">sme_mask</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#x86-32">x86_32</a><ul>
+<li><a class="reference internal" href="#x86-pae">X86_PAE</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#ia64">ia64</a><ul>
+<li><a class="reference internal" href="#pgdat-list-pgdat-list-max-numnodes">pgdat_list|(pgdat_list, MAX_NUMNODES)</a></li>
+<li><a class="reference internal" href="#node-memblk-node-memblk-nr-node-memblks">node_memblk|(node_memblk, NR_NODE_MEMBLKS)</a></li>
+<li><a class="reference internal" href="#node-memblk-s-node-memblk-s-start-paddr-node-memblk-s-size">node_memblk_s|(node_memblk_s, start_paddr)|(node_memblk_s, size)</a></li>
+<li><a class="reference internal" href="#pgtable-3-pgtable-4">PGTABLE_3|PGTABLE_4</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#arm64">ARM64</a><ul>
+<li><a class="reference internal" href="#va-bits">VA_BITS</a></li>
+<li><a class="reference internal" href="#kimage-voffset">kimage_voffset</a></li>
+<li><a class="reference internal" href="#phys-offset">PHYS_OFFSET</a></li>
+<li><a class="reference internal" href="#id1">KERNELOFFSET</a></li>
+<li><a class="reference internal" href="#kernelpacmask">KERNELPACMASK</a></li>
+<li><a class="reference internal" href="#tcr-el1-t1sz">TCR_EL1.T1SZ</a></li>
+<li><a class="reference internal" href="#modules-vaddr-modules-end-vmalloc-start-vmalloc-end-vmemmap-start-vmemmap-end">MODULES_VADDR|MODULES_END|VMALLOC_START|VMALLOC_END|VMEMMAP_START|VMEMMAP_END</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#arm">arm</a><ul>
+<li><a class="reference internal" href="#arm-lpae">ARM_LPAE</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#s390">s390</a><ul>
+<li><a class="reference internal" href="#lowcore-ptr">lowcore_ptr</a></li>
+<li><a class="reference internal" href="#high-memory">high_memory</a></li>
+<li><a class="reference internal" href="#lowcore-ptr-nr-cpus">(lowcore_ptr, NR_CPUS)</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#powerpc">powerpc</a><ul>
+<li><a class="reference internal" href="#node-data-node-data-max-numnodes">node_data|(node_data, MAX_NUMNODES)</a></li>
+<li><a class="reference internal" href="#id2">contig_page_data</a></li>
+<li><a class="reference internal" href="#vmemmap-list">vmemmap_list</a></li>
+<li><a class="reference internal" href="#mmu-vmemmap-psize">mmu_vmemmap_psize</a></li>
+<li><a class="reference internal" href="#mmu-psize-defs">mmu_psize_defs</a></li>
+<li><a class="reference internal" href="#vmemmap-backing-vmemmap-backing-list-vmemmap-backing-phys-vmemmap-backing-virt-addr">vmemmap_backing|(vmemmap_backing, list)|(vmemmap_backing, phys)|(vmemmap_backing, virt_addr)</a></li>
+<li><a class="reference internal" href="#mmu-psize-def-mmu-psize-def-shift">mmu_psize_def|(mmu_psize_def, shift)</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#sh">sh</a><ul>
+<li><a class="reference internal" href="#id3">node_data|(node_data, MAX_NUMNODES)</a></li>
+<li><a class="reference internal" href="#x2tlb">X2TLB</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#riscv64">RISCV64</a><ul>
+<li><a class="reference internal" href="#id4">VA_BITS</a></li>
+<li><a class="reference internal" href="#page-offset">PAGE_OFFSET</a></li>
+<li><a class="reference internal" href="#phys-ram-base">phys_ram_base</a></li>
+<li><a class="reference internal" href="#modules-vaddr-modules-end-vmalloc-start-vmalloc-end-vmemmap-start-vmemmap-end-kernel-link-addr">MODULES_VADDR|MODULES_END|VMALLOC_START|VMALLOC_END|VMEMMAP_START|VMEMMAP_END|KERNEL_LINK_ADDR</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/admin-guide/kdump/vmcoreinfo.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/admin-guide/kdump/vmcoreinfo.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

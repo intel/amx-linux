@@ -1,0 +1,319 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>I915 Small BAR RFC Section &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="I915 VM_BIND feature design and use cases" href="i915_vm_bind.html" />
+    <link rel="prev" title="I915 GuC Submission/DRM Scheduler Section" href="i915_scheduler.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="i915-small-bar-rfc-section">
+<h1>I915 Small BAR RFC Section<a class="headerlink" href="#i915-small-bar-rfc-section" title="Permalink to this headline">¶</a></h1>
+<p>Starting from DG2 we will have resizable BAR support for device local-memory(i.e
+I915_MEMORY_CLASS_DEVICE), but in some cases the final BAR size might still be
+smaller than the total probed_size. In such cases, only some subset of
+I915_MEMORY_CLASS_DEVICE will be CPU accessible(for example the first 256M),
+while the remainder is only accessible via the GPU.</p>
+<section id="i915-gem-create-ext-flag-needs-cpu-access-flag">
+<h2>I915_GEM_CREATE_EXT_FLAG_NEEDS_CPU_ACCESS flag<a class="headerlink" href="#i915-gem-create-ext-flag-needs-cpu-access-flag" title="Permalink to this headline">¶</a></h2>
+<p>New gem_create_ext flag to tell the kernel that a BO will require CPU access.
+This becomes important when placing an object in I915_MEMORY_CLASS_DEVICE, where
+underneath the device has a small BAR, meaning only some portion of it is CPU
+accessible. Without this flag the kernel will assume that CPU access is not
+required, and prioritize using the non-CPU visible portion of
+I915_MEMORY_CLASS_DEVICE.</p>
+<dl class="type">
+<dt id="c.__drm_i915_gem_create_ext">
+struct <code class="sig-name descname">__drm_i915_gem_create_ext</code><a class="headerlink" href="#c.__drm_i915_gem_create_ext" title="Permalink to this definition">¶</a></dt>
+<dd><p>Existing gem_create behaviour, with added extension support using <a class="reference internal" href="../driver-uapi.html#c.i915_user_extension" title="i915_user_extension"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">i915_user_extension</span></code></a>.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct __drm_i915_gem_create_ext {
+    __u64 size;
+    __u32 handle;
+#define I915_GEM_CREATE_EXT_FLAG_NEEDS_CPU_ACCESS (1 &lt;&lt; 0);
+    __u32 flags;
+#define I915_GEM_CREATE_EXT_MEMORY_REGIONS 0;
+#define I915_GEM_CREATE_EXT_PROTECTED_CONTENT 1;
+    __u64 extensions;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl>
+<dt><code class="docutils literal notranslate"><span class="pre">size</span></code></dt><dd><p>Requested size for the object.</p>
+<p>The (page-aligned) allocated size for the object will be returned.</p>
+<p>Note that for some devices we have might have further minimum
+page-size restrictions (larger than 4K), like for device local-memory.
+However in general the final size here should always reflect any
+rounding up, if for example using the I915_GEM_CREATE_EXT_MEMORY_REGIONS
+extension to place the object in device local-memory. The kernel will
+always select the largest minimum page-size for the set of possible
+placements as the value to use when rounding up the <strong>size</strong>.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">handle</span></code></dt><dd><p>Returned handle for the object.</p>
+<p>Object handles are nonzero.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">flags</span></code></dt><dd><p>Optional flags.</p>
+<p>Supported values:</p>
+<p>I915_GEM_CREATE_EXT_FLAG_NEEDS_CPU_ACCESS - Signal to the kernel that
+the object will need to be accessed via the CPU.</p>
+<p>Only valid when placing objects in I915_MEMORY_CLASS_DEVICE, and only
+strictly required on configurations where some subset of the device
+memory is directly visible/mappable through the CPU (which we also
+call small BAR), like on some DG2+ systems. Note that this is quite
+undesirable, but due to various factors like the client CPU, BIOS etc
+it’s something we can expect to see in the wild. See
+<a class="reference internal" href="#c.__drm_i915_memory_region_info" title="__drm_i915_memory_region_info"><code class="xref c c-type docutils literal notranslate"><span class="pre">__drm_i915_memory_region_info.probed_cpu_visible_size</span></code></a> for how to
+determine if this system applies.</p>
+<p>Note that one of the placements MUST be I915_MEMORY_CLASS_SYSTEM, to
+ensure the kernel can always spill the allocation to system memory,
+if the object can’t be allocated in the mappable part of
+I915_MEMORY_CLASS_DEVICE.</p>
+<p>Also note that since the kernel only supports flat-CCS on objects
+that can <em>only</em> be placed in I915_MEMORY_CLASS_DEVICE, we therefore
+don’t support I915_GEM_CREATE_EXT_FLAG_NEEDS_CPU_ACCESS together with
+flat-CCS.</p>
+<p>Without this hint, the kernel will assume that non-mappable
+I915_MEMORY_CLASS_DEVICE is preferred for this object. Note that the
+kernel can still migrate the object to the mappable part, as a last
+resort, if userspace ever CPU faults this object, but this might be
+expensive, and so ideally should be avoided.</p>
+<p>On older kernels which lack the relevant small-bar uAPI support (see
+also <a class="reference internal" href="#c.__drm_i915_memory_region_info" title="__drm_i915_memory_region_info"><code class="xref c c-type docutils literal notranslate"><span class="pre">__drm_i915_memory_region_info.probed_cpu_visible_size</span></code></a>),
+usage of the flag will result in an error, but it should NEVER be
+possible to end up with a small BAR configuration, assuming we can
+also successfully load the i915 kernel module. In such cases the
+entire I915_MEMORY_CLASS_DEVICE region will be CPU accessible, and as
+such there are zero restrictions on where the object can be placed.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">extensions</span></code></dt><dd><p>The chain of extensions to apply to this object.</p>
+<p>This will be useful in the future when we need to support several
+different extensions, and we need to apply more than one when
+creating the object. See <a class="reference internal" href="../driver-uapi.html#c.i915_user_extension" title="i915_user_extension"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">i915_user_extension</span></code></a>.</p>
+<p>If we don’t supply any extensions then we get the same old gem_create
+behaviour.</p>
+<p>For I915_GEM_CREATE_EXT_MEMORY_REGIONS usage see
+<a class="reference internal" href="../driver-uapi.html#c.drm_i915_gem_create_ext_memory_regions" title="drm_i915_gem_create_ext_memory_regions"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">drm_i915_gem_create_ext_memory_regions</span></code></a>.</p>
+<p>For I915_GEM_CREATE_EXT_PROTECTED_CONTENT usage see
+<a class="reference internal" href="../driver-uapi.html#c.drm_i915_gem_create_ext_protected_content" title="drm_i915_gem_create_ext_protected_content"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">drm_i915_gem_create_ext_protected_content</span></code></a>.</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>Note that new buffer flags should be added here, at least for the stuff that
+is immutable. Previously we would have two ioctls, one to create the object
+with gem_create, and another to apply various parameters, however this
+creates some ambiguity for the params which are considered immutable. Also in
+general we’re phasing out the various SET/GET ioctls.</p>
+</section>
+<section id="probed-cpu-visible-size-attribute">
+<h2>probed_cpu_visible_size attribute<a class="headerlink" href="#probed-cpu-visible-size-attribute" title="Permalink to this headline">¶</a></h2>
+<p>New struct__drm_i915_memory_region attribute which returns the total size of the
+CPU accessible portion, for the particular region. This should only be
+applicable for I915_MEMORY_CLASS_DEVICE. We also report the
+unallocated_cpu_visible_size, alongside the unallocated_size.</p>
+<p>Vulkan will need this as part of creating a separate VkMemoryHeap with the
+VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT set, to represent the CPU visible portion,
+where the total size of the heap needs to be known. It also wants to be able to
+give a rough estimate of how memory can potentially be allocated.</p>
+<dl class="type">
+<dt id="c.__drm_i915_memory_region_info">
+struct <code class="sig-name descname">__drm_i915_memory_region_info</code><a class="headerlink" href="#c.__drm_i915_memory_region_info" title="Permalink to this definition">¶</a></dt>
+<dd><p>Describes one region as known to the driver.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct __drm_i915_memory_region_info {
+    struct drm_i915_gem_memory_class_instance region;
+    __u32 rsvd0;
+    __u64 probed_size;
+    __u64 unallocated_size;
+    union {
+        __u64 rsvd1[8];
+        struct {
+            __u64 probed_cpu_visible_size;
+            __u64 unallocated_cpu_visible_size;
+        };
+    };
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl>
+<dt><code class="docutils literal notranslate"><span class="pre">region</span></code></dt><dd><p>The class:instance pair encoding</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">rsvd0</span></code></dt><dd><p>MBZ</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">probed_size</span></code></dt><dd><p>Memory probed by the driver</p>
+<p>Note that it should not be possible to ever encounter a zero value
+here, also note that no current region type will ever return -1 here.
+Although for future region types, this might be a possibility. The
+same applies to the other size fields.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unallocated_size</span></code></dt><dd><p>Estimate of memory remaining</p>
+<p>Requires CAP_PERFMON or CAP_SYS_ADMIN to get reliable accounting.
+Without this (or if this is an older kernel) the value here will
+always equal the <strong>probed_size</strong>. Note this is only currently tracked
+for I915_MEMORY_CLASS_DEVICE regions (for other types the value here
+will always equal the <strong>probed_size</strong>).</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">{unnamed_union}</span></code></dt><dd><p>anonymous</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">rsvd1</span></code></dt><dd><p>MBZ</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">{unnamed_struct}</span></code></dt><dd><p>anonymous</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">probed_cpu_visible_size</span></code></dt><dd><p>Memory probed by the driver
+that is CPU accessible.</p>
+<p>This will be always be &lt;= <strong>probed_size</strong>, and the
+remainder (if there is any) will not be CPU
+accessible.</p>
+<p>On systems without small BAR, the <strong>probed_size</strong> will
+always equal the <strong>probed_cpu_visible_size</strong>, since all
+of it will be CPU accessible.</p>
+<p>Note this is only tracked for
+I915_MEMORY_CLASS_DEVICE regions (for other types the
+value here will always equal the <strong>probed_size</strong>).</p>
+<p>Note that if the value returned here is zero, then
+this must be an old kernel which lacks the relevant
+small-bar uAPI support (including
+I915_GEM_CREATE_EXT_FLAG_NEEDS_CPU_ACCESS), but on
+such systems we should never actually end up with a
+small BAR configuration, assuming we are able to load
+the kernel module. Hence it should be safe to treat
+this the same as when <strong>probed_cpu_visible_size</strong> ==
+<strong>probed_size</strong>.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unallocated_cpu_visible_size</span></code></dt><dd><p>Estimate of CPU
+visible memory remaining</p>
+<p>Note this is only tracked for
+I915_MEMORY_CLASS_DEVICE regions (for other types the
+value here will always equal the
+<strong>probed_cpu_visible_size</strong>).</p>
+<p>Requires CAP_PERFMON or CAP_SYS_ADMIN to get reliable
+accounting.  Without this the value here will always
+equal the <strong>probed_cpu_visible_size</strong>. Note this is only
+currently tracked for I915_MEMORY_CLASS_DEVICE
+regions (for other types the value here will also
+always equal the <strong>probed_cpu_visible_size</strong>).</p>
+<p>If this is an older kernel the value here will be
+zero, see also <strong>probed_cpu_visible_size</strong>.</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>Note this is using both <a class="reference internal" href="../driver-uapi.html#c.drm_i915_query_item" title="drm_i915_query_item"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">drm_i915_query_item</span></code></a> and <a class="reference internal" href="../driver-uapi.html#c.drm_i915_query" title="drm_i915_query"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">drm_i915_query</span></code></a>.
+For this new query we are adding the new query id DRM_I915_QUERY_MEMORY_REGIONS
+at <a class="reference internal" href="../driver-uapi.html#c.drm_i915_query_item" title="drm_i915_query_item"><code class="xref c c-type docutils literal notranslate"><span class="pre">drm_i915_query_item.query_id</span></code></a>.</p>
+</section>
+<section id="error-capture-restrictions">
+<h2>Error Capture restrictions<a class="headerlink" href="#error-capture-restrictions" title="Permalink to this headline">¶</a></h2>
+<p>With error capture we have two new restrictions:</p>
+<blockquote>
+<div><p>1) Error capture is best effort on small BAR systems; if the pages are not
+CPU accessible, at the time of capture, then the kernel is free to skip
+trying to capture them.</p>
+<p>2) On discrete and newer integrated platforms we now reject error capture
+on recoverable contexts. In the future the kernel may want to blit during
+error capture, when for example something is not currently CPU accessible.</p>
+</div></blockquote>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">I915 Small BAR RFC Section</a><ul>
+<li><a class="reference internal" href="#i915-gem-create-ext-flag-needs-cpu-access-flag">I915_GEM_CREATE_EXT_FLAG_NEEDS_CPU_ACCESS flag</a></li>
+<li><a class="reference internal" href="#probed-cpu-visible-size-attribute">probed_cpu_visible_size attribute</a></li>
+<li><a class="reference internal" href="#error-capture-restrictions">Error Capture restrictions</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/gpu/rfc/i915_small_bar.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/gpu/rfc/i915_small_bar.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

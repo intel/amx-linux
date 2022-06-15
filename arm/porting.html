@@ -1,0 +1,221 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Porting &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Feature status on arm architecture" href="features.html" />
+    <link rel="prev" title="vlocks for Bare-Metal Mutual Exclusion" href="vlocks.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="porting">
+<h1>Porting<a class="headerlink" href="#porting" title="Permalink to this headline">¶</a></h1>
+<p>Taken from list archive at <a class="reference external" href="http://lists.arm.linux.org.uk/pipermail/linux-arm-kernel/2001-July/004064.html">http://lists.arm.linux.org.uk/pipermail/linux-arm-kernel/2001-July/004064.html</a></p>
+<section id="initial-definitions">
+<h2>Initial definitions<a class="headerlink" href="#initial-definitions" title="Permalink to this headline">¶</a></h2>
+<p>The following symbol definitions rely on you knowing the translation that
+__virt_to_phys() does for your machine.  This macro converts the passed
+virtual address to a physical address.  Normally, it is simply:</p>
+<blockquote>
+<div><p>phys = virt - PAGE_OFFSET + PHYS_OFFSET</p>
+</div></blockquote>
+</section>
+<section id="decompressor-symbols">
+<h2>Decompressor Symbols<a class="headerlink" href="#decompressor-symbols" title="Permalink to this headline">¶</a></h2>
+<dl>
+<dt>ZTEXTADDR</dt><dd><p>Start address of decompressor.  There’s no point in talking about
+virtual or physical addresses here, since the MMU will be off at
+the time when you call the decompressor code.  You normally call
+the kernel at this address to start it booting.  This doesn’t have
+to be located in RAM, it can be in flash or other read-only or
+read-write addressable medium.</p>
+</dd>
+<dt>ZBSSADDR</dt><dd><p>Start address of zero-initialised work area for the decompressor.
+This must be pointing at RAM.  The decompressor will zero initialise
+this for you.  Again, the MMU will be off.</p>
+</dd>
+<dt>ZRELADDR</dt><dd><p>This is the address where the decompressed kernel will be written,
+and eventually executed.  The following constraint must be valid:</p>
+<blockquote>
+<div><p>__virt_to_phys(TEXTADDR) == ZRELADDR</p>
+</div></blockquote>
+<p>The initial part of the kernel is carefully coded to be position
+independent.</p>
+</dd>
+<dt>INITRD_PHYS</dt><dd><p>Physical address to place the initial RAM disk.  Only relevant if
+you are using the bootpImage stuff (which only works on the old
+struct param_struct).</p>
+</dd>
+<dt>INITRD_VIRT</dt><dd><p>Virtual address of the initial RAM disk.  The following  constraint
+must be valid:</p>
+<blockquote>
+<div><p>__virt_to_phys(INITRD_VIRT) == INITRD_PHYS</p>
+</div></blockquote>
+</dd>
+<dt>PARAMS_PHYS</dt><dd><p>Physical address of the struct param_struct or tag list, giving the
+kernel various parameters about its execution environment.</p>
+</dd>
+</dl>
+</section>
+<section id="kernel-symbols">
+<h2>Kernel Symbols<a class="headerlink" href="#kernel-symbols" title="Permalink to this headline">¶</a></h2>
+<dl>
+<dt>PHYS_OFFSET</dt><dd><p>Physical start address of the first bank of RAM.</p>
+</dd>
+<dt>PAGE_OFFSET</dt><dd><p>Virtual start address of the first bank of RAM.  During the kernel
+boot phase, virtual address PAGE_OFFSET will be mapped to physical
+address PHYS_OFFSET, along with any other mappings you supply.
+This should be the same value as TASK_SIZE.</p>
+</dd>
+<dt>TASK_SIZE</dt><dd><p>The maximum size of a user process in bytes.  Since user space
+always starts at zero, this is the maximum address that a user
+process can access+1.  The user space stack grows down from this
+address.</p>
+<p>Any virtual address below TASK_SIZE is deemed to be user process
+area, and therefore managed dynamically on a process by process
+basis by the kernel.  I’ll call this the user segment.</p>
+<p>Anything above TASK_SIZE is common to all processes.  I’ll call
+this the kernel segment.</p>
+<p>(In other words, you can’t put IO mappings below TASK_SIZE, and
+hence PAGE_OFFSET).</p>
+</dd>
+<dt>TEXTADDR</dt><dd><p>Virtual start address of kernel, normally PAGE_OFFSET + 0x8000.
+This is where the kernel image ends up.  With the latest kernels,
+it must be located at 32768 bytes into a 128MB region.  Previous
+kernels placed a restriction of 256MB here.</p>
+</dd>
+<dt>DATAADDR</dt><dd><p>Virtual address for the kernel data segment.  Must not be defined
+when using the decompressor.</p>
+</dd>
+<dt>VMALLOC_START / VMALLOC_END</dt><dd><p>Virtual addresses bounding the <a class="reference internal" href="../core-api/mm-api.html#c.vmalloc" title="vmalloc"><code class="xref c c-func docutils literal notranslate"><span class="pre">vmalloc()</span></code></a> area.  There must not be
+any static mappings in this area; vmalloc will overwrite them.
+The addresses must also be in the kernel segment (see above).
+Normally, the <a class="reference internal" href="../core-api/mm-api.html#c.vmalloc" title="vmalloc"><code class="xref c c-func docutils literal notranslate"><span class="pre">vmalloc()</span></code></a> area starts VMALLOC_OFFSET bytes above the
+last virtual RAM address (found using variable high_memory).</p>
+</dd>
+<dt>VMALLOC_OFFSET</dt><dd><p>Offset normally incorporated into VMALLOC_START to provide a hole
+between virtual RAM and the vmalloc area.  We do this to allow
+out of bounds memory accesses (eg, something writing off the end
+of the mapped memory map) to be caught.  Normally set to 8MB.</p>
+</dd>
+</dl>
+</section>
+<section id="architecture-specific-macros">
+<h2>Architecture Specific Macros<a class="headerlink" href="#architecture-specific-macros" title="Permalink to this headline">¶</a></h2>
+<dl>
+<dt>BOOT_MEM(pram,pio,vio)</dt><dd><p><cite>pram</cite> specifies the physical start address of RAM.  Must always
+be present, and should be the same as PHYS_OFFSET.</p>
+<p><cite>pio</cite> is the physical address of an 8MB region containing IO for
+use with the debugging macros in arch/arm/kernel/debug-armv.S.</p>
+<p><cite>vio</cite> is the virtual address of the 8MB debugging region.</p>
+<p>It is expected that the debugging region will be re-initialised
+by the architecture specific code later in the code (via the
+MAPIO function).</p>
+</dd>
+<dt>BOOT_PARAMS</dt><dd><p>Same as, and see PARAMS_PHYS.</p>
+</dd>
+<dt>FIXUP(func)</dt><dd><p>Machine specific fixups, run before memory subsystems have been
+initialised.</p>
+</dd>
+<dt>MAPIO(func)</dt><dd><p>Machine specific function to map IO areas (including the debug
+region above).</p>
+</dd>
+<dt>INITIRQ(func)</dt><dd><p>Machine specific function to initialise interrupts.</p>
+</dd>
+</dl>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Porting</a><ul>
+<li><a class="reference internal" href="#initial-definitions">Initial definitions</a></li>
+<li><a class="reference internal" href="#decompressor-symbols">Decompressor Symbols</a></li>
+<li><a class="reference internal" href="#kernel-symbols">Kernel Symbols</a></li>
+<li><a class="reference internal" href="#architecture-specific-macros">Architecture Specific Macros</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/arm/porting.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/arm/porting.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

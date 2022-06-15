@@ -1,0 +1,293 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>3. PCI Express I/O 虚拟化指南 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../PCI/pci-iov-howto.html"><span class="doc">PCI Express I/O Virtualization Howto</span></a></p>
+</dd>
+<dt class="field-even">翻译</dt>
+<dd class="field-even"><p>司延腾 Yanteng Si &lt;<a class="reference external" href="mailto:siyanteng&#37;&#52;&#48;loongson&#46;cn">siyanteng<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+<dt class="field-odd">校译</dt>
+<dd class="field-odd"><p></p></dd>
+</dl>
+<section id="pci-express-i-o">
+<span id="cn-pci-iov-howto"></span><h1><span class="section-number">3. </span>PCI Express I/O 虚拟化指南<a class="headerlink" href="#pci-express-i-o" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">版权</dt>
+<dd class="field-odd"><p>© 2009 Intel Corporation</p>
+</dd>
+<dt class="field-even">作者</dt>
+<dd class="field-even"><ul class="simple">
+<li><p>Yu Zhao &lt;<a class="reference external" href="mailto:yu&#46;zhao&#37;&#52;&#48;intel&#46;com">yu<span>&#46;</span>zhao<span>&#64;</span>intel<span>&#46;</span>com</a>&gt;</p></li>
+<li><p>Donald Dutile &lt;<a class="reference external" href="mailto:ddutile&#37;&#52;&#48;redhat&#46;com">ddutile<span>&#64;</span>redhat<span>&#46;</span>com</a>&gt;</p></li>
+</ul>
+</dd>
+</dl>
+<section id="id1">
+<h2><span class="section-number">3.1. </span>概述<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<section id="sr-iov">
+<h3><span class="section-number">3.1.1. </span>什么是SR-IOV<a class="headerlink" href="#sr-iov" title="Permalink to this headline">¶</a></h3>
+<p>单根I/O虚拟化（SR-IOV）是一种PCI Express扩展功能，它使一个物理设备显示为多个
+虚拟设备。物理设备被称为物理功能（PF），而虚拟设备被称为虚拟功能（VF）。VF的分
+配可以由PF通过封装在该功能中的寄存器动态控制。默认情况下，该功能未被启用，PF表
+现为传统的PCIe设备。一旦开启，每个VF的PCI配置空间都可以通过自己的总线、设备和
+功能编号（路由ID）来访问。而且每个VF也有PCI内存空间，用于映射其寄存器集。VF设
+备驱动程序对寄存器集进行操作，这样它就可以发挥功能，并作为一个真正的现有PCI设备
+出现。</p>
+</section>
+</section>
+<section id="id2">
+<h2><span class="section-number">3.2. </span>使用指南<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<section id="id3">
+<h3><span class="section-number">3.2.1. </span>我怎样才能启用SR-IOV功能<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h3>
+<p>有多种方法可用于SR-IOV的启用。在第一种方法中，设备驱动（PF驱动）将通过SR-IOV
+核心提供的API控制功能的启用和禁用。如果硬件具有SR-IOV能力，加载其PF驱动器将启
+用它和与PF相关的所有VF。一些PF驱动需要设置一个模块参数，以确定要启用的VF的数量。
+在第二种方法中，对sysfs文件sriov_numvfs的写入将启用和禁用与PCIe PF相关的VF。
+这种方法实现了每个PF的VF启用/禁用值，而第一种方法则适用于同一设备的所有PF。此外，
+PCI SRIOV核心支持确保启用/禁用操作是有效的，以减少同一检查在多个驱动程序中的重
+复，例如，如果启用VF，检查numvfs == 0，确保numvfs &lt;= totalvfs。
+第二种方法是对新的/未来的VF设备的推荐方法。</p>
+</section>
+<section id="id4">
+<h3><span class="section-number">3.2.2. </span>我怎样才能使用虚拟功能<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h3>
+<p>在内核中，VF被视为热插拔的PCI设备，所以它们应该能够以与真正的PCI设备相同的方式
+工作。VF需要的设备驱动与普通PCI设备的驱动相同。</p>
+</section>
+</section>
+<section id="id5">
+<h2><span class="section-number">3.3. </span>开发者指南<a class="headerlink" href="#id5" title="Permalink to this headline">¶</a></h2>
+<section id="sr-iov-api">
+<h3><span class="section-number">3.3.1. </span>SR-IOV API<a class="headerlink" href="#sr-iov-api" title="Permalink to this headline">¶</a></h3>
+<p>用来开启SR-IOV功能:</p>
+<ol class="loweralpha">
+<li><p>对于第一种方法，在驱动程序中:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int pci_enable_sriov(struct pci_dev *dev, int nr_virtfn);
+</pre></div>
+</div>
+</li>
+</ol>
+<p>nr_virtfn’是要启用的VF的编号。</p>
+<ol class="loweralpha" start="2">
+<li><p>对于第二种方法，从sysfs:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>echo &#39;nr_virtfn&#39; &gt; \
+/sys/bus/pci/devices/&lt;DOMAIN:BUS:DEVICE.FUNCTION&gt;/sriov_numvfs
+</pre></div>
+</div>
+</li>
+</ol>
+<p>用来关闭SR-IOV功能:</p>
+<ol class="loweralpha">
+<li><p>对于第一种方法，在驱动程序中:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void pci_disable_sriov(struct pci_dev *dev);
+</pre></div>
+</div>
+</li>
+<li><p>对于第二种方法，从sysfs:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>echo  0 &gt; \
+/sys/bus/pci/devices/&lt;DOMAIN:BUS:DEVICE.FUNCTION&gt;/sriov_numvfs
+</pre></div>
+</div>
+</li>
+</ol>
+<p>要想通过主机上的兼容驱动启用自动探测VF，在启用SR-IOV功能之前运行下面的命令。这
+是默认的行为。</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>echo 1 &gt; \
+/sys/bus/pci/devices/&lt;DOMAIN:BUS:DEVICE.FUNCTION&gt;/sriov_drivers_autoprobe
+</pre></div>
+</div>
+<p>要禁止主机上的兼容驱动自动探测VF，请在启用SR-IOV功能之前运行以下命令。更新这个
+入口不会影响已经被探测的VF。</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>echo  0 &gt; \
+/sys/bus/pci/devices/&lt;DOMAIN:BUS:DEVICE.FUNCTION&gt;/sriov_drivers_autoprobe
+</pre></div>
+</div>
+</section>
+<section id="id6">
+<h3><span class="section-number">3.3.2. </span>用例<a class="headerlink" href="#id6" title="Permalink to this headline">¶</a></h3>
+<p>下面的代码演示了SR-IOV API的用法</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>static int dev_probe(struct pci_dev *dev, const struct pci_device_id *id)
+{
+        pci_enable_sriov(dev, NR_VIRTFN);
+
+        ...
+
+        return 0;
+}
+
+static void dev_remove(struct pci_dev *dev)
+{
+        pci_disable_sriov(dev);
+
+        ...
+}
+
+static int dev_suspend(struct device *dev)
+{
+        ...
+
+        return 0;
+}
+
+static int dev_resume(struct device *dev)
+{
+        ...
+
+        return 0;
+}
+
+static void dev_shutdown(struct pci_dev *dev)
+{
+        ...
+}
+
+static int dev_sriov_configure(struct pci_dev *dev, int numvfs)
+{
+        if (numvfs &gt; 0) {
+                ...
+                pci_enable_sriov(dev, numvfs);
+                ...
+                return numvfs;
+        }
+        if (numvfs == 0) {
+                ....
+                pci_disable_sriov(dev);
+                ...
+                return 0;
+        }
+}
+
+static struct pci_driver dev_driver = {
+        .name =         &quot;SR-IOV Physical Function driver&quot;,
+        .id_table =     dev_id_table,
+        .probe =        dev_probe,
+        .remove =       dev_remove,
+        .driver.pm =    &amp;dev_pm_ops
+        .shutdown =     dev_shutdown,
+        .sriov_configure = dev_sriov_configure,
+};
+</pre></div>
+</div>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">3. PCI Express I/O 虚拟化指南</a><ul>
+<li><a class="reference internal" href="#id1">3.1. 概述</a><ul>
+<li><a class="reference internal" href="#sr-iov">3.1.1. 什么是SR-IOV</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id2">3.2. 使用指南</a><ul>
+<li><a class="reference internal" href="#id3">3.2.1. 我怎样才能启用SR-IOV功能</a></li>
+<li><a class="reference internal" href="#id4">3.2.2. 我怎样才能使用虚拟功能</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id5">3.3. 开发者指南</a><ul>
+<li><a class="reference internal" href="#sr-iov-api">3.3.1. SR-IOV API</a></li>
+<li><a class="reference internal" href="#id6">3.3.2. 用例</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/PCI/pci-iov-howto.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/PCI/pci-iov-howto.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

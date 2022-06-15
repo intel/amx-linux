@@ -1,0 +1,255 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>15. x86 IOMMU Support &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="16. Intel(R) TXT Overview" href="intel_txt.html" />
+    <link rel="prev" title="14. Hardware-Feedback Interface for scheduling on Intel Hardware" href="intel-hfi.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="x86-iommu-support">
+<h1><span class="section-number">15. </span>x86 IOMMU Support<a class="headerlink" href="#x86-iommu-support" title="Permalink to this headline">¶</a></h1>
+<p>The architecture specs can be obtained from the below locations.</p>
+<ul class="simple">
+<li><p>Intel: <a class="reference external" href="http://www.intel.com/content/dam/www/public/us/en/documents/product-specifications/vt-directed-io-spec.pdf">http://www.intel.com/content/dam/www/public/us/en/documents/product-specifications/vt-directed-io-spec.pdf</a></p></li>
+<li><p>AMD: <a class="reference external" href="https://www.amd.com/system/files/TechDocs/48882_IOMMU.pdf">https://www.amd.com/system/files/TechDocs/48882_IOMMU.pdf</a></p></li>
+</ul>
+<p>This guide gives a quick cheat sheet for some basic understanding.</p>
+<section id="basic-stuff">
+<h2><span class="section-number">15.1. </span>Basic stuff<a class="headerlink" href="#basic-stuff" title="Permalink to this headline">¶</a></h2>
+<p>ACPI enumerates and lists the different IOMMUs on the platform, and
+device scope relationships between devices and which IOMMU controls
+them.</p>
+<p>Some ACPI Keywords:</p>
+<ul class="simple">
+<li><p>DMAR - Intel DMA Remapping table</p></li>
+<li><p>DRHD - Intel DMA Remapping Hardware Unit Definition</p></li>
+<li><p>RMRR - Intel Reserved Memory Region Reporting Structure</p></li>
+<li><p>IVRS - AMD I/O Virtualization Reporting Structure</p></li>
+<li><p>IVDB - AMD I/O Virtualization Definition Block</p></li>
+<li><p>IVHD - AMD I/O Virtualization Hardware Definition</p></li>
+</ul>
+<section id="what-is-intel-rmrr">
+<h3><span class="section-number">15.1.1. </span>What is Intel RMRR?<a class="headerlink" href="#what-is-intel-rmrr" title="Permalink to this headline">¶</a></h3>
+<p>There are some devices the BIOS controls, for e.g USB devices to perform
+PS2 emulation. The regions of memory used for these devices are marked
+reserved in the e820 map. When we turn on DMA translation, DMA to those
+regions will fail. Hence BIOS uses RMRR to specify these regions along with
+devices that need to access these regions. OS is expected to setup
+unity mappings for these regions for these devices to access these regions.</p>
+</section>
+<section id="what-is-amd-ivrs">
+<h3><span class="section-number">15.1.2. </span>What is AMD IVRS?<a class="headerlink" href="#what-is-amd-ivrs" title="Permalink to this headline">¶</a></h3>
+<p>The architecture defines an ACPI-compatible data structure called an I/O
+Virtualization Reporting Structure (IVRS) that is used to convey information
+related to I/O virtualization to system software.  The IVRS describes the
+configuration and capabilities of the IOMMUs contained in the platform as
+well as information about the devices that each IOMMU virtualizes.</p>
+<p>The IVRS provides information about the following:</p>
+<ul class="simple">
+<li><p>IOMMUs present in the platform including their capabilities and proper configuration</p></li>
+<li><p>System I/O topology relevant to each IOMMU</p></li>
+<li><p>Peripheral devices that cannot be otherwise enumerated</p></li>
+<li><p>Memory regions used by SMI/SMM, platform firmware, and platform hardware. These are generally exclusion ranges to be configured by system software.</p></li>
+</ul>
+</section>
+</section>
+<section id="how-is-an-i-o-virtual-address-iova-generated">
+<h2><span class="section-number">15.2. </span>How is an I/O Virtual Address (IOVA) generated?<a class="headerlink" href="#how-is-an-i-o-virtual-address-iova-generated" title="Permalink to this headline">¶</a></h2>
+<p>Well behaved drivers call dma_map_*() calls before sending command to device
+that needs to perform DMA. Once DMA is completed and mapping is no longer
+required, driver performs dma_unmap_*() calls to unmap the region.</p>
+</section>
+<section id="intel-specific-notes">
+<h2><span class="section-number">15.3. </span>Intel Specific Notes<a class="headerlink" href="#intel-specific-notes" title="Permalink to this headline">¶</a></h2>
+<section id="graphics-problems">
+<h3><span class="section-number">15.3.1. </span>Graphics Problems?<a class="headerlink" href="#graphics-problems" title="Permalink to this headline">¶</a></h3>
+<p>If you encounter issues with graphics devices, you can try adding
+option intel_iommu=igfx_off to turn off the integrated graphics engine.
+If this fixes anything, please ensure you file a bug reporting the problem.</p>
+</section>
+<section id="some-exceptions-to-iova">
+<h3><span class="section-number">15.3.2. </span>Some exceptions to IOVA<a class="headerlink" href="#some-exceptions-to-iova" title="Permalink to this headline">¶</a></h3>
+<p>Interrupt ranges are not address translated, (0xfee00000 - 0xfeefffff).
+The same is true for peer to peer transactions. Hence we reserve the
+address from PCI MMIO ranges so they are not allocated for IOVA addresses.</p>
+</section>
+</section>
+<section id="amd-specific-notes">
+<h2><span class="section-number">15.4. </span>AMD Specific Notes<a class="headerlink" href="#amd-specific-notes" title="Permalink to this headline">¶</a></h2>
+<section id="id1">
+<h3><span class="section-number">15.4.1. </span>Graphics Problems?<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h3>
+<p>If you encounter issues with integrated graphics devices, you can try adding
+option iommu=pt to the kernel command line use a 1:1 mapping for the IOMMU.  If
+this fixes anything, please ensure you file a bug reporting the problem.</p>
+</section>
+</section>
+<section id="fault-reporting">
+<h2><span class="section-number">15.5. </span>Fault reporting<a class="headerlink" href="#fault-reporting" title="Permalink to this headline">¶</a></h2>
+<p>When errors are reported, the IOMMU signals via an interrupt. The fault
+reason and device that caused it is printed on the console.</p>
+</section>
+<section id="kernel-log-samples">
+<h2><span class="section-number">15.6. </span>Kernel Log Samples<a class="headerlink" href="#kernel-log-samples" title="Permalink to this headline">¶</a></h2>
+<section id="intel-boot-messages">
+<h3><span class="section-number">15.6.1. </span>Intel Boot Messages<a class="headerlink" href="#intel-boot-messages" title="Permalink to this headline">¶</a></h3>
+<p>Something like this gets printed indicating presence of DMAR tables
+in ACPI:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ACPI: DMAR (v001 A M I  OEMDMAR  0x00000001 MSFT 0x00000097) @ 0x000000007f5b5ef0
+</pre></div>
+</div>
+<p>When DMAR is being processed and initialized by ACPI, prints DMAR locations
+and any RMRR’s processed:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ACPI DMAR:Host address width 36
+ACPI DMAR:DRHD (flags: 0x00000000)base: 0x00000000fed90000
+ACPI DMAR:DRHD (flags: 0x00000000)base: 0x00000000fed91000
+ACPI DMAR:DRHD (flags: 0x00000001)base: 0x00000000fed93000
+ACPI DMAR:RMRR base: 0x00000000000ed000 end: 0x00000000000effff
+ACPI DMAR:RMRR base: 0x000000007f600000 end: 0x000000007fffffff
+</pre></div>
+</div>
+<p>When DMAR is enabled for use, you will notice:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>PCI-DMA: Using DMAR IOMMU
+</pre></div>
+</div>
+</section>
+<section id="intel-fault-reporting">
+<h3><span class="section-number">15.6.2. </span>Intel Fault reporting<a class="headerlink" href="#intel-fault-reporting" title="Permalink to this headline">¶</a></h3>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>DMAR:[DMA Write] Request device [00:02.0] fault addr 6df084000
+DMAR:[fault reason 05] PTE Write access is not set
+DMAR:[DMA Write] Request device [00:02.0] fault addr 6df084000
+DMAR:[fault reason 05] PTE Write access is not set
+</pre></div>
+</div>
+</section>
+<section id="amd-boot-messages">
+<h3><span class="section-number">15.6.3. </span>AMD Boot Messages<a class="headerlink" href="#amd-boot-messages" title="Permalink to this headline">¶</a></h3>
+<p>Something like this gets printed indicating presence of the IOMMU:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>iommu: Default domain type: Translated
+iommu: DMA domain TLB invalidation policy: lazy mode
+</pre></div>
+</div>
+</section>
+<section id="amd-fault-reporting">
+<h3><span class="section-number">15.6.4. </span>AMD Fault reporting<a class="headerlink" href="#amd-fault-reporting" title="Permalink to this headline">¶</a></h3>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>AMD-Vi: Event logged [IO_PAGE_FAULT domain=0x0007 address=0xffffc02000 flags=0x0000]
+AMD-Vi: Event logged [IO_PAGE_FAULT device=07:00.0 domain=0x0007 address=0xffffc02000 flags=0x0000]
+</pre></div>
+</div>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">15. x86 IOMMU Support</a><ul>
+<li><a class="reference internal" href="#basic-stuff">15.1. Basic stuff</a><ul>
+<li><a class="reference internal" href="#what-is-intel-rmrr">15.1.1. What is Intel RMRR?</a></li>
+<li><a class="reference internal" href="#what-is-amd-ivrs">15.1.2. What is AMD IVRS?</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#how-is-an-i-o-virtual-address-iova-generated">15.2. How is an I/O Virtual Address (IOVA) generated?</a></li>
+<li><a class="reference internal" href="#intel-specific-notes">15.3. Intel Specific Notes</a><ul>
+<li><a class="reference internal" href="#graphics-problems">15.3.1. Graphics Problems?</a></li>
+<li><a class="reference internal" href="#some-exceptions-to-iova">15.3.2. Some exceptions to IOVA</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#amd-specific-notes">15.4. AMD Specific Notes</a><ul>
+<li><a class="reference internal" href="#id1">15.4.1. Graphics Problems?</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#fault-reporting">15.5. Fault reporting</a></li>
+<li><a class="reference internal" href="#kernel-log-samples">15.6. Kernel Log Samples</a><ul>
+<li><a class="reference internal" href="#intel-boot-messages">15.6.1. Intel Boot Messages</a></li>
+<li><a class="reference internal" href="#intel-fault-reporting">15.6.2. Intel Fault reporting</a></li>
+<li><a class="reference internal" href="#amd-boot-messages">15.6.3. AMD Boot Messages</a></li>
+<li><a class="reference internal" href="#amd-fault-reporting">15.6.4. AMD Fault reporting</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/x86/iommu.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/x86/iommu.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

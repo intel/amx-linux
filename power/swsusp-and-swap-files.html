@@ -1,0 +1,156 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Using swap files with software suspend (swsusp) &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="How to use dm-crypt and swsusp together" href="swsusp-dmcrypt.html" />
+    <link rel="prev" title="System Suspend and Device Interrupts" href="suspend-and-interrupts.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="using-swap-files-with-software-suspend-swsusp">
+<h1>Using swap files with software suspend (swsusp)<a class="headerlink" href="#using-swap-files-with-software-suspend-swsusp" title="Permalink to this headline">¶</a></h1>
+<blockquote>
+<div><ol class="upperalpha simple" start="3">
+<li><p>2006 Rafael J. Wysocki &lt;<a class="reference external" href="mailto:rjw&#37;&#52;&#48;sisk&#46;pl">rjw<span>&#64;</span>sisk<span>&#46;</span>pl</a>&gt;</p></li>
+</ol>
+</div></blockquote>
+<p>The Linux kernel handles swap files almost in the same way as it handles swap
+partitions and there are only two differences between these two types of swap
+areas:
+(1) swap files need not be contiguous,
+(2) the header of a swap file is not in the first block of the partition that
+holds it.  From the swsusp’s point of view (1) is not a problem, because it is
+already taken care of by the swap-handling code, but (2) has to be taken into
+consideration.</p>
+<p>In principle the location of a swap file’s header may be determined with the
+help of appropriate filesystem driver.  Unfortunately, however, it requires the
+filesystem holding the swap file to be mounted, and if this filesystem is
+journaled, it cannot be mounted during resume from disk.  For this reason to
+identify a swap file swsusp uses the name of the partition that holds the file
+and the offset from the beginning of the partition at which the swap file’s
+header is located.  For convenience, this offset is expressed in &lt;PAGE_SIZE&gt;
+units.</p>
+<p>In order to use a swap file with swsusp, you need to:</p>
+<ol class="arabic">
+<li><p>Create the swap file and make it active, eg.:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># dd if=/dev/zero of=&lt;swap_file_path&gt; bs=1024 count=&lt;swap_file_size_in_k&gt;
+# mkswap &lt;swap_file_path&gt;
+# swapon &lt;swap_file_path&gt;
+</pre></div>
+</div>
+</li>
+</ol>
+<p>2) Use an application that will bmap the swap file with the help of the
+FIBMAP ioctl and determine the location of the file’s swap header, as the
+offset, in &lt;PAGE_SIZE&gt; units, from the beginning of the partition which
+holds the swap file.</p>
+<ol class="arabic" start="3">
+<li><p>Add the following parameters to the kernel command line:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>resume=&lt;swap_file_partition&gt; resume_offset=&lt;swap_file_offset&gt;
+</pre></div>
+</div>
+</li>
+</ol>
+<p>where &lt;swap_file_partition&gt; is the partition on which the swap file is located
+and &lt;swap_file_offset&gt; is the offset of the swap header determined by the
+application in 2) (of course, this step may be carried out automatically
+by the same application that determines the swap file’s header offset using the
+FIBMAP ioctl)</p>
+<p>OR</p>
+<p>Use a userland suspend application that will set the partition and offset
+with the help of the SNAPSHOT_SET_SWAP_AREA ioctl described in
+<a class="reference internal" href="userland-swsusp.html"><span class="doc">Documentation for userland software suspend interface</span></a> (this is the only method to suspend
+to a swap file allowing the resume to be initiated from an initrd or initramfs
+image).</p>
+<p>Now, swsusp will use the swap file in the same way in which it would use a swap
+partition.  In particular, the swap file has to be active (ie. be present in
+/proc/swaps) so that it can be used for suspending.</p>
+<p>Note that if the swap file used for suspending is deleted and recreated,
+the location of its header need not be the same as before.  Thus every time
+this happens the value of the “resume_offset=” kernel command line parameter
+has to be updated.</p>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/power/swsusp-and-swap-files.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/power/swsusp-and-swap-files.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

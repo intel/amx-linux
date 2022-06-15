@@ -1,0 +1,205 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>dm-service-time &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="device-mapper uevent" href="dm-uevent.html" />
+    <link rel="prev" title="dm-raid" href="dm-raid.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="dm-service-time">
+<h1>dm-service-time<a class="headerlink" href="#dm-service-time" title="Permalink to this headline">¶</a></h1>
+<p>dm-service-time is a path selector module for device-mapper targets,
+which selects a path with the shortest estimated service time for
+the incoming I/O.</p>
+<p>The service time for each path is estimated by dividing the total size
+of in-flight I/Os on a path with the performance value of the path.
+The performance value is a relative throughput value among all paths
+in a path-group, and it can be specified as a table argument.</p>
+<p>The path selector name is ‘service-time’.</p>
+<p>Table parameters for each path:</p>
+<blockquote>
+<div><dl class="simple">
+<dt>[&lt;repeat_count&gt; [&lt;relative_throughput&gt;]]</dt><dd><dl class="simple">
+<dt>&lt;repeat_count&gt;:</dt><dd><p>The number of I/Os to dispatch using the selected
+path before switching to the next path.
+If not given, internal default is used.  To check
+the default value, see the activated table.</p>
+</dd>
+<dt>&lt;relative_throughput&gt;:</dt><dd><p>The relative throughput value of the path
+among all paths in the path-group.
+The valid range is 0-100.
+If not given, minimum value ‘1’ is used.
+If ‘0’ is given, the path isn’t selected while
+other paths having a positive value are available.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</div></blockquote>
+<p>Status for each path:</p>
+<blockquote>
+<div><dl class="simple">
+<dt>&lt;status&gt; &lt;fail-count&gt; &lt;in-flight-size&gt; &lt;relative_throughput&gt;</dt><dd><dl class="simple">
+<dt>&lt;status&gt;:</dt><dd><p>‘A’ if the path is active, ‘F’ if the path is failed.</p>
+</dd>
+<dt>&lt;fail-count&gt;:</dt><dd><p>The number of path failures.</p>
+</dd>
+<dt>&lt;in-flight-size&gt;:</dt><dd><p>The size of in-flight I/Os on the path.</p>
+</dd>
+<dt>&lt;relative_throughput&gt;:</dt><dd><p>The relative throughput value of the path
+among all paths in the path-group.</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</div></blockquote>
+<section id="algorithm">
+<h2>Algorithm<a class="headerlink" href="#algorithm" title="Permalink to this headline">¶</a></h2>
+<p>dm-service-time adds the I/O size to ‘in-flight-size’ when the I/O is
+dispatched and subtracts when completed.
+Basically, dm-service-time selects a path having minimum service time
+which is calculated by:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>(&#39;in-flight-size&#39; + &#39;size-of-incoming-io&#39;) / &#39;relative_throughput&#39;
+</pre></div>
+</div>
+<p>However, some optimizations below are used to reduce the calculation
+as much as possible.</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>If the paths have the same ‘relative_throughput’, skip
+the division and just compare the ‘in-flight-size’.</p></li>
+<li><p>If the paths have the same ‘in-flight-size’, skip the division
+and just compare the ‘relative_throughput’.</p></li>
+<li><p>If some paths have non-zero ‘relative_throughput’ and others
+have zero ‘relative_throughput’, ignore those paths with zero
+‘relative_throughput’.</p></li>
+</ol>
+</div></blockquote>
+<p>If such optimizations can’t be applied, calculate service time, and
+compare service time.
+If calculated service time is equal, the path having maximum
+‘relative_throughput’ may be better.  So compare ‘relative_throughput’
+then.</p>
+</section>
+<section id="examples">
+<h2>Examples<a class="headerlink" href="#examples" title="Permalink to this headline">¶</a></h2>
+<p>In case that 2 paths (sda and sdb) are used with repeat_count == 128
+and sda has an average throughput 1GB/s and sdb has 4GB/s,
+‘relative_throughput’ value may be ‘1’ for sda and ‘4’ for sdb:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># echo &quot;0 10 multipath 0 0 1 1 service-time 0 2 2 8:0 128 1 8:16 128 4&quot; \
+  dmsetup create test
+#
+# dmsetup table
+test: 0 10 multipath 0 0 1 1 service-time 0 2 2 8:0 128 1 8:16 128 4
+#
+# dmsetup status
+test: 0 10 multipath 2 0 0 0 1 1 E 0 2 2 8:0 A 0 0 1 8:16 A 0 0 4
+</pre></div>
+</div>
+<p>Or ‘2’ for sda and ‘8’ for sdb would be also true:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># echo &quot;0 10 multipath 0 0 1 1 service-time 0 2 2 8:0 128 2 8:16 128 8&quot; \
+  dmsetup create test
+#
+# dmsetup table
+test: 0 10 multipath 0 0 1 1 service-time 0 2 2 8:0 128 2 8:16 128 8
+#
+# dmsetup status
+test: 0 10 multipath 2 0 0 0 1 1 E 0 2 2 8:0 A 0 0 2 8:16 A 0 0 8
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">dm-service-time</a><ul>
+<li><a class="reference internal" href="#algorithm">Algorithm</a></li>
+<li><a class="reference internal" href="#examples">Examples</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/admin-guide/device-mapper/dm-service-time.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/admin-guide/device-mapper/dm-service-time.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

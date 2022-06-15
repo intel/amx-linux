@@ -1,0 +1,174 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>USB bulk streams &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="USB core callbacks" href="callbacks.html" />
+    <link rel="prev" title="USB Anchors" href="anchors.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="usb-bulk-streams">
+<h1>USB bulk streams<a class="headerlink" href="#usb-bulk-streams" title="Permalink to this headline">¶</a></h1>
+<section id="background">
+<h2>Background<a class="headerlink" href="#background" title="Permalink to this headline">¶</a></h2>
+<p>Bulk endpoint streams were added in the USB 3.0 specification.  Streams allow a
+device driver to overload a bulk endpoint so that multiple transfers can be
+queued at once.</p>
+<p>Streams are defined in sections 4.4.6.4 and 8.12.1.4 of the Universal Serial Bus
+3.0 specification at <a class="reference external" href="https://www.usb.org/developers/docs/">https://www.usb.org/developers/docs/</a>  The USB Attached SCSI
+Protocol, which uses streams to queue multiple SCSI commands, can be found on
+the T10 website (<a class="reference external" href="https://t10.org/">https://t10.org/</a>).</p>
+</section>
+<section id="device-side-implications">
+<h2>Device-side implications<a class="headerlink" href="#device-side-implications" title="Permalink to this headline">¶</a></h2>
+<p>Once a buffer has been queued to a stream ring, the device is notified (through
+an out-of-band mechanism on another endpoint) that data is ready for that stream
+ID.  The device then tells the host which “stream” it wants to start.  The host
+can also initiate a transfer on a stream without the device asking, but the
+device can refuse that transfer.  Devices can switch between streams at any
+time.</p>
+</section>
+<section id="driver-implications">
+<h2>Driver implications<a class="headerlink" href="#driver-implications" title="Permalink to this headline">¶</a></h2>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int usb_alloc_streams(struct usb_interface *interface,
+              struct usb_host_endpoint **eps, unsigned int num_eps,
+              unsigned int num_streams, gfp_t mem_flags);
+</pre></div>
+</div>
+<p>Device drivers will call this API to request that the host controller driver
+allocate memory so the driver can use up to num_streams stream IDs.  They must
+pass an array of usb_host_endpoints that need to be setup with similar stream
+IDs.  This is to ensure that a UASP driver will be able to use the same stream
+ID for the bulk IN and OUT endpoints used in a Bi-directional command sequence.</p>
+<p>The return value is an error condition (if one of the endpoints doesn’t support
+streams, or the xHCI driver ran out of memory), or the number of streams the
+host controller allocated for this endpoint.  The xHCI host controller hardware
+declares how many stream IDs it can support, and each bulk endpoint on a
+SuperSpeed device will say how many stream IDs it can handle.  Therefore,
+drivers should be able to deal with being allocated less stream IDs than they
+requested.</p>
+<p>Do NOT call this function if you have URBs enqueued for any of the endpoints
+passed in as arguments.  Do not call this function to request less than two
+streams.</p>
+<p>Drivers will only be allowed to call this API once for the same endpoint
+without calling <a class="reference internal" href="usb.html#c.usb_free_streams" title="usb_free_streams"><code class="xref c c-func docutils literal notranslate"><span class="pre">usb_free_streams()</span></code></a>.  This is a simplification for the xHCI host
+controller driver, and may change in the future.</p>
+</section>
+<section id="picking-new-stream-ids-to-use">
+<h2>Picking new Stream IDs to use<a class="headerlink" href="#picking-new-stream-ids-to-use" title="Permalink to this headline">¶</a></h2>
+<p>Stream ID 0 is reserved, and should not be used to communicate with devices.  If
+<a class="reference internal" href="usb.html#c.usb_alloc_streams" title="usb_alloc_streams"><code class="xref c c-func docutils literal notranslate"><span class="pre">usb_alloc_streams()</span></code></a> returns with a value of N, you may use streams 1 though N.
+To queue an URB for a specific stream, set the urb-&gt;stream_id value.  If the
+endpoint does not support streams, an error will be returned.</p>
+<p>Note that new API to choose the next stream ID will have to be added if the xHCI
+driver supports secondary stream IDs.</p>
+</section>
+<section id="clean-up">
+<h2>Clean up<a class="headerlink" href="#clean-up" title="Permalink to this headline">¶</a></h2>
+<p>If a driver wishes to stop using streams to communicate with the device, it
+should call:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void usb_free_streams(struct usb_interface *interface,
+              struct usb_host_endpoint **eps, unsigned int num_eps,
+              gfp_t mem_flags);
+</pre></div>
+</div>
+<p>All stream IDs will be deallocated when the driver releases the interface, to
+ensure that drivers that don’t support streams will be able to use the endpoint.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">USB bulk streams</a><ul>
+<li><a class="reference internal" href="#background">Background</a></li>
+<li><a class="reference internal" href="#device-side-implications">Device-side implications</a></li>
+<li><a class="reference internal" href="#driver-implications">Driver implications</a></li>
+<li><a class="reference internal" href="#picking-new-stream-ids-to-use">Picking new Stream IDs to use</a></li>
+<li><a class="reference internal" href="#clean-up">Clean up</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/usb/bulk-streams.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/usb/bulk-streams.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

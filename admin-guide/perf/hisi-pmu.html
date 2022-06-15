@@ -1,0 +1,199 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>HiSilicon SoC uncore Performance Monitoring Unit (PMU) &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="HiSilicon PCIe Performance Monitoring Unit (PMU)" href="hisi-pcie-pmu.html" />
+    <link rel="prev" title="Performance monitor support" href="index.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="hisilicon-soc-uncore-performance-monitoring-unit-pmu">
+<h1>HiSilicon SoC uncore Performance Monitoring Unit (PMU)<a class="headerlink" href="#hisilicon-soc-uncore-performance-monitoring-unit-pmu" title="Permalink to this headline">¶</a></h1>
+<p>The HiSilicon SoC chip includes various independent system device PMUs
+such as L3 cache (L3C), Hydra Home Agent (HHA) and DDRC. These PMUs are
+independent and have hardware logic to gather statistics and performance
+information.</p>
+<p>The HiSilicon SoC encapsulates multiple CPU and IO dies. Each CPU cluster
+(CCL) is made up of 4 cpu cores sharing one L3 cache; each CPU die is
+called Super CPU cluster (SCCL) and is made up of 6 CCLs. Each SCCL has
+two HHAs (0 - 1) and four DDRCs (0 - 3), respectively.</p>
+<section id="hisilicon-soc-uncore-pmu-driver">
+<h2>HiSilicon SoC uncore PMU driver<a class="headerlink" href="#hisilicon-soc-uncore-pmu-driver" title="Permalink to this headline">¶</a></h2>
+<p>Each device PMU has separate registers for event counting, control and
+interrupt, and the PMU driver shall register perf PMU drivers like L3C,
+HHA and DDRC etc. The available events and configuration options shall
+be described in the sysfs, see:</p>
+<p>/sys/devices/hisi_sccl{X}_&lt;l3c{Y}/hha{Y}/ddrc{Y}&gt;/, or
+/sys/bus/event_source/devices/hisi_sccl{X}_&lt;l3c{Y}/hha{Y}/ddrc{Y}&gt;.
+The “perf list” command shall list the available events from sysfs.</p>
+<p>Each L3C, HHA and DDRC is registered as a separate PMU with perf. The PMU
+name will appear in event listing as hisi_sccl&lt;sccl-id&gt;_module&lt;index-id&gt;.
+where “sccl-id” is the identifier of the SCCL and “index-id” is the index of
+module.</p>
+<p>e.g. hisi_sccl3_l3c0/rd_hit_cpipe is READ_HIT_CPIPE event of L3C index #0 in
+SCCL ID #3.</p>
+<p>e.g. hisi_sccl1_hha0/rx_operations is RX_OPERATIONS event of HHA index #0 in
+SCCL ID #1.</p>
+<p>The driver also provides a “cpumask” sysfs attribute, which shows the CPU core
+ID used to count the uncore PMU event.</p>
+<p>Example usage of perf:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$# perf list
+hisi_sccl3_l3c0/rd_hit_cpipe/ [kernel PMU event]
+------------------------------------------
+hisi_sccl3_l3c0/wr_hit_cpipe/ [kernel PMU event]
+------------------------------------------
+hisi_sccl1_l3c0/rd_hit_cpipe/ [kernel PMU event]
+------------------------------------------
+hisi_sccl1_l3c0/wr_hit_cpipe/ [kernel PMU event]
+------------------------------------------
+
+$# perf stat -a -e hisi_sccl3_l3c0/rd_hit_cpipe/ sleep 5
+$# perf stat -a -e hisi_sccl3_l3c0/config=0x02/ sleep 5
+</pre></div>
+</div>
+<p>For HiSilicon uncore PMU v2 whose identifier is 0x30, the topology is the same
+as PMU v1, but some new functions are added to the hardware.</p>
+<p>(a) L3C PMU supports filtering by core/thread within the cluster which can be
+specified as a bitmap:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$# perf stat -a -e hisi_sccl3_l3c0/config=0x02,tt_core=0x3/ sleep 5
+</pre></div>
+</div>
+<p>This will only count the operations from core/thread 0 and 1 in this cluster.</p>
+<p>(b) Tracetag allow the user to chose to count only read, write or atomic
+operations via the tt_req parameeter in perf. The default value counts all
+operations. tt_req is 3bits, 3’b100 represents read operations, 3’b101
+represents write operations, 3’b110 represents atomic store operations and
+3’b111 represents atomic non-store operations, other values are reserved:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$# perf stat -a -e hisi_sccl3_l3c0/config=0x02,tt_req=0x4/ sleep 5
+</pre></div>
+</div>
+<p>This will only count the read operations in this cluster.</p>
+<p>(c) Datasrc allows the user to check where the data comes from. It is 5 bits.
+Some important codes are as follows:
+5’b00001: comes from L3C in this die;
+5’b01000: comes from L3C in the cross-die;
+5’b01001: comes from L3C which is in another socket;
+5’b01110: comes from the local DDR;
+5’b01111: comes from the cross-die DDR;
+5’b10000: comes from cross-socket DDR;
+etc, it is mainly helpful to find that the data source is nearest from the CPU
+cores. If datasrc_cfg is used in the multi-chips, the datasrc_skt shall be
+configured in perf command:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$# perf stat -a -e hisi_sccl3_l3c0/config=0xb9,datasrc_cfg=0xE/,
+hisi_sccl3_l3c0/config=0xb9,datasrc_cfg=0xF/ sleep 5
+</pre></div>
+</div>
+<p>(d)Some HiSilicon SoCs encapsulate multiple CPU and IO dies. Each CPU die
+contains several Compute Clusters (CCLs). The I/O dies are called Super I/O
+clusters (SICL) containing multiple I/O clusters (ICLs). Each CCL/ICL in the
+SoC has a unique ID. Each ID is 11bits, include a 6-bit SCCL-ID and 5-bit
+CCL/ICL-ID. For I/O die, the ICL-ID is followed by:
+5’b00000: I/O_MGMT_ICL;
+5’b00001: Network_ICL;
+5’b00011: HAC_ICL;
+5’b10000: PCIe_ICL;</p>
+<p>Users could configure IDs to count data come from specific CCL/ICL, by setting
+srcid_cmd &amp; srcid_msk, and data desitined for specific CCL/ICL by setting
+tgtid_cmd &amp; tgtid_msk. A set bit in srcid_msk/tgtid_msk means the PMU will not
+check the bit when matching against the srcid_cmd/tgtid_cmd.</p>
+<p>If all of these options are disabled, it can works by the default value that
+doesn’t distinguish the filter condition and ID information and will return
+the total counter values in the PMU counters.</p>
+<p>The current driver does not support sampling. So “perf record” is unsupported.
+Also attach to a task is unsupported as the events are all uncore.</p>
+<p>Note: Please contact the maintainer for a complete list of events supported for
+the PMU devices in the SoC and its information if needed.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">HiSilicon SoC uncore Performance Monitoring Unit (PMU)</a><ul>
+<li><a class="reference internal" href="#hisilicon-soc-uncore-pmu-driver">HiSilicon SoC uncore PMU driver</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/admin-guide/perf/hisi-pmu.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/admin-guide/perf/hisi-pmu.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

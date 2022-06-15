@@ -1,0 +1,205 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Kernel driver exynos_tmu &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Exynos Emulation Mode" href="exynos_thermal_emulation.html" />
+    <link rel="prev" title="Power allocator governor tunables" href="power_allocator.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="kernel-driver-exynos-tmu">
+<h1>Kernel driver exynos_tmu<a class="headerlink" href="#kernel-driver-exynos-tmu" title="Permalink to this headline">¶</a></h1>
+<p>Supported chips:</p>
+<ul>
+<li><p>ARM Samsung Exynos4, Exynos5 series of SoC</p>
+<p>Datasheet: Not publicly available</p>
+</li>
+</ul>
+<p>Authors: Donggeun Kim &lt;<a class="reference external" href="mailto:dg77&#46;kim&#37;&#52;&#48;samsung&#46;com">dg77<span>&#46;</span>kim<span>&#64;</span>samsung<span>&#46;</span>com</a>&gt;
+Authors: Amit Daniel &lt;<a class="reference external" href="mailto:amit&#46;daniel&#37;&#52;&#48;samsung&#46;com">amit<span>&#46;</span>daniel<span>&#64;</span>samsung<span>&#46;</span>com</a>&gt;</p>
+<section id="tmu-controller-description">
+<h2>TMU controller Description:<a class="headerlink" href="#tmu-controller-description" title="Permalink to this headline">¶</a></h2>
+<p>This driver allows to read temperature inside Samsung Exynos4/5 series of SoC.</p>
+<p>The chip only exposes the measured 8-bit temperature code value
+through a register.
+Temperature can be taken from the temperature code.
+There are three equations converting from temperature to temperature code.</p>
+<dl>
+<dt>The three equations are:</dt><dd><ol class="arabic">
+<li><p>Two point trimming:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Tc = (T - 25) * (TI2 - TI1) / (85 - 25) + TI1
+</pre></div>
+</div>
+</li>
+<li><p>One point trimming:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Tc = T + TI1 - 25
+</pre></div>
+</div>
+</li>
+<li><p>No trimming:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Tc = T + 50
+</pre></div>
+</div>
+</li>
+</ol>
+<dl class="simple">
+<dt>Tc:</dt><dd><p>Temperature code, T: Temperature,</p>
+</dd>
+<dt>TI1:</dt><dd><p>Trimming info for 25 degree Celsius (stored at TRIMINFO register)
+Temperature code measured at 25 degree Celsius which is unchanged</p>
+</dd>
+<dt>TI2:</dt><dd><p>Trimming info for 85 degree Celsius (stored at TRIMINFO register)
+Temperature code measured at 85 degree Celsius which is unchanged</p>
+</dd>
+</dl>
+</dd>
+</dl>
+<p>TMU(Thermal Management Unit) in Exynos4/5 generates interrupt
+when temperature exceeds pre-defined levels.
+The maximum number of configurable threshold is five.
+The threshold levels are defined as follows:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Level_0: current temperature &gt; trigger_level_0 + threshold
+Level_1: current temperature &gt; trigger_level_1 + threshold
+Level_2: current temperature &gt; trigger_level_2 + threshold
+Level_3: current temperature &gt; trigger_level_3 + threshold
+</pre></div>
+</div>
+<p>The threshold and each trigger_level are set
+through the corresponding registers.</p>
+<p>When an interrupt occurs, this driver notify kernel thermal framework
+with the function exynos_report_trigger.
+Although an interrupt condition for level_0 can be set,
+it can be used to synchronize the cooling action.</p>
+</section>
+<section id="tmu-driver-description">
+<h2>TMU driver description:<a class="headerlink" href="#tmu-driver-description" title="Permalink to this headline">¶</a></h2>
+<p>The exynos thermal driver is structured as:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>                                      Kernel Core thermal framework
+                              (thermal_core.c, step_wise.c, cpufreq_cooling.c)
+                                                              ^
+                                                              |
+                                                              |
+TMU configuration data -----&gt; TMU Driver  &lt;----&gt; Exynos Core thermal wrapper
+(exynos_tmu_data.c)         (exynos_tmu.c)       (exynos_thermal_common.c)
+(exynos_tmu_data.h)         (exynos_tmu.h)       (exynos_thermal_common.h)
+</pre></div>
+</div>
+<ol class="loweralpha simple">
+<li><dl class="simple">
+<dt>TMU configuration data:</dt><dd><p>This consist of TMU register offsets/bitfields
+described through structure exynos_tmu_registers. Also several
+other platform data (struct exynos_tmu_platform_data) members
+are used to configure the TMU.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>TMU driver:</dt><dd><p>This component initialises the TMU controller and sets different
+thresholds. It invokes core thermal implementation with the call
+exynos_report_trigger.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>Exynos Core thermal wrapper:</dt><dd><p>This provides 3 wrapper function to use the
+Kernel core thermal framework. They are exynos_unregister_thermal,
+exynos_register_thermal and exynos_report_trigger.</p>
+</dd>
+</dl>
+</li>
+</ol>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Kernel driver exynos_tmu</a><ul>
+<li><a class="reference internal" href="#tmu-controller-description">TMU controller Description:</a></li>
+<li><a class="reference internal" href="#tmu-driver-description">TMU driver description:</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/thermal/exynos_thermal.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/thermal/exynos_thermal.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

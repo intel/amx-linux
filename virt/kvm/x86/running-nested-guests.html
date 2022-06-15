@@ -1,0 +1,378 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Running nested guests with KVM &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="Timekeeping Virtualization for X86-Based Architectures" href="timekeeping.html" />
+    <link rel="prev" title="Nested VMX" href="nested-vmx.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="running-nested-guests-with-kvm">
+<h1>Running nested guests with KVM<a class="headerlink" href="#running-nested-guests-with-kvm" title="Permalink to this headline">¶</a></h1>
+<p>A nested guest is the ability to run a guest inside another guest (it
+can be KVM-based or a different hypervisor).  The straightforward
+example is a KVM guest that in turn runs on a KVM guest (the rest of
+this document is built on this example):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>        .----------------.  .----------------.
+        |                |  |                |
+        |      L2        |  |      L2        |
+        | (Nested Guest) |  | (Nested Guest) |
+        |                |  |                |
+        |----------------&#39;--&#39;----------------|
+        |                                    |
+        |       L1 (Guest Hypervisor)        |
+        |          KVM (/dev/kvm)            |
+        |                                    |
+.------------------------------------------------------.
+|                 L0 (Host Hypervisor)                 |
+|                    KVM (/dev/kvm)                    |
+|------------------------------------------------------|
+|        Hardware (with virtualization extensions)     |
+&#39;------------------------------------------------------&#39;
+</pre></div>
+</div>
+<p>Terminology:</p>
+<ul class="simple">
+<li><p>L0 – level-0; the bare metal host, running KVM</p></li>
+<li><p>L1 – level-1 guest; a VM running on L0; also called the “guest
+hypervisor”, as it itself is capable of running KVM.</p></li>
+<li><p>L2 – level-2 guest; a VM running on L1, this is the “nested guest”</p></li>
+</ul>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The above diagram is modelled after the x86 architecture;
+s390x, ppc64 and other architectures are likely to have
+a different design for nesting.</p>
+<p>For example, s390x always has an LPAR (LogicalPARtition)
+hypervisor running on bare metal, adding another layer and
+resulting in at least four levels in a nested setup — L0 (bare
+metal, running the LPAR hypervisor), L1 (host hypervisor), L2
+(guest hypervisor), L3 (nested guest).</p>
+<p>This document will stick with the three-level terminology (L0,
+L1, and L2) for all architectures; and will largely focus on
+x86.</p>
+</div>
+<section id="use-cases">
+<h2>Use Cases<a class="headerlink" href="#use-cases" title="Permalink to this headline">¶</a></h2>
+<p>There are several scenarios where nested KVM can be useful, to name a
+few:</p>
+<ul class="simple">
+<li><p>As a developer, you want to test your software on different operating
+systems (OSes).  Instead of renting multiple VMs from a Cloud
+Provider, using nested KVM lets you rent a large enough “guest
+hypervisor” (level-1 guest).  This in turn allows you to create
+multiple nested guests (level-2 guests), running different OSes, on
+which you can develop and test your software.</p></li>
+<li><p>Live migration of “guest hypervisors” and their nested guests, for
+load balancing, disaster recovery, etc.</p></li>
+<li><p>VM image creation tools (e.g. <code class="docutils literal notranslate"><span class="pre">virt-install</span></code>,  etc) often run
+their own VM, and users expect these to work inside a VM.</p></li>
+<li><p>Some OSes use virtualization internally for security (e.g. to let
+applications run safely in isolation).</p></li>
+</ul>
+</section>
+<section id="enabling-nested-x86">
+<h2>Enabling “nested” (x86)<a class="headerlink" href="#enabling-nested-x86" title="Permalink to this headline">¶</a></h2>
+<p>From Linux kernel v4.20 onwards, the <code class="docutils literal notranslate"><span class="pre">nested</span></code> KVM parameter is enabled
+by default for Intel and AMD.  (Though your Linux distribution might
+override this default.)</p>
+<p>In case you are running a Linux kernel older than v4.19, to enable
+nesting, set the <code class="docutils literal notranslate"><span class="pre">nested</span></code> KVM module parameter to <code class="docutils literal notranslate"><span class="pre">Y</span></code> or <code class="docutils literal notranslate"><span class="pre">1</span></code>.  To
+persist this setting across reboots, you can add it in a config file, as
+shown below:</p>
+<ol class="arabic">
+<li><p>On the bare metal host (L0), list the kernel modules and ensure that
+the KVM modules:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ lsmod | grep -i kvm
+kvm_intel             133627  0
+kvm                   435079  1 kvm_intel
+</pre></div>
+</div>
+</li>
+<li><p>Show information for <code class="docutils literal notranslate"><span class="pre">kvm_intel</span></code> module:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ modinfo kvm_intel | grep -i nested
+parm:           nested:bool
+</pre></div>
+</div>
+</li>
+<li><p>For the nested KVM configuration to persist across reboots, place the
+below in <code class="docutils literal notranslate"><span class="pre">/etc/modprobed/kvm_intel.conf</span></code> (create the file if it
+doesn’t exist):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ cat /etc/modprobe.d/kvm_intel.conf
+options kvm-intel nested=y
+</pre></div>
+</div>
+</li>
+<li><p>Unload and re-load the KVM Intel module:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ sudo rmmod kvm-intel
+$ sudo modprobe kvm-intel
+</pre></div>
+</div>
+</li>
+<li><p>Verify if the <code class="docutils literal notranslate"><span class="pre">nested</span></code> parameter for KVM is enabled:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ cat /sys/module/kvm_intel/parameters/nested
+Y
+</pre></div>
+</div>
+</li>
+</ol>
+<p>For AMD hosts, the process is the same as above, except that the module
+name is <code class="docutils literal notranslate"><span class="pre">kvm-amd</span></code>.</p>
+</section>
+<section id="additional-nested-related-kernel-parameters-x86">
+<h2>Additional nested-related kernel parameters (x86)<a class="headerlink" href="#additional-nested-related-kernel-parameters-x86" title="Permalink to this headline">¶</a></h2>
+<p>If your hardware is sufficiently advanced (Intel Haswell processor or
+higher, which has newer hardware virt extensions), the following
+additional features will also be enabled by default: “Shadow VMCS
+(Virtual Machine Control Structure)”, APIC Virtualization on your bare
+metal host (L0).  Parameters for Intel hosts:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ cat /sys/module/kvm_intel/parameters/enable_shadow_vmcs
+Y
+
+$ cat /sys/module/kvm_intel/parameters/enable_apicv
+Y
+
+$ cat /sys/module/kvm_intel/parameters/ept
+Y
+</pre></div>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>If you suspect your L2 (i.e. nested guest) is running slower,
+ensure the above are enabled (particularly
+<code class="docutils literal notranslate"><span class="pre">enable_shadow_vmcs</span></code> and <code class="docutils literal notranslate"><span class="pre">ept</span></code>).</p>
+</div>
+</section>
+<section id="starting-a-nested-guest-x86">
+<h2>Starting a nested guest (x86)<a class="headerlink" href="#starting-a-nested-guest-x86" title="Permalink to this headline">¶</a></h2>
+<p>Once your bare metal host (L0) is configured for nesting, you should be
+able to start an L1 guest with:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ qemu-kvm -cpu host [...]
+</pre></div>
+</div>
+<p>The above will pass through the host CPU’s capabilities as-is to the
+gues); or for better live migration compatibility, use a named CPU
+model supported by QEMU. e.g.:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ qemu-kvm -cpu Haswell-noTSX-IBRS,vmx=on
+</pre></div>
+</div>
+<p>then the guest hypervisor will subsequently be capable of running a
+nested guest with accelerated KVM.</p>
+</section>
+<section id="enabling-nested-s390x">
+<h2>Enabling “nested” (s390x)<a class="headerlink" href="#enabling-nested-s390x" title="Permalink to this headline">¶</a></h2>
+<ol class="arabic">
+<li><p>On the host hypervisor (L0), enable the <code class="docutils literal notranslate"><span class="pre">nested</span></code> parameter on
+s390x:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ rmmod kvm
+$ modprobe kvm nested=1
+</pre></div>
+</div>
+</li>
+</ol>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>On s390x, the kernel parameter <code class="docutils literal notranslate"><span class="pre">hpage</span></code> is mutually exclusive
+with the <code class="docutils literal notranslate"><span class="pre">nested</span></code> paramter — i.e. to be able to enable
+<code class="docutils literal notranslate"><span class="pre">nested</span></code>, the <code class="docutils literal notranslate"><span class="pre">hpage</span></code> parameter <em>must</em> be disabled.</p>
+</div>
+<ol class="arabic" start="2">
+<li><p>The guest hypervisor (L1) must be provided with the <code class="docutils literal notranslate"><span class="pre">sie</span></code> CPU
+feature — with QEMU, this can be done by using “host passthrough”
+(via the command-line <code class="docutils literal notranslate"><span class="pre">-cpu</span> <span class="pre">host</span></code>).</p></li>
+<li><p>Now the KVM module can be loaded in the L1 (guest hypervisor):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ modprobe kvm
+</pre></div>
+</div>
+</li>
+</ol>
+</section>
+<section id="live-migration-with-nested-kvm">
+<h2>Live migration with nested KVM<a class="headerlink" href="#live-migration-with-nested-kvm" title="Permalink to this headline">¶</a></h2>
+<p>Migrating an L1 guest, with a  <em>live</em> nested guest in it, to another
+bare metal host, works as of Linux kernel 5.3 and QEMU 4.2.0 for
+Intel x86 systems, and even on older versions for s390x.</p>
+<p>On AMD systems, once an L1 guest has started an L2 guest, the L1 guest
+should no longer be migrated or saved (refer to QEMU documentation on
+“savevm”/”loadvm”) until the L2 guest shuts down.  Attempting to migrate
+or save-and-load an L1 guest while an L2 guest is running will result in
+undefined behavior.  You might see a <code class="docutils literal notranslate"><span class="pre">kernel</span> <span class="pre">BUG!</span></code> entry in <code class="docutils literal notranslate"><span class="pre">dmesg</span></code>, a
+kernel ‘oops’, or an outright kernel panic.  Such a migrated or loaded L1
+guest can no longer be considered stable or secure, and must be restarted.
+Migrating an L1 guest merely configured to support nesting, while not
+actually running L2 guests, is expected to function normally even on AMD
+systems but may fail once guests are started.</p>
+<p>Migrating an L2 guest is always expected to succeed, so all the following
+scenarios should work even on AMD systems:</p>
+<ul class="simple">
+<li><p>Migrating a nested guest (L2) to another L1 guest on the <em>same</em> bare
+metal host.</p></li>
+<li><p>Migrating a nested guest (L2) to another L1 guest on a <em>different</em>
+bare metal host.</p></li>
+<li><p>Migrating a nested guest (L2) to a bare metal host.</p></li>
+</ul>
+</section>
+<section id="reporting-bugs-from-nested-setups">
+<h2>Reporting bugs from nested setups<a class="headerlink" href="#reporting-bugs-from-nested-setups" title="Permalink to this headline">¶</a></h2>
+<p>Debugging “nested” problems can involve sifting through log files across
+L0, L1 and L2; this can result in tedious back-n-forth between the bug
+reporter and the bug fixer.</p>
+<ul class="simple">
+<li><p>Mention that you are in a “nested” setup.  If you are running any kind
+of “nesting” at all, say so.  Unfortunately, this needs to be called
+out because when reporting bugs, people tend to forget to even
+<em>mention</em> that they’re using nested virtualization.</p></li>
+<li><p>Ensure you are actually running KVM on KVM.  Sometimes people do not
+have KVM enabled for their guest hypervisor (L1), which results in
+them running with pure emulation or what QEMU calls it as “TCG”, but
+they think they’re running nested KVM.  Thus confusing “nested Virt”
+(which could also mean, QEMU on KVM) with “nested KVM” (KVM on KVM).</p></li>
+</ul>
+<section id="information-to-collect-generic">
+<h3>Information to collect (generic)<a class="headerlink" href="#information-to-collect-generic" title="Permalink to this headline">¶</a></h3>
+<p>The following is not an exhaustive list, but a very good starting point:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Kernel, libvirt, and QEMU version from L0</p></li>
+<li><p>Kernel, libvirt and QEMU version from L1</p></li>
+<li><p>QEMU command-line of L1 – when using libvirt, you’ll find it here:
+<code class="docutils literal notranslate"><span class="pre">/var/log/libvirt/qemu/instance.log</span></code></p></li>
+<li><p>QEMU command-line of L2 – as above, when using libvirt, get the
+complete libvirt-generated QEMU command-line</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">cat</span> <span class="pre">/sys/cpuinfo</span></code> from L0</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">cat</span> <span class="pre">/sys/cpuinfo</span></code> from L1</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">lscpu</span></code> from L0</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">lscpu</span></code> from L1</p></li>
+<li><p>Full <code class="docutils literal notranslate"><span class="pre">dmesg</span></code> output from L0</p></li>
+<li><p>Full <code class="docutils literal notranslate"><span class="pre">dmesg</span></code> output from L1</p></li>
+</ul>
+</div></blockquote>
+</section>
+<section id="x86-specific-info-to-collect">
+<h3>x86-specific info to collect<a class="headerlink" href="#x86-specific-info-to-collect" title="Permalink to this headline">¶</a></h3>
+<p>Both the below commands, <code class="docutils literal notranslate"><span class="pre">x86info</span></code> and <code class="docutils literal notranslate"><span class="pre">dmidecode</span></code>, should be
+available on most Linux distributions with the same name:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Output of: <code class="docutils literal notranslate"><span class="pre">x86info</span> <span class="pre">-a</span></code> from L0</p></li>
+<li><p>Output of: <code class="docutils literal notranslate"><span class="pre">x86info</span> <span class="pre">-a</span></code> from L1</p></li>
+<li><p>Output of: <code class="docutils literal notranslate"><span class="pre">dmidecode</span></code> from L0</p></li>
+<li><p>Output of: <code class="docutils literal notranslate"><span class="pre">dmidecode</span></code> from L1</p></li>
+</ul>
+</div></blockquote>
+</section>
+<section id="s390x-specific-info-to-collect">
+<h3>s390x-specific info to collect<a class="headerlink" href="#s390x-specific-info-to-collect" title="Permalink to this headline">¶</a></h3>
+<p>Along with the earlier mentioned generic details, the below is
+also recommended:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">/proc/sysinfo</span></code> from L1; this will also include the info from L0</p></li>
+</ul>
+</div></blockquote>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Running nested guests with KVM</a><ul>
+<li><a class="reference internal" href="#use-cases">Use Cases</a></li>
+<li><a class="reference internal" href="#enabling-nested-x86">Enabling “nested” (x86)</a></li>
+<li><a class="reference internal" href="#additional-nested-related-kernel-parameters-x86">Additional nested-related kernel parameters (x86)</a></li>
+<li><a class="reference internal" href="#starting-a-nested-guest-x86">Starting a nested guest (x86)</a></li>
+<li><a class="reference internal" href="#enabling-nested-s390x">Enabling “nested” (s390x)</a></li>
+<li><a class="reference internal" href="#live-migration-with-nested-kvm">Live migration with nested KVM</a></li>
+<li><a class="reference internal" href="#reporting-bugs-from-nested-setups">Reporting bugs from nested setups</a><ul>
+<li><a class="reference internal" href="#information-to-collect-generic">Information to collect (generic)</a></li>
+<li><a class="reference internal" href="#x86-specific-info-to-collect">x86-specific info to collect</a></li>
+<li><a class="reference internal" href="#s390x-specific-info-to-collect">s390x-specific info to collect</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/virt/kvm/x86/running-nested-guests.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/virt/kvm/x86/running-nested-guests.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,189 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>架构特定代码的CPU调度器实现提示 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../scheduler/sched-arch.html"><span class="doc">CPU Scheduler implementation hints for architecture specific code</span></a></p>
+</dd>
+<dt class="field-even">翻译</dt>
+<dd class="field-even"><p>司延腾 Yanteng Si &lt;<a class="reference external" href="mailto:siyanteng&#37;&#52;&#48;loongson&#46;cn">siyanteng<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+<dt class="field-odd">校译</dt>
+<dd class="field-odd"><p></p></dd>
+</dl>
+<section id="cpu">
+<h1>架构特定代码的CPU调度器实现提示<a class="headerlink" href="#cpu" title="Permalink to this headline">¶</a></h1>
+<blockquote>
+<div><p>Nick Piggin, 2005</p>
+</div></blockquote>
+<section id="id1">
+<h2>上下文切换<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>1. 运行队列锁
+默认情况下，switch_to arch函数在调用时锁定了运行队列。这通常不是一个问题，除非
+switch_to可能需要获取运行队列锁。这通常是由于上下文切换中的唤醒操作造成的。见
+arch/ia64/include/asm/switch_to.h的例子。</p>
+<p>为了要求调度器在运行队列解锁的情况下调用switch_to，你必须在头文件
+中`#define __ARCH_WANT_UNLOCKED_CTXSW`(通常是定义switch_to的那个文件）。</p>
+<p>在CONFIG_SMP的情况下，解锁的上下文切换对核心调度器的实现只带来了非常小的性能损
+失。</p>
+</section>
+<section id="id2">
+<h2>CPU空转<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>你的cpu_idle程序需要遵守以下规则：</p>
+<ol class="arabic">
+<li><p>现在抢占应该在空闲的例程上禁用。应该只在调用schedule()时启用，然后再禁用。</p></li>
+<li><p>need_resched/TIF_NEED_RESCHED 只会被设置，并且在运行任务调用 schedule()
+之前永远不会被清除。空闲线程只需要查询need_resched，并且永远不会设置或清除它。</p></li>
+<li><p>当cpu_idle发现（need_resched() == ‘true’），它应该调用schedule()。否则
+它不应该调用schedule()。</p></li>
+<li><p>在检查need_resched时，唯一需要禁用中断的情况是，我们要让处理器休眠到下一个中
+断（这并不对need_resched提供任何保护，它可以防止丢失一个中断）:</p>
+<blockquote>
+<div><p>4a. 这种睡眠类型的常见问题似乎是:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>local_irq_disable();
+if (!need_resched()) {
+        local_irq_enable();
+        *** resched interrupt arrives here ***
+        __asm__(&quot;sleep until next interrupt&quot;);
+}
+</pre></div>
+</div>
+</div></blockquote>
+</li>
+<li><p>当need_resched变为高电平时，TIF_POLLING_NRFLAG可以由不需要中断来唤醒它们
+的空闲程序设置。换句话说，它们必须定期轮询need_resched，尽管做一些后台工作或
+进入低CPU优先级可能是合理的。</p>
+<blockquote>
+<div><ul class="simple">
+<li><dl class="simple">
+<dt>5a. 如果TIF_POLLING_NRFLAG被设置，而我们确实决定进入一个中断睡眠，那</dt><dd><p>么需要清除它，然后发出一个内存屏障（接着测试need_resched，禁用中断，如3中解释）。</p>
+</dd>
+</dl>
+</li>
+</ul>
+</div></blockquote>
+</li>
+</ol>
+<p>arch/x86/kernel/process.c有轮询和睡眠空闲函数的例子。</p>
+</section>
+<section id="arch">
+<h2>可能出现的arch/问题<a class="headerlink" href="#arch" title="Permalink to this headline">¶</a></h2>
+<p>我发现的可能的arch问题（并试图解决或没有解决）。:</p>
+<p>ia64 - safe_halt的调用与中断相比，是否很荒谬？ (它睡眠了吗) (参考 #4a)</p>
+<p>sh64 - 睡眠与中断相比，是否很荒谬？ (参考 #4a)</p>
+<dl class="simple">
+<dt>sparc - 在这一点上，IRQ是开着的（？），把local_irq_save改为_disable。</dt><dd><ul class="simple">
+<li><p>待办事项: 需要第二个CPU来禁用抢占 (参考 #1)</p></li>
+</ul>
+</dd>
+</dl>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">架构特定代码的CPU调度器实现提示</a><ul>
+<li><a class="reference internal" href="#id1">上下文切换</a></li>
+<li><a class="reference internal" href="#id2">CPU空转</a></li>
+<li><a class="reference internal" href="#arch">可能出现的arch/问题</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/scheduler/sched-arch.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/scheduler/sched-arch.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

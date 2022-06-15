@@ -1,0 +1,391 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Power allocator governor tunables &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Kernel driver exynos_tmu" href="exynos_thermal.html" />
+    <link rel="prev" title="Generic Thermal Sysfs driver How To" href="sysfs-api.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="power-allocator-governor-tunables">
+<h1>Power allocator governor tunables<a class="headerlink" href="#power-allocator-governor-tunables" title="Permalink to this headline">¶</a></h1>
+<section id="trip-points">
+<h2>Trip points<a class="headerlink" href="#trip-points" title="Permalink to this headline">¶</a></h2>
+<p>The governor works optimally with the following two passive trip points:</p>
+<ol class="arabic simple">
+<li><p>“switch on” trip point: temperature above which the governor
+control loop starts operating.  This is the first passive trip
+point of the thermal zone.</p></li>
+<li><p>“desired temperature” trip point: it should be higher than the
+“switch on” trip point.  This the target temperature the governor
+is controlling for.  This is the last passive trip point of the
+thermal zone.</p></li>
+</ol>
+</section>
+<section id="pid-controller">
+<h2>PID Controller<a class="headerlink" href="#pid-controller" title="Permalink to this headline">¶</a></h2>
+<p>The power allocator governor implements a
+Proportional-Integral-Derivative controller (PID controller) with
+temperature as the control input and power as the controlled output:</p>
+<blockquote>
+<div><p>P_max = k_p * e + k_i * err_integral + k_d * diff_err + sustainable_power</p>
+</div></blockquote>
+<dl class="simple">
+<dt>where</dt><dd><ul class="simple">
+<li><p>e = desired_temperature - current_temperature</p></li>
+<li><p>err_integral is the sum of previous errors</p></li>
+<li><p>diff_err = e - previous_error</p></li>
+</ul>
+</dd>
+</dl>
+<p>It is similar to the one depicted below:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>                                    k_d
+                                     |
+current_temp                         |
+     |                               v
+     |              +----------+   +---+
+     |       +-----&gt;| diff_err |--&gt;| X |------+
+     |       |      +----------+   +---+      |
+     |       |                                |      tdp        actor
+     |       |                      k_i       |       |  get_requested_power()
+     |       |                       |        |       |        |     |
+     |       |                       |        |       |        |     | ...
+     v       |                       v        v       v        v     v
+   +---+     |      +-------+      +---+    +---+   +---+   +----------+
+   | S |-----+-----&gt;| sum e |-----&gt;| X |---&gt;| S |--&gt;| S |--&gt;|power     |
+   +---+     |      +-------+      +---+    +---+   +---+   |allocation|
+     ^       |                                ^             +----------+
+     |       |                                |                |     |
+     |       |        +---+                   |                |     |
+     |       +-------&gt;| X |-------------------+                v     v
+     |                +---+                               granted performance
+desired_temperature     ^
+                        |
+                        |
+                    k_po/k_pu
+</pre></div>
+</div>
+</section>
+<section id="sustainable-power">
+<h2>Sustainable power<a class="headerlink" href="#sustainable-power" title="Permalink to this headline">¶</a></h2>
+<p>An estimate of the sustainable dissipatable power (in mW) should be
+provided while registering the thermal zone.  This estimates the
+sustained power that can be dissipated at the desired control
+temperature.  This is the maximum sustained power for allocation at
+the desired maximum temperature.  The actual sustained power can vary
+for a number of reasons.  The closed loop controller will take care of
+variations such as environmental conditions, and some factors related
+to the speed-grade of the silicon.  <cite>sustainable_power</cite> is therefore
+simply an estimate, and may be tuned to affect the aggressiveness of
+the thermal ramp. For reference, the sustainable power of a 4” phone
+is typically 2000mW, while on a 10” tablet is around 4500mW (may vary
+depending on screen size). It is possible to have the power value
+expressed in an abstract scale. The sustained power should be aligned
+to the scale used by the related cooling devices.</p>
+<p>If you are using device tree, do add it as a property of the
+thermal-zone.  For example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>thermal-zones {
+        soc_thermal {
+                polling-delay = &lt;1000&gt;;
+                polling-delay-passive = &lt;100&gt;;
+                sustainable-power = &lt;2500&gt;;
+                ...
+</pre></div>
+</div>
+<p>Instead, if the thermal zone is registered from the platform code, pass a
+<cite>thermal_zone_params</cite> that has a <cite>sustainable_power</cite>.  If no
+<cite>thermal_zone_params</cite> were being passed, then something like below
+will suffice:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>static const struct thermal_zone_params tz_params = {
+        .sustainable_power = 3500,
+};
+</pre></div>
+</div>
+<p>and then pass <cite>tz_params</cite> as the 5th parameter to
+<cite>thermal_zone_device_register()</cite></p>
+</section>
+<section id="k-po-and-k-pu">
+<h2>k_po and k_pu<a class="headerlink" href="#k-po-and-k-pu" title="Permalink to this headline">¶</a></h2>
+<p>The implementation of the PID controller in the power allocator
+thermal governor allows the configuration of two proportional term
+constants: <cite>k_po</cite> and <cite>k_pu</cite>.  <cite>k_po</cite> is the proportional term
+constant during temperature overshoot periods (current temperature is
+above “desired temperature” trip point).  Conversely, <cite>k_pu</cite> is the
+proportional term constant during temperature undershoot periods
+(current temperature below “desired temperature” trip point).</p>
+<p>These controls are intended as the primary mechanism for configuring
+the permitted thermal “ramp” of the system.  For instance, a lower
+<cite>k_pu</cite> value will provide a slower ramp, at the cost of capping
+available capacity at a low temperature.  On the other hand, a high
+value of <cite>k_pu</cite> will result in the governor granting very high power
+while temperature is low, and may lead to temperature overshooting.</p>
+<p>The default value for <cite>k_pu</cite> is:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>2 * sustainable_power / (desired_temperature - switch_on_temp)
+</pre></div>
+</div>
+<p>This means that at <cite>switch_on_temp</cite> the output of the controller’s
+proportional term will be 2 * <cite>sustainable_power</cite>.  The default value
+for <cite>k_po</cite> is:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>sustainable_power / (desired_temperature - switch_on_temp)
+</pre></div>
+</div>
+<p>Focusing on the proportional and feed forward values of the PID
+controller equation we have:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>P_max = k_p * e + sustainable_power
+</pre></div>
+</div>
+<p>The proportional term is proportional to the difference between the
+desired temperature and the current one.  When the current temperature
+is the desired one, then the proportional component is zero and
+<cite>P_max</cite> = <cite>sustainable_power</cite>.  That is, the system should operate in
+thermal equilibrium under constant load.  <cite>sustainable_power</cite> is only
+an estimate, which is the reason for closed-loop control such as this.</p>
+<p>Expanding <cite>k_pu</cite> we get:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>P_max = 2 * sustainable_power * (T_set - T) / (T_set - T_on) +
+    sustainable_power
+</pre></div>
+</div>
+<p>where:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>T_set is the desired temperature</p></li>
+<li><p>T is the current temperature</p></li>
+<li><p>T_on is the switch on temperature</p></li>
+</ul>
+</div></blockquote>
+<p>When the current temperature is the switch_on temperature, the above
+formula becomes:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>P_max = 2 * sustainable_power * (T_set - T_on) / (T_set - T_on) +
+    sustainable_power = 2 * sustainable_power + sustainable_power =
+    3 * sustainable_power
+</pre></div>
+</div>
+<p>Therefore, the proportional term alone linearly decreases power from
+3 * <cite>sustainable_power</cite> to <cite>sustainable_power</cite> as the temperature
+rises from the switch on temperature to the desired temperature.</p>
+</section>
+<section id="k-i-and-integral-cutoff">
+<h2>k_i and integral_cutoff<a class="headerlink" href="#k-i-and-integral-cutoff" title="Permalink to this headline">¶</a></h2>
+<p><cite>k_i</cite> configures the PID loop’s integral term constant.  This term
+allows the PID controller to compensate for long term drift and for
+the quantized nature of the output control: cooling devices can’t set
+the exact power that the governor requests.  When the temperature
+error is below <cite>integral_cutoff</cite>, errors are accumulated in the
+integral term.  This term is then multiplied by <cite>k_i</cite> and the result
+added to the output of the controller.  Typically <cite>k_i</cite> is set low (1
+or 2) and <cite>integral_cutoff</cite> is 0.</p>
+</section>
+<section id="k-d">
+<h2>k_d<a class="headerlink" href="#k-d" title="Permalink to this headline">¶</a></h2>
+<p><cite>k_d</cite> configures the PID loop’s derivative term constant.  It’s
+recommended to leave it as the default: 0.</p>
+<section id="cooling-device-power-api">
+<h3>Cooling device power API<a class="headerlink" href="#cooling-device-power-api" title="Permalink to this headline">¶</a></h3>
+<p>Cooling devices controlled by this governor must supply the additional
+“power” API in their <cite>cooling_device_ops</cite>.  It consists on three ops:</p>
+<ol class="arabic">
+<li><div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int get_requested_power(struct thermal_cooling_device *cdev,
+                        struct thermal_zone_device *tz, u32 *power);
+</pre></div>
+</div>
+</li>
+</ol>
+<dl class="simple">
+<dt>&#64;cdev:</dt><dd><p>The <cite>struct thermal_cooling_device</cite> pointer</p>
+</dd>
+<dt>&#64;tz:</dt><dd><p>thermal zone in which we are currently operating</p>
+</dd>
+<dt>&#64;power:</dt><dd><p>pointer in which to store the calculated power</p>
+</dd>
+</dl>
+<p><cite>get_requested_power()</cite> calculates the power requested by the device
+in milliwatts and stores it in &#64;power .  It should return 0 on
+success, -E* on failure.  This is currently used by the power
+allocator governor to calculate how much power to give to each cooling
+device.</p>
+<ol class="arabic" start="2">
+<li><div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int state2power(struct thermal_cooling_device *cdev, struct
+                thermal_zone_device *tz, unsigned long state,
+                u32 *power);
+</pre></div>
+</div>
+</li>
+</ol>
+<dl class="simple">
+<dt>&#64;cdev:</dt><dd><p>The <cite>struct thermal_cooling_device</cite> pointer</p>
+</dd>
+<dt>&#64;tz:</dt><dd><p>thermal zone in which we are currently operating</p>
+</dd>
+<dt>&#64;state:</dt><dd><p>A cooling device state</p>
+</dd>
+<dt>&#64;power:</dt><dd><p>pointer in which to store the equivalent power</p>
+</dd>
+</dl>
+<p>Convert cooling device state &#64;state into power consumption in
+milliwatts and store it in &#64;power.  It should return 0 on success, -E*
+on failure.  This is currently used by thermal core to calculate the
+maximum power that an actor can consume.</p>
+<ol class="arabic" start="3">
+<li><div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int power2state(struct thermal_cooling_device *cdev, u32 power,
+                unsigned long *state);
+</pre></div>
+</div>
+</li>
+</ol>
+<dl class="simple">
+<dt>&#64;cdev:</dt><dd><p>The <cite>struct thermal_cooling_device</cite> pointer</p>
+</dd>
+<dt>&#64;power:</dt><dd><p>power in milliwatts</p>
+</dd>
+<dt>&#64;state:</dt><dd><p>pointer in which to store the resulting state</p>
+</dd>
+</dl>
+<p>Calculate a cooling device state that would make the device consume at
+most &#64;power mW and store it in &#64;state.  It should return 0 on success,
+-E* on failure.  This is currently used by the thermal core to convert
+a given power set by the power allocator governor to a state that the
+cooling device can set.  It is a function because this conversion may
+depend on external factors that may change so this function should the
+best conversion given “current circumstances”.</p>
+</section>
+</section>
+<section id="cooling-device-weights">
+<h2>Cooling device weights<a class="headerlink" href="#cooling-device-weights" title="Permalink to this headline">¶</a></h2>
+<p>Weights are a mechanism to bias the allocation among cooling
+devices.  They express the relative power efficiency of different
+cooling devices.  Higher weight can be used to express higher power
+efficiency.  Weighting is relative such that if each cooling device
+has a weight of one they are considered equal.  This is particularly
+useful in heterogeneous systems where two cooling devices may perform
+the same kind of compute, but with different efficiency.  For example,
+a system with two different types of processors.</p>
+<p>If the thermal zone is registered using
+<cite>thermal_zone_device_register()</cite> (i.e., platform code), then weights
+are passed as part of the thermal zone’s <cite>thermal_bind_parameters</cite>.
+If the platform is registered using device tree, then they are passed
+as the <cite>contribution</cite> property of each map in the <cite>cooling-maps</cite> node.</p>
+<section id="limitations-of-the-power-allocator-governor">
+<h3>Limitations of the power allocator governor<a class="headerlink" href="#limitations-of-the-power-allocator-governor" title="Permalink to this headline">¶</a></h3>
+<p>The power allocator governor’s PID controller works best if there is a
+periodic tick.  If you have a driver that calls
+<cite>thermal_zone_device_update()</cite> (or anything that ends up calling the
+governor’s <cite>throttle()</cite> function) repetitively, the governor response
+won’t be very good.  Note that this is not particular to this
+governor, step-wise will also misbehave if you call its throttle()
+faster than the normal thermal framework tick (due to interrupts for
+example) as it will overreact.</p>
+</section>
+<section id="energy-model-requirements">
+<h3>Energy Model requirements<a class="headerlink" href="#energy-model-requirements" title="Permalink to this headline">¶</a></h3>
+<p>Another important thing is the consistent scale of the power values
+provided by the cooling devices. All of the cooling devices in a single
+thermal zone should have power values reported either in milli-Watts
+or scaled to the same ‘abstract scale’.</p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Power allocator governor tunables</a><ul>
+<li><a class="reference internal" href="#trip-points">Trip points</a></li>
+<li><a class="reference internal" href="#pid-controller">PID Controller</a></li>
+<li><a class="reference internal" href="#sustainable-power">Sustainable power</a></li>
+<li><a class="reference internal" href="#k-po-and-k-pu">k_po and k_pu</a></li>
+<li><a class="reference internal" href="#k-i-and-integral-cutoff">k_i and integral_cutoff</a></li>
+<li><a class="reference internal" href="#k-d">k_d</a><ul>
+<li><a class="reference internal" href="#cooling-device-power-api">Cooling device power API</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#cooling-device-weights">Cooling device weights</a><ul>
+<li><a class="reference internal" href="#limitations-of-the-power-allocator-governor">Limitations of the power allocator governor</a></li>
+<li><a class="reference internal" href="#energy-model-requirements">Energy Model requirements</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/thermal/power_allocator.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/thermal/power_allocator.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

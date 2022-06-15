@@ -1,0 +1,236 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Devlink Line card &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="bnxt devlink support" href="bnxt.html" />
+    <link rel="prev" title="Devlink Trap" href="devlink-trap.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="devlink-line-card">
+<h1>Devlink Line card<a class="headerlink" href="#devlink-line-card" title="Permalink to this headline">¶</a></h1>
+<section id="background">
+<h2>Background<a class="headerlink" href="#background" title="Permalink to this headline">¶</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">devlink-linecard</span></code> mechanism is targeted for manipulation of
+line cards that serve as a detachable PHY modules for modular switch
+system. Following operations are provided:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Get a list of supported line card types.</p></li>
+<li><p>Provision of a slot with specific line card type.</p></li>
+<li><p>Get and monitor of line card state and its change.</p></li>
+</ul>
+</div></blockquote>
+<p>Line card according to the type may contain one or more gearboxes
+to mux the lanes with certain speed to multiple ports with lanes
+of different speed. Line card ensures N:M mapping between
+the switch ASIC modules and physical front panel ports.</p>
+</section>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Permalink to this headline">¶</a></h2>
+<p>Each line card devlink object is created by device driver,
+according to the physical line card slots available on the device.</p>
+<p>Similar to splitter cable, where the device might have no way
+of detection of the splitter cable geometry, the device
+might not have a way to detect line card type. For that devices,
+concept of provisioning is introduced. It allows the user to:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Provision a line card slot with certain line card type</p>
+<ul>
+<li><p>Device driver would instruct the ASIC to prepare all
+resources accordingly. The device driver would
+create all instances, namely devlink port and netdevices
+that reside on the line card, according to the line card type</p></li>
+</ul>
+</li>
+<li><p>Manipulate of line card entities even without line card
+being physically connected or powered-up</p></li>
+<li><p>Setup splitter cable on line card ports</p>
+<ul>
+<li><p>As on the ordinary ports, user may provision a splitter
+cable of a certain type, without the need to
+be physically connected to the port</p></li>
+</ul>
+</li>
+<li><p>Configure devlink ports and netdevices</p></li>
+</ul>
+</div></blockquote>
+<p>Netdevice carrier is decided as follows:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Line card is not inserted or powered-down</p>
+<ul>
+<li><p>The carrier is always down</p></li>
+</ul>
+</li>
+<li><p>Line card is inserted and powered up</p>
+<ul>
+<li><p>The carrier is decided as for ordinary port netdevice</p></li>
+</ul>
+</li>
+</ul>
+</div></blockquote>
+</section>
+<section id="line-card-state">
+<h2>Line card state<a class="headerlink" href="#line-card-state" title="Permalink to this headline">¶</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">devlink-linecard</span></code> mechanism supports the following line card states:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">unprovisioned</span></code>: Line card is not provisioned on the slot.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">unprovisioning</span></code>: Line card slot is currently being unprovisioned.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">provisioning</span></code>: Line card slot is currently in a process of being provisioned
+with a line card type.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">provisioning_failed</span></code>: Provisioning was not successful.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">provisioned</span></code>: Line card slot is provisioned with a type.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">active</span></code>: Line card is powered-up and active.</p></li>
+</ul>
+</div></blockquote>
+<p>The following diagram provides a general overview of <code class="docutils literal notranslate"><span class="pre">devlink-linecard</span></code>
+state transitions:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>                                   +-------------------------+
+                                   |                         |
++----------------------------------&gt;      unprovisioned      |
+|                                  |                         |
+|                                  +--------|-------^--------+
+|                                           |       |
+|                                           |       |
+|                                  +--------v-------|--------+
+|                                  |                         |
+|                                  |       provisioning      |
+|                                  |                         |
+|                                  +------------|------------+
+|                                               |
+|                 +-----------------------------+
+|                 |                             |
+|    +------------v------------+   +------------v------------+   +-------------------------+
+|    |                         |   |                         ----&gt;                         |
++-----   provisioning_failed   |   |       provisioned       |   |         active          |
+|    |                         |   |                         &lt;----                         |
+|    +------------^------------+   +------------|------------+   +-------------------------+
+|                 |                             |
+|                 |                             |
+|                 |                +------------v------------+
+|                 |                |                         |
+|                 |                |     unprovisioning      |
+|                 |                |                         |
+|                 |                +------------|------------+
+|                 |                             |
+|                 +-----------------------------+
+|                                               |
++-----------------------------------------------+
+</pre></div>
+</div>
+</section>
+<section id="example-usage">
+<h2>Example usage<a class="headerlink" href="#example-usage" title="Permalink to this headline">¶</a></h2>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$ devlink lc show <span class="o">[</span> DEV <span class="o">[</span> lc LC_INDEX <span class="o">]</span> <span class="o">]</span>
+$ devlink lc <span class="nb">set</span> DEV lc LC_INDEX <span class="o">[</span> <span class="o">{</span> <span class="nb">type</span> LC_TYPE <span class="p">|</span> notype <span class="o">}</span> <span class="o">]</span>
+
+<span class="c1"># Show current line card configuration and status for all slots:</span>
+$ devlink lc
+
+<span class="c1"># Set slot 8 to be provisioned with type &quot;16x100G&quot;:</span>
+$ devlink lc <span class="nb">set</span> pci/0000:01:00.0 lc <span class="m">8</span> <span class="nb">type</span> 16x100G
+
+<span class="c1"># Set slot 8 to be unprovisioned:</span>
+$ devlink lc <span class="nb">set</span> pci/0000:01:00.0 lc <span class="m">8</span> notype
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Devlink Line card</a><ul>
+<li><a class="reference internal" href="#background">Background</a></li>
+<li><a class="reference internal" href="#overview">Overview</a></li>
+<li><a class="reference internal" href="#line-card-state">Line card state</a></li>
+<li><a class="reference internal" href="#example-usage">Example usage</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/networking/devlink/devlink-linecard.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/networking/devlink/devlink-linecard.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

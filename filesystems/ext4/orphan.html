@@ -1,0 +1,155 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Orphan file &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="orphan-file">
+<h1>Orphan file<a class="headerlink" href="#orphan-file" title="Permalink to this headline">¶</a></h1>
+<p>In unix there can inodes that are unlinked from directory hierarchy but that
+are still alive because they are open. In case of crash the filesystem has to
+clean up these inodes as otherwise they (and the blocks referenced from them)
+would leak. Similarly if we truncate or extend the file, we need not be able
+to perform the operation in a single journalling transaction. In such case we
+track the inode as orphan so that in case of crash extra blocks allocated to
+the file get truncated.</p>
+<p>Traditionally ext4 tracks orphan inodes in a form of single linked list where
+superblock contains the inode number of the last orphan inode (s_last_orphan
+field) and then each inode contains inode number of the previously orphaned
+inode (we overload i_dtime inode field for this). However this filesystem
+global single linked list is a scalability bottleneck for workloads that result
+in heavy creation of orphan inodes. When orphan file feature
+(COMPAT_ORPHAN_FILE) is enabled, the filesystem has a special inode
+(referenced from the superblock through s_orphan_file_inum) with several
+blocks. Each of these blocks has a structure:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 17%" />
+<col style="width: 21%" />
+<col style="width: 20%" />
+<col style="width: 41%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Offset</p></th>
+<th class="head"><p>Type</p></th>
+<th class="head"><p>Name</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>0x0</p></td>
+<td><p>Array of
+__le32 entries</p></td>
+<td><p>Orphan inode
+entries</p></td>
+<td><p>Each __le32 entry is either
+empty (0) or it contains
+inode number of an orphan
+inode.</p></td>
+</tr>
+<tr class="row-odd"><td><p>blocksize-8</p></td>
+<td><p>__le32</p></td>
+<td><p>ob_magic</p></td>
+<td><p>Magic value stored in orphan
+block tail (0x0b10ca04)</p></td>
+</tr>
+<tr class="row-even"><td><p>blocksize-4</p></td>
+<td><p>__le32</p></td>
+<td><p>ob_checksum</p></td>
+<td><p>Checksum of the orphan block.</p></td>
+</tr>
+</tbody>
+</table>
+<p>When a filesystem with orphan file feature is writeably mounted, we set
+RO_COMPAT_ORPHAN_PRESENT feature in the superblock to indicate there may
+be valid orphan entries. In case we see this feature when mounting the
+filesystem, we read the whole orphan file and process all orphan inodes found
+there as usual. When cleanly unmounting the filesystem we remove the
+RO_COMPAT_ORPHAN_PRESENT feature to avoid unnecessary scanning of the orphan
+file and also make the filesystem fully compatible with older kernels.</p>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/filesystems/ext4/orphan.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/filesystems/ext4/orphan.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

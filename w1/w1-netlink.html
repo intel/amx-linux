@@ -1,0 +1,287 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Userspace communication protocol over connector &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="1-wire Master Drivers" href="masters/index.html" />
+    <link rel="prev" title="Introduction to the 1-wire (w1) subsystem" href="w1-generic.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="userspace-communication-protocol-over-connector">
+<h1>Userspace communication protocol over connector<a class="headerlink" href="#userspace-communication-protocol-over-connector" title="Permalink to this headline">¶</a></h1>
+<section id="message-types">
+<h2>Message types<a class="headerlink" href="#message-types" title="Permalink to this headline">¶</a></h2>
+<p>There are three types of messages between w1 core and userspace:</p>
+<ol class="arabic simple">
+<li><p>Events. They are generated each time a new master or slave device
+is found either due to automatic or requested search.</p></li>
+<li><p>Userspace commands.</p></li>
+<li><p>Replies to userspace commands.</p></li>
+</ol>
+</section>
+<section id="protocol">
+<h2>Protocol<a class="headerlink" href="#protocol" title="Permalink to this headline">¶</a></h2>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[struct cn_msg] - connector header.
+      Its length field is equal to size of the attached data
+[struct w1_netlink_msg] - w1 netlink header.
+      __u8 type       - message type.
+                      W1_LIST_MASTERS
+                              list current bus masters
+                      W1_SLAVE_ADD/W1_SLAVE_REMOVE
+                              slave add/remove events
+                      W1_MASTER_ADD/W1_MASTER_REMOVE
+                              master add/remove events
+                      W1_MASTER_CMD
+                              userspace command for bus master
+                              device (search/alarm search)
+                      W1_SLAVE_CMD
+                              userspace command for slave device
+                              (read/write/touch)
+      __u8 status     - error indication from kernel
+      __u16 len       - size of data attached to this header data
+      union {
+              __u8 id[8];                      - slave unique device id
+              struct w1_mst {
+                      __u32           id;      - master&#39;s id
+                      __u32           res;     - reserved
+              } mst;
+      } id;
+
+[struct w1_netlink_cmd] - command for given master or slave device.
+      __u8 cmd        - command opcode.
+                      W1_CMD_READ     - read command
+                      W1_CMD_WRITE    - write command
+                      W1_CMD_SEARCH   - search command
+                      W1_CMD_ALARM_SEARCH - alarm search command
+                      W1_CMD_TOUCH    - touch command
+                              (write and sample data back to userspace)
+                      W1_CMD_RESET    - send bus reset
+                      W1_CMD_SLAVE_ADD        - add slave to kernel list
+                      W1_CMD_SLAVE_REMOVE     - remove slave from kernel list
+                      W1_CMD_LIST_SLAVES      - get slaves list from kernel
+      __u8 res        - reserved
+      __u16 len       - length of data for this command
+              For read command data must be allocated like for write command
+      __u8 data[0]    - data for this command
+</pre></div>
+</div>
+<p>Each connector message can include one or more w1_netlink_msg with
+zero or more attached w1_netlink_cmd messages.</p>
+<p>For event messages there are no w1_netlink_cmd embedded structures,
+only connector header and w1_netlink_msg strucutre with “len” field
+being zero and filled type (one of event types) and id:
+either 8 bytes of slave unique id in host order,
+or master’s id, which is assigned to bus master device
+when it is added to w1 core.</p>
+<p>Currently replies to userspace commands are only generated for read
+command request. One reply is generated exactly for one w1_netlink_cmd
+read request. Replies are not combined when sent - i.e. typical reply
+messages looks like the following:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[cn_msg][w1_netlink_msg][w1_netlink_cmd]
+cn_msg.len = sizeof(struct w1_netlink_msg) +
+           sizeof(struct w1_netlink_cmd) +
+           cmd-&gt;len;
+w1_netlink_msg.len = sizeof(struct w1_netlink_cmd) + cmd-&gt;len;
+w1_netlink_cmd.len = cmd-&gt;len;
+</pre></div>
+</div>
+<p>Replies to W1_LIST_MASTERS should send a message back to the userspace
+which will contain list of all registered master ids in the following
+format:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>cn_msg (CN_W1_IDX.CN_W1_VAL as id, len is equal to sizeof(struct
+w1_netlink_msg) plus number of masters multiplied by 4)
+w1_netlink_msg (type: W1_LIST_MASTERS, len is equal to
+        number of masters multiplied by 4 (u32 size))
+id0 ... idN
+</pre></div>
+</div>
+<p>Each message is at most 4k in size, so if number of master devices
+exceeds this, it will be split into several messages.</p>
+<p>W1 search and alarm search commands.</p>
+<p>request:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[cn_msg]
+  [w1_netlink_msg type = W1_MASTER_CMD
+      id is equal to the bus master id to use for searching]
+  [w1_netlink_cmd cmd = W1_CMD_SEARCH or W1_CMD_ALARM_SEARCH]
+</pre></div>
+</div>
+<p>reply:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[cn_msg, ack = 1 and increasing, 0 means the last message,
+      seq is equal to the request seq]
+[w1_netlink_msg type = W1_MASTER_CMD]
+[w1_netlink_cmd cmd = W1_CMD_SEARCH or W1_CMD_ALARM_SEARCH
+      len is equal to number of IDs multiplied by 8]
+[64bit-id0 ... 64bit-idN]
+</pre></div>
+</div>
+<p>Length in each header corresponds to the size of the data behind it, so
+w1_netlink_cmd-&gt;len = N * 8; where N is number of IDs in this message.
+Can be zero.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>w1_netlink_msg-&gt;len = sizeof(struct w1_netlink_cmd) + N * 8;
+cn_msg-&gt;len = sizeof(struct w1_netlink_msg) +
+            sizeof(struct w1_netlink_cmd) +
+            N*8;
+</pre></div>
+</div>
+<p>W1 reset command:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[cn_msg]
+  [w1_netlink_msg type = W1_MASTER_CMD
+      id is equal to the bus master id to use for searching]
+  [w1_netlink_cmd cmd = W1_CMD_RESET]
+</pre></div>
+</div>
+</section>
+<section id="command-status-replies">
+<h2>Command status replies<a class="headerlink" href="#command-status-replies" title="Permalink to this headline">¶</a></h2>
+<p>Each command (either root, master or slave with or without w1_netlink_cmd
+structure) will be ‘acked’ by the w1 core. Format of the reply is the same
+as request message except that length parameters do not account for data
+requested by the user, i.e. read/write/touch IO requests will not contain
+data, so w1_netlink_cmd.len will be 0, w1_netlink_msg.len will be size
+of the w1_netlink_cmd structure and cn_msg.len will be equal to the sum
+of the sizeof(<a class="reference internal" href="../driver-api/w1.html#c.w1_netlink_msg" title="w1_netlink_msg"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">w1_netlink_msg</span></code></a>) and sizeof(<a class="reference internal" href="../driver-api/w1.html#c.w1_netlink_cmd" title="w1_netlink_cmd"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">w1_netlink_cmd</span></code></a>).
+If reply is generated for master or root command (which do not have
+w1_netlink_cmd attached), reply will contain only cn_msg and w1_netlink_msg
+structures.</p>
+<p>w1_netlink_msg.status field will carry positive error value
+(EINVAL for example) or zero in case of success.</p>
+<p>All other fields in every structure will mirror the same parameters in the
+request message (except lengths as described above).</p>
+<p>Status reply is generated for every w1_netlink_cmd embedded in the
+w1_netlink_msg, if there are no w1_netlink_cmd structures,
+reply will be generated for the w1_netlink_msg.</p>
+<p>All w1_netlink_cmd command structures are handled in every w1_netlink_msg,
+even if there were errors, only length mismatch interrupts message processing.</p>
+</section>
+<section id="operation-steps-in-w1-core-when-new-command-is-received">
+<h2>Operation steps in w1 core when new command is received<a class="headerlink" href="#operation-steps-in-w1-core-when-new-command-is-received" title="Permalink to this headline">¶</a></h2>
+<p>When new message (w1_netlink_msg) is received w1 core detects if it is
+master or slave request, according to w1_netlink_msg.type field.
+Then master or slave device is searched for.
+When found, master device (requested or those one on where slave device
+is found) is locked. If slave command is requested, then reset/select
+procedure is started to select given device.</p>
+<p>Then all requested in w1_netlink_msg operations are performed one by one.
+If command requires reply (like read command) it is sent on command completion.</p>
+<p>When all commands (w1_netlink_cmd) are processed master device is unlocked
+and next w1_netlink_msg header processing started.</p>
+</section>
+<section id="connector-1-specific-documentation">
+<h2>Connector [1] specific documentation<a class="headerlink" href="#connector-1-specific-documentation" title="Permalink to this headline">¶</a></h2>
+<p>Each connector message includes two u32 fields as “address”.
+w1 uses CN_W1_IDX and CN_W1_VAL defined in include/linux/connector.h header.
+Each message also includes sequence and acknowledge numbers.
+Sequence number for event messages is appropriate bus master sequence number
+increased with each event message sent “through” this master.
+Sequence number for userspace requests is set by userspace application.
+Sequence number for reply is the same as was in request, and
+acknowledge number is set to seq+1.</p>
+</section>
+<section id="additional-documentation-source-code-examples">
+<h2>Additional documentation, source code examples<a class="headerlink" href="#additional-documentation-source-code-examples" title="Permalink to this headline">¶</a></h2>
+<ol class="arabic">
+<li><p><a class="reference internal" href="../driver-api/connector.html"><span class="doc">Kernel Connector</span></a></p></li>
+<li><p><a class="reference external" href="http://www.ioremap.net/archive/w1">http://www.ioremap.net/archive/w1</a></p>
+<p>This archive includes userspace application w1d.c which uses
+read/write/search commands for all master/slave devices found on the bus.</p>
+</li>
+</ol>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Userspace communication protocol over connector</a><ul>
+<li><a class="reference internal" href="#message-types">Message types</a></li>
+<li><a class="reference internal" href="#protocol">Protocol</a></li>
+<li><a class="reference internal" href="#command-status-replies">Command status replies</a></li>
+<li><a class="reference internal" href="#operation-steps-in-w1-core-when-new-command-is-received">Operation steps in w1 core when new command is received</a></li>
+<li><a class="reference internal" href="#connector-1-specific-documentation">Connector [1] specific documentation</a></li>
+<li><a class="reference internal" href="#additional-documentation-source-code-examples">Additional documentation, source code examples</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/w1/w1-netlink.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/w1/w1-netlink.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

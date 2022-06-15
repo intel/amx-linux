@@ -1,0 +1,221 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>CPUFreq核心和CPUFreq通知器的通用說明 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="如何實現一個新的CPUFreq處理器驅動程序？" href="cpu-drivers.html" />
+    <link rel="prev" title="Linux CPUFreq - Linux(TM)內核中的CPU頻率和電壓升降代碼" href="index.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是爲讓中文讀者更容易閱讀和理解，而不是作爲一個分支。因此，
+如果您對此文件有任何意見或改動，請先嘗試更新原始英文文件。如果要更改或
+修正某處翻譯文件，請將意見或補丁發送給維護者（聯繫方式見下）。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您發現本文檔與原始文件有任何不同或者有翻譯問題，請聯繫該文件的譯者，
+或者發送電子郵件給胡皓文以獲取幫助：&lt;<a class="reference external" href="mailto:src&#46;res&#37;&#52;&#48;email&#46;cn">src<span>&#46;</span>res<span>&#64;</span>email<span>&#46;</span>cn</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../cpu-freq/core.html"><span class="doc">General description of the CPUFreq core and CPUFreq notifiers</span></a></p>
+</dd>
+<dt class="field-even">Translator</dt>
+<dd class="field-even"><p>Yanteng Si &lt;<a class="reference external" href="mailto:siyanteng&#37;&#52;&#48;loongson&#46;cn">siyanteng<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;
+Hu Haowen &lt;<a class="reference external" href="mailto:src&#46;res&#37;&#52;&#48;email&#46;cn">src<span>&#46;</span>res<span>&#64;</span>email<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+</dl>
+<section id="cpufreqcpufreq">
+<span id="tw-core-rst"></span><h1>CPUFreq核心和CPUFreq通知器的通用說明<a class="headerlink" href="#cpufreqcpufreq" title="Permalink to this headline">¶</a></h1>
+<dl class="simple">
+<dt>作者:</dt><dd><ul class="simple">
+<li><p>Dominik Brodowski  &lt;<a class="reference external" href="mailto:linux&#37;&#52;&#48;brodo&#46;de">linux<span>&#64;</span>brodo<span>&#46;</span>de</a>&gt;</p></li>
+<li><p>David Kimdon &lt;<a class="reference external" href="mailto:dwhedon&#37;&#52;&#48;debian&#46;org">dwhedon<span>&#64;</span>debian<span>&#46;</span>org</a>&gt;</p></li>
+<li><p>Rafael J. Wysocki &lt;<a class="reference external" href="mailto:rafael&#46;j&#46;wysocki&#37;&#52;&#48;intel&#46;com">rafael<span>&#46;</span>j<span>&#46;</span>wysocki<span>&#64;</span>intel<span>&#46;</span>com</a>&gt;</p></li>
+<li><p>Viresh Kumar &lt;<a class="reference external" href="mailto:viresh&#46;kumar&#37;&#52;&#48;linaro&#46;org">viresh<span>&#46;</span>kumar<span>&#64;</span>linaro<span>&#46;</span>org</a>&gt;</p></li>
+</ul>
+</dd>
+</dl>
+<section id="cpufreq">
+<h2>1. CPUFreq核心和接口<a class="headerlink" href="#cpufreq" title="Permalink to this headline">¶</a></h2>
+<p>cpufreq核心代碼位於drivers/cpufreq/cpufreq.c中。這些cpufreq代碼爲CPUFreq架構的驅
+動程序（那些操作硬體切換頻率的代碼）以及 “通知器 “提供了一個標準化的接口。
+這些是設備驅動程序或需要了解策略變化的其它內核部分（如 ACPI 熱量管理）或所有頻率更改（除
+計時代碼外），甚至需要強制確定速度限制的通知器（如 ARM 架構上的 LCD 驅動程序）。
+此外， 內核 “常數” loops_per_jiffy會根據頻率變化而更新。</p>
+<p>cpufreq策略的引用計數由 cpufreq_cpu_get 和 cpufreq_cpu_put 來完成，以確保 cpufreq 驅
+動程序被正確地註冊到核心中，並且驅動程序在 cpufreq_put_cpu 被調用之前不會被卸載。這也保證
+了每個CPU核的cpufreq 策略在使用期間不會被釋放。</p>
+</section>
+<section id="id1">
+<h2>2. CPUFreq 通知器<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>CPUFreq通知器符合標準的內核通知器接口。
+關於通知器的細節請參閱 linux/include/linux/notifier.h。</p>
+<p>這裡有兩個不同的CPUfreq通知器 - 策略通知器和轉換通知器。</p>
+<section id="id2">
+<h3>2.1 CPUFreq策略通知器<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h3>
+<p>當創建或移除策略時，這些都會被通知。</p>
+<p>階段是在通知器的第二個參數中指定的。當第一次創建策略時，階段是CPUFREQ_CREATE_POLICY，當
+策略被移除時，階段是CPUFREQ_REMOVE_POLICY。</p>
+<p>第三個參數 <code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*pointer</span></code> 指向一個結構體cpufreq_policy，其包括min，max(新策略的下限和
+上限（單位爲kHz）)這幾個值。</p>
+</section>
+<section id="id3">
+<h3>2.2 CPUFreq轉換通知器<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h3>
+<p>當CPUfreq驅動切換CPU核心頻率時，策略中的每個在線CPU都會收到兩次通知，這些變化沒有任何外部干
+預。</p>
+<p>第二個參數指定階段 - CPUFREQ_PRECHANGE or CPUFREQ_POSTCHANGE.</p>
+<p>第三個參數是一個包含如下值的結構體cpufreq_freqs：</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 20%" />
+<col style="width: 80%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>cpu</p></td>
+<td><p>受影響cpu的編號</p></td>
+</tr>
+<tr class="row-even"><td><p>old</p></td>
+<td><p>舊頻率</p></td>
+</tr>
+<tr class="row-odd"><td><p>new</p></td>
+<td><p>新頻率</p></td>
+</tr>
+<tr class="row-even"><td><p>flags</p></td>
+<td><p>cpufreq驅動的標誌</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+</section>
+<section id="operating-performance-point-opp-cpufreq">
+<h2>3. 含有Operating Performance Point (OPP)的CPUFreq表的生成<a class="headerlink" href="#operating-performance-point-opp-cpufreq" title="Permalink to this headline">¶</a></h2>
+<p>關於OPP的細節請參閱 <a class="reference internal" href="../../../power/opp.html"><span class="doc">Operating Performance Points (OPP) Library</span></a></p>
+<dl>
+<dt>dev_pm_opp_init_cpufreq_table -</dt><dd><p>這個功能提供了一個隨時可用的轉換程序，用來將OPP層關於可用頻率的內部信息翻譯成一種容易提供給
+cpufreq的格式。</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>不要在中斷上下文中使用此函數。</p>
+</div>
+<p>例如:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>soc_pm_init()
+{
+       /* Do things */
+       r = dev_pm_opp_init_cpufreq_table(dev, &amp;freq_table);
+       if (!r)
+               policy-&gt;freq_table = freq_table;
+       /* Do other things */
+}
+</pre></div>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>該函數只有在CONFIG_PM_OPP之外還啓用了CONFIG_CPU_FREQ時才可用。</p>
+</div>
+</dd>
+<dt>dev_pm_opp_free_cpufreq_table</dt><dd><p>釋放dev_pm_opp_init_cpufreq_table分配的表。</p>
+</dd>
+</dl>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">CPUFreq核心和CPUFreq通知器的通用說明</a><ul>
+<li><a class="reference internal" href="#cpufreq">1. CPUFreq核心和接口</a></li>
+<li><a class="reference internal" href="#id1">2. CPUFreq 通知器</a><ul>
+<li><a class="reference internal" href="#id2">2.1 CPUFreq策略通知器</a></li>
+<li><a class="reference internal" href="#id3">2.2 CPUFreq轉換通知器</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#operating-performance-point-opp-cpufreq">3. 含有Operating Performance Point (OPP)的CPUFreq表的生成</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_TW/cpu-freq/core.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_TW/cpu-freq/core.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

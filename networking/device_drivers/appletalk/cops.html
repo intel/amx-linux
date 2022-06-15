@@ -1,0 +1,183 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>The COPS LocalTalk Linux driver (cops.c) &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="Asynchronous Transfer Mode (ATM) Device Drivers" href="../atm/index.html" />
+    <link rel="prev" title="AppleTalk Device Drivers" href="index.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="the-cops-localtalk-linux-driver-cops-c">
+<h1>The COPS LocalTalk Linux driver (cops.c)<a class="headerlink" href="#the-cops-localtalk-linux-driver-cops-c" title="Permalink to this headline">¶</a></h1>
+<p>By Jay Schulist &lt;<a class="reference external" href="mailto:jschlst&#37;&#52;&#48;samba&#46;org">jschlst<span>&#64;</span>samba<span>&#46;</span>org</a>&gt;</p>
+<p>This driver has two modes and they are: Dayna mode and Tangent mode.
+Each mode corresponds with the type of card. It has been found
+that there are 2 main types of cards and all other cards are
+the same and just have different names or only have minor differences
+such as more IO ports. As this driver is tested it will
+become more clear exactly what cards are supported.</p>
+<p>Right now these cards are known to work with the COPS driver. The
+LT-200 cards work in a somewhat more limited capacity than the
+DL200 cards, which work very well and are in use by many people.</p>
+<dl class="simple">
+<dt>TANGENT driver mode:</dt><dd><ul class="simple">
+<li><p>Tangent ATB-II, Novell NL-1000, Daystar Digital LT-200</p></li>
+</ul>
+</dd>
+<dt>DAYNA driver mode:</dt><dd><ul class="simple">
+<li><p>Dayna DL2000/DaynaTalk PC (Half Length), COPS LT-95,</p></li>
+<li><p>Farallon PhoneNET PC III, Farallon PhoneNET PC II</p></li>
+</ul>
+</dd>
+<dt>Other cards possibly supported mode unknown though:</dt><dd><ul class="simple">
+<li><p>Dayna DL2000 (Full length)</p></li>
+</ul>
+</dd>
+</dl>
+<p>The COPS driver defaults to using Dayna mode. To change the driver’s
+mode if you built a driver with dual support use board_type=1 or
+board_type=2 for Dayna or Tangent with insmod.</p>
+<section id="operation-loading-of-the-driver">
+<h2>Operation/loading of the driver<a class="headerlink" href="#operation-loading-of-the-driver" title="Permalink to this headline">¶</a></h2>
+<p>Use modprobe like this: /sbin/modprobe cops.o (IO #) (IRQ #)
+If you do not specify any options the driver will try and use the IO = 0x240,
+IRQ = 5. As of right now I would only use IRQ 5 for the card, if autoprobing.</p>
+<p>To load multiple COPS driver Localtalk cards you can do one of the following:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>insmod cops io=0x240 irq=5
+insmod -o cops2 cops io=0x260 irq=3
+</pre></div>
+</div>
+<p>Or in lilo.conf put something like this:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>append=&quot;ether=5,0x240,lt0 ether=3,0x260,lt1&quot;
+</pre></div>
+</div>
+<p>Then bring up the interface with ifconfig. It will look something like this:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>lt0       Link encap:UNSPEC  HWaddr 00-00-00-00-00-00-00-F7-00-00-00-00-00-00-00-00
+          inet addr:192.168.1.2  Bcast:192.168.1.255  Mask:255.255.255.0
+          UP BROADCAST RUNNING NOARP MULTICAST  MTU:600  Metric:1
+          RX packets:0 errors:0 dropped:0 overruns:0 frame:0
+          TX packets:0 errors:0 dropped:0 overruns:0 carrier:0 coll:0
+</pre></div>
+</div>
+</section>
+<section id="netatalk-configuration">
+<h2>Netatalk Configuration<a class="headerlink" href="#netatalk-configuration" title="Permalink to this headline">¶</a></h2>
+<p>You will need to configure atalkd with something like the following to make
+it work with the cops.c driver.</p>
+<ul>
+<li><p>For single LTalk card use:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>dummy -seed -phase 2 -net 2000 -addr 2000.10 -zone &quot;1033&quot;
+lt0 -seed -phase 1 -net 1000 -addr 1000.50 -zone &quot;1033&quot;
+</pre></div>
+</div>
+</li>
+<li><p>For multiple cards, Ethernet and LocalTalk:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>eth0 -seed -phase 2 -net 3000 -addr 3000.20 -zone &quot;1033&quot;
+lt0 -seed -phase 1 -net 1000 -addr 1000.50 -zone &quot;1033&quot;
+</pre></div>
+</div>
+</li>
+<li><p>For multiple LocalTalk cards, and an Ethernet card.</p></li>
+<li><p>Order seems to matter here, Ethernet last:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>lt0 -seed -phase 1 -net 1000 -addr 1000.10 -zone &quot;LocalTalk1&quot;
+lt1 -seed -phase 1 -net 2000 -addr 2000.20 -zone &quot;LocalTalk2&quot;
+eth0 -seed -phase 2 -net 3000 -addr 3000.30 -zone &quot;EtherTalk&quot;
+</pre></div>
+</div>
+</li>
+</ul>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">The COPS LocalTalk Linux driver (cops.c)</a><ul>
+<li><a class="reference internal" href="#operation-loading-of-the-driver">Operation/loading of the driver</a></li>
+<li><a class="reference internal" href="#netatalk-configuration">Netatalk Configuration</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/networking/device_drivers/appletalk/cops.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/networking/device_drivers/appletalk/cops.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

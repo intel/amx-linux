@@ -1,0 +1,759 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>TTY Line Discipline &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="TTY Buffer" href="tty_buffer.html" />
+    <link rel="prev" title="TTY Struct" href="tty_struct.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="tty-line-discipline">
+<h1>TTY Line Discipline<a class="headerlink" href="#tty-line-discipline" title="Permalink to this headline">¶</a></h1>
+<div class="contents local topic" id="contents">
+<ul class="simple">
+<li><p><a class="reference internal" href="#registration" id="id1">Registration</a></p></li>
+<li><p><a class="reference internal" href="#other-functions" id="id2">Other Functions</a></p></li>
+<li><p><a class="reference internal" href="#line-discipline-operations-reference" id="id3">Line Discipline Operations Reference</a></p></li>
+<li><p><a class="reference internal" href="#driver-access" id="id4">Driver Access</a></p></li>
+<li><p><a class="reference internal" href="#tty-flags" id="id5">TTY Flags</a></p></li>
+<li><p><a class="reference internal" href="#locking" id="id6">Locking</a></p></li>
+<li><p><a class="reference internal" href="#internal-functions" id="id7">Internal Functions</a></p></li>
+</ul>
+</div>
+<p>TTY line discipline process all incoming and outgoing character from/to a tty
+device. The default line discipline is <a class="reference internal" href="n_tty.html"><span class="doc">N_TTY</span></a>. It is also a
+fallback if establishing any other discipline for a tty fails. If even N_TTY
+fails, N_NULL takes over. That never fails, but also does not process any
+characters – it throws them away.</p>
+<section id="registration">
+<h2><a class="toc-backref" href="#id1">Registration</a><a class="headerlink" href="#registration" title="Permalink to this headline">¶</a></h2>
+<p>Line disciplines are registered with <a class="reference internal" href="#c.tty_register_ldisc" title="tty_register_ldisc"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_register_ldisc()</span></code></a> passing the ldisc
+structure. At the point of registration the discipline must be ready to use and
+it is possible it will get used before the call returns success. If the call
+returns an error then it won’t get called. Do not re-use ldisc numbers as they
+are part of the userspace ABI and writing over an existing ldisc will cause
+demons to eat your computer. You must not re-register over the top of the line
+discipline even with the same data or your computer again will be eaten by
+demons. In order to remove a line discipline call <a class="reference internal" href="#c.tty_unregister_ldisc" title="tty_unregister_ldisc"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_unregister_ldisc()</span></code></a>.</p>
+<p>Heed this warning: the reference count field of the registered copies of the
+tty_ldisc structure in the ldisc table counts the number of lines using this
+discipline. The reference count of the tty_ldisc structure within a tty counts
+the number of active users of the ldisc at this instant. In effect it counts
+the number of threads of execution within an ldisc method (plus those about to
+enter and exit although this detail matters not).</p>
+<dl class="function">
+<dt id="c.tty_register_ldisc">
+int <code class="sig-name descname">tty_register_ldisc</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.tty_ldisc_ops" title="tty_ldisc_ops">tty_ldisc_ops</a><em> *new_ldisc</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_register_ldisc" title="Permalink to this definition">¶</a></dt>
+<dd><p>install a line discipline</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_ldisc_ops</span> <span class="pre">*new_ldisc</span></code></dt><dd><p>pointer to the ldisc object</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Installs a new line discipline into the kernel. The discipline is set up as
+unreferenced and then made available to the kernel from this point onwards.</p>
+<p>Locking: takes <code class="docutils literal notranslate"><span class="pre">tty_ldiscs_lock</span></code> to guard against ldisc races</p>
+</div>
+<dl class="function">
+<dt id="c.tty_unregister_ldisc">
+void <code class="sig-name descname">tty_unregister_ldisc</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.tty_ldisc_ops" title="tty_ldisc_ops">tty_ldisc_ops</a><em> *ldisc</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_unregister_ldisc" title="Permalink to this definition">¶</a></dt>
+<dd><p>unload a line discipline</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_ldisc_ops</span> <span class="pre">*ldisc</span></code></dt><dd><p>ldisc number</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Remove a line discipline from the kernel providing it is not currently in
+use.</p>
+<p>Locking: takes <code class="docutils literal notranslate"><span class="pre">tty_ldiscs_lock</span></code> to guard against ldisc races</p>
+</div>
+</section>
+<section id="other-functions">
+<h2><a class="toc-backref" href="#id2">Other Functions</a><a class="headerlink" href="#other-functions" title="Permalink to this headline">¶</a></h2>
+<dl class="function">
+<dt id="c.tty_ldisc_flush">
+void <code class="sig-name descname">tty_ldisc_flush</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_ldisc_flush" title="Permalink to this definition">¶</a></dt>
+<dd><p>flush line discipline queue</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty to flush ldisc for</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Flush the line discipline queue (if any) and the tty flip buffers for this
+<strong>tty</strong>.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_set_ldisc">
+int <code class="sig-name descname">tty_set_ldisc</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em>, int<em> disc</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_set_ldisc" title="Permalink to this definition">¶</a></dt>
+<dd><p>set line discipline</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>the terminal to set</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">disc</span></code></dt><dd><p>the line discipline number</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Set the discipline of a tty line. Must be called from a process context. The
+ldisc change logic has to protect itself against any overlapping ldisc
+change (including on the other end of pty pairs), the close of one side of a
+tty/pty pair, and eventually hangup.</p>
+</div>
+</section>
+<section id="line-discipline-operations-reference">
+<h2><a class="toc-backref" href="#id3">Line Discipline Operations Reference</a><a class="headerlink" href="#line-discipline-operations-reference" title="Permalink to this headline">¶</a></h2>
+<dl class="type">
+<dt id="c.tty_ldisc_ops">
+struct <code class="sig-name descname">tty_ldisc_ops</code><a class="headerlink" href="#c.tty_ldisc_ops" title="Permalink to this definition">¶</a></dt>
+<dd><p>ldisc operations</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct tty_ldisc_ops {
+    char *name;
+    int num;
+    int (*open)(struct tty_struct *tty);
+    void (*close)(struct tty_struct *tty);
+    void (*flush_buffer)(struct tty_struct *tty);
+    ssize_t (*read)(struct tty_struct *tty, struct file *file,unsigned char *buf, size_t nr, void **cookie, unsigned long offset);
+    ssize_t (*write)(struct tty_struct *tty, struct file *file, const unsigned char *buf, size_t nr);
+    int (*ioctl)(struct tty_struct *tty, unsigned int cmd, unsigned long arg);
+    int (*compat_ioctl)(struct tty_struct *tty, unsigned int cmd, unsigned long arg);
+    void (*set_termios)(struct tty_struct *tty, const struct ktermios *old);
+    __poll_t (*poll)(struct tty_struct *tty, struct file *file, struct poll_table_struct *wait);
+    void (*hangup)(struct tty_struct *tty);
+    void (*receive_buf)(struct tty_struct *tty, const unsigned char *cp, const char *fp, int count);
+    void (*write_wakeup)(struct tty_struct *tty);
+    void (*dcd_change)(struct tty_struct *tty, unsigned int status);
+    int (*receive_buf2)(struct tty_struct *tty, const unsigned char *cp, const char *fp, int count);
+    void (*lookahead_buf)(struct tty_struct *tty, const unsigned char *cp, const unsigned char *fp, unsigned int count);
+    struct module *owner;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl>
+<dt><code class="docutils literal notranslate"><span class="pre">name</span></code></dt><dd><p>name of this ldisc rendered in /proc/tty/ldiscs</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">num</span></code></dt><dd><p><code class="docutils literal notranslate"><span class="pre">N_*</span></code> number (<code class="docutils literal notranslate"><span class="pre">N_TTY</span></code>, <code class="docutils literal notranslate"><span class="pre">N_HDLC</span></code>, …) reserved to this ldisc</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">open</span></code></dt><dd><p>[TTY] <code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">()(struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty)</span></code></p>
+<p>This function is called when the line discipline is associated with the
+<strong>tty</strong>. No other call into the line discipline for this tty will occur
+until it completes successfully. It should initialize any state needed
+by the ldisc, and set <strong>tty-&gt;receive_room</strong> to the maximum amount of data
+the line discipline is willing to accept from the driver with a single
+call to <strong>receive_buf()</strong>. Returning an error will prevent the ldisc from
+being attached.</p>
+<p>Can sleep.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">close</span></code></dt><dd><p>[TTY] <code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">()(struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty)</span></code></p>
+<p>This function is called when the line discipline is being shutdown,
+either because the <strong>tty</strong> is being closed or because the <strong>tty</strong> is being
+changed to use a new line discipline. At the point of execution no
+further users will enter the ldisc code for this tty.</p>
+<p>Can sleep.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">flush_buffer</span></code></dt><dd><p>[TTY] <code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">()(struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty)</span></code></p>
+<p>This function instructs the line discipline to clear its buffers of any
+input characters it may have queued to be delivered to the user mode
+process. It may be called at any point between open and close.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">read</span></code></dt><dd><p>[TTY] <code class="docutils literal notranslate"><span class="pre">ssize_t</span> <span class="pre">()(struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty,</span> <span class="pre">struct</span> <span class="pre">file</span> <span class="pre">*file,</span>
+<span class="pre">unsigned</span> <span class="pre">char</span> <span class="pre">*buf,</span> <span class="pre">size_t</span> <span class="pre">nr)</span></code></p>
+<blockquote>
+<div><p>This function is called when the user requests to read from the <strong>tty</strong>.
+The line discipline will return whatever characters it has buffered up
+for the user. If this function is not defined, the user will receive
+an <code class="docutils literal notranslate"><span class="pre">EIO</span></code> error. Multiple read calls may occur in parallel and the ldisc
+must deal with serialization issues.</p>
+<p>Can sleep.</p>
+</div></blockquote>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">write</span></code></dt><dd><p>[TTY] <code class="docutils literal notranslate"><span class="pre">ssize_t</span> <span class="pre">()(struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty,</span> <span class="pre">struct</span> <span class="pre">file</span> <span class="pre">*file,</span>
+<span class="pre">const</span> <span class="pre">unsigned</span> <span class="pre">char</span> <span class="pre">*buf,</span> <span class="pre">size_t</span> <span class="pre">nr)</span></code></p>
+<blockquote>
+<div><p>This function is called when the user requests to write to the <strong>tty</strong>.
+The line discipline will deliver the characters to the low-level tty
+device for transmission, optionally performing some processing on the
+characters first. If this function is not defined, the user will
+receive an <code class="docutils literal notranslate"><span class="pre">EIO</span></code> error.</p>
+<p>Can sleep.</p>
+</div></blockquote>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">ioctl</span></code></dt><dd><p>[TTY] <code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">()(struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty,</span> <span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">cmd,</span>
+<span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">arg)</span></code></p>
+<blockquote>
+<div><p>This function is called when the user requests an ioctl which is not
+handled by the tty layer or the low-level tty driver. It is intended
+for ioctls which affect line discpline operation.  Note that the search
+order for ioctls is (1) tty layer, (2) tty low-level driver, (3) line
+discpline. So a low-level driver can “grab” an ioctl request before
+the line discpline has a chance to see it.</p>
+</div></blockquote>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">compat_ioctl</span></code></dt><dd><p>[TTY] <code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">()(struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty,</span> <span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">cmd,</span>
+<span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">arg)</span></code></p>
+<blockquote>
+<div><p>Process ioctl calls from 32-bit process on 64-bit system.</p>
+<p>Note that only ioctls that are neither “pointer to compatible
+structure” nor tty-generic.  Something private that takes an integer or
+a pointer to wordsize-sensitive structure belongs here, but most of
+ldiscs will happily leave it <code class="docutils literal notranslate"><span class="pre">NULL</span></code>.</p>
+</div></blockquote>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">set_termios</span></code></dt><dd><p>[TTY] <code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">()(struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty,</span> <span class="pre">const</span> <span class="pre">struct</span> <span class="pre">ktermios</span> <span class="pre">*old)</span></code></p>
+<p>This function notifies the line discpline that a change has been made
+to the termios structure.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">poll</span></code></dt><dd><p>[TTY] <code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">()(struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty,</span> <span class="pre">struct</span> <span class="pre">file</span> <span class="pre">*file,</span>
+<span class="pre">struct</span> <span class="pre">poll_table_struct</span> <span class="pre">*wait)</span></code></p>
+<blockquote>
+<div><p>This function is called when a user attempts to select/poll on a <strong>tty</strong>
+device. It is solely the responsibility of the line discipline to
+handle poll requests.</p>
+</div></blockquote>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">hangup</span></code></dt><dd><p>[TTY] <code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">()(struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty)</span></code></p>
+<p>Called on a hangup. Tells the discipline that it should cease I/O to
+the tty driver. The driver should seek to perform this action quickly
+but should wait until any pending driver I/O is completed. No further
+calls into the ldisc code will occur.</p>
+<p>Can sleep.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">receive_buf</span></code></dt><dd><p>[DRV] <code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">()(struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty,</span>
+<span class="pre">const</span> <span class="pre">unsigned</span> <span class="pre">char</span> <span class="pre">*cp,</span> <span class="pre">const</span> <span class="pre">char</span> <span class="pre">*fp,</span> <span class="pre">int</span> <span class="pre">count)</span></code></p>
+<blockquote>
+<div><p>This function is called by the low-level tty driver to send characters
+received by the hardware to the line discpline for processing. <strong>cp</strong> is
+a pointer to the buffer of input character received by the device. <strong>fp</strong>
+is a pointer to an array of flag bytes which indicate whether a
+character was received with a parity error, etc. <strong>fp</strong> may be <code class="docutils literal notranslate"><span class="pre">NULL</span></code> to
+indicate all data received is <code class="docutils literal notranslate"><span class="pre">TTY_NORMAL</span></code>.</p>
+</div></blockquote>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">write_wakeup</span></code></dt><dd><p>[DRV] <code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">()(struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty)</span></code></p>
+<p>This function is called by the low-level tty driver to signal that line
+discpline should try to send more characters to the low-level driver
+for transmission. If the line discpline does not have any more data to
+send, it can just return. If the line discipline does have some data to
+send, please arise a tasklet or workqueue to do the real data transfer.
+Do not send data in this hook, it may lead to a deadlock.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dcd_change</span></code></dt><dd><p>[DRV] <code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">()(struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty,</span> <span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">status)</span></code></p>
+<p>Tells the discipline that the DCD pin has changed its status. Used
+exclusively by the <code class="docutils literal notranslate"><span class="pre">N_PPS</span></code> (Pulse-Per-Second) line discipline.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">receive_buf2</span></code></dt><dd><p>[DRV] <code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">()(struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty,</span>
+<span class="pre">const</span> <span class="pre">unsigned</span> <span class="pre">char</span> <span class="pre">*cp,</span> <span class="pre">const</span> <span class="pre">char</span> <span class="pre">*fp,</span> <span class="pre">int</span> <span class="pre">count)</span></code></p>
+<blockquote>
+<div><p>This function is called by the low-level tty driver to send characters
+received by the hardware to the line discpline for processing. <strong>cp</strong> is a
+pointer to the buffer of input character received by the device.  <strong>fp</strong>
+is a pointer to an array of flag bytes which indicate whether a
+character was received with a parity error, etc. <strong>fp</strong> may be <code class="docutils literal notranslate"><span class="pre">NULL</span></code> to
+indicate all data received is <code class="docutils literal notranslate"><span class="pre">TTY_NORMAL</span></code>. If assigned, prefer this
+function for automatic flow control.</p>
+</div></blockquote>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">lookahead_buf</span></code></dt><dd><p>[DRV] <code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">()(struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty,</span>
+<span class="pre">const</span> <span class="pre">unsigned</span> <span class="pre">char</span> <span class="pre">*cp,</span> <span class="pre">const</span> <span class="pre">char</span> <span class="pre">*fp,</span> <span class="pre">int</span> <span class="pre">count)</span></code></p>
+<blockquote>
+<div><p>This function is called by the low-level tty driver for characters
+not eaten by -&gt;receive_buf() or -&gt;receive_buf2(). It is useful for
+processing high-priority characters such as software flow-control
+characters that could otherwise get stuck into the intermediate
+buffer until tty has room to receive them. Ldisc must be able to
+handle later a -&gt;receive_buf() or -&gt;receive_buf2() call for the
+same characters (e.g. by skipping the actions for high-priority
+characters already handled by -&gt;lookahead_buf()).</p>
+</div></blockquote>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">owner</span></code></dt><dd><p>module containting this ldisc (for reference counting)</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>This structure defines the interface between the tty line discipline
+implementation and the tty routines. The above routines can be defined.
+Unless noted otherwise, they are optional, and can be filled in with a <code class="docutils literal notranslate"><span class="pre">NULL</span></code>
+pointer.</p>
+<p>Hooks marked [TTY] are invoked from the TTY core, the [DRV] ones from the
+tty_driver side.</p>
+</section>
+<section id="driver-access">
+<h2><a class="toc-backref" href="#id4">Driver Access</a><a class="headerlink" href="#driver-access" title="Permalink to this headline">¶</a></h2>
+<p>Line discipline methods can call the methods of the underlying hardware driver.
+These are documented as a part of <a class="reference internal" href="tty_driver.html#c.tty_operations" title="tty_operations"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_operations</span></code></a>.</p>
+</section>
+<section id="tty-flags">
+<h2><a class="toc-backref" href="#id5">TTY Flags</a><a class="headerlink" href="#tty-flags" title="Permalink to this headline">¶</a></h2>
+<p>Line discipline methods have access to <code class="xref c c-member docutils literal notranslate"><span class="pre">tty_struct.flags</span></code> field. See
+<a class="reference internal" href="tty_struct.html"><span class="doc">TTY Struct</span></a>.</p>
+</section>
+<section id="locking">
+<h2><a class="toc-backref" href="#id6">Locking</a><a class="headerlink" href="#locking" title="Permalink to this headline">¶</a></h2>
+<p>Callers to the line discipline functions from the tty layer are required to
+take line discipline locks. The same is true of calls from the driver side
+but not yet enforced.</p>
+<dl class="function">
+<dt id="c.tty_ldisc_ref_wait">
+struct tty_ldisc * <code class="sig-name descname">tty_ldisc_ref_wait</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_ldisc_ref_wait" title="Permalink to this definition">¶</a></dt>
+<dd><p>wait for the tty ldisc</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty device</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Dereference the line discipline for the terminal and take a reference to it.
+If the line discipline is in flux then wait patiently until it changes.</p>
+<p>Note 1: Must not be called from an IRQ/timer context. The caller must also
+be careful not to hold other locks that will deadlock against a discipline
+change, such as an existing ldisc reference (which we check for).</p>
+<p>Note 2: a file_operations routine (read/poll/write) should use this function
+to wait for any ldisc lifetime events to finish.</p>
+<p><strong>Return</strong></p>
+<p><code class="docutils literal notranslate"><span class="pre">NULL</span></code> if the tty has been hungup and not re-opened with a new file
+descriptor, otherwise valid ldisc reference</p>
+</div>
+<dl class="function">
+<dt id="c.tty_ldisc_ref">
+struct tty_ldisc * <code class="sig-name descname">tty_ldisc_ref</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_ldisc_ref" title="Permalink to this definition">¶</a></dt>
+<dd><p>get the tty ldisc</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty device</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Dereference the line discipline for the terminal and take a reference to it.
+If the line discipline is in flux then return <code class="docutils literal notranslate"><span class="pre">NULL</span></code>. Can be called from IRQ
+and timer functions.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_ldisc_deref">
+void <code class="sig-name descname">tty_ldisc_deref</code><span class="sig-paren">(</span>struct tty_ldisc<em> *ld</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_ldisc_deref" title="Permalink to this definition">¶</a></dt>
+<dd><p>free a tty ldisc reference</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_ldisc</span> <span class="pre">*ld</span></code></dt><dd><p>reference to free up</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Undoes the effect of <a class="reference internal" href="#c.tty_ldisc_ref" title="tty_ldisc_ref"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_ldisc_ref()</span></code></a> or <a class="reference internal" href="#c.tty_ldisc_ref_wait" title="tty_ldisc_ref_wait"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_ldisc_ref_wait()</span></code></a>. May be called
+in IRQ context.</p>
+</div>
+<p>While these functions are slightly slower than the old code they should have
+minimal impact as most receive logic uses the flip buffers and they only
+need to take a reference when they push bits up through the driver.</p>
+<p>A caution: The <code class="xref c c-member docutils literal notranslate"><span class="pre">tty_ldisc_ops.open()</span></code>,
+<code class="xref c c-member docutils literal notranslate"><span class="pre">tty_ldisc_ops.close()</span></code> and <code class="xref c c-member docutils literal notranslate"><span class="pre">tty_driver.set_ldisc()</span></code>
+functions are called with the ldisc unavailable. Thus <a class="reference internal" href="#c.tty_ldisc_ref" title="tty_ldisc_ref"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_ldisc_ref()</span></code></a> will fail
+in this situation if used within these functions.  Ldisc and driver code
+calling its own functions must be careful in this case.</p>
+</section>
+<section id="internal-functions">
+<h2><a class="toc-backref" href="#id7">Internal Functions</a><a class="headerlink" href="#internal-functions" title="Permalink to this headline">¶</a></h2>
+<dl class="function">
+<dt id="c.tty_ldisc_get">
+struct tty_ldisc * <code class="sig-name descname">tty_ldisc_get</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em>, int<em> disc</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_ldisc_get" title="Permalink to this definition">¶</a></dt>
+<dd><p>take a reference to an ldisc</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">disc</span></code></dt><dd><p>ldisc number</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Takes a reference to a line discipline. Deals with refcounts and module
+locking counts. If the discipline is not available, its module loaded, if
+possible.</p>
+<p>Locking: takes <code class="docutils literal notranslate"><span class="pre">tty_ldiscs_lock</span></code> to guard against ldisc races</p>
+<p><strong>Return</strong></p>
+<ul class="simple">
+<li><p>-<code class="docutils literal notranslate"><span class="pre">EINVAL</span></code> if the discipline index is not [<code class="docutils literal notranslate"><span class="pre">N_TTY</span></code> .. <code class="docutils literal notranslate"><span class="pre">NR_LDISCS</span></code>] or if the
+discipline is not registered</p></li>
+<li><p>-<code class="docutils literal notranslate"><span class="pre">EAGAIN</span></code> if request_module() failed to load or register the discipline</p></li>
+<li><p>-<code class="docutils literal notranslate"><span class="pre">ENOMEM</span></code> if allocation failure</p></li>
+<li><p>Otherwise, returns a pointer to the discipline and bumps the ref count</p></li>
+</ul>
+</div>
+<dl class="function">
+<dt id="c.tty_ldisc_put">
+void <code class="sig-name descname">tty_ldisc_put</code><span class="sig-paren">(</span>struct tty_ldisc<em> *ld</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_ldisc_put" title="Permalink to this definition">¶</a></dt>
+<dd><p>release the ldisc</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_ldisc</span> <span class="pre">*ld</span></code></dt><dd><p>lisdsc to release</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Complement of <a class="reference internal" href="#c.tty_ldisc_get" title="tty_ldisc_get"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_ldisc_get()</span></code></a>.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_set_termios_ldisc">
+void <code class="sig-name descname">tty_set_termios_ldisc</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em>, int<em> disc</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_set_termios_ldisc" title="Permalink to this definition">¶</a></dt>
+<dd><p>set ldisc field</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty structure</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">disc</span></code></dt><dd><p>line discipline number</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This is probably overkill for real world processors but they are not on hot
+paths so a little discipline won’t do any harm.</p>
+<p>The line discipline-related tty_struct fields are reset to prevent the ldisc
+driver from re-using stale information for the new ldisc instance.</p>
+<p>Locking: takes termios_rwsem</p>
+</div>
+<dl class="function">
+<dt id="c.tty_ldisc_open">
+int <code class="sig-name descname">tty_ldisc_open</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em>, struct tty_ldisc<em> *ld</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_ldisc_open" title="Permalink to this definition">¶</a></dt>
+<dd><p>open a line discipline</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty we are opening the ldisc on</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_ldisc</span> <span class="pre">*ld</span></code></dt><dd><p>discipline to open</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>A helper opening method. Also a convenient debugging and check point.</p>
+<p>Locking: always called with BTM already held.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_ldisc_close">
+void <code class="sig-name descname">tty_ldisc_close</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em>, struct tty_ldisc<em> *ld</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_ldisc_close" title="Permalink to this definition">¶</a></dt>
+<dd><p>close a line discipline</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty we are opening the ldisc on</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_ldisc</span> <span class="pre">*ld</span></code></dt><dd><p>discipline to close</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>A helper close method. Also a convenient debugging and check point.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_ldisc_failto">
+int <code class="sig-name descname">tty_ldisc_failto</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em>, int<em> ld</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_ldisc_failto" title="Permalink to this definition">¶</a></dt>
+<dd><p>helper for ldisc failback</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty to open the ldisc on</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">ld</span></code></dt><dd><p>ldisc we are trying to fail back to</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Helper to try and recover a tty when switching back to the old ldisc fails
+and we need something attached.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_ldisc_restore">
+void <code class="sig-name descname">tty_ldisc_restore</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em>, struct tty_ldisc<em> *old</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_ldisc_restore" title="Permalink to this definition">¶</a></dt>
+<dd><p>helper for tty ldisc change</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty to recover</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_ldisc</span> <span class="pre">*old</span></code></dt><dd><p>previous ldisc</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Restore the previous line discipline or <code class="docutils literal notranslate"><span class="pre">N_TTY</span></code> when a line discipline change
+fails due to an open error</p>
+</div>
+<dl class="function">
+<dt id="c.tty_ldisc_kill">
+void <code class="sig-name descname">tty_ldisc_kill</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_ldisc_kill" title="Permalink to this definition">¶</a></dt>
+<dd><p>teardown ldisc</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty being released</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Perform final close of the ldisc and reset <strong>tty-&gt;ldisc</strong></p>
+</div>
+<dl class="function">
+<dt id="c.tty_reset_termios">
+void <code class="sig-name descname">tty_reset_termios</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_reset_termios" title="Permalink to this definition">¶</a></dt>
+<dd><p>reset terminal state</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty to reset</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Restore a terminal to the driver default state.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_ldisc_reinit">
+int <code class="sig-name descname">tty_ldisc_reinit</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em>, int<em> disc</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_ldisc_reinit" title="Permalink to this definition">¶</a></dt>
+<dd><p>reinitialise the tty ldisc</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty to reinit</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">disc</span></code></dt><dd><p>line discipline to reinitialize</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Completely reinitialize the line discipline state, by closing the current
+instance, if there is one, and opening a new instance. If an error occurs
+opening the new non-<code class="docutils literal notranslate"><span class="pre">N_TTY</span></code> instance, the instance is dropped and <strong>tty-&gt;ldisc</strong>
+reset to <code class="docutils literal notranslate"><span class="pre">NULL</span></code>. The caller can then retry with <code class="docutils literal notranslate"><span class="pre">N_TTY</span></code> instead.</p>
+<p><strong>Return</strong></p>
+<p>0 if successful, otherwise error code &lt; 0</p>
+</div>
+<dl class="function">
+<dt id="c.tty_ldisc_hangup">
+void <code class="sig-name descname">tty_ldisc_hangup</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em>, bool<em> reinit</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_ldisc_hangup" title="Permalink to this definition">¶</a></dt>
+<dd><p>hangup ldisc reset</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty being hung up</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">bool</span> <span class="pre">reinit</span></code></dt><dd><p>whether to re-initialise the tty</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Some tty devices reset their termios when they receive a hangup event. In
+that situation we must also switch back to <code class="docutils literal notranslate"><span class="pre">N_TTY</span></code> properly before we reset
+the termios data.</p>
+<p>Locking: We can take the ldisc mutex as the rest of the code is careful to
+allow for this.</p>
+<p>In the pty pair case this occurs in the close() path of the tty itself so we
+must be careful about locking rules.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_ldisc_setup">
+int <code class="sig-name descname">tty_ldisc_setup</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em>, struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *o_tty</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_ldisc_setup" title="Permalink to this definition">¶</a></dt>
+<dd><p>open line discipline</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty being shut down</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*o_tty</span></code></dt><dd><p>pair tty for pty/tty pairs</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Called during the initial open of a tty/pty pair in order to set up the line
+disciplines and bind them to the <strong>tty</strong>. This has no locking issues as the
+device isn’t yet active.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_ldisc_release">
+void <code class="sig-name descname">tty_ldisc_release</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_ldisc_release" title="Permalink to this definition">¶</a></dt>
+<dd><p>release line discipline</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty being shut down (or one end of pty pair)</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Called during the final close of a tty or a pty pair in order to shut down
+the line discpline layer. On exit, each tty’s ldisc is <code class="docutils literal notranslate"><span class="pre">NULL</span></code>.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_ldisc_init">
+int <code class="sig-name descname">tty_ldisc_init</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_ldisc_init" title="Permalink to this definition">¶</a></dt>
+<dd><p>ldisc setup for new tty</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty being allocated</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Set up the line discipline objects for a newly allocated tty. Note that the
+tty structure is not completely set up when this call is made.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_ldisc_deinit">
+void <code class="sig-name descname">tty_ldisc_deinit</code><span class="sig-paren">(</span>struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_ldisc_deinit" title="Permalink to this definition">¶</a></dt>
+<dd><p>ldisc cleanup for new tty</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty that was allocated recently</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>The tty structure must not be completely set up (<a class="reference internal" href="#c.tty_ldisc_setup" title="tty_ldisc_setup"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_ldisc_setup()</span></code></a>) when
+this call is made.</p>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">TTY Line Discipline</a><ul>
+<li><a class="reference internal" href="#registration">Registration</a></li>
+<li><a class="reference internal" href="#other-functions">Other Functions</a></li>
+<li><a class="reference internal" href="#line-discipline-operations-reference">Line Discipline Operations Reference</a></li>
+<li><a class="reference internal" href="#driver-access">Driver Access</a></li>
+<li><a class="reference internal" href="#tty-flags">TTY Flags</a></li>
+<li><a class="reference internal" href="#locking">Locking</a></li>
+<li><a class="reference internal" href="#internal-functions">Internal Functions</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/tty/tty_ldisc.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/tty/tty_ldisc.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

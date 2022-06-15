@@ -1,0 +1,1769 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>AMDgpu Display Manager &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="Display Core Debug tools" href="dc-debug.html" />
+    <link rel="prev" title="drm/amd/display - Display Core (DC)" href="index.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="amdgpu-display-manager">
+<h1><a class="toc-backref" href="#id1">AMDgpu Display Manager</a><a class="headerlink" href="#amdgpu-display-manager" title="Permalink to this headline">¶</a></h1>
+<div class="contents topic" id="table-of-contents">
+<p class="topic-title">Table of Contents</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="#amdgpu-display-manager" id="id1">AMDgpu Display Manager</a></p>
+<ul>
+<li><p><a class="reference internal" href="#lifecycle" id="id2">Lifecycle</a></p></li>
+<li><p><a class="reference internal" href="#interrupts" id="id3">Interrupts</a></p></li>
+<li><p><a class="reference internal" href="#atomic-implementation" id="id4">Atomic Implementation</a></p></li>
+<li><p><a class="reference internal" href="#color-management-properties" id="id5">Color Management Properties</a></p>
+<ul>
+<li><p><a class="reference internal" href="#dc-color-capabilities-between-dcn-generations" id="id6">DC Color Capabilities between DCN generations</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#blend-mode-properties" id="id7">Blend Mode Properties</a></p>
+<ul>
+<li><p><a class="reference internal" href="#blend-configuration-flow" id="id8">Blend configuration flow</a></p></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</div>
+<p>The AMDgpu display manager, <strong>amdgpu_dm</strong> (or even simpler,
+<strong>dm</strong>) sits between DRM and DC. It acts as a liaison, converting DRM
+requests into DC requests, and DC responses into DRM responses.</p>
+<p>The root control structure is <a class="reference internal" href="#c.amdgpu_display_manager" title="amdgpu_display_manager"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">amdgpu_display_manager</span></code></a>.</p>
+<dl class="type">
+<dt id="c.dm_compressor_info">
+struct <code class="sig-name descname">dm_compressor_info</code><a class="headerlink" href="#c.dm_compressor_info" title="Permalink to this definition">¶</a></dt>
+<dd><p>Buffer info used by frame buffer compression</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct dm_compressor_info {
+    void *cpu_addr;
+    struct amdgpu_bo *bo_ptr;
+    uint64_t gpu_addr;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">cpu_addr</span></code></dt><dd><p>MMIO cpu addr</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">bo_ptr</span></code></dt><dd><p>Pointer to the buffer object</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">gpu_addr</span></code></dt><dd><p>MMIO gpu addr</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.dmub_hpd_work">
+struct <code class="sig-name descname">dmub_hpd_work</code><a class="headerlink" href="#c.dmub_hpd_work" title="Permalink to this definition">¶</a></dt>
+<dd><p>Handle time consuming work in low priority outbox IRQ</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct dmub_hpd_work {
+    struct work_struct handle_hpd_work;
+    struct dmub_notification *dmub_notify;
+    struct amdgpu_device *adev;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">handle_hpd_work</span></code></dt><dd><p>Work to be executed in a separate thread to handle hpd_low_irq</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dmub_notify</span></code></dt><dd><p>notification for callback function</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">adev</span></code></dt><dd><p>amdgpu_device pointer</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.vblank_control_work">
+struct <code class="sig-name descname">vblank_control_work</code><a class="headerlink" href="#c.vblank_control_work" title="Permalink to this definition">¶</a></dt>
+<dd><p>Work data for vblank control</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct vblank_control_work {
+    struct work_struct work;
+    struct amdgpu_display_manager *dm;
+    struct amdgpu_crtc *acrtc;
+    struct dc_stream_state *stream;
+    bool enable;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">work</span></code></dt><dd><p>Kernel work data for the work event</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dm</span></code></dt><dd><p>amdgpu display manager device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">acrtc</span></code></dt><dd><p>amdgpu CRTC instance for which the event has occurred</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">stream</span></code></dt><dd><p>DC stream for which the event has occurred</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">enable</span></code></dt><dd><p>true if enabling vblank</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.amdgpu_dm_backlight_caps">
+struct <code class="sig-name descname">amdgpu_dm_backlight_caps</code><a class="headerlink" href="#c.amdgpu_dm_backlight_caps" title="Permalink to this definition">¶</a></dt>
+<dd><p>Information about backlight</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct amdgpu_dm_backlight_caps {
+    union dpcd_sink_ext_caps *ext_caps;
+    u32 aux_min_input_signal;
+    u32 aux_max_input_signal;
+    int min_input_signal;
+    int max_input_signal;
+    bool caps_valid;
+    bool aux_support;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">ext_caps</span></code></dt><dd><p>Keep the data struct with all the information about the
+display support for HDR.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">aux_min_input_signal</span></code></dt><dd><p>Min brightness value supported by the display</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">aux_max_input_signal</span></code></dt><dd><p>Max brightness value supported by the display
+in nits.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">min_input_signal</span></code></dt><dd><p>minimum possible input in range 0-255.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">max_input_signal</span></code></dt><dd><p>maximum possible input in range 0-255.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">caps_valid</span></code></dt><dd><p>true if these values are from the ACPI interface.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">aux_support</span></code></dt><dd><p>Describes if the display supports AUX backlight.</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>Describe the backlight support for ACPI or eDP AUX.</p>
+<dl class="type">
+<dt id="c.dal_allocation">
+struct <code class="sig-name descname">dal_allocation</code><a class="headerlink" href="#c.dal_allocation" title="Permalink to this definition">¶</a></dt>
+<dd><p>Tracks mapped FB memory for SMU communication</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct dal_allocation {
+    struct list_head list;
+    struct amdgpu_bo *bo;
+    void *cpu_ptr;
+    u64 gpu_addr;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">list</span></code></dt><dd><p>list of dal allocations</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">bo</span></code></dt><dd><p>GPU buffer object</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">cpu_ptr</span></code></dt><dd><p>CPU virtual address of the GPU buffer object</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">gpu_addr</span></code></dt><dd><p>GPU virtual address of the GPU buffer object</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.hpd_rx_irq_offload_work_queue">
+struct <code class="sig-name descname">hpd_rx_irq_offload_work_queue</code><a class="headerlink" href="#c.hpd_rx_irq_offload_work_queue" title="Permalink to this definition">¶</a></dt>
+<dd><p>Work queue to handle hpd_rx_irq offload work</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct hpd_rx_irq_offload_work_queue {
+    struct workqueue_struct *wq;
+    spinlock_t offload_lock;
+    bool is_handling_link_loss;
+    struct amdgpu_dm_connector *aconnector;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">wq</span></code></dt><dd><p>workqueue structure to queue offload work.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">offload_lock</span></code></dt><dd><p>To protect fields of offload work queue.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">is_handling_link_loss</span></code></dt><dd><p>Used to prevent inserting link loss event when
+we’re handling link loss</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">aconnector</span></code></dt><dd><p>The aconnector that this work queue is attached to</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.hpd_rx_irq_offload_work">
+struct <code class="sig-name descname">hpd_rx_irq_offload_work</code><a class="headerlink" href="#c.hpd_rx_irq_offload_work" title="Permalink to this definition">¶</a></dt>
+<dd><p>hpd_rx_irq offload work structure</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct hpd_rx_irq_offload_work {
+    struct work_struct work;
+    union hpd_irq_data data;
+    struct hpd_rx_irq_offload_work_queue *offload_wq;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">work</span></code></dt><dd><p>offload work</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">data</span></code></dt><dd><p>reference irq data which is used while handling offload work</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">offload_wq</span></code></dt><dd><p>offload work queue that this work is queued to</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.amdgpu_display_manager">
+struct <code class="sig-name descname">amdgpu_display_manager</code><a class="headerlink" href="#c.amdgpu_display_manager" title="Permalink to this definition">¶</a></dt>
+<dd><p>Central amdgpu display manager device</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct amdgpu_display_manager {
+    struct dc *dc;
+    struct dmub_srv *dmub_srv;
+    struct dmub_notification *dmub_notify;
+    dmub_notify_interrupt_callback_t dmub_callback[AMDGPU_DMUB_NOTIFICATION_MAX];
+    bool dmub_thread_offload[AMDGPU_DMUB_NOTIFICATION_MAX];
+    struct dmub_srv_fb_info *dmub_fb_info;
+    const struct firmware *dmub_fw;
+    struct amdgpu_bo *dmub_bo;
+    u64 dmub_bo_gpu_addr;
+    void *dmub_bo_cpu_addr;
+    uint32_t dmcub_fw_version;
+    struct cgs_device *cgs_device;
+    struct amdgpu_device *adev;
+    struct drm_device *ddev;
+    u16 display_indexes_num;
+    struct drm_private_obj atomic_obj;
+    struct mutex dc_lock;
+    struct mutex audio_lock;
+    struct drm_audio_component *audio_component;
+    bool audio_registered;
+    struct list_head irq_handler_list_low_tab[DAL_IRQ_SOURCES_NUMBER];
+    struct list_head irq_handler_list_high_tab[DAL_IRQ_SOURCES_NUMBER];
+    struct common_irq_params pflip_params[DC_IRQ_SOURCE_PFLIP_LAST - DC_IRQ_SOURCE_PFLIP_FIRST + 1];
+    struct common_irq_params vblank_params[DC_IRQ_SOURCE_VBLANK6 - DC_IRQ_SOURCE_VBLANK1 + 1];
+    struct common_irq_params vline0_params[DC_IRQ_SOURCE_DC6_VLINE0 - DC_IRQ_SOURCE_DC1_VLINE0 + 1];
+    struct common_irq_params vupdate_params[DC_IRQ_SOURCE_VUPDATE6 - DC_IRQ_SOURCE_VUPDATE1 + 1];
+    struct common_irq_params dmub_trace_params[1];
+    struct common_irq_params dmub_outbox_params[1];
+    spinlock_t irq_handler_list_table_lock;
+    struct backlight_device *backlight_dev[AMDGPU_DM_MAX_NUM_EDP];
+    const struct dc_link *backlight_link[AMDGPU_DM_MAX_NUM_EDP];
+    uint8_t num_of_edps;
+    struct amdgpu_dm_backlight_caps backlight_caps[AMDGPU_DM_MAX_NUM_EDP];
+    struct mod_freesync *freesync_module;
+#ifdef CONFIG_DRM_AMD_DC_HDCP;
+    struct hdcp_workqueue *hdcp_workqueue;
+#endif;
+    struct workqueue_struct *vblank_control_workqueue;
+    struct drm_atomic_state *cached_state;
+    struct dc_state *cached_dc_state;
+    struct dm_compressor_info compressor;
+    const struct firmware *fw_dmcu;
+    uint32_t dmcu_fw_version;
+    const struct gpu_info_soc_bounding_box_v1_0 *soc_bounding_box;
+    uint32_t active_vblank_irq_count;
+#if defined(CONFIG_DRM_AMD_SECURE_DISPLAY);
+    struct crc_rd_work *crc_rd_wrk;
+#endif;
+    struct hpd_rx_irq_offload_work_queue *hpd_rx_offload_wq;
+    struct amdgpu_encoder mst_encoders[AMDGPU_DM_MAX_CRTC];
+    bool force_timing_sync;
+    bool disable_hpd_irq;
+    bool dmcub_trace_event_en;
+    struct list_head da_list;
+    struct completion dmub_aux_transfer_done;
+    struct workqueue_struct *delayed_hpd_wq;
+    u32 brightness[AMDGPU_DM_MAX_NUM_EDP];
+    u32 actual_brightness[AMDGPU_DM_MAX_NUM_EDP];
+    bool aux_hpd_discon_quirk;
+    struct mutex dpia_aux_lock;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl>
+<dt><code class="docutils literal notranslate"><span class="pre">dc</span></code></dt><dd><p>Display Core control structure</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dmub_srv</span></code></dt><dd><p>DMUB service, used for controlling the DMUB on hardware
+that supports it. The pointer to the dmub_srv will be
+NULL on hardware that does not support it.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dmub_notify</span></code></dt><dd><p>Notification from DMUB.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dmub_callback</span></code></dt><dd><p>Callback functions to handle notification from DMUB.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dmub_thread_offload</span></code></dt><dd><p>Flag to indicate if callback is offload.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dmub_fb_info</span></code></dt><dd><p>Framebuffer regions for the DMUB.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dmub_fw</span></code></dt><dd><p>DMUB firmware, required on hardware that has DMUB support.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dmub_bo</span></code></dt><dd><p>Buffer object for the DMUB.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dmub_bo_gpu_addr</span></code></dt><dd><p>GPU virtual address for the DMUB buffer object.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dmub_bo_cpu_addr</span></code></dt><dd><p>CPU address for the DMUB buffer object.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dmcub_fw_version</span></code></dt><dd><p>DMCUB firmware version.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">cgs_device</span></code></dt><dd><p>The Common Graphics Services device. It provides an interface for
+accessing registers.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">adev</span></code></dt><dd><p>AMDGPU base driver structure</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">ddev</span></code></dt><dd><p>DRM base driver structure</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">display_indexes_num</span></code></dt><dd><p>Max number of display streams supported</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">atomic_obj</span></code></dt><dd><p>In combination with <code class="xref c c-type docutils literal notranslate"><span class="pre">dm_atomic_state</span></code> it helps manage
+global atomic state that doesn’t map cleanly into existing
+drm resources, like <code class="xref c c-type docutils literal notranslate"><span class="pre">dc_context</span></code>.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dc_lock</span></code></dt><dd><p>Guards access to DC functions that can issue register write
+sequences.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">audio_lock</span></code></dt><dd><p>Guards access to audio instance changes.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">audio_component</span></code></dt><dd><p>Used to notify ELD changes to sound driver.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">audio_registered</span></code></dt><dd><p>True if the audio component has been registered
+successfully, false otherwise.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">irq_handler_list_low_tab</span></code></dt><dd><p>Low priority IRQ handler table.</p>
+<p>It is a n*m table consisting of n IRQ sources, and m handlers per IRQ
+source. Low priority IRQ handlers are deferred to a workqueue to be
+processed. Hence, they can sleep.</p>
+<p>Note that handlers are called in the same order as they were
+registered (FIFO).</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">irq_handler_list_high_tab</span></code></dt><dd><p>High priority IRQ handler table.</p>
+<p>It is a n*m table, same as <code class="xref c c-type docutils literal notranslate"><span class="pre">irq_handler_list_low_tab</span></code>. However,
+handlers in this table are not deferred and are called immediately.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">pflip_params</span></code></dt><dd><p>Page flip IRQ parameters, passed to registered handlers when
+triggered.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">vblank_params</span></code></dt><dd><p>Vertical blanking IRQ parameters, passed to registered handlers when
+triggered.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">vline0_params</span></code></dt><dd><p>OTG vertical interrupt0 IRQ parameters, passed to registered
+handlers when triggered.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">vupdate_params</span></code></dt><dd><p>Vertical update IRQ parameters, passed to registered handlers when
+triggered.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dmub_trace_params</span></code></dt><dd><p>DMUB trace event IRQ parameters, passed to registered handlers when
+triggered.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dmub_outbox_params</span></code></dt><dd><p>DMUB Outbox parameters</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">irq_handler_list_table_lock</span></code></dt><dd><p>Synchronizes access to IRQ tables</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">backlight_dev</span></code></dt><dd><p>Backlight control device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">backlight_link</span></code></dt><dd><p>Link on which to control backlight</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">num_of_edps</span></code></dt><dd><p>number of backlight eDPs</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">backlight_caps</span></code></dt><dd><p>Capabilities of the backlight device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">freesync_module</span></code></dt><dd><p>Module handling freesync calculations</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">hdcp_workqueue</span></code></dt><dd><p>AMDGPU content protection queue</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">vblank_control_workqueue</span></code></dt><dd><p>Deferred work for vblank control events.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">cached_state</span></code></dt><dd><p>Caches device atomic state for suspend/resume</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">cached_dc_state</span></code></dt><dd><p>Cached state of content streams</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">compressor</span></code></dt><dd><p>Frame buffer compression buffer. See <a class="reference internal" href="#c.dm_compressor_info" title="dm_compressor_info"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">dm_compressor_info</span></code></a></p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">fw_dmcu</span></code></dt><dd><p>Reference to DMCU firmware</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dmcu_fw_version</span></code></dt><dd><p>Version of the DMCU firmware</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">soc_bounding_box</span></code></dt><dd><p>gpu_info FW provided soc bounding box struct or 0 if not
+available in FW</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">active_vblank_irq_count</span></code></dt><dd><p>number of currently active vblank irqs</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">crc_rd_wrk</span></code></dt><dd><p>Work to be executed in a separate thread to communicate with PSP.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">hpd_rx_offload_wq</span></code></dt><dd><p>Work queue to offload works of hpd_rx_irq</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">mst_encoders</span></code></dt><dd><p>fake encoders used for DP MST.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">force_timing_sync</span></code></dt><dd><p>set via debugfs. When set, indicates that all connected
+displays will be forced to synchronize.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">disable_hpd_irq</span></code></dt><dd><p>disables all HPD and HPD RX interrupt handling in the
+driver when true</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dmcub_trace_event_en</span></code></dt><dd><p>enable dmcub trace events</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">da_list</span></code></dt><dd><p>DAL fb memory allocation list, for communication with SMU.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dmub_aux_transfer_done</span></code></dt><dd><p>struct completion used to indicate when DMUB
+transfers are done</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">delayed_hpd_wq</span></code></dt><dd><p>work queue used to delay DMUB HPD work</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">brightness</span></code></dt><dd><p>cached backlight values.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">actual_brightness</span></code></dt><dd><p>last successfully applied backlight values.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">aux_hpd_discon_quirk</span></code></dt><dd><p>quirk for hpd discon while aux is on-going.
+occurred on certain intel platform</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dpia_aux_lock</span></code></dt><dd><p>Guards access to DPIA AUX</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.amdgpu_hdmi_vsdb_info">
+struct <code class="sig-name descname">amdgpu_hdmi_vsdb_info</code><a class="headerlink" href="#c.amdgpu_hdmi_vsdb_info" title="Permalink to this definition">¶</a></dt>
+<dd><p>Keep track of the VSDB info</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct amdgpu_hdmi_vsdb_info {
+    unsigned int amd_vsdb_version;
+    bool freesync_supported;
+    unsigned int min_refresh_rate_hz;
+    unsigned int max_refresh_rate_hz;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">amd_vsdb_version</span></code></dt><dd><p>Vendor Specific Data Block Version, should be
+used to determine which Vendor Specific InfoFrame (VSIF) to send.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">freesync_supported</span></code></dt><dd><p>FreeSync Supported.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">min_refresh_rate_hz</span></code></dt><dd><p>FreeSync Minimum Refresh Rate in Hz.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">max_refresh_rate_hz</span></code></dt><dd><p>FreeSync Maximum Refresh Rate in Hz</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>AMDGPU supports FreeSync over HDMI by using the VSDB section, and this
+struct is useful to keep track of the display-specific information about
+FreeSync.</p>
+<section id="lifecycle">
+<h2><a class="toc-backref" href="#id2">Lifecycle</a><a class="headerlink" href="#lifecycle" title="Permalink to this headline">¶</a></h2>
+<p>DM (and consequently DC) is registered in the amdgpu base driver as a IP
+block. When CONFIG_DRM_AMD_DC is enabled, the DM device IP block is added to
+the base driver’s device list to be initialized and torn down accordingly.</p>
+<p>The functions to do so are provided as hooks in <a class="reference internal" href="../driver-core.html#c.amd_ip_funcs" title="amd_ip_funcs"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">amd_ip_funcs</span></code></a>.</p>
+<dl class="function">
+<dt id="c.dm_hw_init">
+int <code class="sig-name descname">dm_hw_init</code><span class="sig-paren">(</span>void<em> *handle</em><span class="sig-paren">)</span><a class="headerlink" href="#c.dm_hw_init" title="Permalink to this definition">¶</a></dt>
+<dd><p>Initialize DC device</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*handle</span></code></dt><dd><p>The base driver device containing the amdgpu_dm device.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Initialize the <a class="reference internal" href="#c.amdgpu_display_manager" title="amdgpu_display_manager"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">amdgpu_display_manager</span></code></a> device. This involves calling
+the initializers of each DM component, then populating the struct with them.</p>
+<p>Although the function implies hardware initialization, both hardware and
+software are initialized here. Splitting them out to their relevant init
+hooks is a future TODO item.</p>
+<p>Some notable things that are initialized here:</p>
+<ul class="simple">
+<li><p>Display Core, both software and hardware</p></li>
+<li><p>DC modules that we need (freesync and color management)</p></li>
+<li><p>DRM software states</p></li>
+<li><p>Interrupt sources and handlers</p></li>
+<li><p>Vblank support</p></li>
+<li><p>Debug FS entries, if enabled</p></li>
+</ul>
+</div>
+<dl class="function">
+<dt id="c.dm_hw_fini">
+int <code class="sig-name descname">dm_hw_fini</code><span class="sig-paren">(</span>void<em> *handle</em><span class="sig-paren">)</span><a class="headerlink" href="#c.dm_hw_fini" title="Permalink to this definition">¶</a></dt>
+<dd><p>Teardown DC device</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*handle</span></code></dt><dd><p>The base driver device containing the amdgpu_dm device.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Teardown components within <a class="reference internal" href="#c.amdgpu_display_manager" title="amdgpu_display_manager"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">amdgpu_display_manager</span></code></a> that require
+cleanup. This involves cleaning up the DRM device, DC, and any modules that
+were loaded. Also flush IRQ workqueues and disable them.</p>
+</div>
+</section>
+<section id="interrupts">
+<h2><a class="toc-backref" href="#id3">Interrupts</a><a class="headerlink" href="#interrupts" title="Permalink to this headline">¶</a></h2>
+<p>DM provides another layer of IRQ management on top of what the base driver
+already provides. This is something that could be cleaned up, and is a
+future TODO item.</p>
+<p>The base driver provides IRQ source registration with DRM, handler
+registration into the base driver’s IRQ table, and a handler callback
+<a class="reference internal" href="../driver-core.html#c.amdgpu_irq_handler" title="amdgpu_irq_handler"><code class="xref c c-func docutils literal notranslate"><span class="pre">amdgpu_irq_handler()</span></code></a>, with which DRM calls on interrupts. This generic
+handler looks up the IRQ table, and calls the respective
+<code class="xref c c-type docutils literal notranslate"><span class="pre">amdgpu_irq_src_funcs.process</span></code> hookups.</p>
+<p>What DM provides on top are two IRQ tables specifically for top-half and
+bottom-half IRQ handling, with the bottom-half implementing workqueues:</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="#c.amdgpu_display_manager" title="amdgpu_display_manager"><code class="xref c c-type docutils literal notranslate"><span class="pre">amdgpu_display_manager.irq_handler_list_high_tab</span></code></a></p></li>
+<li><p><a class="reference internal" href="#c.amdgpu_display_manager" title="amdgpu_display_manager"><code class="xref c c-type docutils literal notranslate"><span class="pre">amdgpu_display_manager.irq_handler_list_low_tab</span></code></a></p></li>
+</ul>
+<p>They override the base driver’s IRQ table, and the effect can be seen
+in the hooks that DM provides for <code class="xref c c-type docutils literal notranslate"><span class="pre">amdgpu_irq_src_funcs.process</span></code>. They
+are all set to the DM generic handler <a class="reference internal" href="#c.amdgpu_dm_irq_handler" title="amdgpu_dm_irq_handler"><code class="xref c c-func docutils literal notranslate"><span class="pre">amdgpu_dm_irq_handler()</span></code></a>, which looks up
+DM’s IRQ tables. However, in order for base driver to recognize this hook, DM
+still needs to register the IRQ with the base driver. See
+dce110_register_irq_handlers() and dcn10_register_irq_handlers().</p>
+<p>To expose DC’s hardware interrupt toggle to the base driver, DM implements
+<code class="xref c c-type docutils literal notranslate"><span class="pre">amdgpu_irq_src_funcs.set</span></code> hooks. Base driver calls it through
+<a class="reference internal" href="../driver-core.html#c.amdgpu_irq_update" title="amdgpu_irq_update"><code class="xref c c-func docutils literal notranslate"><span class="pre">amdgpu_irq_update()</span></code></a> to enable or disable the interrupt.</p>
+<dl class="type">
+<dt id="c.amdgpu_dm_irq_handler_data">
+struct <code class="sig-name descname">amdgpu_dm_irq_handler_data</code><a class="headerlink" href="#c.amdgpu_dm_irq_handler_data" title="Permalink to this definition">¶</a></dt>
+<dd><p>Data for DM interrupt handlers.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct amdgpu_dm_irq_handler_data {
+    struct list_head list;
+    interrupt_handler handler;
+    void *handler_arg;
+    struct amdgpu_display_manager *dm;
+    enum dc_irq_source irq_source;
+    struct work_struct work;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">list</span></code></dt><dd><p>Linked list entry referencing the next/previous handler</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">handler</span></code></dt><dd><p>Handler function</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">handler_arg</span></code></dt><dd><p>Argument passed to the handler when triggered</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dm</span></code></dt><dd><p>DM which this handler belongs to</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">irq_source</span></code></dt><dd><p>DC interrupt source that this handler is registered for</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">work</span></code></dt><dd><p>work struct</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.dm_irq_work_func">
+void <code class="sig-name descname">dm_irq_work_func</code><span class="sig-paren">(</span>struct work_struct<em> *work</em><span class="sig-paren">)</span><a class="headerlink" href="#c.dm_irq_work_func" title="Permalink to this definition">¶</a></dt>
+<dd><p>Handle an IRQ outside of the interrupt handler proper.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">work_struct</span> <span class="pre">*work</span></code></dt><dd><p>work struct</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.unregister_all_irq_handlers">
+void <code class="sig-name descname">unregister_all_irq_handlers</code><span class="sig-paren">(</span>struct amdgpu_device<em> *adev</em><span class="sig-paren">)</span><a class="headerlink" href="#c.unregister_all_irq_handlers" title="Permalink to this definition">¶</a></dt>
+<dd><p>Cleans up handlers from the DM IRQ table</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">amdgpu_device</span> <span class="pre">*adev</span></code></dt><dd><p>The base driver device containing the DM device</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Go through low and high context IRQ tables and deallocate handlers.</p>
+</div>
+<dl class="function">
+<dt id="c.amdgpu_dm_irq_register_interrupt">
+void * <code class="sig-name descname">amdgpu_dm_irq_register_interrupt</code><span class="sig-paren">(</span>struct amdgpu_device<em> *adev</em>, struct dc_interrupt_params<em> *int_params</em>, void (<em>*ih</em>)(void *), void<em> *handler_args</em><span class="sig-paren">)</span><a class="headerlink" href="#c.amdgpu_dm_irq_register_interrupt" title="Permalink to this definition">¶</a></dt>
+<dd><p>Register a handler within DM.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">amdgpu_device</span> <span class="pre">*adev</span></code></dt><dd><p>The base driver device containing the DM device.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">dc_interrupt_params</span> <span class="pre">*int_params</span></code></dt><dd><p>Interrupt parameters containing the source, and handler context</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">(*ih)(void</span> <span class="pre">*)</span></code></dt><dd><p>Function pointer to the interrupt handler to register</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*handler_args</span></code></dt><dd><p>Arguments passed to the handler when the interrupt occurs</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Register an interrupt handler for the given IRQ source, under the given
+context. The context can either be high or low. High context handlers are
+executed directly within ISR context, while low context is executed within a
+workqueue, thereby allowing operations that sleep.</p>
+<p>Registered handlers are called in a FIFO manner, i.e. the most recently
+registered handler will be called first.</p>
+<p><strong>Return</strong></p>
+<dl class="simple">
+<dt>Handler data <a class="reference internal" href="#c.amdgpu_dm_irq_handler_data" title="amdgpu_dm_irq_handler_data"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">amdgpu_dm_irq_handler_data</span></code></a> containing the IRQ</dt><dd><p>source, handler function, and args</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.amdgpu_dm_irq_unregister_interrupt">
+void <code class="sig-name descname">amdgpu_dm_irq_unregister_interrupt</code><span class="sig-paren">(</span>struct amdgpu_device<em> *adev</em>, enum dc_irq_source<em> irq_source</em>, void<em> *ih</em><span class="sig-paren">)</span><a class="headerlink" href="#c.amdgpu_dm_irq_unregister_interrupt" title="Permalink to this definition">¶</a></dt>
+<dd><p>Remove a handler from the DM IRQ table</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">amdgpu_device</span> <span class="pre">*adev</span></code></dt><dd><p>The base driver device containing the DM device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">enum</span> <span class="pre">dc_irq_source</span> <span class="pre">irq_source</span></code></dt><dd><p>IRQ source to remove the given handler from</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*ih</span></code></dt><dd><p>Function pointer to the interrupt handler to unregister</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Go through both low and high context IRQ tables, and find the given handler
+for the given irq source. If found, remove it. Otherwise, do nothing.</p>
+</div>
+<dl class="function">
+<dt id="c.amdgpu_dm_irq_init">
+int <code class="sig-name descname">amdgpu_dm_irq_init</code><span class="sig-paren">(</span>struct amdgpu_device<em> *adev</em><span class="sig-paren">)</span><a class="headerlink" href="#c.amdgpu_dm_irq_init" title="Permalink to this definition">¶</a></dt>
+<dd><p>Initialize DM IRQ management</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">amdgpu_device</span> <span class="pre">*adev</span></code></dt><dd><p>The base driver device containing the DM device</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Initialize DM’s high and low context IRQ tables.</p>
+<p>The N by M table contains N IRQ sources, with M
+<a class="reference internal" href="#c.amdgpu_dm_irq_handler_data" title="amdgpu_dm_irq_handler_data"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">amdgpu_dm_irq_handler_data</span></code></a> hooked together in a linked list. The
+list_heads are initialized here. When an interrupt n is triggered, all m
+handlers are called in sequence, FIFO according to registration order.</p>
+<p>The low context table requires special steps to initialize, since handlers
+will be deferred to a workqueue. See <code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">irq_list_head</span></code>.</p>
+</div>
+<dl class="function">
+<dt id="c.amdgpu_dm_irq_fini">
+void <code class="sig-name descname">amdgpu_dm_irq_fini</code><span class="sig-paren">(</span>struct amdgpu_device<em> *adev</em><span class="sig-paren">)</span><a class="headerlink" href="#c.amdgpu_dm_irq_fini" title="Permalink to this definition">¶</a></dt>
+<dd><p>Tear down DM IRQ management</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">amdgpu_device</span> <span class="pre">*adev</span></code></dt><dd><p>The base driver device containing the DM device</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Flush all work within the low context IRQ table.</p>
+</div>
+<dl class="function">
+<dt id="c.amdgpu_dm_irq_handler">
+int <code class="sig-name descname">amdgpu_dm_irq_handler</code><span class="sig-paren">(</span>struct amdgpu_device<em> *adev</em>, struct amdgpu_irq_src<em> *source</em>, struct amdgpu_iv_entry<em> *entry</em><span class="sig-paren">)</span><a class="headerlink" href="#c.amdgpu_dm_irq_handler" title="Permalink to this definition">¶</a></dt>
+<dd><p>Generic DM IRQ handler</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">amdgpu_device</span> <span class="pre">*adev</span></code></dt><dd><p>amdgpu base driver device containing the DM device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">amdgpu_irq_src</span> <span class="pre">*source</span></code></dt><dd><p>Unused</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">amdgpu_iv_entry</span> <span class="pre">*entry</span></code></dt><dd><p>Data about the triggered interrupt</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Calls all registered high irq work immediately, and schedules work for low
+irq. The DM IRQ table is used to find the corresponding handlers.</p>
+</div>
+<dl class="function">
+<dt id="c.amdgpu_dm_hpd_init">
+void <code class="sig-name descname">amdgpu_dm_hpd_init</code><span class="sig-paren">(</span>struct amdgpu_device<em> *adev</em><span class="sig-paren">)</span><a class="headerlink" href="#c.amdgpu_dm_hpd_init" title="Permalink to this definition">¶</a></dt>
+<dd><p>hpd setup callback.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">amdgpu_device</span> <span class="pre">*adev</span></code></dt><dd><p>amdgpu_device pointer</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Setup the hpd pins used by the card (evergreen+).
+Enable the pin, set the polarity, and enable the hpd interrupts.</p>
+</div>
+<dl class="function">
+<dt id="c.amdgpu_dm_hpd_fini">
+void <code class="sig-name descname">amdgpu_dm_hpd_fini</code><span class="sig-paren">(</span>struct amdgpu_device<em> *adev</em><span class="sig-paren">)</span><a class="headerlink" href="#c.amdgpu_dm_hpd_fini" title="Permalink to this definition">¶</a></dt>
+<dd><p>hpd tear down callback.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">amdgpu_device</span> <span class="pre">*adev</span></code></dt><dd><p>amdgpu_device pointer</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Tear down the hpd pins used by the card (evergreen+).
+Disable the hpd interrupts.</p>
+</div>
+<dl class="function">
+<dt id="c.dm_pflip_high_irq">
+void <code class="sig-name descname">dm_pflip_high_irq</code><span class="sig-paren">(</span>void<em> *interrupt_params</em><span class="sig-paren">)</span><a class="headerlink" href="#c.dm_pflip_high_irq" title="Permalink to this definition">¶</a></dt>
+<dd><p>Handle pageflip interrupt</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*interrupt_params</span></code></dt><dd><p>ignored</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Handles the pageflip interrupt by notifying all interested parties
+that the pageflip has been completed.</p>
+</div>
+<dl class="function">
+<dt id="c.dm_crtc_high_irq">
+void <code class="sig-name descname">dm_crtc_high_irq</code><span class="sig-paren">(</span>void<em> *interrupt_params</em><span class="sig-paren">)</span><a class="headerlink" href="#c.dm_crtc_high_irq" title="Permalink to this definition">¶</a></dt>
+<dd><p>Handles CRTC interrupt</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*interrupt_params</span></code></dt><dd><p>used for determining the CRTC instance</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Handles the CRTC/VSYNC interrupt by notfying DRM’s VBLANK
+event handler.</p>
+</div>
+</section>
+<section id="atomic-implementation">
+<h2><a class="toc-backref" href="#id4">Atomic Implementation</a><a class="headerlink" href="#atomic-implementation" title="Permalink to this headline">¶</a></h2>
+<p><em>WIP</em></p>
+<dl class="function">
+<dt id="c.amdgpu_dm_atomic_commit_tail">
+void <code class="sig-name descname">amdgpu_dm_atomic_commit_tail</code><span class="sig-paren">(</span>struct <a class="reference internal" href="../../drm-kms.html#c.drm_atomic_state" title="drm_atomic_state">drm_atomic_state</a><em> *state</em><span class="sig-paren">)</span><a class="headerlink" href="#c.amdgpu_dm_atomic_commit_tail" title="Permalink to this definition">¶</a></dt>
+<dd><p>AMDgpu DM’s commit tail implementation.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">drm_atomic_state</span> <span class="pre">*state</span></code></dt><dd><p>The atomic state to commit</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This will tell DC to commit the constructed DC state from atomic_check,
+programming the hardware. Any failures here implies a hardware failure, since
+atomic check should have filtered anything non-kosher.</p>
+</div>
+<dl class="function">
+<dt id="c.amdgpu_dm_atomic_check">
+int <code class="sig-name descname">amdgpu_dm_atomic_check</code><span class="sig-paren">(</span>struct <a class="reference internal" href="../../drm-internals.html#c.drm_device" title="drm_device">drm_device</a><em> *dev</em>, struct <a class="reference internal" href="../../drm-kms.html#c.drm_atomic_state" title="drm_atomic_state">drm_atomic_state</a><em> *state</em><span class="sig-paren">)</span><a class="headerlink" href="#c.amdgpu_dm_atomic_check" title="Permalink to this definition">¶</a></dt>
+<dd><p>Atomic check implementation for AMDgpu DM.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">drm_device</span> <span class="pre">*dev</span></code></dt><dd><p>The DRM device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">drm_atomic_state</span> <span class="pre">*state</span></code></dt><dd><p>The atomic state to commit</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Validate that the given atomic state is programmable by DC into hardware.
+This involves constructing a <code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">dc_state</span></code> reflecting the new hardware
+state we wish to commit, then querying DC to see if it is programmable. It’s
+important not to modify the existing DC state. Otherwise, atomic_check
+may unexpectedly commit hardware changes.</p>
+<p>When validating the DC state, it’s important that the right locks are
+acquired. For full updates case which removes/adds/updates streams on one
+CRTC while flipping on another CRTC, acquiring global lock will guarantee
+that any such full update commit will wait for completion of any outstanding
+flip using DRMs synchronization events.</p>
+<p>Note that DM adds the affected connectors for all CRTCs in state, when that
+might not seem necessary. This is because DC stream creation requires the
+DC sink, which is tied to the DRM connector state. Cleaning this up should
+be possible but non-trivial - a possible TODO item.</p>
+<p><strong>Return</strong></p>
+<p>-Error code if validation failed.</p>
+</div>
+</section>
+<section id="color-management-properties">
+<h2><a class="toc-backref" href="#id5">Color Management Properties</a><a class="headerlink" href="#color-management-properties" title="Permalink to this headline">¶</a></h2>
+<p>The DC interface to HW gives us the following color management blocks
+per pipe (surface):</p>
+<ul class="simple">
+<li><p>Input gamma LUT (de-normalized)</p></li>
+<li><p>Input CSC (normalized)</p></li>
+<li><p>Surface degamma LUT (normalized)</p></li>
+<li><p>Surface CSC (normalized)</p></li>
+<li><p>Surface regamma LUT (normalized)</p></li>
+<li><p>Output CSC (normalized)</p></li>
+</ul>
+<p>But these aren’t a direct mapping to DRM color properties. The current DRM
+interface exposes CRTC degamma, CRTC CTM and CRTC regamma while our hardware
+is essentially giving:</p>
+<p>Plane CTM -&gt; Plane degamma -&gt; Plane CTM -&gt; Plane regamma -&gt; Plane CTM</p>
+<p>The input gamma LUT block isn’t really applicable here since it operates
+on the actual input data itself rather than the HW fp representation. The
+input and output CSC blocks are technically available to use as part of
+the DC interface but are typically used internally by DC for conversions
+between color spaces. These could be blended together with user
+adjustments in the future but for now these should remain untouched.</p>
+<p>The pipe blending also happens after these blocks so we don’t actually
+support any CRTC props with correct blending with multiple planes - but we
+can still support CRTC color management properties in DM in most single
+plane cases correctly with clever management of the DC interface in DM.</p>
+<p>As per DRM documentation, blocks should be in hardware bypass when their
+respective property is set to NULL. A linear DGM/RGM LUT should also
+considered as putting the respective block into bypass mode.</p>
+<p>This means that the following
+configuration is assumed to be the default:</p>
+<p>Plane DGM Bypass -&gt; Plane CTM Bypass -&gt; Plane RGM Bypass -&gt; …
+CRTC DGM Bypass -&gt; CRTC CTM Bypass -&gt; CRTC RGM Bypass</p>
+<dl class="function">
+<dt id="c.amdgpu_dm_init_color_mod">
+void <code class="sig-name descname">amdgpu_dm_init_color_mod</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.amdgpu_dm_init_color_mod" title="Permalink to this definition">¶</a></dt>
+<dd><p>Initialize the color module.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">void</span></code></dt><dd><p>no arguments</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>We’re not using the full color module, only certain components.
+Only call setup functions for components that we need.</p>
+</div>
+<dl class="function">
+<dt id="c.__extract_blob_lut">
+const struct drm_color_lut * <code class="sig-name descname">__extract_blob_lut</code><span class="sig-paren">(</span>const struct <a class="reference internal" href="../../drm-kms.html#c.drm_property_blob" title="drm_property_blob">drm_property_blob</a><em> *blob</em>, uint32_t<em> *size</em><span class="sig-paren">)</span><a class="headerlink" href="#c.__extract_blob_lut" title="Permalink to this definition">¶</a></dt>
+<dd><p>Extracts the DRM lut and lut size from a blob.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">struct</span> <span class="pre">drm_property_blob</span> <span class="pre">*blob</span></code></dt><dd><p>DRM color mgmt property blob</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">uint32_t</span> <span class="pre">*size</span></code></dt><dd><p>lut size</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p>DRM LUT or NULL</p>
+</div>
+<dl class="function">
+<dt id="c.__is_lut_linear">
+bool <code class="sig-name descname">__is_lut_linear</code><span class="sig-paren">(</span>const struct drm_color_lut<em> *lut</em>, uint32_t<em> size</em><span class="sig-paren">)</span><a class="headerlink" href="#c.__is_lut_linear" title="Permalink to this definition">¶</a></dt>
+<dd><p>check if the given lut is a linear mapping of values</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">struct</span> <span class="pre">drm_color_lut</span> <span class="pre">*lut</span></code></dt><dd><p>given lut to check values</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">uint32_t</span> <span class="pre">size</span></code></dt><dd><p>lut size</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>It is considered linear if the lut represents:
+f(a) = (0xFF00/MAX_COLOR_LUT_ENTRIES-1)a; for integer a in [0,
+MAX_COLOR_LUT_ENTRIES)</p>
+<p><strong>Return</strong></p>
+<p>True if the given lut is a linear mapping of values, i.e. it acts like a
+bypass LUT. Otherwise, false.</p>
+</div>
+<dl class="function">
+<dt id="c.__drm_lut_to_dc_gamma">
+void <code class="sig-name descname">__drm_lut_to_dc_gamma</code><span class="sig-paren">(</span>const struct drm_color_lut<em> *lut</em>, struct dc_gamma<em> *gamma</em>, bool<em> is_legacy</em><span class="sig-paren">)</span><a class="headerlink" href="#c.__drm_lut_to_dc_gamma" title="Permalink to this definition">¶</a></dt>
+<dd><p>convert the drm_color_lut to dc_gamma.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">struct</span> <span class="pre">drm_color_lut</span> <span class="pre">*lut</span></code></dt><dd><p>DRM lookup table for color conversion</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">dc_gamma</span> <span class="pre">*gamma</span></code></dt><dd><p>DC gamma to set entries</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">bool</span> <span class="pre">is_legacy</span></code></dt><dd><p>legacy or atomic gamma</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>The conversion depends on the size of the lut - whether or not it’s legacy.</p>
+</div>
+<dl class="function">
+<dt id="c.__drm_ctm_to_dc_matrix">
+void <code class="sig-name descname">__drm_ctm_to_dc_matrix</code><span class="sig-paren">(</span>const struct drm_color_ctm<em> *ctm</em>, struct fixed31_32<em> *matrix</em><span class="sig-paren">)</span><a class="headerlink" href="#c.__drm_ctm_to_dc_matrix" title="Permalink to this definition">¶</a></dt>
+<dd><p>converts a DRM CTM to a DC CSC float matrix</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">struct</span> <span class="pre">drm_color_ctm</span> <span class="pre">*ctm</span></code></dt><dd><p>DRM color transformation matrix</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">fixed31_32</span> <span class="pre">*matrix</span></code></dt><dd><p>DC CSC float matrix</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>The matrix needs to be a 3x4 (12 entry) matrix.</p>
+</div>
+<dl class="function">
+<dt id="c.__set_legacy_tf">
+int <code class="sig-name descname">__set_legacy_tf</code><span class="sig-paren">(</span>struct dc_transfer_func<em> *func</em>, const struct drm_color_lut<em> *lut</em>, uint32_t<em> lut_size</em>, bool<em> has_rom</em><span class="sig-paren">)</span><a class="headerlink" href="#c.__set_legacy_tf" title="Permalink to this definition">¶</a></dt>
+<dd><p>Calculates the legacy transfer function</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">dc_transfer_func</span> <span class="pre">*func</span></code></dt><dd><p>transfer function</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">struct</span> <span class="pre">drm_color_lut</span> <span class="pre">*lut</span></code></dt><dd><p>lookup table that defines the color space</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">uint32_t</span> <span class="pre">lut_size</span></code></dt><dd><p>size of respective lut</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">bool</span> <span class="pre">has_rom</span></code></dt><dd><p>if ROM can be used for hardcoded curve</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Only for sRGB input space</p>
+<p><strong>Return</strong></p>
+<p>0 in case of success, -ENOMEM if fails</p>
+</div>
+<dl class="function">
+<dt id="c.__set_output_tf">
+int <code class="sig-name descname">__set_output_tf</code><span class="sig-paren">(</span>struct dc_transfer_func<em> *func</em>, const struct drm_color_lut<em> *lut</em>, uint32_t<em> lut_size</em>, bool<em> has_rom</em><span class="sig-paren">)</span><a class="headerlink" href="#c.__set_output_tf" title="Permalink to this definition">¶</a></dt>
+<dd><p>calculates the output transfer function based on expected input space.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">dc_transfer_func</span> <span class="pre">*func</span></code></dt><dd><p>transfer function</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">struct</span> <span class="pre">drm_color_lut</span> <span class="pre">*lut</span></code></dt><dd><p>lookup table that defines the color space</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">uint32_t</span> <span class="pre">lut_size</span></code></dt><dd><p>size of respective lut</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">bool</span> <span class="pre">has_rom</span></code></dt><dd><p>if ROM can be used for hardcoded curve</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p>0 in case of success. -ENOMEM if fails.</p>
+</div>
+<dl class="function">
+<dt id="c.__set_input_tf">
+int <code class="sig-name descname">__set_input_tf</code><span class="sig-paren">(</span>struct dc_transfer_func<em> *func</em>, const struct drm_color_lut<em> *lut</em>, uint32_t<em> lut_size</em><span class="sig-paren">)</span><a class="headerlink" href="#c.__set_input_tf" title="Permalink to this definition">¶</a></dt>
+<dd><p>calculates the input transfer function based on expected input space.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">dc_transfer_func</span> <span class="pre">*func</span></code></dt><dd><p>transfer function</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">struct</span> <span class="pre">drm_color_lut</span> <span class="pre">*lut</span></code></dt><dd><p>lookup table that defines the color space</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">uint32_t</span> <span class="pre">lut_size</span></code></dt><dd><p>size of respective lut.</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p>0 in case of success. -ENOMEM if fails.</p>
+</div>
+<dl class="function">
+<dt id="c.amdgpu_dm_verify_lut_sizes">
+int <code class="sig-name descname">amdgpu_dm_verify_lut_sizes</code><span class="sig-paren">(</span>const struct <a class="reference internal" href="../../drm-kms.html#c.drm_crtc_state" title="drm_crtc_state">drm_crtc_state</a><em> *crtc_state</em><span class="sig-paren">)</span><a class="headerlink" href="#c.amdgpu_dm_verify_lut_sizes" title="Permalink to this definition">¶</a></dt>
+<dd><p>verifies if DRM luts match the hw supported sizes</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">struct</span> <span class="pre">drm_crtc_state</span> <span class="pre">*crtc_state</span></code></dt><dd><p>the DRM CRTC state</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Verifies that the Degamma and Gamma LUTs attached to the <code class="xref c c-type docutils literal notranslate"><span class="pre">crtc_state</span></code>
+are of the expected size.</p>
+<p><strong>Return</strong></p>
+<p>0 on success. -EINVAL if any lut sizes are invalid.</p>
+</div>
+<dl class="function">
+<dt id="c.amdgpu_dm_update_crtc_color_mgmt">
+int <code class="sig-name descname">amdgpu_dm_update_crtc_color_mgmt</code><span class="sig-paren">(</span>struct dm_crtc_state<em> *crtc</em><span class="sig-paren">)</span><a class="headerlink" href="#c.amdgpu_dm_update_crtc_color_mgmt" title="Permalink to this definition">¶</a></dt>
+<dd><p>Maps DRM color management to DC stream.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">dm_crtc_state</span> <span class="pre">*crtc</span></code></dt><dd><p>amdgpu_dm crtc state</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>With no plane level color management properties we’re free to use any
+of the HW blocks as long as the CRTC CTM always comes before the
+CRTC RGM and after the CRTC DGM.</p>
+<ul class="simple">
+<li><p>The CRTC RGM block will be placed in the RGM LUT block if it is non-linear.</p></li>
+<li><p>The CRTC DGM block will be placed in the DGM LUT block if it is non-linear.</p></li>
+<li><p>The CRTC CTM will be placed in the gamut remap block if it is non-linear.</p></li>
+</ul>
+<p>The RGM block is typically more fully featured and accurate across
+all ASICs - DCE can’t support a custom non-linear CRTC DGM.</p>
+<p>For supporting both plane level color management and CRTC level color
+management at once we have to either restrict the usage of CRTC properties
+or blend adjustments together.</p>
+<p><strong>Return</strong></p>
+<p>0 on success. Error code if setup fails.</p>
+</div>
+<dl class="function">
+<dt id="c.amdgpu_dm_update_plane_color_mgmt">
+int <code class="sig-name descname">amdgpu_dm_update_plane_color_mgmt</code><span class="sig-paren">(</span>struct dm_crtc_state<em> *crtc</em>, struct dc_plane_state<em> *dc_plane_state</em><span class="sig-paren">)</span><a class="headerlink" href="#c.amdgpu_dm_update_plane_color_mgmt" title="Permalink to this definition">¶</a></dt>
+<dd><p>Maps DRM color management to DC plane.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">dm_crtc_state</span> <span class="pre">*crtc</span></code></dt><dd><p>amdgpu_dm crtc state</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">dc_plane_state</span> <span class="pre">*dc_plane_state</span></code></dt><dd><p>target DC surface</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Update the underlying dc_stream_state’s input transfer function (ITF) in
+preparation for hardware commit. The transfer function used depends on
+the preparation done on the stream for color management.</p>
+<p><strong>Return</strong></p>
+<p>0 on success. -ENOMEM if mem allocation fails.</p>
+</div>
+<section id="dc-color-capabilities-between-dcn-generations">
+<h3><a class="toc-backref" href="#id6">DC Color Capabilities between DCN generations</a><a class="headerlink" href="#dc-color-capabilities-between-dcn-generations" title="Permalink to this headline">¶</a></h3>
+<p>DRM/KMS framework defines three CRTC color correction properties: degamma,
+color transformation matrix (CTM) and gamma, and two properties for degamma and
+gamma LUT sizes. AMD DC programs some of the color correction features
+pre-blending but DRM/KMS has not per-plane color correction properties.</p>
+<p>In general, the DRM CRTC color properties are programmed to DC, as follows:
+CRTC gamma after blending, and CRTC degamma pre-blending. Although CTM is
+programmed after blending, it is mapped to DPP hw blocks (pre-blending). Other
+color caps available in the hw is not currently exposed by DRM interface and
+are bypassed.</p>
+<p><strong>Color management caps (DPP and MPC)</strong></p>
+<p>Modules/color calculates various color operations which are translated to
+abstracted HW. DCE 5-12 had almost no important changes, but starting with
+DCN1, every new generation comes with fairly major differences in color
+pipeline. Therefore, we abstract color pipe capabilities so modules/DM can
+decide mapping to HW block based on logical capabilities.</p>
+<dl class="type">
+<dt id="c.rom_curve_caps">
+struct <code class="sig-name descname">rom_curve_caps</code><a class="headerlink" href="#c.rom_curve_caps" title="Permalink to this definition">¶</a></dt>
+<dd><p>predefined transfer function caps for degamma and regamma</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct rom_curve_caps {
+    uint16_t srgb : 1;
+    uint16_t bt2020 : 1;
+    uint16_t gamma2_2 : 1;
+    uint16_t pq : 1;
+    uint16_t hlg : 1;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">srgb</span></code></dt><dd><p>RGB color space transfer func</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">bt2020</span></code></dt><dd><p>BT.2020 transfer func</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">gamma2_2</span></code></dt><dd><p>standard gamma</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">pq</span></code></dt><dd><p>perceptual quantizer transfer function</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">hlg</span></code></dt><dd><p>hybrid log–gamma transfer function</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.dpp_color_caps">
+struct <code class="sig-name descname">dpp_color_caps</code><a class="headerlink" href="#c.dpp_color_caps" title="Permalink to this definition">¶</a></dt>
+<dd><p>color pipeline capabilities for display pipe and plane blocks</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct dpp_color_caps {
+    uint16_t dcn_arch : 1;
+    uint16_t input_lut_shared : 1;
+    uint16_t icsc : 1;
+    uint16_t dgam_ram : 1;
+    uint16_t post_csc : 1;
+    uint16_t gamma_corr : 1;
+    uint16_t hw_3d_lut : 1;
+    uint16_t ogam_ram : 1;
+    uint16_t ocsc : 1;
+    uint16_t dgam_rom_for_yuv : 1;
+    struct rom_curve_caps dgam_rom_caps;
+    struct rom_curve_caps ogam_rom_caps;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">dcn_arch</span></code></dt><dd><p>all DCE generations treated the same</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">input_lut_shared</span></code></dt><dd><p>shared with DGAM. Input LUT is different than most LUTs,
+just plain 256-entry lookup</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">icsc</span></code></dt><dd><p>input color space conversion</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dgam_ram</span></code></dt><dd><p>programmable degamma LUT</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">post_csc</span></code></dt><dd><p>post color space conversion, before gamut remap</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">gamma_corr</span></code></dt><dd><p>degamma correction</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">hw_3d_lut</span></code></dt><dd><p>3D LUT support. It implies a shaper LUT before. It may be shared
+with MPC by setting mpc:shared_3d_lut flag</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">ogam_ram</span></code></dt><dd><p>programmable out/blend gamma LUT</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">ocsc</span></code></dt><dd><p>output color space conversion</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dgam_rom_for_yuv</span></code></dt><dd><p>pre-defined degamma LUT for YUV planes</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dgam_rom_caps</span></code></dt><dd><p>pre-definied curve caps for degamma 1D LUT</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">ogam_rom_caps</span></code></dt><dd><p>pre-definied curve caps for regamma 1D LUT</p>
+</dd>
+</dl>
+</div>
+<p><strong>Note</strong></p>
+<p>hdr_mult and gamut remap (CTM) are always available in DPP (in that order)</p>
+<dl class="type">
+<dt id="c.mpc_color_caps">
+struct <code class="sig-name descname">mpc_color_caps</code><a class="headerlink" href="#c.mpc_color_caps" title="Permalink to this definition">¶</a></dt>
+<dd><p>color pipeline capabilities for multiple pipe and plane combined blocks</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct mpc_color_caps {
+    uint16_t gamut_remap : 1;
+    uint16_t ogam_ram : 1;
+    uint16_t ocsc : 1;
+    uint16_t num_3dluts : 3;
+    uint16_t shared_3d_lut:1;
+    struct rom_curve_caps ogam_rom_caps;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">gamut_remap</span></code></dt><dd><p>color transformation matrix</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">ogam_ram</span></code></dt><dd><p>programmable out gamma LUT</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">ocsc</span></code></dt><dd><p>output color space conversion matrix</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">num_3dluts</span></code></dt><dd><p>MPC 3D LUT; always assumes a preceding shaper LUT</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">shared_3d_lut</span></code></dt><dd><p>shared 3D LUT flag. Can be either DPP or MPC, but single
+instance</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">ogam_rom_caps</span></code></dt><dd><p>pre-definied curve caps for regamma 1D LUT</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.dc_color_caps">
+struct <code class="sig-name descname">dc_color_caps</code><a class="headerlink" href="#c.dc_color_caps" title="Permalink to this definition">¶</a></dt>
+<dd><p>color pipes capabilities for DPP and MPC hw blocks</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct dc_color_caps {
+    struct dpp_color_caps dpp;
+    struct mpc_color_caps mpc;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">dpp</span></code></dt><dd><p>color pipes caps for DPP</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">mpc</span></code></dt><dd><p>color pipes caps for MPC</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.pipe_split_policy">
+enum <code class="sig-name descname">pipe_split_policy</code><a class="headerlink" href="#c.pipe_split_policy" title="Permalink to this definition">¶</a></dt>
+<dd><p>Pipe split strategy supported by DCN</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Constants</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">MPC_SPLIT_DYNAMIC</span></code></dt><dd><p>DC will automatically decide how to split the
+pipe in order to bring the best trade-off between performance and
+power consumption. This is the recommended option.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">MPC_SPLIT_AVOID</span></code></dt><dd><p>Avoid pipe split, which means that DC will not
+try any sort of split optimization.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">MPC_SPLIT_AVOID_MULT_DISP</span></code></dt><dd><p>With this option, DC will only try to
+optimize the pipe utilization when using a single display; if the
+user connects to a second display, DC will avoid pipe split.</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>This enum is used to define the pipe split policy supported by DCN. By
+default, DC favors MPC_SPLIT_DYNAMIC.</p>
+<dl class="type">
+<dt id="c.dc_clocks">
+struct <code class="sig-name descname">dc_clocks</code><a class="headerlink" href="#c.dc_clocks" title="Permalink to this definition">¶</a></dt>
+<dd><p>DC pipe clocks</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct dc_clocks {
+    int dispclk_khz;
+    int actual_dispclk_khz;
+    int dppclk_khz;
+    int actual_dppclk_khz;
+    int disp_dpp_voltage_level_khz;
+    int dcfclk_khz;
+    int socclk_khz;
+    int dcfclk_deep_sleep_khz;
+    int fclk_khz;
+    int phyclk_khz;
+    int dramclk_khz;
+    bool p_state_change_support;
+    enum dcn_zstate_support_state zstate_support;
+    bool dtbclk_en;
+    int ref_dtbclk_khz;
+    bool fclk_p_state_change_support;
+    enum dcn_pwr_state pwr_state;
+    bool prev_p_state_change_support;
+    bool fclk_prev_p_state_change_support;
+    int num_ways;
+    bool fw_based_mclk_switching;
+    bool fw_based_mclk_switching_shut_down;
+    int prev_num_ways;
+    enum dtm_pstate dtm_level;
+    int max_supported_dppclk_khz;
+    int max_supported_dispclk_khz;
+    int bw_dppclk_khz;
+    int bw_dispclk_khz;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+</div>
+<p><strong>Description</strong></p>
+<p>For any clocks that may differ per pipe only the max is stored in this
+structure</p>
+<dl class="type">
+<dt id="c.dc_debug_options">
+struct <code class="sig-name descname">dc_debug_options</code><a class="headerlink" href="#c.dc_debug_options" title="Permalink to this definition">¶</a></dt>
+<dd><p>DC debug struct</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct dc_debug_options {
+    bool native422_support;
+    bool disable_dsc;
+    enum visual_confirm visual_confirm;
+    int visual_confirm_rect_height;
+    bool sanity_checks;
+    bool max_disp_clk;
+    bool surface_trace;
+    bool timing_trace;
+    bool clock_trace;
+    bool validation_trace;
+    bool bandwidth_calcs_trace;
+    int max_downscale_src_width;
+    bool disable_stutter;
+    bool use_max_lb;
+    enum dcc_option disable_dcc;
+    enum pipe_split_policy pipe_split_policy;
+    bool force_single_disp_pipe_split;
+    bool voltage_align_fclk;
+    bool disable_min_fclk;
+    bool disable_dfs_bypass;
+    bool disable_dpp_power_gate;
+    bool disable_hubp_power_gate;
+    bool disable_dsc_power_gate;
+    int dsc_min_slice_height_override;
+    int dsc_bpp_increment_div;
+    bool disable_pplib_wm_range;
+    enum wm_report_mode pplib_wm_report_mode;
+    unsigned int min_disp_clk_khz;
+    unsigned int min_dpp_clk_khz;
+    unsigned int min_dram_clk_khz;
+    int sr_exit_time_dpm0_ns;
+    int sr_enter_plus_exit_time_dpm0_ns;
+    int sr_exit_time_ns;
+    int sr_enter_plus_exit_time_ns;
+    int urgent_latency_ns;
+    uint32_t underflow_assert_delay_us;
+    int percent_of_ideal_drambw;
+    int dram_clock_change_latency_ns;
+    bool optimized_watermark;
+    int always_scale;
+    bool disable_pplib_clock_request;
+    bool disable_clock_gate;
+    bool disable_mem_low_power;
+    bool pstate_enabled;
+    bool disable_dmcu;
+    bool force_abm_enable;
+    bool disable_stereo_support;
+    bool vsr_support;
+    bool performance_trace;
+    bool az_endpoint_mute_only;
+    bool always_use_regamma;
+    bool recovery_enabled;
+    bool avoid_vbios_exec_table;
+    bool scl_reset_length10;
+    bool hdmi20_disable;
+    bool skip_detection_link_training;
+    uint32_t edid_read_retry_times;
+    unsigned int force_odm_combine;
+    unsigned int seamless_boot_odm_combine;
+    unsigned int force_odm_combine_4to1;
+    bool disable_z9_mpc;
+    unsigned int force_fclk_khz;
+    bool enable_tri_buf;
+    bool dmub_offload_enabled;
+    bool dmcub_emulation;
+    bool disable_idle_power_optimizations;
+    unsigned int mall_size_override;
+    unsigned int mall_additional_timer_percent;
+    bool mall_error_as_fatal;
+    bool dmub_command_table;
+    struct dc_bw_validation_profile bw_val_profile;
+    bool disable_fec;
+    bool disable_48mhz_pwrdwn;
+    unsigned int force_min_dcfclk_mhz;
+    int dwb_fi_phase;
+    bool disable_timing_sync;
+    bool cm_in_bypass;
+    int force_clock_mode;
+    bool disable_dram_clock_change_vactive_support;
+    bool validate_dml_output;
+    bool enable_dmcub_surface_flip;
+    bool usbc_combo_phy_reset_wa;
+    bool enable_dram_clock_change_one_display_vactive;
+    bool legacy_dp2_lt;
+    bool set_mst_en_for_sst;
+    bool disable_uhbr;
+    bool force_dp2_lt_fallback_method;
+    bool ignore_cable_id;
+    union mem_low_power_enable_options enable_mem_low_power;
+    union root_clock_optimization_options root_clock_optimization;
+    bool hpo_optimization;
+    bool force_vblank_alignment;
+    bool enable_dmub_aux_for_legacy_ddc;
+    bool disable_fams;
+    uint8_t fec_enable_delay_in100us;
+    bool enable_driver_sequence_debug;
+    enum det_size crb_alloc_policy;
+    int crb_alloc_policy_min_disp_count;
+    bool disable_z10;
+    bool enable_z9_disable_interface;
+    bool psr_skip_crtc_disable;
+    union dpia_debug_options dpia_debug;
+    bool disable_fixed_vs_aux_timeout_wa;
+    bool force_disable_subvp;
+    bool force_subvp_mclk_switch;
+    bool allow_sw_cursor_fallback;
+    unsigned int force_subvp_num_ways;
+    unsigned int force_mall_ss_num_ways;
+    bool alloc_extra_way_for_cursor;
+    uint32_t subvp_extra_lines;
+    bool force_usr_allow;
+    bool disable_dtb_ref_clk_switch;
+    uint32_t fixed_vs_aux_delay_config_wa;
+    bool extended_blank_optimization;
+    union aux_wake_wa_options aux_wake_wa;
+    uint32_t mst_start_top_delay;
+    uint8_t psr_power_use_phy_fsm;
+    enum dml_hostvm_override_opts dml_hostvm_override;
+    bool dml_disallow_alternate_prefetch_modes;
+    bool use_legacy_soc_bb_mechanism;
+    bool exit_idle_opt_for_cursor_updates;
+    bool enable_single_display_2to1_odm_policy;
+    bool enable_double_buffered_dsc_pg_support;
+    bool enable_dp_dig_pixel_rate_div_policy;
+    enum lttpr_mode lttpr_mode_override;
+    unsigned int dsc_delay_factor_wa_x1000;
+    unsigned int min_prefetch_in_strobe_ns;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">pipe_split_policy</span></code></dt><dd><p>Define which pipe split policy is used by the
+display core.</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>This struct provides a simple mechanism for developers to change some
+configurations, enable/disable features, and activate extra debug options.
+This can be very handy to narrow down whether some specific feature is
+causing an issue or not.</p>
+<dl class="type">
+<dt id="c.dc_validation_set">
+struct <code class="sig-name descname">dc_validation_set</code><a class="headerlink" href="#c.dc_validation_set" title="Permalink to this definition">¶</a></dt>
+<dd><p>Struct to store surface/stream associations for validation</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct dc_validation_set {
+    struct dc_stream_state *stream;
+    struct dc_plane_state *plane_states[MAX_SURFACES];
+    uint8_t plane_count;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">stream</span></code></dt><dd><p>Stream state properties</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">plane_count</span></code></dt><dd><p>Total of active planes</p>
+</dd>
+</dl>
+</div>
+<p>The color pipeline has undergone major changes between DCN hardware
+generations. What’s possible to do before and after blending depends on
+hardware capabilities, as illustrated below by the DCN 2.0 and DCN 3.0 families
+schemas.</p>
+<p><strong>DCN 2.0 family color caps and mapping</strong></p>
+<figure class="align-default">
+<img alt="../../../_images/dcn2_cm_drm_current.svg" src="../../../_images/dcn2_cm_drm_current.svg" /></figure>
+<p><strong>DCN 3.0 family color caps and mapping</strong></p>
+<figure class="align-default">
+<img alt="../../../_images/dcn3_cm_drm_current.svg" src="../../../_images/dcn3_cm_drm_current.svg" /></figure>
+</section>
+</section>
+<section id="blend-mode-properties">
+<h2><a class="toc-backref" href="#id7">Blend Mode Properties</a><a class="headerlink" href="#blend-mode-properties" title="Permalink to this headline">¶</a></h2>
+<p>Pixel blend mode is a DRM plane composition property of <a class="reference internal" href="../../drm-kms.html#c.drm_plane" title="drm_plane"><code class="xref c c-type docutils literal notranslate"><span class="pre">drm_plane</span></code></a> used to
+describes how pixels from a foreground plane (fg) are composited with the
+background plane (bg). Here, we present main concepts of DRM blend mode to help
+to understand how this property is mapped to AMD DC interface. See more about
+this DRM property and the alpha blending equations in <a class="reference internal" href="../../drm-kms.html#plane-composition-properties"><span class="std std-ref">DRM Plane
+Composition Properties</span></a>.</p>
+<p>Basically, a blend mode sets the alpha blending equation for plane
+composition that fits the mode in which the alpha channel affects the state of
+pixel color values and, therefore, the resulted pixel color. For
+example, consider the following elements of the alpha blending equation:</p>
+<ul class="simple">
+<li><p><em>fg.rgb</em>: Each of the RGB component values from the foreground’s pixel.</p></li>
+<li><p><em>fg.alpha</em>: Alpha component value from the foreground’s pixel.</p></li>
+<li><p><em>bg.rgb</em>: Each of the RGB component values from the background.</p></li>
+<li><p><em>plane_alpha</em>: Plane alpha value set by the <strong>plane “alpha” property</strong>, see
+more in <a class="reference internal" href="../../drm-kms.html#plane-composition-properties"><span class="std std-ref">DRM Plane Composition Properties</span></a>.</p></li>
+</ul>
+<p>in the basic alpha blending equation:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>out.rgb = alpha * fg.rgb + (1 - alpha) * bg.rgb
+</pre></div>
+</div>
+<p>the alpha channel value of each pixel in a plane is ignored and only the plane
+alpha affects the resulted pixel color values.</p>
+<p>DRM has three blend mode to define the blend formula in the plane composition:</p>
+<ul class="simple">
+<li><p><strong>None</strong>: Blend formula that ignores the pixel alpha.</p></li>
+<li><p><strong>Pre-multiplied</strong>: Blend formula that assumes the pixel color values in a
+plane was already pre-multiplied by its own alpha channel before storage.</p></li>
+<li><p><strong>Coverage</strong>: Blend formula that assumes the pixel color values were not
+pre-multiplied with the alpha channel values.</p></li>
+</ul>
+<p>and pre-multiplied is the default pixel blend mode, that means, when no blend
+mode property is created or defined, DRM considers the plane’s pixels has
+pre-multiplied color values. On IGT GPU tools, the kms_plane_alpha_blend test
+provides a set of subtests to verify plane alpha and blend mode properties.</p>
+<p>The DRM blend mode and its elements are then mapped by AMDGPU display manager
+(DM) to program the blending configuration of the Multiple Pipe/Plane Combined
+(MPC), as follows:</p>
+<p>Multiple Pipe/Plane Combined (MPC) is a component in the hardware pipeline
+that performs blending of multiple planes, using global and per-pixel alpha.
+It also performs post-blending color correction operations according to the
+hardware capabilities, such as color transformation matrix and gamma 1D and
+3D LUT.</p>
+<dl class="type">
+<dt id="c.mpcc_blnd_cfg">
+struct <code class="sig-name descname">mpcc_blnd_cfg</code><a class="headerlink" href="#c.mpcc_blnd_cfg" title="Permalink to this definition">¶</a></dt>
+<dd><p>MPCC blending configuration</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct mpcc_blnd_cfg {
+    struct tg_color black_color;
+    enum mpcc_alpha_blend_mode alpha_mode;
+    bool pre_multiplied_alpha;
+    int global_gain;
+    int global_alpha;
+    bool overlap_only;
+    int bottom_gain_mode;
+    int background_color_bpc;
+    int top_gain;
+    int bottom_inside_gain;
+    int bottom_outside_gain;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">black_color</span></code></dt><dd><p>background color</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">alpha_mode</span></code></dt><dd><p>alpha blend mode (MPCC_ALPHA_BLND_MODE)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">pre_multiplied_alpha</span></code></dt><dd><p>whether pixel color values were pre-multiplied by the
+alpha channel (MPCC_ALPHA_MULTIPLIED_MODE)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">global_gain</span></code></dt><dd><p>used when blend mode considers both pixel alpha and plane
+alpha value and assumes the global alpha value.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">global_alpha</span></code></dt><dd><p>plane alpha value</p>
+</dd>
+</dl>
+</div>
+<p>Therefore, the blending configuration for a single MPCC instance on the MPC
+tree is defined by <a class="reference internal" href="#c.mpcc_blnd_cfg" title="mpcc_blnd_cfg"><code class="xref c c-type docutils literal notranslate"><span class="pre">mpcc_blnd_cfg</span></code></a>, where
+<code class="xref c c-type docutils literal notranslate"><span class="pre">pre_multiplied_alpha</span></code> is the alpha pre-multiplied mode flag used to
+set <code class="xref c c-type docutils literal notranslate"><span class="pre">MPCC_ALPHA_MULTIPLIED_MODE</span></code>. It controls whether alpha is
+multiplied (true/false), being only true for DRM pre-multiplied blend mode.
+<a class="reference internal" href="#c.mpcc_alpha_blend_mode" title="mpcc_alpha_blend_mode"><code class="xref c c-type docutils literal notranslate"><span class="pre">mpcc_alpha_blend_mode</span></code></a> defines the alpha blend mode regarding pixel
+alpha and plane alpha values. It sets one of the three modes for
+<code class="xref c c-type docutils literal notranslate"><span class="pre">MPCC_ALPHA_BLND_MODE</span></code>, as described below.</p>
+<dl class="type">
+<dt id="c.mpcc_alpha_blend_mode">
+enum <code class="sig-name descname">mpcc_alpha_blend_mode</code><a class="headerlink" href="#c.mpcc_alpha_blend_mode" title="Permalink to this definition">¶</a></dt>
+<dd><p>define the alpha blend mode regarding pixel alpha and plane alpha values</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Constants</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">MPCC_ALPHA_BLEND_MODE_PER_PIXEL_ALPHA</span></code></dt><dd><p>per pixel alpha using DPP
+alpha value</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">MPCC_ALPHA_BLEND_MODE_PER_PIXEL_ALPHA_COMBINED_GLOBAL_GAIN</span></code></dt><dd><p>per
+pixel alpha using DPP alpha value multiplied by a global gain (plane
+alpha)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">MPCC_ALPHA_BLEND_MODE_GLOBAL_ALPHA</span></code></dt><dd><p>global alpha value, ignores
+pixel alpha and consider only plane alpha</p>
+</dd>
+</dl>
+</div>
+<p>DM then maps the elements of <cite><a class="reference internal" href="#c.mpcc_alpha_blend_mode" title="mpcc_alpha_blend_mode"><code class="xref c c-type docutils literal notranslate"><span class="pre">enum</span> <span class="pre">mpcc_alpha_blend_mode</span></code></a></cite> to those in the DRM
+blend formula, as follows:</p>
+<ul class="simple">
+<li><p><em>MPC pixel alpha</em> matches <em>DRM fg.alpha</em> as the alpha component value
+from the plane’s pixel</p></li>
+<li><p><em>MPC global alpha</em> matches <em>DRM plane_alpha</em> when the pixel alpha should
+be ignored and, therefore, pixel values are not pre-multiplied</p></li>
+<li><p><em>MPC global gain</em> assumes <em>MPC global alpha</em> value when both <em>DRM
+fg.alpha</em> and <em>DRM plane_alpha</em> participate in the blend equation</p></li>
+</ul>
+<p>In short, <em>fg.alpha</em> is ignored by selecting
+<code class="xref c c-type docutils literal notranslate"><span class="pre">MPCC_ALPHA_BLEND_MODE_GLOBAL_ALPHA</span></code>. On the other hand, (plane_alpha *
+fg.alpha) component becomes available by selecting
+<code class="xref c c-type docutils literal notranslate"><span class="pre">MPCC_ALPHA_BLEND_MODE_PER_PIXEL_ALPHA_COMBINED_GLOBAL_GAIN</span></code>. And the
+<code class="xref c c-type docutils literal notranslate"><span class="pre">MPCC_ALPHA_MULTIPLIED_MODE</span></code> defines if the pixel color values are
+pre-multiplied by alpha or not.</p>
+<section id="blend-configuration-flow">
+<h3><a class="toc-backref" href="#id8">Blend configuration flow</a><a class="headerlink" href="#blend-configuration-flow" title="Permalink to this headline">¶</a></h3>
+<p>The alpha blending equation is configured from DRM to DC interface by the
+following path:</p>
+<ol class="arabic simple">
+<li><p>When updating a <a class="reference internal" href="../../drm-kms.html#c.drm_plane_state" title="drm_plane_state"><code class="xref c c-type docutils literal notranslate"><span class="pre">drm_plane_state</span></code></a>, DM calls
+<code class="xref c c-type docutils literal notranslate"><span class="pre">fill_blending_from_plane_state()</span></code> that maps
+<a class="reference internal" href="../../drm-kms.html#c.drm_plane_state" title="drm_plane_state"><code class="xref c c-type docutils literal notranslate"><span class="pre">drm_plane_state</span></code></a> attributes to
+<code class="xref c c-type docutils literal notranslate"><span class="pre">dc_plane_info</span></code> struct to be handled in the
+OS-agnostic component (DC).</p></li>
+<li><p>On DC interface, <a class="reference internal" href="#c.mpcc_blnd_cfg" title="mpcc_blnd_cfg"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">mpcc_blnd_cfg</span></code></a> programs the
+MPCC blend configuration considering the <code class="xref c c-type docutils literal notranslate"><span class="pre">dc_plane_info</span></code> input from DPP.</p></li>
+</ol>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">AMDgpu Display Manager</a><ul>
+<li><a class="reference internal" href="#lifecycle">Lifecycle</a></li>
+<li><a class="reference internal" href="#interrupts">Interrupts</a></li>
+<li><a class="reference internal" href="#atomic-implementation">Atomic Implementation</a></li>
+<li><a class="reference internal" href="#color-management-properties">Color Management Properties</a><ul>
+<li><a class="reference internal" href="#dc-color-capabilities-between-dcn-generations">DC Color Capabilities between DCN generations</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#blend-mode-properties">Blend Mode Properties</a><ul>
+<li><a class="reference internal" href="#blend-configuration-flow">Blend configuration flow</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/gpu/amdgpu/display/display-manager.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/gpu/amdgpu/display/display-manager.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

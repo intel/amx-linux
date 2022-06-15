@@ -1,0 +1,311 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Testing BPF on s390 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="1 Clang implementation notes" href="clang-notes.html" />
+    <link rel="prev" title="BPF drgn tools" href="drgn.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="testing-bpf-on-s390">
+<h1>Testing BPF on s390<a class="headerlink" href="#testing-bpf-on-s390" title="Permalink to this headline">¶</a></h1>
+<section id="introduction">
+<h2>1. Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>IBM Z are mainframe computers, which are descendants of IBM System/360 from
+year 1964. They are supported by the Linux kernel under the name “s390”. This
+document describes how to test BPF in an s390 QEMU guest.</p>
+</section>
+<section id="one-time-setup">
+<h2>2. One-time setup<a class="headerlink" href="#one-time-setup" title="Permalink to this headline">¶</a></h2>
+<p>The following is required to build and run the test suite:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>s390 GCC</p></li>
+<li><p>s390 development headers and libraries</p></li>
+<li><p>Clang with BPF support</p></li>
+<li><p>QEMU with s390 support</p></li>
+<li><p>Disk image with s390 rootfs</p></li>
+</ul>
+</div></blockquote>
+<p>Debian supports installing compiler and libraries for s390 out of the box.
+Users of other distros may use debootstrap in order to set up a Debian chroot:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>sudo debootstrap \
+  --variant=minbase \
+  --include=sudo \
+  testing \
+  ./s390-toolchain
+sudo mount --rbind /dev ./s390-toolchain/dev
+sudo mount --rbind /proc ./s390-toolchain/proc
+sudo mount --rbind /sys ./s390-toolchain/sys
+sudo chroot ./s390-toolchain
+</pre></div>
+</div>
+<p>Once on Debian, the build prerequisites can be installed as follows:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>sudo dpkg --add-architecture s390x
+sudo apt-get update
+sudo apt-get install \
+  bc \
+  bison \
+  cmake \
+  debootstrap \
+  dwarves \
+  flex \
+  g++ \
+  gcc \
+  g++-s390x-linux-gnu \
+  gcc-s390x-linux-gnu \
+  gdb-multiarch \
+  git \
+  make \
+  python3 \
+  qemu-system-misc \
+  qemu-utils \
+  rsync \
+  libcap-dev:s390x \
+  libelf-dev:s390x \
+  libncurses-dev
+</pre></div>
+</div>
+<p>Latest Clang targeting BPF can be installed as follows:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>git clone https://github.com/llvm/llvm-project.git
+ln -s ../../clang llvm-project/llvm/tools/
+mkdir llvm-project-build
+cd llvm-project-build
+cmake \
+  -DLLVM_TARGETS_TO_BUILD=BPF \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX=/opt/clang-bpf \
+  ../llvm-project/llvm
+make
+sudo make install
+export PATH=/opt/clang-bpf/bin:$PATH
+</pre></div>
+</div>
+<p>The disk image can be prepared using a loopback mount and debootstrap:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>qemu-img create -f raw ./s390.img 1G
+sudo losetup -f ./s390.img
+sudo mkfs.ext4 /dev/loopX
+mkdir ./s390.rootfs
+sudo mount /dev/loopX ./s390.rootfs
+sudo debootstrap \
+  --foreign \
+  --arch=s390x \
+  --variant=minbase \
+  --include=&quot; \
+    iproute2, \
+    iputils-ping, \
+    isc-dhcp-client, \
+    kmod, \
+    libcap2, \
+    libelf1, \
+    netcat, \
+    procps&quot; \
+  testing \
+  ./s390.rootfs
+sudo umount ./s390.rootfs
+sudo losetup -d /dev/loopX
+</pre></div>
+</div>
+</section>
+<section id="compilation">
+<h2>3. Compilation<a class="headerlink" href="#compilation" title="Permalink to this headline">¶</a></h2>
+<p>In addition to the usual Kconfig options required to run the BPF test suite, it
+is also helpful to select:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>CONFIG_NET_9P=y
+CONFIG_9P_FS=y
+CONFIG_NET_9P_VIRTIO=y
+CONFIG_VIRTIO_PCI=y
+</pre></div>
+</div>
+<p>as that would enable a very easy way to share files with the s390 virtual
+machine.</p>
+<p>Compiling kernel, modules and testsuite, as well as preparing gdb scripts to
+simplify debugging, can be done using the following commands:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>make ARCH=s390 CROSS_COMPILE=s390x-linux-gnu- menuconfig
+make ARCH=s390 CROSS_COMPILE=s390x-linux-gnu- bzImage modules scripts_gdb
+make ARCH=s390 CROSS_COMPILE=s390x-linux-gnu- \
+  -C tools/testing/selftests \
+  TARGETS=bpf \
+  INSTALL_PATH=$PWD/tools/testing/selftests/kselftest_install \
+  install
+</pre></div>
+</div>
+</section>
+<section id="running-the-test-suite">
+<h2>4. Running the test suite<a class="headerlink" href="#running-the-test-suite" title="Permalink to this headline">¶</a></h2>
+<p>The virtual machine can be started as follows:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>qemu-system-s390x \
+  -cpu max,zpci=on \
+  -smp 2 \
+  -m 4G \
+  -kernel linux/arch/s390/boot/compressed/vmlinux \
+  -drive file=./s390.img,if=virtio,format=raw \
+  -nographic \
+  -append &#39;root=/dev/vda rw console=ttyS1&#39; \
+  -virtfs local,path=./linux,security_model=none,mount_tag=linux \
+  -object rng-random,filename=/dev/urandom,id=rng0 \
+  -device virtio-rng-ccw,rng=rng0 \
+  -netdev user,id=net0 \
+  -device virtio-net-ccw,netdev=net0
+</pre></div>
+</div>
+<p>When using this on a real IBM Z, <code class="docutils literal notranslate"><span class="pre">-enable-kvm</span></code> may be added for better
+performance. When starting the virtual machine for the first time, disk image
+setup must be finalized using the following command:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/debootstrap/debootstrap --second-stage
+</pre></div>
+</div>
+<p>Directory with the code built on the host as well as <code class="docutils literal notranslate"><span class="pre">/proc</span></code> and <code class="docutils literal notranslate"><span class="pre">/sys</span></code>
+need to be mounted as follows:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>mkdir -p /linux
+mount -t 9p linux /linux
+mount -t proc proc /proc
+mount -t sysfs sys /sys
+</pre></div>
+</div>
+<p>After that, the test suite can be run using the following commands:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>cd /linux/tools/testing/selftests/kselftest_install
+./run_kselftest.sh
+</pre></div>
+</div>
+<p>As usual, tests can be also run individually:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>cd /linux/tools/testing/selftests/bpf
+./test_verifier
+</pre></div>
+</div>
+</section>
+<section id="debugging">
+<h2>5. Debugging<a class="headerlink" href="#debugging" title="Permalink to this headline">¶</a></h2>
+<p>It is possible to debug the s390 kernel using QEMU GDB stub, which is activated
+by passing <code class="docutils literal notranslate"><span class="pre">-s</span></code> to QEMU.</p>
+<p>It is preferable to turn KASLR off, so that gdb would know where to find the
+kernel image in memory, by building the kernel with:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>RANDOMIZE_BASE=n
+</pre></div>
+</div>
+<p>GDB can then be attached using the following command:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>gdb-multiarch -ex &#39;target remote localhost:1234&#39; ./vmlinux
+</pre></div>
+</div>
+</section>
+<section id="network">
+<h2>6. Network<a class="headerlink" href="#network" title="Permalink to this headline">¶</a></h2>
+<p>In case one needs to use the network in the virtual machine in order to e.g.
+install additional packages, it can be configured using:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>dhclient eth0
+</pre></div>
+</div>
+</section>
+<section id="links">
+<h2>7. Links<a class="headerlink" href="#links" title="Permalink to this headline">¶</a></h2>
+<p>This document is a compilation of techniques, whose more comprehensive
+descriptions can be found by following these links:</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://wiki.debian.org/EmDebian/CrossDebootstrap">Debootstrap</a></p></li>
+<li><p><a class="reference external" href="https://wiki.debian.org/Multiarch/HOWTO">Multiarch</a></p></li>
+<li><p><a class="reference external" href="https://llvm.org/docs/CMake.html">Building LLVM</a></p></li>
+<li><p><a class="reference external" href="https://wiki.gentoo.org/wiki/Embedded_Handbook/General/Cross-compiling_the_kernel">Cross-compiling the kernel</a></p></li>
+<li><p><a class="reference external" href="https://wiki.qemu.org/Documentation/Platforms/S390X">QEMU s390x Guest Support</a></p></li>
+<li><p><a class="reference external" href="https://wiki.qemu.org/Documentation/9psetup">Plan 9 folder sharing over Virtio</a></p></li>
+<li><p><a class="reference external" href="https://wiki.osdev.org/Kernel_Debugging#Use_GDB_with_QEMU">Using GDB with QEMU</a></p></li>
+</ul>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Testing BPF on s390</a><ul>
+<li><a class="reference internal" href="#introduction">1. Introduction</a></li>
+<li><a class="reference internal" href="#one-time-setup">2. One-time setup</a></li>
+<li><a class="reference internal" href="#compilation">3. Compilation</a></li>
+<li><a class="reference internal" href="#running-the-test-suite">4. Running the test suite</a></li>
+<li><a class="reference internal" href="#debugging">5. Debugging</a></li>
+<li><a class="reference internal" href="#network">6. Network</a></li>
+<li><a class="reference internal" href="#links">7. Links</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/bpf/s390.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/bpf/s390.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

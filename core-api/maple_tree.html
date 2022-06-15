@@ -1,0 +1,1009 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Maple Tree &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="ID Allocation" href="idr.html" />
+    <link rel="prev" title="XArray" href="xarray.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="maple-tree">
+<h1>Maple Tree<a class="headerlink" href="#maple-tree" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">Author</dt>
+<dd class="field-odd"><p>Liam R. Howlett</p>
+</dd>
+</dl>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Permalink to this headline">¶</a></h2>
+<p>The Maple Tree is a B-Tree data type which is optimized for storing
+non-overlapping ranges, including ranges of size 1.  The tree was designed to
+be simple to use and does not require a user written search method.  It
+supports iterating over a range of entries and going to the previous or next
+entry in a cache-efficient manner.  The tree can also be put into an RCU-safe
+mode of operation which allows reading and writing concurrently.  Writers must
+synchronize on a lock, which can be the default spinlock, or the user can set
+the lock to an external lock of a different type.</p>
+<p>The Maple Tree maintains a small memory footprint and was designed to use
+modern processor cache efficiently.  The majority of the users will be able to
+use the normal API.  An <a class="reference internal" href="#maple-tree-advanced-api"><span class="std std-ref">Advanced API</span></a> exists for more complex
+scenarios.  The most important usage of the Maple Tree is the tracking of the
+virtual memory areas.</p>
+<p>The Maple Tree can store values between <code class="docutils literal notranslate"><span class="pre">0</span></code> and <code class="docutils literal notranslate"><span class="pre">ULONG_MAX</span></code>.  The Maple
+Tree reserves values with the bottom two bits set to ‘10’ which are below 4096
+(ie 2, 6, 10 .. 4094) for internal use.  If the entries may use reserved
+entries then the users can convert the entries using <a class="reference internal" href="xarray.html#c.xa_mk_value" title="xa_mk_value"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_mk_value()</span></code></a> and convert
+them back by calling <a class="reference internal" href="xarray.html#c.xa_to_value" title="xa_to_value"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_to_value()</span></code></a>.  If the user needs to use a reserved
+value, then the user can convert the value when using the
+<a class="reference internal" href="#maple-tree-advanced-api"><span class="std std-ref">Advanced API</span></a>, but are blocked by the normal API.</p>
+<p>The Maple Tree can also be configured to support searching for a gap of a given
+size (or larger).</p>
+<p>Pre-allocating of nodes is also supported using the
+<a class="reference internal" href="#maple-tree-advanced-api"><span class="std std-ref">Advanced API</span></a>.  This is useful for users who must guarantee a
+successful store operation within a given
+code segment when allocating cannot be done.  Allocations of nodes are
+relatively small at around 256 bytes.</p>
+</section>
+<section id="normal-api">
+<span id="maple-tree-normal-api"></span><h2>Normal API<a class="headerlink" href="#normal-api" title="Permalink to this headline">¶</a></h2>
+<p>Start by initialising a maple tree, either with DEFINE_MTREE() for statically
+allocated maple trees or <a class="reference internal" href="#c.mt_init" title="mt_init"><code class="xref c c-func docutils literal notranslate"><span class="pre">mt_init()</span></code></a> for dynamically allocated ones.  A
+freshly-initialised maple tree contains a <code class="docutils literal notranslate"><span class="pre">NULL</span></code> pointer for the range <code class="docutils literal notranslate"><span class="pre">0</span></code>
+- <code class="docutils literal notranslate"><span class="pre">ULONG_MAX</span></code>.  There are currently two types of maple trees supported: the
+allocation tree and the regular tree.  The regular tree has a higher branching
+factor for internal nodes.  The allocation tree has a lower branching factor
+but allows the user to search for a gap of a given size or larger from either
+<code class="docutils literal notranslate"><span class="pre">0</span></code> upwards or <code class="docutils literal notranslate"><span class="pre">ULONG_MAX</span></code> down.  An allocation tree can be used by
+passing in the <code class="docutils literal notranslate"><span class="pre">MT_FLAGS_ALLOC_RANGE</span></code> flag when initialising the tree.</p>
+<p>You can then set entries using <a class="reference internal" href="#c.mtree_store" title="mtree_store"><code class="xref c c-func docutils literal notranslate"><span class="pre">mtree_store()</span></code></a> or <a class="reference internal" href="#c.mtree_store_range" title="mtree_store_range"><code class="xref c c-func docutils literal notranslate"><span class="pre">mtree_store_range()</span></code></a>.
+<a class="reference internal" href="#c.mtree_store" title="mtree_store"><code class="xref c c-func docutils literal notranslate"><span class="pre">mtree_store()</span></code></a> will overwrite any entry with the new entry and return 0 on
+success or an error code otherwise.  <a class="reference internal" href="#c.mtree_store_range" title="mtree_store_range"><code class="xref c c-func docutils literal notranslate"><span class="pre">mtree_store_range()</span></code></a> works in the same way
+but takes a range.  <a class="reference internal" href="#c.mtree_load" title="mtree_load"><code class="xref c c-func docutils literal notranslate"><span class="pre">mtree_load()</span></code></a> is used to retrieve the entry stored at a
+given index.  You can use <a class="reference internal" href="#c.mtree_erase" title="mtree_erase"><code class="xref c c-func docutils literal notranslate"><span class="pre">mtree_erase()</span></code></a> to erase an entire range by only
+knowing one value within that range, or <a class="reference internal" href="#c.mtree_store" title="mtree_store"><code class="xref c c-func docutils literal notranslate"><span class="pre">mtree_store()</span></code></a> call with an entry of
+NULL may be used to partially erase a range or many ranges at once.</p>
+<p>If you want to only store a new entry to a range (or index) if that range is
+currently <code class="docutils literal notranslate"><span class="pre">NULL</span></code>, you can use <a class="reference internal" href="#c.mtree_insert_range" title="mtree_insert_range"><code class="xref c c-func docutils literal notranslate"><span class="pre">mtree_insert_range()</span></code></a> or <a class="reference internal" href="#c.mtree_insert" title="mtree_insert"><code class="xref c c-func docutils literal notranslate"><span class="pre">mtree_insert()</span></code></a> which
+return -EEXIST if the range is not empty.</p>
+<p>You can search for an entry from an index upwards by using <a class="reference internal" href="#c.mt_find" title="mt_find"><code class="xref c c-func docutils literal notranslate"><span class="pre">mt_find()</span></code></a>.</p>
+<p>You can walk each entry within a range by calling <a class="reference internal" href="#c.mt_for_each" title="mt_for_each"><code class="xref c c-func docutils literal notranslate"><span class="pre">mt_for_each()</span></code></a>.  You must
+provide a temporary variable to store a cursor.  If you want to walk each
+element of the tree then <code class="docutils literal notranslate"><span class="pre">0</span></code> and <code class="docutils literal notranslate"><span class="pre">ULONG_MAX</span></code> may be used as the range.  If
+the caller is going to hold the lock for the duration of the walk then it is
+worth looking at the <a class="reference internal" href="#c.mas_for_each" title="mas_for_each"><code class="xref c c-func docutils literal notranslate"><span class="pre">mas_for_each()</span></code></a> API in the <a class="reference internal" href="#maple-tree-advanced-api"><span class="std std-ref">Advanced API</span></a>
+section.</p>
+<p>Sometimes it is necessary to ensure the next call to store to a maple tree does
+not allocate memory, please see <a class="reference internal" href="#maple-tree-advanced-api"><span class="std std-ref">Advanced API</span></a> for this use case.</p>
+<p>Finally, you can remove all entries from a maple tree by calling
+<a class="reference internal" href="#c.mtree_destroy" title="mtree_destroy"><code class="xref c c-func docutils literal notranslate"><span class="pre">mtree_destroy()</span></code></a>.  If the maple tree entries are pointers, you may wish to free
+the entries first.</p>
+<section id="allocating-nodes">
+<h3>Allocating Nodes<a class="headerlink" href="#allocating-nodes" title="Permalink to this headline">¶</a></h3>
+<p>The allocations are handled by the internal tree code.  See
+<a class="reference internal" href="#maple-tree-advanced-alloc"><span class="std std-ref">Advanced Allocating Nodes</span></a> for other options.</p>
+</section>
+<section id="locking">
+<h3>Locking<a class="headerlink" href="#locking" title="Permalink to this headline">¶</a></h3>
+<p>You do not have to worry about locking.  See <a class="reference internal" href="#maple-tree-advanced-locks"><span class="std std-ref">Advanced Locking</span></a>
+for other options.</p>
+<p>The Maple Tree uses RCU and an internal spinlock to synchronise access:</p>
+<dl class="simple">
+<dt>Takes RCU read lock:</dt><dd><ul class="simple">
+<li><p><a class="reference internal" href="#c.mtree_load" title="mtree_load"><code class="xref c c-func docutils literal notranslate"><span class="pre">mtree_load()</span></code></a></p></li>
+<li><p><a class="reference internal" href="#c.mt_find" title="mt_find"><code class="xref c c-func docutils literal notranslate"><span class="pre">mt_find()</span></code></a></p></li>
+<li><p><a class="reference internal" href="#c.mt_for_each" title="mt_for_each"><code class="xref c c-func docutils literal notranslate"><span class="pre">mt_for_each()</span></code></a></p></li>
+<li><p><a class="reference internal" href="#c.mt_next" title="mt_next"><code class="xref c c-func docutils literal notranslate"><span class="pre">mt_next()</span></code></a></p></li>
+<li><p><a class="reference internal" href="#c.mt_prev" title="mt_prev"><code class="xref c c-func docutils literal notranslate"><span class="pre">mt_prev()</span></code></a></p></li>
+</ul>
+</dd>
+<dt>Takes ma_lock internally:</dt><dd><ul class="simple">
+<li><p><a class="reference internal" href="#c.mtree_store" title="mtree_store"><code class="xref c c-func docutils literal notranslate"><span class="pre">mtree_store()</span></code></a></p></li>
+<li><p><a class="reference internal" href="#c.mtree_store_range" title="mtree_store_range"><code class="xref c c-func docutils literal notranslate"><span class="pre">mtree_store_range()</span></code></a></p></li>
+<li><p><a class="reference internal" href="#c.mtree_insert" title="mtree_insert"><code class="xref c c-func docutils literal notranslate"><span class="pre">mtree_insert()</span></code></a></p></li>
+<li><p><a class="reference internal" href="#c.mtree_insert_range" title="mtree_insert_range"><code class="xref c c-func docutils literal notranslate"><span class="pre">mtree_insert_range()</span></code></a></p></li>
+<li><p><a class="reference internal" href="#c.mtree_erase" title="mtree_erase"><code class="xref c c-func docutils literal notranslate"><span class="pre">mtree_erase()</span></code></a></p></li>
+<li><p><a class="reference internal" href="#c.mtree_destroy" title="mtree_destroy"><code class="xref c c-func docutils literal notranslate"><span class="pre">mtree_destroy()</span></code></a></p></li>
+<li><p><a class="reference internal" href="#c.mt_set_in_rcu" title="mt_set_in_rcu"><code class="xref c c-func docutils literal notranslate"><span class="pre">mt_set_in_rcu()</span></code></a></p></li>
+<li><p><a class="reference internal" href="#c.mt_clear_in_rcu" title="mt_clear_in_rcu"><code class="xref c c-func docutils literal notranslate"><span class="pre">mt_clear_in_rcu()</span></code></a></p></li>
+</ul>
+</dd>
+</dl>
+<p>If you want to take advantage of the internal lock to protect the data
+structures that you are storing in the Maple Tree, you can call mtree_lock()
+before calling <a class="reference internal" href="#c.mtree_load" title="mtree_load"><code class="xref c c-func docutils literal notranslate"><span class="pre">mtree_load()</span></code></a>, then take a reference count on the object you
+have found before calling mtree_unlock().  This will prevent stores from
+removing the object from the tree between looking up the object and
+incrementing the refcount.  You can also use RCU to avoid dereferencing
+freed memory, but an explanation of that is beyond the scope of this
+document.</p>
+</section>
+</section>
+<section id="advanced-api">
+<span id="maple-tree-advanced-api"></span><h2>Advanced API<a class="headerlink" href="#advanced-api" title="Permalink to this headline">¶</a></h2>
+<p>The advanced API offers more flexibility and better performance at the
+cost of an interface which can be harder to use and has fewer safeguards.
+You must take care of your own locking while using the advanced API.
+You can use the ma_lock, RCU or an external lock for protection.
+You can mix advanced and normal operations on the same array, as long
+as the locking is compatible.  The <a class="reference internal" href="#maple-tree-normal-api"><span class="std std-ref">Normal API</span></a> is implemented
+in terms of the advanced API.</p>
+<p>The advanced API is based around the ma_state, this is where the ‘mas’
+prefix originates.  The ma_state struct keeps track of tree operations to make
+life easier for both internal and external tree users.</p>
+<p>Initialising the maple tree is the same as in the <a class="reference internal" href="#maple-tree-normal-api"><span class="std std-ref">Normal API</span></a>.
+Please see above.</p>
+<p>The maple state keeps track of the range start and end in mas-&gt;index and
+mas-&gt;last, respectively.</p>
+<p><a class="reference internal" href="#c.mas_walk" title="mas_walk"><code class="xref c c-func docutils literal notranslate"><span class="pre">mas_walk()</span></code></a> will walk the tree to the location of mas-&gt;index and set the
+mas-&gt;index and mas-&gt;last according to the range for the entry.</p>
+<p>You can set entries using <a class="reference internal" href="#c.mas_store" title="mas_store"><code class="xref c c-func docutils literal notranslate"><span class="pre">mas_store()</span></code></a>.  <a class="reference internal" href="#c.mas_store" title="mas_store"><code class="xref c c-func docutils literal notranslate"><span class="pre">mas_store()</span></code></a> will overwrite any entry
+with the new entry and return the first existing entry that is overwritten.
+The range is passed in as members of the maple state: index and last.</p>
+<p>You can use <a class="reference internal" href="#c.mas_erase" title="mas_erase"><code class="xref c c-func docutils literal notranslate"><span class="pre">mas_erase()</span></code></a> to erase an entire range by setting index and
+last of the maple state to the desired range to erase.  This will erase
+the first range that is found in that range, set the maple state index
+and last as the range that was erased and return the entry that existed
+at that location.</p>
+<p>You can walk each entry within a range by using <a class="reference internal" href="#c.mas_for_each" title="mas_for_each"><code class="xref c c-func docutils literal notranslate"><span class="pre">mas_for_each()</span></code></a>.  If you want
+to walk each element of the tree then <code class="docutils literal notranslate"><span class="pre">0</span></code> and <code class="docutils literal notranslate"><span class="pre">ULONG_MAX</span></code> may be used as
+the range.  If the lock needs to be periodically dropped, see the locking
+section <a class="reference internal" href="#c.mas_pause" title="mas_pause"><code class="xref c c-func docutils literal notranslate"><span class="pre">mas_pause()</span></code></a>.</p>
+<p>Using a maple state allows <a class="reference internal" href="#c.mas_next" title="mas_next"><code class="xref c c-func docutils literal notranslate"><span class="pre">mas_next()</span></code></a> and <a class="reference internal" href="#c.mas_prev" title="mas_prev"><code class="xref c c-func docutils literal notranslate"><span class="pre">mas_prev()</span></code></a> to function as if the
+tree was a linked list.  With such a high branching factor the amortized
+performance penalty is outweighed by cache optimization.  <a class="reference internal" href="#c.mas_next" title="mas_next"><code class="xref c c-func docutils literal notranslate"><span class="pre">mas_next()</span></code></a> will
+return the next entry which occurs after the entry at index.  <a class="reference internal" href="#c.mas_prev" title="mas_prev"><code class="xref c c-func docutils literal notranslate"><span class="pre">mas_prev()</span></code></a>
+will return the previous entry which occurs before the entry at index.</p>
+<p><a class="reference internal" href="#c.mas_find" title="mas_find"><code class="xref c c-func docutils literal notranslate"><span class="pre">mas_find()</span></code></a> will find the first entry which exists at or above index on
+the first call, and the next entry from every subsequent calls.</p>
+<p><a class="reference internal" href="#c.mas_find_rev" title="mas_find_rev"><code class="xref c c-func docutils literal notranslate"><span class="pre">mas_find_rev()</span></code></a> will find the fist entry which exists at or below the last on
+the first call, and the previous entry from every subsequent calls.</p>
+<p>If the user needs to yield the lock during an operation, then the maple state
+must be paused using <a class="reference internal" href="#c.mas_pause" title="mas_pause"><code class="xref c c-func docutils literal notranslate"><span class="pre">mas_pause()</span></code></a>.</p>
+<p>There are a few extra interfaces provided when using an allocation tree.
+If you wish to search for a gap within a range, then mas_empty_area()
+or mas_empty_area_rev() can be used.  mas_empty_area() searches for a gap
+starting at the lowest index given up to the maximum of the range.
+mas_empty_area_rev() searches for a gap starting at the highest index given
+and continues downward to the lower bound of the range.</p>
+<section id="advanced-allocating-nodes">
+<span id="maple-tree-advanced-alloc"></span><h3>Advanced Allocating Nodes<a class="headerlink" href="#advanced-allocating-nodes" title="Permalink to this headline">¶</a></h3>
+<p>Allocations are usually handled internally to the tree, however if allocations
+need to occur before a write occurs then calling mas_expected_entries() will
+allocate the worst-case number of needed nodes to insert the provided number of
+ranges.  This also causes the tree to enter mass insertion mode.  Once
+insertions are complete calling mas_destroy() on the maple state will free the
+unused allocations.</p>
+</section>
+<section id="advanced-locking">
+<span id="maple-tree-advanced-locks"></span><h3>Advanced Locking<a class="headerlink" href="#advanced-locking" title="Permalink to this headline">¶</a></h3>
+<p>The maple tree uses a spinlock by default, but external locks can be used for
+tree updates as well.  To use an external lock, the tree must be initialized
+with the <code class="docutils literal notranslate"><span class="pre">MT_FLAGS_LOCK_EXTERN</span> <span class="pre">flag</span></code>, this is usually done with the
+<a class="reference internal" href="#c.MTREE_INIT_EXT" title="MTREE_INIT_EXT"><code class="xref c c-func docutils literal notranslate"><span class="pre">MTREE_INIT_EXT()</span></code></a> #define, which takes an external lock as an argument.</p>
+</section>
+</section>
+<section id="functions-and-structures">
+<h2>Functions and structures<a class="headerlink" href="#functions-and-structures" title="Permalink to this headline">¶</a></h2>
+<p id="maple-tree-flags"><strong>Maple tree flags</strong></p>
+<ul class="simple">
+<li><p>MT_FLAGS_ALLOC_RANGE       - Track gaps in this tree</p></li>
+<li><p>MT_FLAGS_USE_RCU           - Operate in RCU mode</p></li>
+<li><p>MT_FLAGS_HEIGHT_OFFSET     - The position of the tree height in the flags</p></li>
+<li><p>MT_FLAGS_HEIGHT_MASK       - The mask for the maple tree height value</p></li>
+<li><p>MT_FLAGS_LOCK_MASK         - How the mt_lock is used</p></li>
+<li><p>MT_FLAGS_LOCK_IRQ          - Acquired irq-safe</p></li>
+<li><p>MT_FLAGS_LOCK_BH           - Acquired bh-safe</p></li>
+<li><p>MT_FLAGS_LOCK_EXTERN       - mt_lock is not used</p></li>
+</ul>
+<p>MAPLE_HEIGHT_MAX     The largest height that can be stored</p>
+<dl class="function">
+<dt id="c.MTREE_INIT">
+<code class="sig-name descname">MTREE_INIT</code><span class="sig-paren">(</span><em>name</em>, <em>__flags</em><span class="sig-paren">)</span><a class="headerlink" href="#c.MTREE_INIT" title="Permalink to this definition">¶</a></dt>
+<dd><p>Initialize a maple tree</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">name</span></code></dt><dd><p>The maple tree name</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">__flags</span></code></dt><dd><p>The maple tree flags</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.MTREE_INIT_EXT">
+<code class="sig-name descname">MTREE_INIT_EXT</code><span class="sig-paren">(</span><em>name</em>, <em>__flags</em>, <em>__lock</em><span class="sig-paren">)</span><a class="headerlink" href="#c.MTREE_INIT_EXT" title="Permalink to this definition">¶</a></dt>
+<dd><p>Initialize a maple tree with an external lock.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">name</span></code></dt><dd><p>The tree name</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">__flags</span></code></dt><dd><p>The maple tree flags</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">__lock</span></code></dt><dd><p>The external lock</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.mtree_empty">
+bool <code class="sig-name descname">mtree_empty</code><span class="sig-paren">(</span>const struct maple_tree<em> *mt</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mtree_empty" title="Permalink to this definition">¶</a></dt>
+<dd><p>Determine if a tree has any present entries.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">struct</span> <span class="pre">maple_tree</span> <span class="pre">*mt</span></code></dt><dd><p>Maple Tree.</p>
+</dd>
+</dl>
+<p><strong>Context</strong></p>
+<p>Any context.</p>
+<p><strong>Return</strong></p>
+<p><code class="docutils literal notranslate"><span class="pre">true</span></code> if the tree contains only NULL pointers.</p>
+</div>
+<dl class="function">
+<dt id="c.mas_reset">
+void <code class="sig-name descname">mas_reset</code><span class="sig-paren">(</span>struct ma_state<em> *mas</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mas_reset" title="Permalink to this definition">¶</a></dt>
+<dd><p>Reset a Maple Tree operation state.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">ma_state</span> <span class="pre">*mas</span></code></dt><dd><p>Maple Tree operation state.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Resets the error or walk state of the <strong>mas</strong> so future walks of the
+array will start from the root.  Use this if you have dropped the
+lock and want to reuse the ma_state.</p>
+<p><strong>Context</strong></p>
+<p>Any context.</p>
+</div>
+<dl class="function">
+<dt id="c.mas_for_each">
+<code class="sig-name descname">mas_for_each</code><span class="sig-paren">(</span><em>__mas</em>, <em>__entry</em>, <em>__max</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mas_for_each" title="Permalink to this definition">¶</a></dt>
+<dd><p>Iterate over a range of the maple tree.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">__mas</span></code></dt><dd><p>Maple Tree operation state (maple_state)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">__entry</span></code></dt><dd><p>Entry retrieved from the tree</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">__max</span></code></dt><dd><p>maximum index to retrieve from the tree</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>When returned, mas-&gt;index and mas-&gt;last will hold the entire range for the
+entry.</p>
+<p><strong>Note</strong></p>
+<p>may return the zero entry.</p>
+</div>
+<dl class="function">
+<dt id="c.mas_set_range">
+void <code class="sig-name descname">mas_set_range</code><span class="sig-paren">(</span>struct ma_state<em> *mas</em>, unsigned long<em> start</em>, unsigned long<em> last</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mas_set_range" title="Permalink to this definition">¶</a></dt>
+<dd><p>Set up Maple Tree operation state for a different index.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">ma_state</span> <span class="pre">*mas</span></code></dt><dd><p>Maple Tree operation state.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">start</span></code></dt><dd><p>New start of range in the Maple Tree.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">last</span></code></dt><dd><p>New end of range in the Maple Tree.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Move the operation state to refer to a different range.  This will
+have the effect of starting a walk from the top; see <a class="reference internal" href="#c.mas_next" title="mas_next"><code class="xref c c-func docutils literal notranslate"><span class="pre">mas_next()</span></code></a>
+to move to an adjacent index.</p>
+</div>
+<dl class="function">
+<dt id="c.mas_set">
+void <code class="sig-name descname">mas_set</code><span class="sig-paren">(</span>struct ma_state<em> *mas</em>, unsigned long<em> index</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mas_set" title="Permalink to this definition">¶</a></dt>
+<dd><p>Set up Maple Tree operation state for a different index.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">ma_state</span> <span class="pre">*mas</span></code></dt><dd><p>Maple Tree operation state.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">index</span></code></dt><dd><p>New index into the Maple Tree.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Move the operation state to refer to a different index.  This will
+have the effect of starting a walk from the top; see <a class="reference internal" href="#c.mas_next" title="mas_next"><code class="xref c c-func docutils literal notranslate"><span class="pre">mas_next()</span></code></a>
+to move to an adjacent index.</p>
+</div>
+<dl class="function">
+<dt id="c.mt_init_flags">
+void <code class="sig-name descname">mt_init_flags</code><span class="sig-paren">(</span>struct maple_tree<em> *mt</em>, unsigned int<em> flags</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mt_init_flags" title="Permalink to this definition">¶</a></dt>
+<dd><p>Initialise an empty maple tree with flags.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">maple_tree</span> <span class="pre">*mt</span></code></dt><dd><p>Maple Tree</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">flags</span></code></dt><dd><p>maple tree flags.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>If you need to initialise a Maple Tree with special flags (eg, an
+allocation tree), use this function.</p>
+<p><strong>Context</strong></p>
+<p>Any context.</p>
+</div>
+<dl class="function">
+<dt id="c.mt_init">
+void <code class="sig-name descname">mt_init</code><span class="sig-paren">(</span>struct maple_tree<em> *mt</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mt_init" title="Permalink to this definition">¶</a></dt>
+<dd><p>Initialise an empty maple tree.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">maple_tree</span> <span class="pre">*mt</span></code></dt><dd><p>Maple Tree</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>An empty Maple Tree.</p>
+<p><strong>Context</strong></p>
+<p>Any context.</p>
+</div>
+<dl class="function">
+<dt id="c.mt_clear_in_rcu">
+void <code class="sig-name descname">mt_clear_in_rcu</code><span class="sig-paren">(</span>struct maple_tree<em> *mt</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mt_clear_in_rcu" title="Permalink to this definition">¶</a></dt>
+<dd><p>Switch the tree to non-RCU mode.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">maple_tree</span> <span class="pre">*mt</span></code></dt><dd><p>The Maple Tree</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.mt_set_in_rcu">
+void <code class="sig-name descname">mt_set_in_rcu</code><span class="sig-paren">(</span>struct maple_tree<em> *mt</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mt_set_in_rcu" title="Permalink to this definition">¶</a></dt>
+<dd><p>Switch the tree to RCU safe mode.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">maple_tree</span> <span class="pre">*mt</span></code></dt><dd><p>The Maple Tree</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.mt_for_each">
+<code class="sig-name descname">mt_for_each</code><span class="sig-paren">(</span><em>__tree</em>, <em>__entry</em>, <em>__index</em>, <em>__max</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mt_for_each" title="Permalink to this definition">¶</a></dt>
+<dd><p>Iterate over each entry starting at index until max.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">__tree</span></code></dt><dd><p>The Maple Tree</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">__entry</span></code></dt><dd><p>The current entry</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">__index</span></code></dt><dd><p>The index to update to track the location in the tree</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">__max</span></code></dt><dd><p>The maximum limit for <strong>index</strong></p>
+</dd>
+</dl>
+<p><strong>Note</strong></p>
+<p>Will not return the zero entry.</p>
+</div>
+<dl class="function">
+<dt id="c.mas_insert">
+void * <code class="sig-name descname">mas_insert</code><span class="sig-paren">(</span>struct ma_state<em> *mas</em>, void<em> *entry</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mas_insert" title="Permalink to this definition">¶</a></dt>
+<dd><p>Internal call to insert a value</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">ma_state</span> <span class="pre">*mas</span></code></dt><dd><p>The maple state</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*entry</span></code></dt><dd><p>The entry to store</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p><code class="docutils literal notranslate"><span class="pre">NULL</span></code> or the contents that already exists at the requested index
+otherwise.  The maple state needs to be checked for error conditions.</p>
+</div>
+<dl class="function">
+<dt id="c.mas_walk">
+void * <code class="sig-name descname">mas_walk</code><span class="sig-paren">(</span>struct ma_state<em> *mas</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mas_walk" title="Permalink to this definition">¶</a></dt>
+<dd><p>Search for <strong>mas-&gt;index</strong> in the tree.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">ma_state</span> <span class="pre">*mas</span></code></dt><dd><p>The maple state.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>mas-&gt;index and mas-&gt;last will be set to the range if there is a value.  If
+mas-&gt;node is MAS_NONE, reset to MAS_START.</p>
+<p><strong>Return</strong></p>
+<p>the entry at the location or <code class="docutils literal notranslate"><span class="pre">NULL</span></code>.</p>
+</div>
+<dl class="function">
+<dt id="c.mas_store">
+void * <code class="sig-name descname">mas_store</code><span class="sig-paren">(</span>struct ma_state<em> *mas</em>, void<em> *entry</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mas_store" title="Permalink to this definition">¶</a></dt>
+<dd><p>Store an <strong>entry</strong>.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">ma_state</span> <span class="pre">*mas</span></code></dt><dd><p>The maple state.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*entry</span></code></dt><dd><p>The entry to store.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>The <strong>mas-&gt;index</strong> and <strong>mas-&gt;last</strong> is used to set the range for the <strong>entry</strong>.</p>
+<p><strong>Note</strong></p>
+<p>The <strong>mas</strong> should have pre-allocated entries to ensure there is memory to
+store the entry.  Please see mas_expected_entries()/mas_destroy() for more details.</p>
+<p><strong>Return</strong></p>
+<p>the first entry between mas-&gt;index and mas-&gt;last or <code class="docutils literal notranslate"><span class="pre">NULL</span></code>.</p>
+</div>
+<dl class="function">
+<dt id="c.mas_store_gfp">
+int <code class="sig-name descname">mas_store_gfp</code><span class="sig-paren">(</span>struct ma_state<em> *mas</em>, void<em> *entry</em>, gfp_t<em> gfp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mas_store_gfp" title="Permalink to this definition">¶</a></dt>
+<dd><p>Store a value into the tree.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">ma_state</span> <span class="pre">*mas</span></code></dt><dd><p>The maple state</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*entry</span></code></dt><dd><p>The entry to store</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">gfp_t</span> <span class="pre">gfp</span></code></dt><dd><p>The GFP_FLAGS to use for allocations if necessary.</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p>0 on success, -EINVAL on invalid request, -ENOMEM if memory could not
+be allocated.</p>
+</div>
+<dl class="function">
+<dt id="c.mas_store_prealloc">
+void <code class="sig-name descname">mas_store_prealloc</code><span class="sig-paren">(</span>struct ma_state<em> *mas</em>, void<em> *entry</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mas_store_prealloc" title="Permalink to this definition">¶</a></dt>
+<dd><p>Store a value into the tree using memory preallocated in the maple state.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">ma_state</span> <span class="pre">*mas</span></code></dt><dd><p>The maple state</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*entry</span></code></dt><dd><p>The entry to store.</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.mas_preallocate">
+int <code class="sig-name descname">mas_preallocate</code><span class="sig-paren">(</span>struct ma_state<em> *mas</em>, void<em> *entry</em>, gfp_t<em> gfp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mas_preallocate" title="Permalink to this definition">¶</a></dt>
+<dd><p>Preallocate enough nodes for a store operation</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">ma_state</span> <span class="pre">*mas</span></code></dt><dd><p>The maple state</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*entry</span></code></dt><dd><p>The entry that will be stored</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">gfp_t</span> <span class="pre">gfp</span></code></dt><dd><p>The GFP_FLAGS to use for allocations.</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p>0 on success, -ENOMEM if memory could not be allocated.</p>
+</div>
+<dl class="function">
+<dt id="c.mas_next">
+void * <code class="sig-name descname">mas_next</code><span class="sig-paren">(</span>struct ma_state<em> *mas</em>, unsigned long<em> max</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mas_next" title="Permalink to this definition">¶</a></dt>
+<dd><p>Get the next entry.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">ma_state</span> <span class="pre">*mas</span></code></dt><dd><p>The maple state</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">max</span></code></dt><dd><p>The maximum index to check.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Returns the next entry after <strong>mas-&gt;index</strong>.
+Must hold rcu_read_lock or the write lock.
+Can return the zero entry.</p>
+<p><strong>Return</strong></p>
+<p>The next entry or <code class="docutils literal notranslate"><span class="pre">NULL</span></code></p>
+</div>
+<dl class="function">
+<dt id="c.mt_next">
+void * <code class="sig-name descname">mt_next</code><span class="sig-paren">(</span>struct maple_tree<em> *mt</em>, unsigned long<em> index</em>, unsigned long<em> max</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mt_next" title="Permalink to this definition">¶</a></dt>
+<dd><p>get the next value in the maple tree</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">maple_tree</span> <span class="pre">*mt</span></code></dt><dd><p>The maple tree</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">index</span></code></dt><dd><p>The start index</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">max</span></code></dt><dd><p>The maximum index to check</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p>The entry at <strong>index</strong> or higher, or <code class="docutils literal notranslate"><span class="pre">NULL</span></code> if nothing is found.</p>
+</div>
+<dl class="function">
+<dt id="c.mas_prev">
+void * <code class="sig-name descname">mas_prev</code><span class="sig-paren">(</span>struct ma_state<em> *mas</em>, unsigned long<em> min</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mas_prev" title="Permalink to this definition">¶</a></dt>
+<dd><p>Get the previous entry</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">ma_state</span> <span class="pre">*mas</span></code></dt><dd><p>The maple state</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">min</span></code></dt><dd><p>The minimum value to check.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Must hold rcu_read_lock or the write lock.
+Will reset mas to MAS_START if the node is MAS_NONE.  Will stop on not
+searchable nodes.</p>
+<p><strong>Return</strong></p>
+<p>the previous value or <code class="docutils literal notranslate"><span class="pre">NULL</span></code>.</p>
+</div>
+<dl class="function">
+<dt id="c.mt_prev">
+void * <code class="sig-name descname">mt_prev</code><span class="sig-paren">(</span>struct maple_tree<em> *mt</em>, unsigned long<em> index</em>, unsigned long<em> min</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mt_prev" title="Permalink to this definition">¶</a></dt>
+<dd><p>get the previous value in the maple tree</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">maple_tree</span> <span class="pre">*mt</span></code></dt><dd><p>The maple tree</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">index</span></code></dt><dd><p>The start index</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">min</span></code></dt><dd><p>The minimum index to check</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p>The entry at <strong>index</strong> or lower, or <code class="docutils literal notranslate"><span class="pre">NULL</span></code> if nothing is found.</p>
+</div>
+<dl class="function">
+<dt id="c.mas_pause">
+void <code class="sig-name descname">mas_pause</code><span class="sig-paren">(</span>struct ma_state<em> *mas</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mas_pause" title="Permalink to this definition">¶</a></dt>
+<dd><p>Pause a mas_find/mas_for_each to drop the lock.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">ma_state</span> <span class="pre">*mas</span></code></dt><dd><p>The maple state to pause</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Some users need to pause a walk and drop the lock they’re holding in
+order to yield to a higher priority thread or carry out an operation
+on an entry.  Those users should call this function before they drop
+the lock.  It resets the <strong>mas</strong> to be suitable for the next iteration
+of the loop after the user has reacquired the lock.  If most entries
+found during a walk require you to call <a class="reference internal" href="#c.mas_pause" title="mas_pause"><code class="xref c c-func docutils literal notranslate"><span class="pre">mas_pause()</span></code></a>, the <a class="reference internal" href="#c.mt_for_each" title="mt_for_each"><code class="xref c c-func docutils literal notranslate"><span class="pre">mt_for_each()</span></code></a>
+iterator may be more appropriate.</p>
+</div>
+<dl class="function">
+<dt id="c.mas_find">
+void * <code class="sig-name descname">mas_find</code><span class="sig-paren">(</span>struct ma_state<em> *mas</em>, unsigned long<em> max</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mas_find" title="Permalink to this definition">¶</a></dt>
+<dd><p>On the first call, find the entry at or after mas-&gt;index up to <code class="docutils literal notranslate"><span class="pre">max</span></code>. Otherwise, find the entry after mas-&gt;index.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">ma_state</span> <span class="pre">*mas</span></code></dt><dd><p>The maple state</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">max</span></code></dt><dd><p>The maximum value to check.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Must hold rcu_read_lock or the write lock.
+If an entry exists, last and index are updated accordingly.
+May set <strong>mas-&gt;node</strong> to MAS_NONE.</p>
+<p><strong>Return</strong></p>
+<p>The entry or <code class="docutils literal notranslate"><span class="pre">NULL</span></code>.</p>
+</div>
+<dl class="function">
+<dt id="c.mas_find_rev">
+void * <code class="sig-name descname">mas_find_rev</code><span class="sig-paren">(</span>struct ma_state<em> *mas</em>, unsigned long<em> min</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mas_find_rev" title="Permalink to this definition">¶</a></dt>
+<dd><p>On the first call, find the first non-null entry at or below mas-&gt;index down to <code class="docutils literal notranslate"><span class="pre">min</span></code>. Otherwise find the first non-null entry below mas-&gt;index down to <code class="docutils literal notranslate"><span class="pre">min</span></code>.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">ma_state</span> <span class="pre">*mas</span></code></dt><dd><p>The maple state</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">min</span></code></dt><dd><p>The minimum value to check.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Must hold rcu_read_lock or the write lock.
+If an entry exists, last and index are updated accordingly.
+May set <strong>mas-&gt;node</strong> to MAS_NONE.</p>
+<p><strong>Return</strong></p>
+<p>The entry or <code class="docutils literal notranslate"><span class="pre">NULL</span></code>.</p>
+</div>
+<dl class="function">
+<dt id="c.mas_erase">
+void * <code class="sig-name descname">mas_erase</code><span class="sig-paren">(</span>struct ma_state<em> *mas</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mas_erase" title="Permalink to this definition">¶</a></dt>
+<dd><p>Find the range in which index resides and erase the entire range.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">ma_state</span> <span class="pre">*mas</span></code></dt><dd><p>The maple state</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Must hold the write lock.
+Searches for <strong>mas-&gt;index</strong>, sets <strong>mas-&gt;index</strong> and <strong>mas-&gt;last</strong> to the range and
+erases that range.</p>
+<p><strong>Return</strong></p>
+<p>the entry that was erased or <code class="docutils literal notranslate"><span class="pre">NULL</span></code>, <strong>mas-&gt;index</strong> and <strong>mas-&gt;last</strong> are updated.</p>
+</div>
+<dl class="function">
+<dt id="c.mas_nomem">
+bool <code class="sig-name descname">mas_nomem</code><span class="sig-paren">(</span>struct ma_state<em> *mas</em>, gfp_t<em> gfp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mas_nomem" title="Permalink to this definition">¶</a></dt>
+<dd><p>Check if there was an error allocating and do the allocation if necessary If there are allocations, then free them.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">ma_state</span> <span class="pre">*mas</span></code></dt><dd><p>The maple state</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">gfp_t</span> <span class="pre">gfp</span></code></dt><dd><p>The GFP_FLAGS to use for allocations</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p>true on allocation, false otherwise.</p>
+</div>
+<dl class="function">
+<dt id="c.mtree_load">
+void * <code class="sig-name descname">mtree_load</code><span class="sig-paren">(</span>struct maple_tree<em> *mt</em>, unsigned long<em> index</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mtree_load" title="Permalink to this definition">¶</a></dt>
+<dd><p>Load a value stored in a maple tree</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">maple_tree</span> <span class="pre">*mt</span></code></dt><dd><p>The maple tree</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">index</span></code></dt><dd><p>The index to load</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p>the entry or <code class="docutils literal notranslate"><span class="pre">NULL</span></code></p>
+</div>
+<dl class="function">
+<dt id="c.mtree_store_range">
+int <code class="sig-name descname">mtree_store_range</code><span class="sig-paren">(</span>struct maple_tree<em> *mt</em>, unsigned long<em> index</em>, unsigned long<em> last</em>, void<em> *entry</em>, gfp_t<em> gfp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mtree_store_range" title="Permalink to this definition">¶</a></dt>
+<dd><p>Store an entry at a given range.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">maple_tree</span> <span class="pre">*mt</span></code></dt><dd><p>The maple tree</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">index</span></code></dt><dd><p>The start of the range</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">last</span></code></dt><dd><p>The end of the range</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*entry</span></code></dt><dd><p>The entry to store</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">gfp_t</span> <span class="pre">gfp</span></code></dt><dd><p>The GFP_FLAGS to use for allocations</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p>0 on success, -EINVAL on invalid request, -ENOMEM if memory could not
+be allocated.</p>
+</div>
+<dl class="function">
+<dt id="c.mtree_store">
+int <code class="sig-name descname">mtree_store</code><span class="sig-paren">(</span>struct maple_tree<em> *mt</em>, unsigned long<em> index</em>, void<em> *entry</em>, gfp_t<em> gfp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mtree_store" title="Permalink to this definition">¶</a></dt>
+<dd><p>Store an entry at a given index.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">maple_tree</span> <span class="pre">*mt</span></code></dt><dd><p>The maple tree</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">index</span></code></dt><dd><p>The index to store the value</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*entry</span></code></dt><dd><p>The entry to store</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">gfp_t</span> <span class="pre">gfp</span></code></dt><dd><p>The GFP_FLAGS to use for allocations</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p>0 on success, -EINVAL on invalid request, -ENOMEM if memory could not
+be allocated.</p>
+</div>
+<dl class="function">
+<dt id="c.mtree_insert_range">
+int <code class="sig-name descname">mtree_insert_range</code><span class="sig-paren">(</span>struct maple_tree<em> *mt</em>, unsigned long<em> first</em>, unsigned long<em> last</em>, void<em> *entry</em>, gfp_t<em> gfp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mtree_insert_range" title="Permalink to this definition">¶</a></dt>
+<dd><p>Insert an entry at a give range if there is no value.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">maple_tree</span> <span class="pre">*mt</span></code></dt><dd><p>The maple tree</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">first</span></code></dt><dd><p>The start of the range</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">last</span></code></dt><dd><p>The end of the range</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*entry</span></code></dt><dd><p>The entry to store</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">gfp_t</span> <span class="pre">gfp</span></code></dt><dd><p>The GFP_FLAGS to use for allocations.</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p>0 on success, -EEXISTS if the range is occupied, -EINVAL on invalid
+request, -ENOMEM if memory could not be allocated.</p>
+</div>
+<dl class="function">
+<dt id="c.mtree_insert">
+int <code class="sig-name descname">mtree_insert</code><span class="sig-paren">(</span>struct maple_tree<em> *mt</em>, unsigned long<em> index</em>, void<em> *entry</em>, gfp_t<em> gfp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mtree_insert" title="Permalink to this definition">¶</a></dt>
+<dd><p>Insert an entry at a give index if there is no value.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">maple_tree</span> <span class="pre">*mt</span></code></dt><dd><p>The maple tree</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">index</span></code></dt><dd><p>The index to store the value</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*entry</span></code></dt><dd><p>The entry to store</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">gfp_t</span> <span class="pre">gfp</span></code></dt><dd><p>The FGP_FLAGS to use for allocations.</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p>0 on success, -EEXISTS if the range is occupied, -EINVAL on invalid
+request, -ENOMEM if memory could not be allocated.</p>
+</div>
+<dl class="function">
+<dt id="c.mtree_erase">
+void * <code class="sig-name descname">mtree_erase</code><span class="sig-paren">(</span>struct maple_tree<em> *mt</em>, unsigned long<em> index</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mtree_erase" title="Permalink to this definition">¶</a></dt>
+<dd><p>Find an index and erase the entire range.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">maple_tree</span> <span class="pre">*mt</span></code></dt><dd><p>The maple tree</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">index</span></code></dt><dd><p>The index to erase</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Erasing is the same as a walk to an entry then a store of a NULL to that
+ENTIRE range.  In fact, it is implemented as such using the advanced API.</p>
+<p><strong>Return</strong></p>
+<p>The entry stored at the <strong>index</strong> or <code class="docutils literal notranslate"><span class="pre">NULL</span></code></p>
+</div>
+<dl class="function">
+<dt id="c.__mt_destroy">
+void <code class="sig-name descname">__mt_destroy</code><span class="sig-paren">(</span>struct maple_tree<em> *mt</em><span class="sig-paren">)</span><a class="headerlink" href="#c.__mt_destroy" title="Permalink to this definition">¶</a></dt>
+<dd><p>Walk and free all nodes of a locked maple tree.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">maple_tree</span> <span class="pre">*mt</span></code></dt><dd><p>The maple tree</p>
+</dd>
+</dl>
+<p><strong>Note</strong></p>
+<p>Does not handle locking.</p>
+</div>
+<dl class="function">
+<dt id="c.mtree_destroy">
+void <code class="sig-name descname">mtree_destroy</code><span class="sig-paren">(</span>struct maple_tree<em> *mt</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mtree_destroy" title="Permalink to this definition">¶</a></dt>
+<dd><p>Destroy a maple tree</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">maple_tree</span> <span class="pre">*mt</span></code></dt><dd><p>The maple tree</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Frees all resources used by the tree.  Handles locking.</p>
+</div>
+<dl class="function">
+<dt id="c.mt_find">
+void * <code class="sig-name descname">mt_find</code><span class="sig-paren">(</span>struct maple_tree<em> *mt</em>, unsigned long<em> *index</em>, unsigned long<em> max</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mt_find" title="Permalink to this definition">¶</a></dt>
+<dd><p>Search from the start up until an entry is found.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">maple_tree</span> <span class="pre">*mt</span></code></dt><dd><p>The maple tree</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">*index</span></code></dt><dd><p>Pointer which contains the start location of the search</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">max</span></code></dt><dd><p>The maximum value to check</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Handles locking.  <strong>index</strong> will be incremented to one beyond the range.</p>
+<p><strong>Return</strong></p>
+<p>The entry at or after the <strong>index</strong> or <code class="docutils literal notranslate"><span class="pre">NULL</span></code></p>
+</div>
+<dl class="function">
+<dt id="c.mt_find_after">
+void * <code class="sig-name descname">mt_find_after</code><span class="sig-paren">(</span>struct maple_tree<em> *mt</em>, unsigned long<em> *index</em>, unsigned long<em> max</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mt_find_after" title="Permalink to this definition">¶</a></dt>
+<dd><p>Search from the start up until an entry is found.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">maple_tree</span> <span class="pre">*mt</span></code></dt><dd><p>The maple tree</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">*index</span></code></dt><dd><p>Pointer which contains the start location of the search</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">max</span></code></dt><dd><p>The maximum value to check</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Handles locking, detects wrapping on index == 0</p>
+<p><strong>Return</strong></p>
+<p>The entry at or after the <strong>index</strong> or <code class="docutils literal notranslate"><span class="pre">NULL</span></code></p>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Maple Tree</a><ul>
+<li><a class="reference internal" href="#overview">Overview</a></li>
+<li><a class="reference internal" href="#normal-api">Normal API</a><ul>
+<li><a class="reference internal" href="#allocating-nodes">Allocating Nodes</a></li>
+<li><a class="reference internal" href="#locking">Locking</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#advanced-api">Advanced API</a><ul>
+<li><a class="reference internal" href="#advanced-allocating-nodes">Advanced Allocating Nodes</a></li>
+<li><a class="reference internal" href="#advanced-locking">Advanced Locking</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#functions-and-structures">Functions and structures</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/core-api/maple_tree.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/core-api/maple_tree.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

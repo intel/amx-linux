@@ -1,0 +1,396 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>The SMBus Protocol &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="How to instantiate I2C devices" href="instantiating-devices.html" />
+    <link rel="prev" title="The I2C Protocol" href="i2c-protocol.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="the-smbus-protocol">
+<h1>The SMBus Protocol<a class="headerlink" href="#the-smbus-protocol" title="Permalink to this headline">¶</a></h1>
+<p>The following is a summary of the SMBus protocol. It applies to
+all revisions of the protocol (1.0, 1.1, and 2.0).
+Certain protocol features which are not supported by
+this package are briefly described at the end of this document.</p>
+<p>Some adapters understand only the SMBus (System Management Bus) protocol,
+which is a subset from the I2C protocol. Fortunately, many devices use
+only the same subset, which makes it possible to put them on an SMBus.</p>
+<p>If you write a driver for some I2C device, please try to use the SMBus
+commands if at all possible (if the device uses only that subset of the
+I2C protocol). This makes it possible to use the device driver on both
+SMBus adapters and I2C adapters (the SMBus command set is automatically
+translated to I2C on I2C adapters, but plain I2C commands can not be
+handled at all on most pure SMBus adapters).</p>
+<p>Below is a list of SMBus protocol operations, and the functions executing
+them.  Note that the names used in the SMBus protocol specifications usually
+don’t match these function names.  For some of the operations which pass a
+single data byte, the functions using SMBus protocol operation names execute
+a different protocol operation entirely.</p>
+<p>Each transaction type corresponds to a functionality flag. Before calling a
+transaction function, a device driver should always check (just once) for
+the corresponding functionality flag to ensure that the underlying I2C
+adapter supports the transaction in question. See
+<a class="reference internal" href="functionality.html"><span class="doc">I2C/SMBus Functionality</span></a> for the details.</p>
+<section id="key-to-symbols">
+<h2>Key to symbols<a class="headerlink" href="#key-to-symbols" title="Permalink to this headline">¶</a></h2>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 20%" />
+<col style="width: 80%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>S</p></td>
+<td><p>Start condition</p></td>
+</tr>
+<tr class="row-even"><td><p>Sr</p></td>
+<td><p>Repeated start condition, used to switch from write to
+read mode.</p></td>
+</tr>
+<tr class="row-odd"><td><p>P</p></td>
+<td><p>Stop condition</p></td>
+</tr>
+<tr class="row-even"><td><p>Rd/Wr (1 bit)</p></td>
+<td><p>Read/Write bit. Rd equals 1, Wr equals 0.</p></td>
+</tr>
+<tr class="row-odd"><td><p>A, NA (1 bit)</p></td>
+<td><p>Acknowledge (ACK) and Not Acknowledge (NACK) bit</p></td>
+</tr>
+<tr class="row-even"><td><p>Addr  (7 bits)</p></td>
+<td><p>I2C 7 bit address. Note that this can be expanded to
+get a 10 bit I2C address.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Comm  (8 bits)</p></td>
+<td><p>Command byte, a data byte which often selects a register on
+the device.</p></td>
+</tr>
+<tr class="row-even"><td><p>Data  (8 bits)</p></td>
+<td><p>A plain data byte. DataLow and DataHigh represent the low and
+high byte of a 16 bit word.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Count (8 bits)</p></td>
+<td><p>A data byte containing the length of a block operation.</p></td>
+</tr>
+<tr class="row-even"><td><p>[..]</p></td>
+<td><p>Data sent by I2C device, as opposed to data sent by the host
+adapter.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="smbus-quick-command">
+<h2>SMBus Quick Command<a class="headerlink" href="#smbus-quick-command" title="Permalink to this headline">¶</a></h2>
+<p>This sends a single bit to the device, at the place of the Rd/Wr bit:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>S Addr Rd/Wr [A] P
+</pre></div>
+</div>
+<p>Functionality flag: I2C_FUNC_SMBUS_QUICK</p>
+</section>
+<section id="smbus-receive-byte">
+<h2>SMBus Receive Byte<a class="headerlink" href="#smbus-receive-byte" title="Permalink to this headline">¶</a></h2>
+<p>Implemented by <a class="reference internal" href="../driver-api/i2c.html#c.i2c_smbus_read_byte" title="i2c_smbus_read_byte"><code class="xref c c-func docutils literal notranslate"><span class="pre">i2c_smbus_read_byte()</span></code></a></p>
+<p>This reads a single byte from a device, without specifying a device
+register. Some devices are so simple that this interface is enough; for
+others, it is a shorthand if you want to read the same register as in
+the previous SMBus command:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>S Addr Rd [A] [Data] NA P
+</pre></div>
+</div>
+<p>Functionality flag: I2C_FUNC_SMBUS_READ_BYTE</p>
+</section>
+<section id="smbus-send-byte">
+<h2>SMBus Send Byte<a class="headerlink" href="#smbus-send-byte" title="Permalink to this headline">¶</a></h2>
+<p>Implemented by <a class="reference internal" href="../driver-api/i2c.html#c.i2c_smbus_write_byte" title="i2c_smbus_write_byte"><code class="xref c c-func docutils literal notranslate"><span class="pre">i2c_smbus_write_byte()</span></code></a></p>
+<p>This operation is the reverse of Receive Byte: it sends a single byte
+to a device.  See Receive Byte for more information.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>S Addr Wr [A] Data [A] P
+</pre></div>
+</div>
+<p>Functionality flag: I2C_FUNC_SMBUS_WRITE_BYTE</p>
+</section>
+<section id="smbus-read-byte">
+<h2>SMBus Read Byte<a class="headerlink" href="#smbus-read-byte" title="Permalink to this headline">¶</a></h2>
+<p>Implemented by <a class="reference internal" href="../driver-api/i2c.html#c.i2c_smbus_read_byte_data" title="i2c_smbus_read_byte_data"><code class="xref c c-func docutils literal notranslate"><span class="pre">i2c_smbus_read_byte_data()</span></code></a></p>
+<p>This reads a single byte from a device, from a designated register.
+The register is specified through the Comm byte:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>S Addr Wr [A] Comm [A] Sr Addr Rd [A] [Data] NA P
+</pre></div>
+</div>
+<p>Functionality flag: I2C_FUNC_SMBUS_READ_BYTE_DATA</p>
+</section>
+<section id="smbus-read-word">
+<h2>SMBus Read Word<a class="headerlink" href="#smbus-read-word" title="Permalink to this headline">¶</a></h2>
+<p>Implemented by <a class="reference internal" href="../driver-api/i2c.html#c.i2c_smbus_read_word_data" title="i2c_smbus_read_word_data"><code class="xref c c-func docutils literal notranslate"><span class="pre">i2c_smbus_read_word_data()</span></code></a></p>
+<p>This operation is very like Read Byte; again, data is read from a
+device, from a designated register that is specified through the Comm
+byte. But this time, the data is a complete word (16 bits):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>S Addr Wr [A] Comm [A] Sr Addr Rd [A] [DataLow] A [DataHigh] NA P
+</pre></div>
+</div>
+<p>Functionality flag: I2C_FUNC_SMBUS_READ_WORD_DATA</p>
+<p>Note the convenience function i2c_smbus_read_word_swapped() is
+available for reads where the two data bytes are the other way
+around (not SMBus compliant, but very popular.)</p>
+</section>
+<section id="smbus-write-byte">
+<h2>SMBus Write Byte<a class="headerlink" href="#smbus-write-byte" title="Permalink to this headline">¶</a></h2>
+<p>Implemented by <a class="reference internal" href="../driver-api/i2c.html#c.i2c_smbus_write_byte_data" title="i2c_smbus_write_byte_data"><code class="xref c c-func docutils literal notranslate"><span class="pre">i2c_smbus_write_byte_data()</span></code></a></p>
+<p>This writes a single byte to a device, to a designated register. The
+register is specified through the Comm byte. This is the opposite of
+the Read Byte operation.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>S Addr Wr [A] Comm [A] Data [A] P
+</pre></div>
+</div>
+<p>Functionality flag: I2C_FUNC_SMBUS_WRITE_BYTE_DATA</p>
+</section>
+<section id="smbus-write-word">
+<h2>SMBus Write Word<a class="headerlink" href="#smbus-write-word" title="Permalink to this headline">¶</a></h2>
+<p>Implemented by <a class="reference internal" href="../driver-api/i2c.html#c.i2c_smbus_write_word_data" title="i2c_smbus_write_word_data"><code class="xref c c-func docutils literal notranslate"><span class="pre">i2c_smbus_write_word_data()</span></code></a></p>
+<p>This is the opposite of the Read Word operation. 16 bits
+of data are written to a device, to the designated register that is
+specified through the Comm byte:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>S Addr Wr [A] Comm [A] DataLow [A] DataHigh [A] P
+</pre></div>
+</div>
+<p>Functionality flag: I2C_FUNC_SMBUS_WRITE_WORD_DATA</p>
+<p>Note the convenience function i2c_smbus_write_word_swapped() is
+available for writes where the two data bytes are the other way
+around (not SMBus compliant, but very popular.)</p>
+</section>
+<section id="smbus-process-call">
+<h2>SMBus Process Call<a class="headerlink" href="#smbus-process-call" title="Permalink to this headline">¶</a></h2>
+<p>This command selects a device register (through the Comm byte), sends
+16 bits of data to it, and reads 16 bits of data in return:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>S Addr Wr [A] Comm [A] DataLow [A] DataHigh [A]
+                            Sr Addr Rd [A] [DataLow] A [DataHigh] NA P
+</pre></div>
+</div>
+<p>Functionality flag: I2C_FUNC_SMBUS_PROC_CALL</p>
+</section>
+<section id="smbus-block-read">
+<h2>SMBus Block Read<a class="headerlink" href="#smbus-block-read" title="Permalink to this headline">¶</a></h2>
+<p>Implemented by <a class="reference internal" href="../driver-api/i2c.html#c.i2c_smbus_read_block_data" title="i2c_smbus_read_block_data"><code class="xref c c-func docutils literal notranslate"><span class="pre">i2c_smbus_read_block_data()</span></code></a></p>
+<p>This command reads a block of up to 32 bytes from a device, from a
+designated register that is specified through the Comm byte. The amount
+of data is specified by the device in the Count byte.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>S Addr Wr [A] Comm [A]
+          Sr Addr Rd [A] [Count] A [Data] A [Data] A ... A [Data] NA P
+</pre></div>
+</div>
+<p>Functionality flag: I2C_FUNC_SMBUS_READ_BLOCK_DATA</p>
+</section>
+<section id="smbus-block-write">
+<h2>SMBus Block Write<a class="headerlink" href="#smbus-block-write" title="Permalink to this headline">¶</a></h2>
+<p>Implemented by <a class="reference internal" href="../driver-api/i2c.html#c.i2c_smbus_write_block_data" title="i2c_smbus_write_block_data"><code class="xref c c-func docutils literal notranslate"><span class="pre">i2c_smbus_write_block_data()</span></code></a></p>
+<p>The opposite of the Block Read command, this writes up to 32 bytes to
+a device, to a designated register that is specified through the
+Comm byte. The amount of data is specified in the Count byte.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>S Addr Wr [A] Comm [A] Count [A] Data [A] Data [A] ... [A] Data [A] P
+</pre></div>
+</div>
+<p>Functionality flag: I2C_FUNC_SMBUS_WRITE_BLOCK_DATA</p>
+</section>
+<section id="smbus-block-write-block-read-process-call">
+<h2>SMBus Block Write - Block Read Process Call<a class="headerlink" href="#smbus-block-write-block-read-process-call" title="Permalink to this headline">¶</a></h2>
+<p>SMBus Block Write - Block Read Process Call was introduced in
+Revision 2.0 of the specification.</p>
+<p>This command selects a device register (through the Comm byte), sends
+1 to 31 bytes of data to it, and reads 1 to 31 bytes of data in return:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>S Addr Wr [A] Comm [A] Count [A] Data [A] ...
+                            Sr Addr Rd [A] [Count] A [Data] ... A P
+</pre></div>
+</div>
+<p>Functionality flag: I2C_FUNC_SMBUS_BLOCK_PROC_CALL</p>
+</section>
+<section id="smbus-host-notify">
+<h2>SMBus Host Notify<a class="headerlink" href="#smbus-host-notify" title="Permalink to this headline">¶</a></h2>
+<p>This command is sent from a SMBus device acting as a master to the
+SMBus host acting as a slave.
+It is the same form as Write Word, with the command code replaced by the
+alerting device’s address.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[S] [HostAddr] [Wr] A [DevAddr] A [DataLow] A [DataHigh] A [P]
+</pre></div>
+</div>
+<p>This is implemented in the following way in the Linux kernel:</p>
+<ul class="simple">
+<li><p>I2C bus drivers which support SMBus Host Notify should report
+I2C_FUNC_SMBUS_HOST_NOTIFY.</p></li>
+<li><p>I2C bus drivers trigger SMBus Host Notify by a call to
+<a class="reference internal" href="../driver-api/i2c.html#c.i2c_handle_smbus_host_notify" title="i2c_handle_smbus_host_notify"><code class="xref c c-func docutils literal notranslate"><span class="pre">i2c_handle_smbus_host_notify()</span></code></a>.</p></li>
+<li><p>I2C drivers for devices which can trigger SMBus Host Notify will have
+client-&gt;irq assigned to a Host Notify IRQ if noone else specified an other.</p></li>
+</ul>
+<p>There is currently no way to retrieve the data parameter from the client.</p>
+</section>
+<section id="packet-error-checking-pec">
+<h2>Packet Error Checking (PEC)<a class="headerlink" href="#packet-error-checking-pec" title="Permalink to this headline">¶</a></h2>
+<p>Packet Error Checking was introduced in Revision 1.1 of the specification.</p>
+<p>PEC adds a CRC-8 error-checking byte to transfers using it, immediately
+before the terminating STOP.</p>
+</section>
+<section id="address-resolution-protocol-arp">
+<h2>Address Resolution Protocol (ARP)<a class="headerlink" href="#address-resolution-protocol-arp" title="Permalink to this headline">¶</a></h2>
+<p>The Address Resolution Protocol was introduced in Revision 2.0 of
+the specification. It is a higher-layer protocol which uses the
+messages above.</p>
+<p>ARP adds device enumeration and dynamic address assignment to
+the protocol. All ARP communications use slave address 0x61 and
+require PEC checksums.</p>
+</section>
+<section id="smbus-alert">
+<h2>SMBus Alert<a class="headerlink" href="#smbus-alert" title="Permalink to this headline">¶</a></h2>
+<p>SMBus Alert was introduced in Revision 1.0 of the specification.</p>
+<p>The SMBus alert protocol allows several SMBus slave devices to share a
+single interrupt pin on the SMBus master, while still allowing the master
+to know which slave triggered the interrupt.</p>
+<p>This is implemented the following way in the Linux kernel:</p>
+<ul class="simple">
+<li><p>I2C bus drivers which support SMBus alert should call
+<a class="reference internal" href="../driver-api/i2c.html#c.i2c_new_smbus_alert_device" title="i2c_new_smbus_alert_device"><code class="xref c c-func docutils literal notranslate"><span class="pre">i2c_new_smbus_alert_device()</span></code></a> to install SMBus alert support.</p></li>
+<li><p>I2C drivers for devices which can trigger SMBus alerts should implement
+the optional alert() callback.</p></li>
+</ul>
+</section>
+<section id="i2c-block-transactions">
+<h2>I2C Block Transactions<a class="headerlink" href="#i2c-block-transactions" title="Permalink to this headline">¶</a></h2>
+<p>The following I2C block transactions are similar to the SMBus Block Read
+and Write operations, except these do not have a Count byte. They are
+supported by the SMBus layer and are described here for completeness, but
+they are <em>NOT</em> defined by the SMBus specification.</p>
+<p>I2C block transactions do not limit the number of bytes transferred
+but the SMBus layer places a limit of 32 bytes.</p>
+</section>
+<section id="i2c-block-read">
+<h2>I2C Block Read<a class="headerlink" href="#i2c-block-read" title="Permalink to this headline">¶</a></h2>
+<p>Implemented by i2c_smbus_read_i2c_block_data()</p>
+<p>This command reads a block of bytes from a device, from a
+designated register that is specified through the Comm byte:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>S Addr Wr [A] Comm [A]
+          Sr Addr Rd [A] [Data] A [Data] A ... A [Data] NA P
+</pre></div>
+</div>
+<p>Functionality flag: I2C_FUNC_SMBUS_READ_I2C_BLOCK</p>
+</section>
+<section id="i2c-block-write">
+<h2>I2C Block Write<a class="headerlink" href="#i2c-block-write" title="Permalink to this headline">¶</a></h2>
+<p>Implemented by i2c_smbus_write_i2c_block_data()</p>
+<p>The opposite of the Block Read command, this writes bytes to
+a device, to a designated register that is specified through the
+Comm byte. Note that command lengths of 0, 2, or more bytes are
+supported as they are indistinguishable from data.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>S Addr Wr [A] Comm [A] Data [A] Data [A] ... [A] Data [A] P
+</pre></div>
+</div>
+<p>Functionality flag: I2C_FUNC_SMBUS_WRITE_I2C_BLOCK</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">The SMBus Protocol</a><ul>
+<li><a class="reference internal" href="#key-to-symbols">Key to symbols</a></li>
+<li><a class="reference internal" href="#smbus-quick-command">SMBus Quick Command</a></li>
+<li><a class="reference internal" href="#smbus-receive-byte">SMBus Receive Byte</a></li>
+<li><a class="reference internal" href="#smbus-send-byte">SMBus Send Byte</a></li>
+<li><a class="reference internal" href="#smbus-read-byte">SMBus Read Byte</a></li>
+<li><a class="reference internal" href="#smbus-read-word">SMBus Read Word</a></li>
+<li><a class="reference internal" href="#smbus-write-byte">SMBus Write Byte</a></li>
+<li><a class="reference internal" href="#smbus-write-word">SMBus Write Word</a></li>
+<li><a class="reference internal" href="#smbus-process-call">SMBus Process Call</a></li>
+<li><a class="reference internal" href="#smbus-block-read">SMBus Block Read</a></li>
+<li><a class="reference internal" href="#smbus-block-write">SMBus Block Write</a></li>
+<li><a class="reference internal" href="#smbus-block-write-block-read-process-call">SMBus Block Write - Block Read Process Call</a></li>
+<li><a class="reference internal" href="#smbus-host-notify">SMBus Host Notify</a></li>
+<li><a class="reference internal" href="#packet-error-checking-pec">Packet Error Checking (PEC)</a></li>
+<li><a class="reference internal" href="#address-resolution-protocol-arp">Address Resolution Protocol (ARP)</a></li>
+<li><a class="reference internal" href="#smbus-alert">SMBus Alert</a></li>
+<li><a class="reference internal" href="#i2c-block-transactions">I2C Block Transactions</a></li>
+<li><a class="reference internal" href="#i2c-block-read">I2C Block Read</a></li>
+<li><a class="reference internal" href="#i2c-block-write">I2C Block Write</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/i2c/smbus-protocol.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/i2c/smbus-protocol.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

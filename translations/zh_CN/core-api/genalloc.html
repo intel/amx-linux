@@ -1,0 +1,178 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>genalloc/genpool子系统 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="启动时的内存管理" href="boot-time-mm.html" />
+    <link rel="prev" title="内存管理APIs" href="mm-api.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../core-api/genalloc.html"><span class="doc">The genalloc/genpool subsystem</span></a></p>
+</dd>
+<dt class="field-even">翻译</dt>
+<dd class="field-even"><p>司延腾 Yanteng Si &lt;<a class="reference external" href="mailto:siyanteng&#37;&#52;&#48;loongson&#46;cn">siyanteng<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+<dt class="field-odd">校译</dt>
+<dd class="field-odd"><p>时奎亮 &lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;</p>
+</dd>
+</dl>
+<section id="genalloc-genpool">
+<span id="cn-core-api-genalloc"></span><h1>genalloc/genpool子系统<a class="headerlink" href="#genalloc-genpool" title="Permalink to this headline">¶</a></h1>
+<p>内核中有许多内存分配子系统，每一个都是针对特定的需求。然而，有时候，内核开发者需
+要为特定范围的特殊用途的内存实现一个新的分配器；通常这个内存位于某个设备上。该设
+备的驱动程序的作者当然可以写一个小的分配器来完成工作，但这是让内核充满几十个测试
+差劲的分配器的方法。早在2005年，Jes Sorensen从sym53c8xx_2驱动中提取了其中的一
+个分配器，并将其作为一个通用模块发布，用于创建特设的内存分配器。这段代码在2.6.13
+版本中被合并；此后它被大大地修改了。</p>
+<p>使用这个分配器的代码应该包括&lt;linux/genalloc.h&gt;。这个动作从创建一个池开始，使用
+一个:</p>
+<p>该API在以下内核代码中:</p>
+<p>lib/genalloc.c</p>
+<p>对<a class="reference internal" href="../../../core-api/genalloc.html#c.gen_pool_create" title="gen_pool_create"><code class="xref c c-func docutils literal notranslate"><span class="pre">gen_pool_create()</span></code></a>的调用将创建一个内存池。分配的粒度由min_alloc_order设置；它
+是一个log-base-2（以2为底的对数）的数字，就像页面分配器使用的数字一样，但它指的是
+字节而不是页面。因此，如果min_alloc_order被传递为3，那么所有的分配将是8字节的倍数。
+增加min_alloc_order可以减少跟踪池中内存所需的内存。nid参数指定哪一个NUMA节点应该被
+用于分配管家结构体；如果调用者不关心，它可以是-1。</p>
+<p>“管理的”接口<a class="reference internal" href="../../../core-api/genalloc.html#c.devm_gen_pool_create" title="devm_gen_pool_create"><code class="xref c c-func docutils literal notranslate"><span class="pre">devm_gen_pool_create()</span></code></a>将内存池与一个特定的设备联系起来。在其他方面，
+当给定的设备被销毁时，它将自动清理内存池。</p>
+<p>一个内存池池被关闭的方法是:</p>
+<p>该API在以下内核代码中:</p>
+<p>lib/genalloc.c</p>
+<p>值得注意的是，如果在给定的内存池中仍有未完成的分配，这个函数将采取相当极端的步骤，调用
+BUG()，使整个系统崩溃。你已经被警告了。</p>
+<p>一个新创建的内存池没有内存可以分配。在这种状态下，它是相当无用的，所以首要任务之一通常
+是向内存池里添加内存。这可以通过以下方式完成:</p>
+<p>该API在以下内核代码中:</p>
+<p>include/linux/genalloc.h</p>
+<p>lib/genalloc.c</p>
+<p>对<a class="reference internal" href="../../../core-api/genalloc.html#c.gen_pool_add" title="gen_pool_add"><code class="xref c c-func docutils literal notranslate"><span class="pre">gen_pool_add()</span></code></a>的调用将把从地址（在内核的虚拟地址空间）开始的内存的大小字节放入
+给定的池中，再次使用nid作为节点ID进行辅助内存分配。gen_pool_add_virt()变体将显式
+物理地址与内存联系起来；只有在内存池被用于DMA分配时，这才是必要的。</p>
+<p>从内存池中分配内存（并将其放回）的函数是:</p>
+<p>该API在以下内核代码中:</p>
+<p>include/linux/genalloc.h</p>
+<p>lib/genalloc.c</p>
+<p>正如人们所期望的，<a class="reference internal" href="../../../core-api/genalloc.html#c.gen_pool_alloc" title="gen_pool_alloc"><code class="xref c c-func docutils literal notranslate"><span class="pre">gen_pool_alloc()</span></code></a>将从给定的池中分配size&lt;字节。<a class="reference internal" href="../../../core-api/genalloc.html#c.gen_pool_dma_alloc" title="gen_pool_dma_alloc"><code class="xref c c-func docutils literal notranslate"><span class="pre">gen_pool_dma_alloc()</span></code></a>
+变量分配内存用于DMA操作，返回dma所指向的空间中的相关物理地址。这只有在内存是用
+gen_pool_add_virt()添加的情况下才会起作用。请注意，这个函数偏离了genpool通常使用
+无符号长值来表示内核地址的模式；它返回一个void * 来代替。</p>
+<p>这一切看起来都比较简单；事实上，一些开发者显然认为这太简单了。毕竟，上面的接口没有提
+供对分配函数如何选择返回哪块特定内存的控制。如果需要这样的控制，下面的函数将是有意义
+的:</p>
+<p>该API在以下内核代码中:</p>
+<p>lib/genalloc.c</p>
+<p>使用gen_pool_alloc_algo()进行的分配指定了一种用于选择要分配的内存的算法；默认算法可
+以用<a class="reference internal" href="../../../core-api/genalloc.html#c.gen_pool_set_algo" title="gen_pool_set_algo"><code class="xref c c-func docutils literal notranslate"><span class="pre">gen_pool_set_algo()</span></code></a>来设置。数据值被传递给算法；大多数算法会忽略它，但偶尔也会需
+要它。当然，人们可以写一个特殊用途的算法，但是已经有一套公平的算法可用了:</p>
+<ul class="simple">
+<li><p>gen_pool_first_fit是一个简单的初配分配器；如果没有指定其他算法，这是默认算法。</p></li>
+<li><p>gen_pool_first_fit_align强迫分配有一个特定的对齐方式（通过genpool_data_align结
+构中的数据传递）。</p></li>
+<li><p>gen_pool_first_fit_order_align 按照大小的顺序排列分配。例如，一个60字节的分配将
+以64字节对齐。</p></li>
+<li><p>gen_pool_best_fit，正如人们所期望的，是一个简单的最佳匹配分配器。</p></li>
+<li><p>gen_pool_fixed_alloc在池中的一个特定偏移量（通过数据参数在genpool_data_fixed结
+构中传递）进行分配。如果指定的内存不可用，则分配失败。</p></li>
+</ul>
+<p>还有一些其他的函数，主要是为了查询内存池中的可用空间或迭代内存块等目的。然而，大多数
+用户应该不需要以上描述的功能。如果幸运的话，对这个模块的广泛认识将有助于防止在未来编
+写特殊用途的内存分配器。</p>
+<p>该API在以下内核代码中:</p>
+<p>lib/genalloc.c</p>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/core-api/genalloc.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/core-api/genalloc.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

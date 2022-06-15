@@ -1,0 +1,183 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>USB Raw Gadget &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="USB/IP protocol" href="usbip_protocol.html" />
+    <link rel="prev" title="OHCI" href="ohci.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="usb-raw-gadget">
+<h1>USB Raw Gadget<a class="headerlink" href="#usb-raw-gadget" title="Permalink to this headline">¶</a></h1>
+<p>USB Raw Gadget is a gadget driver that gives userspace low-level control over
+the gadget’s communication process.</p>
+<p>Like any other gadget driver, Raw Gadget implements USB devices via the
+USB gadget API. Unlike most gadget drivers, Raw Gadget does not implement
+any concrete USB functions itself but requires userspace to do that.</p>
+<p>Raw Gadget is currently a strictly debugging feature and should not be used
+in production. Use GadgetFS instead.</p>
+<p>Enabled with CONFIG_USB_RAW_GADGET.</p>
+<section id="comparison-to-gadgetfs">
+<h2>Comparison to GadgetFS<a class="headerlink" href="#comparison-to-gadgetfs" title="Permalink to this headline">¶</a></h2>
+<p>Raw Gadget is similar to GadgetFS but provides more direct access to the
+USB gadget layer for userspace. The key differences are:</p>
+<ol class="arabic simple">
+<li><p>Raw Gadget passes every USB request to userspace to get a response, while
+GadgetFS responds to some USB requests internally based on the provided
+descriptors. Note that the UDC driver might respond to some requests on
+its own and never forward them to the gadget layer.</p></li>
+<li><p>Raw Gadget allows providing arbitrary data as responses to USB requests,
+while GadgetFS performs sanity checks on the provided USB descriptors.
+This makes Raw Gadget suitable for fuzzing by providing malformed data as
+responses to USB requests.</p></li>
+<li><p>Raw Gadget provides a way to select a UDC device/driver to bind to,
+while GadgetFS currently binds to the first available UDC. This allows
+having multiple Raw Gadget instances bound to different UDCs.</p></li>
+<li><p>Raw Gadget explicitly exposes information about endpoints addresses and
+capabilities. This allows the user to write UDC-agnostic gadgets.</p></li>
+<li><p>Raw Gadget has an ioctl-based interface instead of a filesystem-based
+one.</p></li>
+</ol>
+</section>
+<section id="userspace-interface">
+<h2>Userspace interface<a class="headerlink" href="#userspace-interface" title="Permalink to this headline">¶</a></h2>
+<p>The user can interact with Raw Gadget by opening <code class="docutils literal notranslate"><span class="pre">/dev/raw-gadget</span></code> and
+issuing ioctl calls; see the comments in include/uapi/linux/usb/raw_gadget.h
+for details. Multiple Raw Gadget instances (bound to different UDCs) can be
+used at the same time.</p>
+<p>A typical usage scenario of Raw Gadget:</p>
+<ol class="arabic simple">
+<li><p>Create a Raw Gadget instance by opening <code class="docutils literal notranslate"><span class="pre">/dev/raw-gadget</span></code>.</p></li>
+<li><p>Initialize the instance via <code class="docutils literal notranslate"><span class="pre">USB_RAW_IOCTL_INIT</span></code>.</p></li>
+<li><p>Launch the instance with <code class="docutils literal notranslate"><span class="pre">USB_RAW_IOCTL_RUN</span></code>.</p></li>
+<li><p>In a loop issue <code class="docutils literal notranslate"><span class="pre">USB_RAW_IOCTL_EVENT_FETCH</span></code> to receive events from
+Raw Gadget and react to those depending on what kind of USB gadget must
+be implemented.</p></li>
+</ol>
+<p>Note that some UDC drivers have fixed addresses assigned to endpoints, and
+therefore arbitrary endpoint addresses cannot be used in the descriptors.
+Nevertheless, Raw Gadget provides a UDC-agnostic way to write USB gadgets.
+Once <code class="docutils literal notranslate"><span class="pre">USB_RAW_EVENT_CONNECT</span></code> is received via <code class="docutils literal notranslate"><span class="pre">USB_RAW_IOCTL_EVENT_FETCH</span></code>,
+<code class="docutils literal notranslate"><span class="pre">USB_RAW_IOCTL_EPS_INFO</span></code> can be used to find out information about the
+endpoints that the UDC driver has. Based on that, userspace must choose UDC
+endpoints for the gadget and assign addresses in the endpoint descriptors
+correspondingly.</p>
+<p>Raw Gadget usage examples and a test suite:</p>
+<p><a class="reference external" href="https://github.com/xairy/raw-gadget">https://github.com/xairy/raw-gadget</a></p>
+</section>
+<section id="internal-details">
+<h2>Internal details<a class="headerlink" href="#internal-details" title="Permalink to this headline">¶</a></h2>
+<p>Every Raw Gadget endpoint read/write ioctl submits a USB request and waits
+until its completion. This is done deliberately to assist with coverage-guided
+fuzzing by having a single syscall fully process a single USB request. This
+feature must be kept in the implementation.</p>
+</section>
+<section id="potential-future-improvements">
+<h2>Potential future improvements<a class="headerlink" href="#potential-future-improvements" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p>Report more events (suspend, resume, etc.) through
+<code class="docutils literal notranslate"><span class="pre">USB_RAW_IOCTL_EVENT_FETCH</span></code>.</p></li>
+<li><p>Support <code class="docutils literal notranslate"><span class="pre">O_NONBLOCK</span></code> I/O. This would be another mode of operation, where
+Raw Gadget would not wait until the completion of each USB request.</p></li>
+<li><p>Support USB 3 features (accept SS endpoint companion descriptor when
+enabling endpoints; allow providing <code class="docutils literal notranslate"><span class="pre">stream_id</span></code> for bulk transfers).</p></li>
+<li><p>Support ISO transfer features (expose <code class="docutils literal notranslate"><span class="pre">frame_number</span></code> for completed
+requests).</p></li>
+</ul>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">USB Raw Gadget</a><ul>
+<li><a class="reference internal" href="#comparison-to-gadgetfs">Comparison to GadgetFS</a></li>
+<li><a class="reference internal" href="#userspace-interface">Userspace interface</a></li>
+<li><a class="reference internal" href="#internal-details">Internal details</a></li>
+<li><a class="reference internal" href="#potential-future-improvements">Potential future improvements</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/usb/raw-gadget.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/usb/raw-gadget.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

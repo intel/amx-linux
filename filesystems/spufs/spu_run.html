@@ -1,0 +1,248 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>spu_run &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Squashfs 4.0 Filesystem" href="../squashfs.html" />
+    <link rel="prev" title="spu_create" href="spu_create.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="spu-run">
+<h1>spu_run<a class="headerlink" href="#spu-run" title="Permalink to this headline">¶</a></h1>
+<section id="name">
+<h2>Name<a class="headerlink" href="#name" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>spu_run - execute an spu context</p>
+</div></blockquote>
+</section>
+<section id="synopsis">
+<h2>Synopsis<a class="headerlink" href="#synopsis" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#include &lt;sys/spu.h&gt;
+
+int spu_run(int fd, unsigned int *npc, unsigned int *event);
+</pre></div>
+</div>
+</div></blockquote>
+</section>
+<section id="description">
+<h2>Description<a class="headerlink" href="#description" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>The  spu_run system call is used on PowerPC machines that implement the
+Cell Broadband Engine Architecture in order to access Synergistic  Pro-
+cessor  Units  (SPUs).  It  uses the fd that was returned from spu_cre-
+ate(2) to address a specific SPU context. When the context gets  sched-
+uled  to a physical SPU, it starts execution at the instruction pointer
+passed in npc.</p>
+<p>Execution of SPU code happens synchronously, meaning that spu_run  does
+not  return  while the SPU is still running. If there is a need to exe-
+cute SPU code in parallel with other code on either  the  main  CPU  or
+other  SPUs,  you  need to create a new thread of execution first, e.g.
+using the pthread_create(3) call.</p>
+<p>When spu_run returns, the current value of the SPU instruction  pointer
+is  written back to npc, so you can call spu_run again without updating
+the pointers.</p>
+<p>event can be a NULL pointer or point to an extended  status  code  that
+gets  filled  when spu_run returns. It can be one of the following con-
+stants:</p>
+<dl class="simple">
+<dt>SPE_EVENT_DMA_ALIGNMENT</dt><dd><p>A DMA alignment error</p>
+</dd>
+<dt>SPE_EVENT_SPE_DATA_SEGMENT</dt><dd><p>A DMA segmentation error</p>
+</dd>
+<dt>SPE_EVENT_SPE_DATA_STORAGE</dt><dd><p>A DMA storage error</p>
+</dd>
+</dl>
+<p>If NULL is passed as the event argument, these errors will result in  a
+signal delivered to the calling process.</p>
+</div></blockquote>
+</section>
+<section id="return-value">
+<h2>Return Value<a class="headerlink" href="#return-value" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>spu_run  returns the value of the spu_status register or -1 to indicate
+an error and set errno to one of the error  codes  listed  below.   The
+spu_status  register  value  contains  a  bit  mask of status codes and
+optionally a 14 bit code returned from the stop-and-signal  instruction
+on the SPU. The bit masks for the status codes are:</p>
+<dl class="simple">
+<dt>0x02</dt><dd><p>SPU was stopped by stop-and-signal.</p>
+</dd>
+<dt>0x04</dt><dd><p>SPU was stopped by halt.</p>
+</dd>
+<dt>0x08</dt><dd><p>SPU is waiting for a channel.</p>
+</dd>
+<dt>0x10</dt><dd><p>SPU is in single-step mode.</p>
+</dd>
+<dt>0x20</dt><dd><p>SPU has tried to execute an invalid instruction.</p>
+</dd>
+<dt>0x40</dt><dd><p>SPU has tried to access an invalid channel.</p>
+</dd>
+<dt>0x3fff0000</dt><dd><p>The  bits  masked with this value contain the code returned from
+stop-and-signal.</p>
+</dd>
+</dl>
+<p>There are always one or more of the lower eight bits set  or  an  error
+code is returned from spu_run.</p>
+</div></blockquote>
+</section>
+<section id="errors">
+<h2>Errors<a class="headerlink" href="#errors" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><dl class="simple">
+<dt>EAGAIN or EWOULDBLOCK</dt><dd><p>fd is in non-blocking mode and spu_run would block.</p>
+</dd>
+</dl>
+<p>EBADF  fd is not a valid file descriptor.</p>
+<dl class="simple">
+<dt>EFAULT npc is not a valid pointer or status is neither NULL nor a valid</dt><dd><p>pointer.</p>
+</dd>
+<dt>EINTR  A signal occurred while spu_run was in progress.  The npc  value</dt><dd><p>has  been updated to the new program counter value if necessary.</p>
+</dd>
+</dl>
+<p>EINVAL fd is not a file descriptor returned from spu_create(2).</p>
+<dl class="simple">
+<dt>ENOMEM Insufficient memory was available to handle a page fault result-</dt><dd><p>ing from an MFC direct memory access.</p>
+</dd>
+<dt>ENOSYS the functionality is not provided by the current system, because</dt><dd><p>either the hardware does not provide SPUs or the spufs module is
+not loaded.</p>
+</dd>
+</dl>
+</div></blockquote>
+</section>
+<section id="notes">
+<h2>Notes<a class="headerlink" href="#notes" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>spu_run  is  meant  to  be  used  from  libraries that implement a more
+abstract interface to SPUs, not to be used from  regular  applications.
+See  <a class="reference external" href="http://www.bsc.es/projects/deepcomputing/linuxoncell/">http://www.bsc.es/projects/deepcomputing/linuxoncell/</a> for the rec-
+ommended libraries.</p>
+</div></blockquote>
+</section>
+<section id="conforming-to">
+<h2>Conforming to<a class="headerlink" href="#conforming-to" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>This call is Linux specific and only implemented by the ppc64 architec-
+ture. Programs using this system call are not portable.</p>
+</div></blockquote>
+</section>
+<section id="bugs">
+<h2>Bugs<a class="headerlink" href="#bugs" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>The code does not yet fully implement all features lined out here.</p>
+</div></blockquote>
+</section>
+<section id="author">
+<h2>Author<a class="headerlink" href="#author" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>Arnd Bergmann &lt;<a class="reference external" href="mailto:arndb&#37;&#52;&#48;de&#46;ibm&#46;com">arndb<span>&#64;</span>de<span>&#46;</span>ibm<span>&#46;</span>com</a>&gt;</p>
+</div></blockquote>
+</section>
+<section id="see-also">
+<h2>See Also<a class="headerlink" href="#see-also" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>capabilities(7), close(2), spu_create(2), spufs(7)</p>
+</div></blockquote>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">spu_run</a><ul>
+<li><a class="reference internal" href="#name">Name</a></li>
+<li><a class="reference internal" href="#synopsis">Synopsis</a></li>
+<li><a class="reference internal" href="#description">Description</a></li>
+<li><a class="reference internal" href="#return-value">Return Value</a></li>
+<li><a class="reference internal" href="#errors">Errors</a></li>
+<li><a class="reference internal" href="#notes">Notes</a></li>
+<li><a class="reference internal" href="#conforming-to">Conforming to</a></li>
+<li><a class="reference internal" href="#bugs">Bugs</a></li>
+<li><a class="reference internal" href="#author">Author</a></li>
+<li><a class="reference internal" href="#see-also">See Also</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/filesystems/spufs/spu_run.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/filesystems/spufs/spu_run.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

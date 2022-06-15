@@ -1,0 +1,450 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>XArray &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="Linux中的红黑树（rbtree）" href="rbtree.html" />
+    <link rel="prev" title="通用关联数组的实现" href="assoc_array.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../core-api/xarray.html"><span class="doc">XArray</span></a></p>
+</dd>
+<dt class="field-even">翻译</dt>
+<dd class="field-even"><p>司延腾 Yanteng Si &lt;<a class="reference external" href="mailto:siyanteng&#37;&#52;&#48;loongson&#46;cn">siyanteng<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;
+周彬彬 Binbin Zhou &lt;<a class="reference external" href="mailto:zhoubinbin&#37;&#52;&#48;loongson&#46;cn">zhoubinbin<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+<dt class="field-odd">校译</dt>
+<dd class="field-odd"><p></p></dd>
+</dl>
+<section id="xarray">
+<span id="cn-core-api-xarray"></span><h1>XArray<a class="headerlink" href="#xarray" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">作者</dt>
+<dd class="field-odd"><p>Matthew Wilcox</p>
+</dd>
+</dl>
+<section id="id1">
+<h2>概览<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>XArray是一个抽象的数据类型，它的行为就像一个非常大的指针数组。它满足了许多与哈
+希或传统可调整大小的数组相同的需求。与哈希不同的是，它允许你以一种高效的缓存方
+式合理地转到下一个或上一个条目。与可调整大小的数组相比，不需要复制数据或改变MMU
+的映射来增加数组。与双链表相比，它的内存效率更高，可并行，对缓存更友好。它利用
+RCU的优势来执行查找而不需要锁定。</p>
+<p>当使用的索引是密集聚集的时候，XArray的实现是有效的；而哈希对象并使用哈希作为索引
+将不会有好的表现。XArray对小的索引进行了优化，不过对大的索引仍有良好的性能。如果
+你的索引可以大于 <code class="docutils literal notranslate"><span class="pre">ULONG_MAX</span></code> ，那么XArray就不适合你的数据类型。XArray最重要
+的用户是页面高速缓存。</p>
+<p>普通指针可以直接存储在XArray中。它们必须是4字节对齐的，这对任何从<a class="reference internal" href="../../../core-api/mm-api.html#c.kmalloc" title="kmalloc"><code class="xref c c-func docutils literal notranslate"><span class="pre">kmalloc()</span></code></a>和
+alloc_page()返回的指针来说都是如此。这对任意的用户空间指针和函数指针来说都不是
+真的。你可以存储指向静态分配对象的指针，只要这些对象的对齐方式至少是4（字节）。</p>
+<p>你也可以在XArray中存储0到 <code class="docutils literal notranslate"><span class="pre">LONG_MAX</span></code> 之间的整数。你必须首先使用<a class="reference internal" href="../../../core-api/xarray.html#c.xa_mk_value" title="xa_mk_value"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_mk_value()</span></code></a>
+将其转换为一个条目。当你从XArray中检索一个条目时，你可以通过调用<a class="reference internal" href="../../../core-api/xarray.html#c.xa_is_value" title="xa_is_value"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_is_value()</span></code></a>检
+查它是否是一个值条目，并通过调用<a class="reference internal" href="../../../core-api/xarray.html#c.xa_to_value" title="xa_to_value"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_to_value()</span></code></a>将它转换回一个整数。</p>
+<p>一些用户希望对他们存储在XArray中的指针进行标记。你可以调用<a class="reference internal" href="../../../core-api/xarray.html#c.xa_tag_pointer" title="xa_tag_pointer"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_tag_pointer()</span></code></a>来创建
+一个带有标签的条目，<a class="reference internal" href="../../../core-api/xarray.html#c.xa_untag_pointer" title="xa_untag_pointer"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_untag_pointer()</span></code></a>将一个有标签的条目转回一个无标签的指针，
+<a class="reference internal" href="../../../core-api/xarray.html#c.xa_pointer_tag" title="xa_pointer_tag"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_pointer_tag()</span></code></a>来检索一个条目的标签。标签指针使用相同的位，用于区分值条目和普通
+指针，所以你必须决定他们是否要在任何特定的XArray中存储值条目或标签指针。</p>
+<p>XArray不支持存储IS_ERR()指针，因为有些指针与值条目或内部条目冲突。</p>
+<p>XArray的一个不寻常的特点是能够创建占据一系列索引的条目。一旦存储到其中，查询该范围
+内的任何索引将返回与查询该范围内任何其他索引相同的条目。存储到任何索引都会存储所有
+的索引条目。多索引条目可以明确地分割成更小的条目，或者将其存储 <code class="docutils literal notranslate"><span class="pre">NULL</span></code> 到任何条目中
+都会使XArray忘记范围。</p>
+</section>
+<section id="api">
+<h2>普通API<a class="headerlink" href="#api" title="Permalink to this headline">¶</a></h2>
+<p>首先初始化一个XArray，对于静态分配的XArray可以用<a class="reference internal" href="../../../core-api/xarray.html#c.DEFINE_XARRAY" title="DEFINE_XARRAY"><code class="xref c c-func docutils literal notranslate"><span class="pre">DEFINE_XARRAY()</span></code></a>，对于动态分配的
+XArray可以用<a class="reference internal" href="../../../core-api/xarray.html#c.xa_init" title="xa_init"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_init()</span></code></a>。一个新初始化的XArray在每个索引处都包含一个 <code class="docutils literal notranslate"><span class="pre">NULL</span></code> 指针。</p>
+<p>然后你可以用<a class="reference internal" href="../../../core-api/xarray.html#c.xa_store" title="xa_store"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_store()</span></code></a>来设置条目，用<a class="reference internal" href="../../../core-api/xarray.html#c.xa_load" title="xa_load"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_load()</span></code></a>来获取条目。xa_store将用新的条目覆盖任
+何条目，并返回存储在该索引的上一个条目。你可以使用<a class="reference internal" href="../../../core-api/xarray.html#c.xa_erase" title="xa_erase"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_erase()</span></code></a>来代替调用<a class="reference internal" href="../../../core-api/xarray.html#c.xa_store" title="xa_store"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_store()</span></code></a>的
+<code class="docutils literal notranslate"><span class="pre">NULL</span></code> 条目。一个从未被存储过的条目、一个被擦除的条目和一个最近被存储过 <code class="docutils literal notranslate"><span class="pre">NULL</span></code> 的
+条目之间没有区别。</p>
+<p>你可以通过使用<a class="reference internal" href="../../../core-api/xarray.html#c.xa_cmpxchg" title="xa_cmpxchg"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_cmpxchg()</span></code></a>有条件地替换一个索引中的条目。和cmpxchg()一样，它只有在该索
+引的条目有 ‘旧‘ 值时才会成功。它也会返回该索引上的条目；如果它返回与传递的 ‘旧‘ 相同的条
+目，那么<a class="reference internal" href="../../../core-api/xarray.html#c.xa_cmpxchg" title="xa_cmpxchg"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_cmpxchg()</span></code></a>就成功了。</p>
+<p>如果你只想在某个索引的当前条目为 <code class="docutils literal notranslate"><span class="pre">NULL</span></code> 时将一个新条目存储到该索引，你可以使用<a class="reference internal" href="../../../core-api/xarray.html#c.xa_insert" title="xa_insert"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_insert()</span></code></a>，
+如果该条目不是空的，则返回 <code class="docutils literal notranslate"><span class="pre">-EBUSY</span></code> 。</p>
+<p>你可以通过调用<a class="reference internal" href="../../../core-api/xarray.html#c.xa_extract" title="xa_extract"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_extract()</span></code></a>将条目从XArray中复制到一个普通数组中。或者你可以通过调用
+<a class="reference internal" href="../../../core-api/xarray.html#c.xa_for_each" title="xa_for_each"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_for_each()</span></code></a>、<a class="reference internal" href="../../../core-api/xarray.html#c.xa_for_each_start" title="xa_for_each_start"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_for_each_start()</span></code></a>或<a class="reference internal" href="../../../core-api/xarray.html#c.xa_for_each_range" title="xa_for_each_range"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_for_each_range()</span></code></a>来遍历XArray中的现有条目。你
+可能更喜欢使用<a class="reference internal" href="../../../core-api/xarray.html#c.xa_find" title="xa_find"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_find()</span></code></a>或<a class="reference internal" href="../../../core-api/xarray.html#c.xa_find_after" title="xa_find_after"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_find_after()</span></code></a>来移动到XArray中的下一个当前条目。</p>
+<p>调用<a class="reference internal" href="../../../core-api/xarray.html#c.xa_store_range" title="xa_store_range"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_store_range()</span></code></a>可以在一个索引范围内存储同一个条目。如果你这样做，其他的一些操作将以
+一种稍微奇怪的方式进行。例如，在一个索引上标记条目可能会导致该条目在一些，但不是所有其他索
+引上被标记。储存到一个索引中可能会导致由一些，但不是所有其他索引检索的条目发生变化。</p>
+<p>有时你需要确保对<a class="reference internal" href="../../../core-api/xarray.html#c.xa_store" title="xa_store"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_store()</span></code></a>的后续调用将不需要分配内存。<a class="reference internal" href="../../../core-api/xarray.html#c.xa_reserve" title="xa_reserve"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_reserve()</span></code></a>函数将在指定索引处存储
+一个保留条目。普通API的用户将看到这个条目包含 <code class="docutils literal notranslate"><span class="pre">NULL</span></code> 。如果你不需要使用保留的条目，你可
+以调用<a class="reference internal" href="../../../core-api/xarray.html#c.xa_release" title="xa_release"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_release()</span></code></a>来删除这个未使用的条目。如果在此期间有其他用户存储到该条目，<a class="reference internal" href="../../../core-api/xarray.html#c.xa_release" title="xa_release"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_release()</span></code></a>
+将不做任何事情；相反，如果你想让该条目变成 <code class="docutils literal notranslate"><span class="pre">NULL</span></code> ，你应该使用<a class="reference internal" href="../../../core-api/xarray.html#c.xa_erase" title="xa_erase"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_erase()</span></code></a>。在一个保留的条
+目上使用<a class="reference internal" href="../../../core-api/xarray.html#c.xa_insert" title="xa_insert"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_insert()</span></code></a>将会失败。</p>
+<p>如果数组中的所有条目都是 <code class="docutils literal notranslate"><span class="pre">NULL</span></code> ，<a class="reference internal" href="../../../core-api/xarray.html#c.xa_empty" title="xa_empty"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_empty()</span></code></a>函数将返回 <code class="docutils literal notranslate"><span class="pre">true</span></code> 。</p>
+<p>最后，你可以通过调用<a class="reference internal" href="../../../core-api/xarray.html#c.xa_destroy" title="xa_destroy"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_destroy()</span></code></a>删除XArray中的所有条目。如果XArray的条目是指针，你可能希望
+先释放这些条目。你可以通过使用<a class="reference internal" href="../../../core-api/xarray.html#c.xa_for_each" title="xa_for_each"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_for_each()</span></code></a>迭代器遍历XArray中所有存在的条目来实现这一目的。</p>
+<section id="id2">
+<h3>搜索标记<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h3>
+<p>数组中的每个条目都有三个与之相关的位，称为标记。每个标记可以独立于其他标记被设置或清除。你可以
+通过使用<a class="reference internal" href="../../../core-api/xarray.html#c.xa_for_each_marked" title="xa_for_each_marked"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_for_each_marked()</span></code></a>迭代器来迭代有标记的条目。</p>
+<p>你可以通过使用<a class="reference internal" href="../../../core-api/xarray.html#c.xa_get_mark" title="xa_get_mark"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_get_mark()</span></code></a>来查询某个条目是否设置了标记。如果该条目不是 <code class="docutils literal notranslate"><span class="pre">NULL</span></code> ，你可以通过
+使用<a class="reference internal" href="../../../core-api/xarray.html#c.xa_set_mark" title="xa_set_mark"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_set_mark()</span></code></a>来设置一个标记，并通过调用<a class="reference internal" href="../../../core-api/xarray.html#c.xa_clear_mark" title="xa_clear_mark"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_clear_mark()</span></code></a>来删除条目上的标记。你可以通过调用
+<a class="reference internal" href="../../../core-api/xarray.html#c.xa_marked" title="xa_marked"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_marked()</span></code></a>来询问XArray中的任何条目是否有一个特定的标记被设置。从XArray中删除一个条目会导致与
+该条目相关的所有标记被清除。</p>
+<p>在一个多索引条目的任何索引上设置或清除标记将影响该条目所涵盖的所有索引。查询任何索引上的标记将返
+回相同的结果。</p>
+<p>没有办法对没有标记的条目进行迭代；数据结构不允许有效地实现这一点。目前没有迭代器来搜索比特的逻辑
+组合（例如迭代所有同时设置了 <code class="docutils literal notranslate"><span class="pre">XA_MARK_1</span></code> 和 <code class="docutils literal notranslate"><span class="pre">XA_MARK_2</span></code> 的条目，或者迭代所有设置了
+<code class="docutils literal notranslate"><span class="pre">XA_MARK_0</span></code> 或 <code class="docutils literal notranslate"><span class="pre">XA_MARK_2</span></code> 的条目）。如果有用户需要，可以增加这些内容。</p>
+</section>
+<section id="xarrays">
+<h3>分配XArrays<a class="headerlink" href="#xarrays" title="Permalink to this headline">¶</a></h3>
+<p>如果你使用<a class="reference internal" href="../../../core-api/xarray.html#c.DEFINE_XARRAY_ALLOC" title="DEFINE_XARRAY_ALLOC"><code class="xref c c-func docutils literal notranslate"><span class="pre">DEFINE_XARRAY_ALLOC()</span></code></a>来定义XArray，或者通过向<a class="reference internal" href="../../../core-api/xarray.html#c.xa_init_flags" title="xa_init_flags"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_init_flags()</span></code></a>传递 <code class="docutils literal notranslate"><span class="pre">XA_FLAGS_ALLOC</span></code>
+来初始化它，XArray会改变以跟踪条目是否被使用。</p>
+<p>你可以调用<a class="reference internal" href="../../../core-api/xarray.html#c.xa_alloc" title="xa_alloc"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_alloc()</span></code></a>将条目存储在XArray中一个未使用的索引上。如果你需要从中断上下文中修改数组，你
+可以使用<a class="reference internal" href="../../../core-api/xarray.html#c.xa_alloc_bh" title="xa_alloc_bh"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_alloc_bh()</span></code></a>或<a class="reference internal" href="../../../core-api/xarray.html#c.xa_alloc_irq" title="xa_alloc_irq"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_alloc_irq()</span></code></a>，在分配ID的同时禁用中断。</p>
+<p>使用<a class="reference internal" href="../../../core-api/xarray.html#c.xa_store" title="xa_store"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_store()</span></code></a>、<a class="reference internal" href="../../../core-api/xarray.html#c.xa_cmpxchg" title="xa_cmpxchg"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_cmpxchg()</span></code></a>或<a class="reference internal" href="../../../core-api/xarray.html#c.xa_insert" title="xa_insert"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_insert()</span></code></a>也将标记该条目为正在分配。与普通的XArray不同，存储 <code class="docutils literal notranslate"><span class="pre">NULL</span></code>
+将标记该条目为正在使用中，就像<a class="reference internal" href="../../../core-api/xarray.html#c.xa_reserve" title="xa_reserve"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_reserve()</span></code></a>。要释放一个条目，请使用<a class="reference internal" href="../../../core-api/xarray.html#c.xa_erase" title="xa_erase"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_erase()</span></code></a>（或者<a class="reference internal" href="../../../core-api/xarray.html#c.xa_release" title="xa_release"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_release()</span></code></a>，
+如果你只想释放一个 <code class="docutils literal notranslate"><span class="pre">NULL</span></code> 的条目）。</p>
+<p>默认情况下，最低的空闲条目从0开始分配。如果你想从1开始分配条目，使用<a class="reference internal" href="../../../core-api/xarray.html#c.DEFINE_XARRAY_ALLOC1" title="DEFINE_XARRAY_ALLOC1"><code class="xref c c-func docutils literal notranslate"><span class="pre">DEFINE_XARRAY_ALLOC1()</span></code></a>或
+<code class="docutils literal notranslate"><span class="pre">XA_FLAGS_ALLOC1</span></code> 会更有效。如果你想分配ID到一个最大值，然后绕回最低的空闲ID，你可以使用
+<a class="reference internal" href="../../../core-api/xarray.html#c.xa_alloc_cyclic" title="xa_alloc_cyclic"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_alloc_cyclic()</span></code></a>。</p>
+<p>你不能在分配的XArray中使用 <code class="docutils literal notranslate"><span class="pre">XA_MARK_0</span></code> ，因为这个标记是用来跟踪一个条目是否是空闲的。其他的
+标记可以供你使用。</p>
+</section>
+<section id="id3">
+<h3>内存分配<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h3>
+<p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_store" title="xa_store"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_store()</span></code></a>, <a class="reference internal" href="../../../core-api/xarray.html#c.xa_cmpxchg" title="xa_cmpxchg"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_cmpxchg()</span></code></a>, <a class="reference internal" href="../../../core-api/xarray.html#c.xa_alloc" title="xa_alloc"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_alloc()</span></code></a>, <a class="reference internal" href="../../../core-api/xarray.html#c.xa_reserve" title="xa_reserve"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_reserve()</span></code></a>和<a class="reference internal" href="../../../core-api/xarray.html#c.xa_insert" title="xa_insert"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_insert()</span></code></a>函数接受一个gfp_t参数，以
+防XArray需要分配内存来存储这个条目。如果该条目被删除，则不需要进行内存分配，指定的GFP标志将被忽
+略。</p>
+<p>没有内存可供分配是可能的，特别是如果你传递了一组限制性的GFP标志。在这种情况下，这些函数会返回一
+个特殊的值，可以用<a class="reference internal" href="../../../core-api/xarray.html#c.xa_err" title="xa_err"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_err()</span></code></a>把它变成一个错误值。如果你不需要确切地知道哪个错误发生，使用<a class="reference internal" href="../../../core-api/xarray.html#c.xa_is_err" title="xa_is_err"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_is_err()</span></code></a>
+会更有效一些。</p>
+</section>
+<section id="id4">
+<h3>锁<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h3>
+<p>当使用普通API时，你不必担心锁的问题。XArray使用RCU和一个内部自旋锁来同步访问:</p>
+<dl class="simple">
+<dt>不需要锁:</dt><dd><ul class="simple">
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_empty" title="xa_empty"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_empty()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_marked" title="xa_marked"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_marked()</span></code></a></p></li>
+</ul>
+</dd>
+<dt>采取RCU读锁:</dt><dd><ul class="simple">
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_load" title="xa_load"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_load()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_for_each" title="xa_for_each"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_for_each()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_for_each_start" title="xa_for_each_start"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_for_each_start()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_for_each_range" title="xa_for_each_range"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_for_each_range()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_find" title="xa_find"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_find()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_find_after" title="xa_find_after"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_find_after()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_extract" title="xa_extract"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_extract()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_get_mark" title="xa_get_mark"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_get_mark()</span></code></a></p></li>
+</ul>
+</dd>
+<dt>内部使用xa_lock:</dt><dd><ul class="simple">
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_store" title="xa_store"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_store()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_store_bh" title="xa_store_bh"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_store_bh()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_store_irq" title="xa_store_irq"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_store_irq()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_insert" title="xa_insert"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_insert()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_insert_bh" title="xa_insert_bh"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_insert_bh()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_insert_irq" title="xa_insert_irq"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_insert_irq()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_erase" title="xa_erase"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_erase()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_erase_bh" title="xa_erase_bh"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_erase_bh()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_erase_irq" title="xa_erase_irq"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_erase_irq()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_cmpxchg" title="xa_cmpxchg"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_cmpxchg()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_cmpxchg_bh" title="xa_cmpxchg_bh"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_cmpxchg_bh()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_cmpxchg_irq" title="xa_cmpxchg_irq"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_cmpxchg_irq()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_store_range" title="xa_store_range"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_store_range()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_alloc" title="xa_alloc"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_alloc()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_alloc_bh" title="xa_alloc_bh"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_alloc_bh()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_alloc_irq" title="xa_alloc_irq"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_alloc_irq()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_reserve" title="xa_reserve"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_reserve()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_reserve_bh" title="xa_reserve_bh"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_reserve_bh()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_reserve_irq" title="xa_reserve_irq"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_reserve_irq()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_destroy" title="xa_destroy"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_destroy()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_set_mark" title="xa_set_mark"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_set_mark()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_clear_mark" title="xa_clear_mark"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_clear_mark()</span></code></a></p></li>
+</ul>
+</dd>
+<dt>假设进入时持有xa_lock:</dt><dd><ul class="simple">
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.__xa_store" title="__xa_store"><code class="xref c c-func docutils literal notranslate"><span class="pre">__xa_store()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.__xa_insert" title="__xa_insert"><code class="xref c c-func docutils literal notranslate"><span class="pre">__xa_insert()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.__xa_erase" title="__xa_erase"><code class="xref c c-func docutils literal notranslate"><span class="pre">__xa_erase()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.__xa_cmpxchg" title="__xa_cmpxchg"><code class="xref c c-func docutils literal notranslate"><span class="pre">__xa_cmpxchg()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.__xa_alloc" title="__xa_alloc"><code class="xref c c-func docutils literal notranslate"><span class="pre">__xa_alloc()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.__xa_set_mark" title="__xa_set_mark"><code class="xref c c-func docutils literal notranslate"><span class="pre">__xa_set_mark()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/xarray.html#c.__xa_clear_mark" title="__xa_clear_mark"><code class="xref c c-func docutils literal notranslate"><span class="pre">__xa_clear_mark()</span></code></a></p></li>
+</ul>
+</dd>
+</dl>
+<p>如果你想利用锁来保护你存储在XArray中的数据结构，你可以在调用<a class="reference internal" href="../../../core-api/xarray.html#c.xa_load" title="xa_load"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_load()</span></code></a>之前调用xa_lock()，然后在
+调用xa_unlock()之前对你找到的对象进行一个引用计数。这将防止存储操作在查找对象和增加refcount期间
+从数组中删除对象。你也可以使用RCU来避免解除对已释放内存的引用，但对这一点的解释已经超出了本文的范
+围。</p>
+<p>在修改数组时，XArray不会禁用中断或softirqs。从中断或softirq上下文中读取XArray是安全的，因为RCU锁
+提供了足够的保护。</p>
+<p>例如，如果你想在进程上下文中存储XArray中的条目，然后在softirq上下文中擦除它们，你可以这样做:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void foo_init(struct foo *foo)
+{
+    xa_init_flags(&amp;foo-&gt;array, XA_FLAGS_LOCK_BH);
+}
+
+int foo_store(struct foo *foo, unsigned long index, void *entry)
+{
+    int err;
+
+    xa_lock_bh(&amp;foo-&gt;array);
+    err = xa_err(__xa_store(&amp;foo-&gt;array, index, entry, GFP_KERNEL));
+    if (!err)
+        foo-&gt;count++;
+    xa_unlock_bh(&amp;foo-&gt;array);
+    return err;
+}
+
+/* foo_erase()只在软中断上下文中调用 */
+void foo_erase(struct foo *foo, unsigned long index)
+{
+    xa_lock(&amp;foo-&gt;array);
+    __xa_erase(&amp;foo-&gt;array, index);
+    foo-&gt;count--;
+    xa_unlock(&amp;foo-&gt;array);
+}
+</pre></div>
+</div>
+<p>如果你要从中断或softirq上下文中修改XArray，你需要使用<a class="reference internal" href="../../../core-api/xarray.html#c.xa_init_flags" title="xa_init_flags"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_init_flags()</span></code></a>初始化数组，传递
+<code class="docutils literal notranslate"><span class="pre">XA_FLAGS_LOCK_IRQ</span></code> 或 <code class="docutils literal notranslate"><span class="pre">XA_FLAGS_LOCK_BH</span></code> （参数）。</p>
+<p>上面的例子还显示了一个常见的模式，即希望在存储端扩展xa_lock的覆盖范围，以保护与数组相关的一些统计
+数据。</p>
+<p>与中断上下文共享XArray也是可能的，可以在中断处理程序和进程上下文中都使用xa_lock_irqsave()，或者
+在进程上下文中使用xa_lock_irq()，在中断处理程序中使用xa_lock()。一些更常见的模式有一些辅助函数，
+如<a class="reference internal" href="../../../core-api/xarray.html#c.xa_store_bh" title="xa_store_bh"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_store_bh()</span></code></a>、<a class="reference internal" href="../../../core-api/xarray.html#c.xa_store_irq" title="xa_store_irq"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_store_irq()</span></code></a>、<a class="reference internal" href="../../../core-api/xarray.html#c.xa_erase_bh" title="xa_erase_bh"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_erase_bh()</span></code></a>、<a class="reference internal" href="../../../core-api/xarray.html#c.xa_erase_irq" title="xa_erase_irq"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_erase_irq()</span></code></a>、<a class="reference internal" href="../../../core-api/xarray.html#c.xa_cmpxchg_bh" title="xa_cmpxchg_bh"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_cmpxchg_bh()</span></code></a> 和<a class="reference internal" href="../../../core-api/xarray.html#c.xa_cmpxchg_irq" title="xa_cmpxchg_irq"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_cmpxchg_irq()</span></code></a>。</p>
+<p>有时你需要用一个mutex来保护对XArray的访问，因为这个锁在锁的层次结构中位于另一个mutex之上。这并不
+意味着你有权使用像<a class="reference internal" href="../../../core-api/xarray.html#c.__xa_erase" title="__xa_erase"><code class="xref c c-func docutils literal notranslate"><span class="pre">__xa_erase()</span></code></a>这样的函数而不占用xa_lock；xa_lock是用来进行lockdep验证的，将来也
+会用于其他用途。</p>
+<p><a class="reference internal" href="../../../core-api/xarray.html#c.__xa_set_mark" title="__xa_set_mark"><code class="xref c c-func docutils literal notranslate"><span class="pre">__xa_set_mark()</span></code></a> 和 <a class="reference internal" href="../../../core-api/xarray.html#c.__xa_clear_mark" title="__xa_clear_mark"><code class="xref c c-func docutils literal notranslate"><span class="pre">__xa_clear_mark()</span></code></a> 函数也适用于你查找一个条目并想原子化地设置或清除一个标记的
+情况。在这种情况下，使用高级API可能更有效，因为它将使你免于走两次树。</p>
+</section>
+</section>
+<section id="id5">
+<h2>高级API<a class="headerlink" href="#id5" title="Permalink to this headline">¶</a></h2>
+<p>高级API提供了更多的灵活性和更好的性能，但代价是接口可能更难使用，保障措施更少。高级API没有为你加锁，
+你需要在修改数组的时候使用xa_lock。在对数组进行只读操作时，你可以选择使用xa_lock或RCU锁。你可以在
+同一个数组上混合使用高级和普通操作；事实上，普通API是以高级API的形式实现的。高级API只对具有GPL兼容
+许可证的模块可用。</p>
+<p>高级API是基于xa_state的。这是一个不透明的数据结构，你使用<a class="reference internal" href="../../../core-api/xarray.html#c.XA_STATE" title="XA_STATE"><code class="xref c c-func docutils literal notranslate"><span class="pre">XA_STATE()</span></code></a>宏在堆栈中声明。这个宏初始化了
+xa_state，准备开始在XArray上移动。它被用作一个游标来保持在XArray中的位置，并让你把各种操作组合在一
+起，而不必每次都从头开始。xa_state的内容受<a class="reference internal" href="../../../core-api/kernel-api.html#c.rcu_read_lock" title="rcu_read_lock"><code class="xref c c-func docutils literal notranslate"><span class="pre">rcu_read_lock()</span></code></a>或xas_lock()的保护。如果需要删除保护状态
+和树的这些锁中的任何一个，你必须调用<a class="reference internal" href="../../../core-api/xarray.html#c.xas_pause" title="xas_pause"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_pause()</span></code></a>以便将来的调用不会依赖于状态中未受保护的部分。</p>
+<p>xa_state也被用来存储错误(store errors)。你可以调用<a class="reference internal" href="../../../core-api/xarray.html#c.xas_error" title="xas_error"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_error()</span></code></a>来检索错误。所有的操作在进行之前都
+会检查xa_state是否处于错误状态，所以你没有必要在每次调用之后检查错误；你可以连续进行多次调用，只在
+方便的时候检查。目前XArray代码本身产生的错误只有 <code class="docutils literal notranslate"><span class="pre">ENOMEM</span></code> 和 <code class="docutils literal notranslate"><span class="pre">EINVAL</span></code> ，但它支持任意的错误，
+以防你想自己调用<a class="reference internal" href="../../../core-api/xarray.html#c.xas_set_err" title="xas_set_err"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_set_err()</span></code></a>。</p>
+<p>如果xa_state持有 <code class="docutils literal notranslate"><span class="pre">ENOMEM</span></code> 错误，调用<a class="reference internal" href="../../../core-api/xarray.html#c.xas_nomem" title="xas_nomem"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_nomem()</span></code></a>将尝试使用指定的gfp标志分配更多的内存，并将其缓
+存在xa_state中供下一次尝试。这个想法是，你拿着xa_lock，尝试操作，然后放弃锁。该操作试图在持有锁的情
+况下分配内存，但它更有可能失败。一旦你放弃了锁，<a class="reference internal" href="../../../core-api/xarray.html#c.xas_nomem" title="xas_nomem"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_nomem()</span></code></a>可以更努力地尝试分配更多内存。如果值得重
+试该操作，它将返回 <code class="docutils literal notranslate"><span class="pre">true</span></code> （即出现了内存错误，分配了更多的内存）。如果它之前已经分配了内存，并且
+该内存没有被使用，也没有错误（或者一些不是 <code class="docutils literal notranslate"><span class="pre">ENOMEM</span></code> 的错误），那么它将释放之前分配的内存。</p>
+<section id="id6">
+<h3>内部条目<a class="headerlink" href="#id6" title="Permalink to this headline">¶</a></h3>
+<p>XArray为它自己的目的保留了一些条目。这些条目从未通过正常的API暴露出来，但是当使用高级API时，有可能看
+到它们。通常，处理它们的最好方法是把它们传递给<a class="reference internal" href="../../../core-api/xarray.html#c.xas_retry" title="xas_retry"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_retry()</span></code></a>，如果它返回 <code class="docutils literal notranslate"><span class="pre">true</span></code> ，就重试操作。</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 13%" />
+<col style="width: 13%" />
+<col style="width: 75%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>名称</p></td>
+<td><p>检测</p></td>
+<td><p>用途</p></td>
+</tr>
+<tr class="row-even"><td><p>Node</p></td>
+<td><p>xa_is_node()</p></td>
+<td><p>一个XArray节点。 在使用多索引xa_state时可能是可见的。</p></td>
+</tr>
+<tr class="row-odd"><td><p>Sibling</p></td>
+<td><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_is_sibling" title="xa_is_sibling"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_is_sibling()</span></code></a></p></td>
+<td><p>一个多索引条目的非典型条目。该值表示该节点中的哪个槽有典型条目。</p></td>
+</tr>
+<tr class="row-even"><td><p>Retry</p></td>
+<td><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_is_retry" title="xa_is_retry"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_is_retry()</span></code></a></p></td>
+<td><p>这个条目目前正在被一个拥有xa_lock的线程修改。在这个RCU周期结束时，包含该条目的节点可能会被释放。
+你应该从数组的头部重新开始查找。</p></td>
+</tr>
+<tr class="row-odd"><td><p>Zero</p></td>
+<td><p><a class="reference internal" href="../../../core-api/xarray.html#c.xa_is_zero" title="xa_is_zero"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_is_zero()</span></code></a></p></td>
+<td><p>Zero条目通过普通API显示为 <code class="docutils literal notranslate"><span class="pre">NULL</span></code> ，但在XArray中占有一个条目，可用于保留索引供将来使用。这是
+通过为分配的条目分配XArrays来使用的，这些条目是 <code class="docutils literal notranslate"><span class="pre">NULL</span></code> 。</p></td>
+</tr>
+</tbody>
+</table>
+<p>其他内部条目可能会在未来被添加。在可能的情况下，它们将由<a class="reference internal" href="../../../core-api/xarray.html#c.xas_retry" title="xas_retry"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_retry()</span></code></a>处理。</p>
+</section>
+<section id="id7">
+<h3>附加函数<a class="headerlink" href="#id7" title="Permalink to this headline">¶</a></h3>
+<p><a class="reference internal" href="../../../core-api/xarray.html#c.xas_create_range" title="xas_create_range"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_create_range()</span></code></a>函数分配了所有必要的内存来存储一个范围内的每一个条目。如果它不能分配内存，它将在
+xa_state中设置ENOMEM。</p>
+<p>你可以使用<a class="reference internal" href="../../../core-api/xarray.html#c.xas_init_marks" title="xas_init_marks"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_init_marks()</span></code></a>将一个条目上的标记重置为默认状态。这通常是清空所有标记，除非XArray被标记
+为 <code class="docutils literal notranslate"><span class="pre">XA_FLAGS_TRACK_FREE</span></code> ，在这种情况下，标记0被设置，所有其他标记被清空。使用<a class="reference internal" href="../../../core-api/xarray.html#c.xas_store" title="xas_store"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_store()</span></code></a>将一个
+条目替换为另一个条目不会重置该条目上的标记；如果你想重置标记，你应该明确地这样做。</p>
+<p><a class="reference internal" href="../../../core-api/xarray.html#c.xas_load" title="xas_load"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_load()</span></code></a>会尽可能地将xa_state移动到该条目附近。如果你知道xa_state已经移动到了该条目，并且需要检查
+该条目是否有变化，你可以使用<a class="reference internal" href="../../../core-api/xarray.html#c.xas_reload" title="xas_reload"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_reload()</span></code></a>来保存一个函数调用。</p>
+<p>如果你需要移动到XArray中的不同索引，可以调用<a class="reference internal" href="../../../core-api/xarray.html#c.xas_set" title="xas_set"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_set()</span></code></a>。这可以将光标重置到树的顶端，这通常会使下一个
+操作将光标移动到树中想要的位置。如果你想移动到下一个或上一个索引，调用<a class="reference internal" href="../../../core-api/xarray.html#c.xas_next" title="xas_next"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_next()</span></code></a>或<a class="reference internal" href="../../../core-api/xarray.html#c.xas_prev" title="xas_prev"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_prev()</span></code></a>。设置
+索引不会使光标在数组中移动，所以不需要锁，而移动到下一个或上一个索引则需要锁。</p>
+<p>你可以使用<a class="reference internal" href="../../../core-api/xarray.html#c.xas_find" title="xas_find"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_find()</span></code></a>搜索下一个当前条目。这相当于<a class="reference internal" href="../../../core-api/xarray.html#c.xa_find" title="xa_find"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_find()</span></code></a>和<a class="reference internal" href="../../../core-api/xarray.html#c.xa_find_after" title="xa_find_after"><code class="xref c c-func docutils literal notranslate"><span class="pre">xa_find_after()</span></code></a>；如果光标已经移动到了
+一个条目，那么它将找到当前引用的条目之后的下一个条目。如果没有，它将返回xa_state索引处的条目。使用
+<a class="reference internal" href="../../../core-api/xarray.html#c.xas_next_entry" title="xas_next_entry"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_next_entry()</span></code></a>而不是<a class="reference internal" href="../../../core-api/xarray.html#c.xas_find" title="xas_find"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_find()</span></code></a>来移动到下一个当前条目，在大多数情况下会节省一个函数调用，但代价
+是发出更多内联代码。</p>
+<p><a class="reference internal" href="../../../core-api/xarray.html#c.xas_find_marked" title="xas_find_marked"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_find_marked()</span></code></a>函数也是如此。如果xa_state没有被移动过，它将返回xa_state的索引处的条目，如果它
+被标记了。否则，它将返回xa_state所引用的条目之后的第一个被标记的条目。<a class="reference internal" href="../../../core-api/xarray.html#c.xas_next_marked" title="xas_next_marked"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_next_marked()</span></code></a>函数等同
+于<a class="reference internal" href="../../../core-api/xarray.html#c.xas_next_entry" title="xas_next_entry"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_next_entry()</span></code></a>。</p>
+<p>当使用<a class="reference internal" href="../../../core-api/xarray.html#c.xas_for_each" title="xas_for_each"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_for_each()</span></code></a>或<a class="reference internal" href="../../../core-api/xarray.html#c.xas_for_each_marked" title="xas_for_each_marked"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_for_each_marked()</span></code></a>在XArray的某个范围内进行迭代时，可能需要暂时停止迭代。
+<a class="reference internal" href="../../../core-api/xarray.html#c.xas_pause" title="xas_pause"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_pause()</span></code></a>函数的存在就是为了这个目的。在你完成了必要的工作并希望恢复后，xa_state处于适当的状态，在
+你最后处理的条目后继续迭代。如果你在迭代时禁用了中断，那么暂停迭代并在每一个 <code class="docutils literal notranslate"><span class="pre">XA_CHECK_SCHED</span></code> 条目
+中重新启用中断是很好的做法。</p>
+<p><a class="reference internal" href="../../../core-api/xarray.html#c.xas_get_mark" title="xas_get_mark"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_get_mark()</span></code></a>, <a class="reference internal" href="../../../core-api/xarray.html#c.xas_set_mark" title="xas_set_mark"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_set_mark()</span></code></a>和<a class="reference internal" href="../../../core-api/xarray.html#c.xas_clear_mark" title="xas_clear_mark"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_clear_mark()</span></code></a>函数要求xa_state光标已经被移动到XArray中的适当位
+置；如果你在之前调用了<a class="reference internal" href="../../../core-api/xarray.html#c.xas_pause" title="xas_pause"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_pause()</span></code></a>或<a class="reference internal" href="../../../core-api/xarray.html#c.xas_set" title="xas_set"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_set()</span></code></a>，它们将不会有任何作用。</p>
+<p>你可以调用<a class="reference internal" href="../../../core-api/xarray.html#c.xas_set_update" title="xas_set_update"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_set_update()</span></code></a>，让XArray每次更新一个节点时都调用一个回调函数。这被页面缓存的workingset
+代码用来维护其只包含阴影项的节点列表。</p>
+</section>
+<section id="id8">
+<h3>多索引条目<a class="headerlink" href="#id8" title="Permalink to this headline">¶</a></h3>
+<p>XArray有能力将多个索引联系在一起，因此对一个索引的操作会影响到所有的索引。例如，存储到任何索引将改变
+从任何索引检索的条目的值。在任何索引上设置或清除一个标记，都会在每个被绑在一起的索引上设置或清除该标
+记。目前的实现只允许将2的整数倍的范围绑在一起；例如指数64-127可以绑在一起，但2-6不能。这可以节省大量
+的内存；例如，将512个条目绑在一起可以节省4kB以上的内存。</p>
+<p>你可以通过使用<a class="reference internal" href="../../../core-api/xarray.html#c.XA_STATE_ORDER" title="XA_STATE_ORDER"><code class="xref c c-func docutils literal notranslate"><span class="pre">XA_STATE_ORDER()</span></code></a>或<a class="reference internal" href="../../../core-api/xarray.html#c.xas_set_order" title="xas_set_order"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_set_order()</span></code></a>，然后调用<a class="reference internal" href="../../../core-api/xarray.html#c.xas_store" title="xas_store"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_store()</span></code></a>来创建一个多索引条目。用一个
+多索引的xa_state调用<a class="reference internal" href="../../../core-api/xarray.html#c.xas_load" title="xas_load"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_load()</span></code></a>会把xa_state移动到树中的正确位置，但是返回值没有意义，有可能是一个内
+部条目或 <code class="docutils literal notranslate"><span class="pre">NULL</span></code> ，即使在范围内有一个条目存储。调用<a class="reference internal" href="../../../core-api/xarray.html#c.xas_find_conflict" title="xas_find_conflict"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_find_conflict()</span></code></a>将返回该范围内的第一个条目，
+如果该范围内没有条目，则返回 <code class="docutils literal notranslate"><span class="pre">NULL</span></code> 。<a class="reference internal" href="../../../core-api/xarray.html#c.xas_for_each_conflict" title="xas_for_each_conflict"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_for_each_conflict()</span></code></a>迭代器将遍历每个与指定范围重叠的条目。</p>
+<p>如果<a class="reference internal" href="../../../core-api/xarray.html#c.xas_load" title="xas_load"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_load()</span></code></a>遇到一个多索引条目，xa_state中的xa_index将不会被改变。当遍历一个XArray或者调用<a class="reference internal" href="../../../core-api/xarray.html#c.xas_find" title="xas_find"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_find()</span></code></a>
+时，如果初始索引在一个多索引条目的中间，它将不会被改变。随后的调用或迭代将把索引移到范围内的第一个索引。
+每个条目只会被返回一次，不管它占据了多少个索引。</p>
+<p>不支持使用<a class="reference internal" href="../../../core-api/xarray.html#c.xas_next" title="xas_next"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_next()</span></code></a>或<a class="reference internal" href="../../../core-api/xarray.html#c.xas_prev" title="xas_prev"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_prev()</span></code></a>来处理一个多索引的xa_state。在一个多索引的条目上使用这两个函数中的任
+何一个都会显示出同级的条目；这些条目应该被调用者跳过。</p>
+<p>在一个多索引条目的任何一个索引中存储 <code class="docutils literal notranslate"><span class="pre">NULL</span></code> ，将把每个索引的条目设置为 <code class="docutils literal notranslate"><span class="pre">NULL</span></code> ，并解除绑定。通过调
+用<a class="reference internal" href="../../../core-api/xarray.html#c.xas_split_alloc" title="xas_split_alloc"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_split_alloc()</span></code></a>，在没有xa_lock的情况下，可以将一个多索引条目分割成占据较小范围的条目，然后再取锁并
+调用<a class="reference internal" href="../../../core-api/xarray.html#c.xas_split" title="xas_split"><code class="xref c c-func docutils literal notranslate"><span class="pre">xas_split()</span></code></a>。</p>
+</section>
+</section>
+<section id="id9">
+<h2>函数和结构体<a class="headerlink" href="#id9" title="Permalink to this headline">¶</a></h2>
+<p>该API在以下内核代码中:</p>
+<p>include/linux/xarray.h</p>
+<p>lib/xarray.c</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">XArray</a><ul>
+<li><a class="reference internal" href="#id1">概览</a></li>
+<li><a class="reference internal" href="#api">普通API</a><ul>
+<li><a class="reference internal" href="#id2">搜索标记</a></li>
+<li><a class="reference internal" href="#xarrays">分配XArrays</a></li>
+<li><a class="reference internal" href="#id3">内存分配</a></li>
+<li><a class="reference internal" href="#id4">锁</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id5">高级API</a><ul>
+<li><a class="reference internal" href="#id6">内部条目</a></li>
+<li><a class="reference internal" href="#id7">附加函数</a></li>
+<li><a class="reference internal" href="#id8">多索引条目</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id9">函数和结构体</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/core-api/xarray.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/core-api/xarray.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

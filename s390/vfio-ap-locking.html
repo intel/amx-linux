@@ -1,0 +1,206 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>VFIO AP Locks Overview &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="vfio-ccw: the basic infrastructure" href="vfio-ccw.html" />
+    <link rel="prev" title="Adjunct Processor (AP) facility" href="vfio-ap.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="vfio-ap-locks-overview">
+<h1>VFIO AP Locks Overview<a class="headerlink" href="#vfio-ap-locks-overview" title="Permalink to this headline">¶</a></h1>
+<p>This document describes the locks that are pertinent to the secure operation
+of the vfio_ap device driver. Throughout this document, the following variables
+will be used to denote instances of the structures herein described:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="k">struct</span> <span class="nc">ap_matrix_dev</span><span class="w"> </span><span class="o">*</span><span class="n">matrix_dev</span><span class="p">;</span><span class="w"></span>
+<span class="k">struct</span> <span class="nc">ap_matrix_mdev</span><span class="w"> </span><span class="o">*</span><span class="n">matrix_mdev</span><span class="p">;</span><span class="w"></span>
+<span class="k">struct</span> <span class="nc">kvm</span><span class="w"> </span><span class="o">*</span><span class="n">kvm</span><span class="p">;</span><span class="w"></span>
+</pre></div>
+</div>
+<section id="the-matrix-devices-lock-drivers-s390-crypto-vfio-ap-private-h">
+<h2>The Matrix Devices Lock (drivers/s390/crypto/vfio_ap_private.h)<a class="headerlink" href="#the-matrix-devices-lock-drivers-s390-crypto-vfio-ap-private-h" title="Permalink to this headline">¶</a></h2>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="k">struct</span> <span class="nc">ap_matrix_dev</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">      </span><span class="p">...</span><span class="w"></span>
+<span class="w">      </span><span class="k">struct</span> <span class="nc">list_head</span><span class="w"> </span><span class="n">mdev_list</span><span class="p">;</span><span class="w"></span>
+<span class="w">      </span><span class="k">struct</span> <span class="nc">mutex</span><span class="w"> </span><span class="n">mdevs_lock</span><span class="p">;</span><span class="w"></span>
+<span class="w">      </span><span class="p">...</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+<p>The Matrix Devices Lock (matrix_dev-&gt;mdevs_lock) is implemented as a global
+mutex contained within the single object of struct ap_matrix_dev. This lock
+controls access to all fields contained within each matrix_mdev
+(matrix_dev-&gt;mdev_list). This lock must be held while reading from, writing to
+or using the data from a field contained within a matrix_mdev instance
+representing one of the vfio_ap device driver’s mediated devices.</p>
+</section>
+<section id="the-kvm-lock-include-linux-kvm-host-h">
+<h2>The KVM Lock (include/linux/kvm_host.h)<a class="headerlink" href="#the-kvm-lock-include-linux-kvm-host-h" title="Permalink to this headline">¶</a></h2>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="k">struct</span> <span class="nc">kvm</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">      </span><span class="p">...</span><span class="w"></span>
+<span class="w">      </span><span class="k">struct</span> <span class="nc">mutex</span><span class="w"> </span><span class="n">lock</span><span class="p">;</span><span class="w"></span>
+<span class="w">      </span><span class="p">...</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+<p>The KVM Lock (kvm-&gt;lock) controls access to the state data for a KVM guest. This
+lock must be held by the vfio_ap device driver while one or more AP adapters,
+domains or control domains are being plugged into or unplugged from the guest.</p>
+<p>The KVM pointer is stored in the in the matrix_mdev instance
+(matrix_mdev-&gt;kvm = kvm) containing the state of the mediated device that has
+been attached to the KVM guest.</p>
+</section>
+<section id="the-guests-lock-drivers-s390-crypto-vfio-ap-private-h">
+<h2>The Guests Lock (drivers/s390/crypto/vfio_ap_private.h)<a class="headerlink" href="#the-guests-lock-drivers-s390-crypto-vfio-ap-private-h" title="Permalink to this headline">¶</a></h2>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="k">struct</span> <span class="nc">ap_matrix_dev</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">      </span><span class="p">...</span><span class="w"></span>
+<span class="w">      </span><span class="k">struct</span> <span class="nc">list_head</span><span class="w"> </span><span class="n">mdev_list</span><span class="p">;</span><span class="w"></span>
+<span class="w">      </span><span class="k">struct</span> <span class="nc">mutex</span><span class="w"> </span><span class="n">guests_lock</span><span class="p">;</span><span class="w"></span>
+<span class="w">      </span><span class="p">...</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+<p>The Guests Lock (matrix_dev-&gt;guests_lock) controls access to the
+matrix_mdev instances (matrix_dev-&gt;mdev_list) that represent mediated devices
+that hold the state for the mediated devices that have been attached to a
+KVM guest. This lock must be held:</p>
+<ol class="arabic">
+<li><p>To control access to the KVM pointer (matrix_mdev-&gt;kvm) while the vfio_ap
+device driver is using it to plug/unplug AP devices passed through to the KVM
+guest.</p></li>
+<li><p>To add matrix_mdev instances to or remove them from matrix_dev-&gt;mdev_list.
+This is necessary to ensure the proper locking order when the list is perused
+to find an ap_matrix_mdev instance for the purpose of plugging/unplugging
+AP devices passed through to a KVM guest.</p>
+<p>For example, when a queue device is removed from the vfio_ap device driver,
+if the adapter is passed through to a KVM guest, it will have to be
+unplugged. In order to figure out whether the adapter is passed through,
+the matrix_mdev object to which the queue is assigned will have to be
+found. The KVM pointer (matrix_mdev-&gt;kvm) can then be used to determine if
+the mediated device is passed through (matrix_mdev-&gt;kvm != NULL) and if so,
+to unplug the adapter.</p>
+</li>
+</ol>
+<p>It is not necessary to take the Guests Lock to access the KVM pointer if the
+pointer is not used to plug/unplug devices passed through to the KVM guest;
+however, in this case, the Matrix Devices Lock (matrix_dev-&gt;mdevs_lock) must be
+held in order to access the KVM pointer since it is set and cleared under the
+protection of the Matrix Devices Lock. A case in point is the function that
+handles interception of the PQAP(AQIC) instruction sub-function. This handler
+needs to access the KVM pointer only for the purposes of setting or clearing IRQ
+resources, so only the matrix_dev-&gt;mdevs_lock needs to be held.</p>
+</section>
+<section id="the-pqap-hook-lock-arch-s390-include-asm-kvm-host-h">
+<h2>The PQAP Hook Lock (arch/s390/include/asm/kvm_host.h)<a class="headerlink" href="#the-pqap-hook-lock-arch-s390-include-asm-kvm-host-h" title="Permalink to this headline">¶</a></h2>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="k">typedef</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="p">(</span><span class="o">*</span><span class="n">crypto_hook</span><span class="p">)(</span><span class="k">struct</span> <span class="nc">kvm_vcpu</span><span class="w"> </span><span class="o">*</span><span class="n">vcpu</span><span class="p">);</span><span class="w"></span>
+
+<span class="k">struct</span> <span class="nc">kvm_s390_crypto</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">      </span><span class="p">...</span><span class="w"></span>
+<span class="w">      </span><span class="k">struct</span> <span class="nc">rw_semaphore</span><span class="w"> </span><span class="n">pqap_hook_rwsem</span><span class="p">;</span><span class="w"></span>
+<span class="w">      </span><span class="n">crypto_hook</span><span class="w"> </span><span class="o">*</span><span class="n">pqap_hook</span><span class="p">;</span><span class="w"></span>
+<span class="w">      </span><span class="p">...</span><span class="w"></span>
+<span class="p">};</span><span class="w"></span>
+</pre></div>
+</div>
+<p>The PQAP Hook Lock is a r/w semaphore that controls access to the function
+pointer of the handler <code class="docutils literal notranslate"><span class="pre">(*kvm-&gt;arch.crypto.pqap_hook)</span></code> to invoke when the
+PQAP(AQIC) instruction sub-function is intercepted by the host. The lock must be
+held in write mode when pqap_hook value is set, and in read mode when the
+pqap_hook function is called.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">VFIO AP Locks Overview</a><ul>
+<li><a class="reference internal" href="#the-matrix-devices-lock-drivers-s390-crypto-vfio-ap-private-h">The Matrix Devices Lock (drivers/s390/crypto/vfio_ap_private.h)</a></li>
+<li><a class="reference internal" href="#the-kvm-lock-include-linux-kvm-host-h">The KVM Lock (include/linux/kvm_host.h)</a></li>
+<li><a class="reference internal" href="#the-guests-lock-drivers-s390-crypto-vfio-ap-private-h">The Guests Lock (drivers/s390/crypto/vfio_ap_private.h)</a></li>
+<li><a class="reference internal" href="#the-pqap-hook-lock-arch-s390-include-asm-kvm-host-h">The PQAP Hook Lock (arch/s390/include/asm/kvm_host.h)</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/s390/vfio-ap-locking.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/s390/vfio-ap-locking.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

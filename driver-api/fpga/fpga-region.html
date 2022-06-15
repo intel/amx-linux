@@ -1,0 +1,411 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>FPGA Region &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="In-kernel API for FPGA Programming" href="fpga-programming.html" />
+    <link rel="prev" title="FPGA Bridge" href="fpga-bridge.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="fpga-region">
+<h1>FPGA Region<a class="headerlink" href="#fpga-region" title="Permalink to this headline">¶</a></h1>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Permalink to this headline">¶</a></h2>
+<p>This document is meant to be a brief overview of the FPGA region API usage.  A
+more conceptual look at regions can be found in the Device Tree binding
+document <a class="footnote-reference brackets" href="#f1" id="id1">1</a>.</p>
+<p>For the purposes of this API document, let’s just say that a region associates
+an FPGA Manager and a bridge (or bridges) with a reprogrammable region of an
+FPGA or the whole FPGA.  The API provides a way to register a region and to
+program a region.</p>
+<p>Currently the only layer above fpga-region.c in the kernel is the Device Tree
+support (of-fpga-region.c) described in <a class="footnote-reference brackets" href="#f1" id="id2">1</a>.  The DT support layer uses regions
+to program the FPGA and then DT to handle enumeration.  The common region code
+is intended to be used by other schemes that have other ways of accomplishing
+enumeration after programming.</p>
+<p>An fpga-region can be set up to know the following things:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>which FPGA manager to use to do the programming</p></li>
+<li><p>which bridges to disable before programming and enable afterwards.</p></li>
+</ul>
+</div></blockquote>
+<p>Additional info needed to program the FPGA image is passed in the <a class="reference internal" href="fpga-programming.html#c.fpga_image_info" title="fpga_image_info"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span>
+<span class="pre">fpga_image_info</span></code></a> including:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>pointers to the image as either a scatter-gather buffer, a contiguous
+buffer, or the name of firmware file</p></li>
+<li><p>flags indicating specifics such as whether the image is for partial
+reconfiguration.</p></li>
+</ul>
+</div></blockquote>
+</section>
+<section id="how-to-add-a-new-fpga-region">
+<h2>How to add a new FPGA region<a class="headerlink" href="#how-to-add-a-new-fpga-region" title="Permalink to this headline">¶</a></h2>
+<p>An example of usage can be seen in the probe function of <a class="footnote-reference brackets" href="#f2" id="id3">2</a>.</p>
+<dl class="footnote brackets">
+<dt class="label" id="f1"><span class="brackets">1</span><span class="fn-backref">(<a href="#id1">1</a>,<a href="#id2">2</a>)</span></dt>
+<dd><p>../devicetree/bindings/fpga/fpga-region.txt</p>
+</dd>
+<dt class="label" id="f2"><span class="brackets"><a class="fn-backref" href="#id3">2</a></span></dt>
+<dd><p>../../drivers/fpga/of-fpga-region.c</p>
+</dd>
+</dl>
+</section>
+<section id="api-to-add-a-new-fpga-region">
+<h2>API to add a new FPGA region<a class="headerlink" href="#api-to-add-a-new-fpga-region" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p><a class="reference internal" href="#c.fpga_region" title="fpga_region"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">fpga_region</span></code></a> - The FPGA region struct</p></li>
+<li><p><a class="reference internal" href="#c.fpga_region_info" title="fpga_region_info"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">fpga_region_info</span></code></a> - Parameter structure for <a class="reference internal" href="#c.fpga_region_register_full" title="fpga_region_register_full"><code class="xref c c-func docutils literal notranslate"><span class="pre">fpga_region_register_full()</span></code></a></p></li>
+<li><p><a class="reference internal" href="#c.fpga_region_register_full" title="fpga_region_register_full"><code class="xref c c-func docutils literal notranslate"><span class="pre">fpga_region_register_full()</span></code></a> -  Create and register an FPGA region using the
+fpga_region_info structure to provide the full flexibility of options</p></li>
+<li><p><a class="reference internal" href="#c.fpga_region_register" title="fpga_region_register"><code class="xref c c-func docutils literal notranslate"><span class="pre">fpga_region_register()</span></code></a> -  Create and register an FPGA region using standard
+arguments</p></li>
+<li><p><a class="reference internal" href="#c.fpga_region_unregister" title="fpga_region_unregister"><code class="xref c c-func docutils literal notranslate"><span class="pre">fpga_region_unregister()</span></code></a> -  Unregister an FPGA region</p></li>
+</ul>
+<p>The FPGA region’s probe function will need to get a reference to the FPGA
+Manager it will be using to do the programming.  This usually would happen
+during the region’s probe function.</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="#c.fpga_mgr_get" title="fpga_mgr_get"><code class="xref c c-func docutils literal notranslate"><span class="pre">fpga_mgr_get()</span></code></a> - Get a reference to an FPGA manager, raise ref count</p></li>
+<li><p><a class="reference internal" href="#c.of_fpga_mgr_get" title="of_fpga_mgr_get"><code class="xref c c-func docutils literal notranslate"><span class="pre">of_fpga_mgr_get()</span></code></a> -  Get a reference to an FPGA manager, raise ref count,
+given a device node.</p></li>
+<li><p><a class="reference internal" href="#c.fpga_mgr_put" title="fpga_mgr_put"><code class="xref c c-func docutils literal notranslate"><span class="pre">fpga_mgr_put()</span></code></a> - Put an FPGA manager</p></li>
+</ul>
+<p>The FPGA region will need to specify which bridges to control while programming
+the FPGA.  The region driver can build a list of bridges during probe time
+(<code class="docutils literal notranslate"><span class="pre">fpga_region-&gt;bridge_list</span></code>) or it can have a function that creates
+the list of bridges to program just before programming
+(<code class="docutils literal notranslate"><span class="pre">fpga_region-&gt;get_bridges</span></code>).  The FPGA bridge framework supplies the
+following APIs to handle building or tearing down that list.</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="#c.fpga_bridge_get_to_list" title="fpga_bridge_get_to_list"><code class="xref c c-func docutils literal notranslate"><span class="pre">fpga_bridge_get_to_list()</span></code></a> - Get a ref of an FPGA bridge, add it to a
+list</p></li>
+<li><p><a class="reference internal" href="#c.of_fpga_bridge_get_to_list" title="of_fpga_bridge_get_to_list"><code class="xref c c-func docutils literal notranslate"><span class="pre">of_fpga_bridge_get_to_list()</span></code></a> - Get a ref of an FPGA bridge, add it to a
+list, given a device node</p></li>
+<li><p><a class="reference internal" href="#c.fpga_bridges_put" title="fpga_bridges_put"><code class="xref c c-func docutils literal notranslate"><span class="pre">fpga_bridges_put()</span></code></a> - Given a list of bridges, put them</p></li>
+</ul>
+<dl class="type">
+<dt id="c.fpga_region">
+struct <code class="sig-name descname">fpga_region</code><a class="headerlink" href="#c.fpga_region" title="Permalink to this definition">¶</a></dt>
+<dd><p>FPGA Region structure</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct fpga_region {
+    struct device dev;
+    struct mutex mutex;
+    struct list_head bridge_list;
+    struct fpga_manager *mgr;
+    struct fpga_image_info *info;
+    struct fpga_compat_id *compat_id;
+    void *priv;
+    int (*get_bridges)(struct fpga_region *region);
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">dev</span></code></dt><dd><p>FPGA Region device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">mutex</span></code></dt><dd><p>enforces exclusive reference to region</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">bridge_list</span></code></dt><dd><p>list of FPGA bridges specified in region</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">mgr</span></code></dt><dd><p>FPGA manager</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">info</span></code></dt><dd><p>FPGA image info</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">compat_id</span></code></dt><dd><p>FPGA region id for compatibility check.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">priv</span></code></dt><dd><p>private data</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">get_bridges</span></code></dt><dd><p>optional function to get bridges to a list</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.fpga_region_info">
+struct <code class="sig-name descname">fpga_region_info</code><a class="headerlink" href="#c.fpga_region_info" title="Permalink to this definition">¶</a></dt>
+<dd><p>collection of parameters an FPGA Region</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct fpga_region_info {
+    struct fpga_manager *mgr;
+    struct fpga_compat_id *compat_id;
+    void *priv;
+    int (*get_bridges)(struct fpga_region *region);
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">mgr</span></code></dt><dd><p>fpga region manager</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">compat_id</span></code></dt><dd><p>FPGA region id for compatibility check.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">priv</span></code></dt><dd><p>fpga region private data</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">get_bridges</span></code></dt><dd><p>optional function to get bridges to a list</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>fpga_region_info contains parameters for the register_full function.
+These are separated into an info structure because they some are optional
+others could be added to in the future. The info structure facilitates
+maintaining a stable API.</p>
+<dl class="function">
+<dt id="c.fpga_region_register_full">
+struct <a class="reference internal" href="#c.fpga_region" title="fpga_region">fpga_region</a> * <code class="sig-name descname">fpga_region_register_full</code><span class="sig-paren">(</span>struct <a class="reference internal" href="../infrastructure.html#c.device" title="device">device</a><em> *parent</em>, const struct <a class="reference internal" href="#c.fpga_region_info" title="fpga_region_info">fpga_region_info</a><em> *info</em><span class="sig-paren">)</span><a class="headerlink" href="#c.fpga_region_register_full" title="Permalink to this definition">¶</a></dt>
+<dd><p>create and register an FPGA Region device</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*parent</span></code></dt><dd><p>device parent</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">struct</span> <span class="pre">fpga_region_info</span> <span class="pre">*info</span></code></dt><dd><p>parameters for FPGA Region</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p><a class="reference internal" href="#c.fpga_region" title="fpga_region"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">fpga_region</span></code></a> or ERR_PTR()</p>
+</div>
+<dl class="function">
+<dt id="c.fpga_region_register">
+struct <a class="reference internal" href="#c.fpga_region" title="fpga_region">fpga_region</a> * <code class="sig-name descname">fpga_region_register</code><span class="sig-paren">(</span>struct <a class="reference internal" href="../infrastructure.html#c.device" title="device">device</a><em> *parent</em>, struct <a class="reference internal" href="fpga-mgr.html#c.fpga_manager" title="fpga_manager">fpga_manager</a><em> *mgr</em>, int (<em>*get_bridges</em>)(struct <a class="reference internal" href="#c.fpga_region" title="fpga_region">fpga_region</a> *)<span class="sig-paren">)</span><a class="headerlink" href="#c.fpga_region_register" title="Permalink to this definition">¶</a></dt>
+<dd><p>create and register an FPGA Region device</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*parent</span></code></dt><dd><p>device parent</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">fpga_manager</span> <span class="pre">*mgr</span></code></dt><dd><p>manager that programs this region</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">(*get_bridges)(struct</span> <span class="pre">fpga_region</span> <span class="pre">*)</span></code></dt><dd><p>optional function to get bridges to a list</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This simple version of the register function should be sufficient for most users.
+The <a class="reference internal" href="#c.fpga_region_register_full" title="fpga_region_register_full"><code class="xref c c-func docutils literal notranslate"><span class="pre">fpga_region_register_full()</span></code></a> function is available for users that need to
+pass additional, optional parameters.</p>
+<p><strong>Return</strong></p>
+<p><a class="reference internal" href="#c.fpga_region" title="fpga_region"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">fpga_region</span></code></a> or ERR_PTR()</p>
+</div>
+<dl class="function">
+<dt id="c.fpga_region_unregister">
+void <code class="sig-name descname">fpga_region_unregister</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.fpga_region" title="fpga_region">fpga_region</a><em> *region</em><span class="sig-paren">)</span><a class="headerlink" href="#c.fpga_region_unregister" title="Permalink to this definition">¶</a></dt>
+<dd><p>unregister an FPGA region</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">fpga_region</span> <span class="pre">*region</span></code></dt><dd><p>FPGA region</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This function is intended for use in an FPGA region driver’s remove function.</p>
+</div>
+<dl class="function">
+<dt id="c.fpga_mgr_get">
+struct <a class="reference internal" href="fpga-mgr.html#c.fpga_manager" title="fpga_manager">fpga_manager</a> * <code class="sig-name descname">fpga_mgr_get</code><span class="sig-paren">(</span>struct <a class="reference internal" href="../infrastructure.html#c.device" title="device">device</a><em> *dev</em><span class="sig-paren">)</span><a class="headerlink" href="#c.fpga_mgr_get" title="Permalink to this definition">¶</a></dt>
+<dd><p>Given a device, get a reference to an fpga mgr.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>parent device that fpga mgr was registered with</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p>fpga manager struct or IS_ERR() condition containing error code.</p>
+</div>
+<dl class="function">
+<dt id="c.of_fpga_mgr_get">
+struct <a class="reference internal" href="fpga-mgr.html#c.fpga_manager" title="fpga_manager">fpga_manager</a> * <code class="sig-name descname">of_fpga_mgr_get</code><span class="sig-paren">(</span>struct device_node<em> *node</em><span class="sig-paren">)</span><a class="headerlink" href="#c.of_fpga_mgr_get" title="Permalink to this definition">¶</a></dt>
+<dd><p>Given a device node, get a reference to an fpga mgr.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device_node</span> <span class="pre">*node</span></code></dt><dd><p>device node</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p>fpga manager struct or IS_ERR() condition containing error code.</p>
+</div>
+<dl class="function">
+<dt id="c.fpga_mgr_put">
+void <code class="sig-name descname">fpga_mgr_put</code><span class="sig-paren">(</span>struct <a class="reference internal" href="fpga-mgr.html#c.fpga_manager" title="fpga_manager">fpga_manager</a><em> *mgr</em><span class="sig-paren">)</span><a class="headerlink" href="#c.fpga_mgr_put" title="Permalink to this definition">¶</a></dt>
+<dd><p>release a reference to an fpga manager</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">fpga_manager</span> <span class="pre">*mgr</span></code></dt><dd><p>fpga manager structure</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.fpga_bridge_get_to_list">
+int <code class="sig-name descname">fpga_bridge_get_to_list</code><span class="sig-paren">(</span>struct <a class="reference internal" href="../infrastructure.html#c.device" title="device">device</a><em> *dev</em>, struct <a class="reference internal" href="fpga-programming.html#c.fpga_image_info" title="fpga_image_info">fpga_image_info</a><em> *info</em>, struct list_head<em> *bridge_list</em><span class="sig-paren">)</span><a class="headerlink" href="#c.fpga_bridge_get_to_list" title="Permalink to this definition">¶</a></dt>
+<dd><p>given device, get a bridge, add it to a list</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>FPGA bridge device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">fpga_image_info</span> <span class="pre">*info</span></code></dt><dd><p>fpga image specific information</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">list_head</span> <span class="pre">*bridge_list</span></code></dt><dd><p>list of FPGA bridges</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Get an exclusive reference to the bridge and it to the list.</p>
+<p>Return 0 for success, error code from fpga_bridge_get() otherwise.</p>
+</div>
+<dl class="function">
+<dt id="c.of_fpga_bridge_get_to_list">
+int <code class="sig-name descname">of_fpga_bridge_get_to_list</code><span class="sig-paren">(</span>struct device_node<em> *np</em>, struct <a class="reference internal" href="fpga-programming.html#c.fpga_image_info" title="fpga_image_info">fpga_image_info</a><em> *info</em>, struct list_head<em> *bridge_list</em><span class="sig-paren">)</span><a class="headerlink" href="#c.of_fpga_bridge_get_to_list" title="Permalink to this definition">¶</a></dt>
+<dd><p>get a bridge, add it to a list</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device_node</span> <span class="pre">*np</span></code></dt><dd><p>node pointer of an FPGA bridge</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">fpga_image_info</span> <span class="pre">*info</span></code></dt><dd><p>fpga image specific information</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">list_head</span> <span class="pre">*bridge_list</span></code></dt><dd><p>list of FPGA bridges</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Get an exclusive reference to the bridge and it to the list.</p>
+<p>Return 0 for success, error code from of_fpga_bridge_get() otherwise.</p>
+</div>
+<dl class="function">
+<dt id="c.fpga_bridges_put">
+void <code class="sig-name descname">fpga_bridges_put</code><span class="sig-paren">(</span>struct list_head<em> *bridge_list</em><span class="sig-paren">)</span><a class="headerlink" href="#c.fpga_bridges_put" title="Permalink to this definition">¶</a></dt>
+<dd><p>put bridges</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">list_head</span> <span class="pre">*bridge_list</span></code></dt><dd><p>list of FPGA bridges</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>For each bridge in the list, put the bridge and remove it from the list.
+If list is empty, do nothing.</p>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">FPGA Region</a><ul>
+<li><a class="reference internal" href="#overview">Overview</a></li>
+<li><a class="reference internal" href="#how-to-add-a-new-fpga-region">How to add a new FPGA region</a></li>
+<li><a class="reference internal" href="#api-to-add-a-new-fpga-region">API to add a new FPGA region</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/fpga/fpga-region.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/fpga/fpga-region.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

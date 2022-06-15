@@ -1,0 +1,229 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>USB DMA &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="USB Request Block (URB)" href="URB.html" />
+    <link rel="prev" title="USB core callbacks" href="callbacks.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="usb-dma">
+<h1>USB DMA<a class="headerlink" href="#usb-dma" title="Permalink to this headline">¶</a></h1>
+<p>In Linux 2.5 kernels (and later), USB device drivers have additional control
+over how DMA may be used to perform I/O operations.  The APIs are detailed
+in the kernel usb programming guide (kerneldoc, from the source code).</p>
+<section id="api-overview">
+<h2>API overview<a class="headerlink" href="#api-overview" title="Permalink to this headline">¶</a></h2>
+<p>The big picture is that USB drivers can continue to ignore most DMA issues,
+though they still must provide DMA-ready buffers (see
+<a class="reference internal" href="../../core-api/dma-api-howto.html"><span class="doc">Dynamic DMA mapping Guide</span></a>).  That’s how they’ve worked through
+the 2.4 (and earlier) kernels, or they can now be DMA-aware.</p>
+<p>DMA-aware usb drivers:</p>
+<ul class="simple">
+<li><p>New calls enable DMA-aware drivers, letting them allocate dma buffers and
+manage dma mappings for existing dma-ready buffers (see below).</p></li>
+<li><p>URBs have an additional “transfer_dma” field, as well as a transfer_flags
+bit saying if it’s valid.  (Control requests also have “setup_dma”, but
+drivers must not use it.)</p></li>
+<li><p>“usbcore” will map this DMA address, if a DMA-aware driver didn’t do
+it first and set <code class="docutils literal notranslate"><span class="pre">URB_NO_TRANSFER_DMA_MAP</span></code>.  HCDs
+don’t manage dma mappings for URBs.</p></li>
+<li><p>There’s a new “generic DMA API”, parts of which are usable by USB device
+drivers.  Never use dma_set_mask() on any USB interface or device; that
+would potentially break all devices sharing that bus.</p></li>
+</ul>
+</section>
+<section id="eliminating-copies">
+<h2>Eliminating copies<a class="headerlink" href="#eliminating-copies" title="Permalink to this headline">¶</a></h2>
+<p>It’s good to avoid making CPUs copy data needlessly.  The costs can add up,
+and effects like cache-trashing can impose subtle penalties.</p>
+<ul>
+<li><p>If you’re doing lots of small data transfers from the same buffer all
+the time, that can really burn up resources on systems which use an
+IOMMU to manage the DMA mappings.  It can cost MUCH more to set up and
+tear down the IOMMU mappings with each request than perform the I/O!</p>
+<p>For those specific cases, USB has primitives to allocate less expensive
+memory.  They work like kmalloc and kfree versions that give you the right
+kind of addresses to store in urb-&gt;transfer_buffer and urb-&gt;transfer_dma.
+You’d also set <code class="docutils literal notranslate"><span class="pre">URB_NO_TRANSFER_DMA_MAP</span></code> in urb-&gt;transfer_flags:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void *usb_alloc_coherent (struct usb_device *dev, size_t size,
+        int mem_flags, dma_addr_t *dma);
+
+void usb_free_coherent (struct usb_device *dev, size_t size,
+        void *addr, dma_addr_t dma);
+</pre></div>
+</div>
+<p>Most drivers should <strong>NOT</strong> be using these primitives; they don’t need
+to use this type of memory (“dma-coherent”), and memory returned from
+<a class="reference internal" href="../../core-api/mm-api.html#c.kmalloc" title="kmalloc"><code class="xref c c-func docutils literal notranslate"><span class="pre">kmalloc()</span></code></a> will work just fine.</p>
+<p>The memory buffer returned is “dma-coherent”; sometimes you might need to
+force a consistent memory access ordering by using memory barriers.  It’s
+not using a streaming DMA mapping, so it’s good for small transfers on
+systems where the I/O would otherwise thrash an IOMMU mapping.  (See
+<a class="reference internal" href="../../core-api/dma-api-howto.html"><span class="doc">Dynamic DMA mapping Guide</span></a> for definitions of “coherent” and
+“streaming” DMA mappings.)</p>
+<p>Asking for 1/Nth of a page (as well as asking for N pages) is reasonably
+space-efficient.</p>
+<p>On most systems the memory returned will be uncached, because the
+semantics of dma-coherent memory require either bypassing CPU caches
+or using cache hardware with bus-snooping support.  While x86 hardware
+has such bus-snooping, many other systems use software to flush cache
+lines to prevent DMA conflicts.</p>
+</li>
+<li><p>Devices on some EHCI controllers could handle DMA to/from high memory.</p>
+<p>Unfortunately, the current Linux DMA infrastructure doesn’t have a sane
+way to expose these capabilities … and in any case, HIGHMEM is mostly a
+design wart specific to x86_32.  So your best bet is to ensure you never
+pass a highmem buffer into a USB driver.  That’s easy; it’s the default
+behavior.  Just don’t override it; e.g. with <code class="docutils literal notranslate"><span class="pre">NETIF_F_HIGHDMA</span></code>.</p>
+<p>This may force your callers to do some bounce buffering, copying from
+high memory to “normal” DMA memory.  If you can come up with a good way
+to fix this issue (for x86_32 machines with over 1 GByte of memory),
+feel free to submit patches.</p>
+</li>
+</ul>
+</section>
+<section id="working-with-existing-buffers">
+<h2>Working with existing buffers<a class="headerlink" href="#working-with-existing-buffers" title="Permalink to this headline">¶</a></h2>
+<p>Existing buffers aren’t usable for DMA without first being mapped into the
+DMA address space of the device.  However, most buffers passed to your
+driver can safely be used with such DMA mapping.  (See the first section
+of <a class="reference internal" href="../../core-api/dma-api-howto.html"><span class="doc">Dynamic DMA mapping Guide</span></a>, titled “What memory is DMA-able?”)</p>
+<ul>
+<li><p>When you’re using scatterlists, you can map everything at once.  On some
+systems, this kicks in an IOMMU and turns the scatterlists into single
+DMA transactions:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int usb_buffer_map_sg (struct usb_device *dev, unsigned pipe,
+        struct scatterlist *sg, int nents);
+
+void usb_buffer_dmasync_sg (struct usb_device *dev, unsigned pipe,
+        struct scatterlist *sg, int n_hw_ents);
+
+void usb_buffer_unmap_sg (struct usb_device *dev, unsigned pipe,
+        struct scatterlist *sg, int n_hw_ents);
+</pre></div>
+</div>
+<p>It’s probably easier to use the new <code class="docutils literal notranslate"><span class="pre">usb_sg_*()</span></code> calls, which do the DMA
+mapping and apply other tweaks to make scatterlist i/o be fast.</p>
+</li>
+<li><p>Some drivers may prefer to work with the model that they’re mapping large
+buffers, synchronizing their safe re-use.  (If there’s no re-use, then let
+usbcore do the map/unmap.)  Large periodic transfers make good examples
+here, since it’s cheaper to just synchronize the buffer than to unmap it
+each time an urb completes and then re-map it on during resubmission.</p>
+<p>These calls all work with initialized urbs:  <code class="docutils literal notranslate"><span class="pre">urb-&gt;dev</span></code>, <code class="docutils literal notranslate"><span class="pre">urb-&gt;pipe</span></code>,
+<code class="docutils literal notranslate"><span class="pre">urb-&gt;transfer_buffer</span></code>, and <code class="docutils literal notranslate"><span class="pre">urb-&gt;transfer_buffer_length</span></code> must all be
+valid when these calls are used (<code class="docutils literal notranslate"><span class="pre">urb-&gt;setup_packet</span></code> must be valid too
+if urb is a control request):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct urb *usb_buffer_map (struct urb *urb);
+
+void usb_buffer_dmasync (struct urb *urb);
+
+void usb_buffer_unmap (struct urb *urb);
+</pre></div>
+</div>
+<p>The calls manage <code class="docutils literal notranslate"><span class="pre">urb-&gt;transfer_dma</span></code> for you, and set
+<code class="docutils literal notranslate"><span class="pre">URB_NO_TRANSFER_DMA_MAP</span></code> so that usbcore won’t map or unmap the buffer.
+They cannot be used for setup_packet buffers in control requests.</p>
+</li>
+</ul>
+<p>Note that several of those interfaces are currently commented out, since
+they don’t have current users.  See the source code.  Other than the dmasync
+calls (where the underlying DMA primitives have changed), most of them can
+easily be commented back in if you want to use them.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">USB DMA</a><ul>
+<li><a class="reference internal" href="#api-overview">API overview</a></li>
+<li><a class="reference internal" href="#eliminating-copies">Eliminating copies</a></li>
+<li><a class="reference internal" href="#working-with-existing-buffers">Working with existing buffers</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/usb/dma.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/usb/dma.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

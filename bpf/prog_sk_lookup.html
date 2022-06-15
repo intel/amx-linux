@@ -1,0 +1,188 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>BPF sk_lookup program &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="BPF maps" href="maps.html" />
+    <link rel="prev" title="LSM BPF Programs" href="prog_lsm.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="bpf-sk-lookup-program">
+<h1>BPF sk_lookup program<a class="headerlink" href="#bpf-sk-lookup-program" title="Permalink to this headline">¶</a></h1>
+<p>BPF sk_lookup program type (<code class="docutils literal notranslate"><span class="pre">BPF_PROG_TYPE_SK_LOOKUP</span></code>) introduces programmability
+into the socket lookup performed by the transport layer when a packet is to be
+delivered locally.</p>
+<p>When invoked BPF sk_lookup program can select a socket that will receive the
+incoming packet by calling the <code class="docutils literal notranslate"><span class="pre">bpf_sk_assign()</span></code> BPF helper function.</p>
+<p>Hooks for a common attach point (<code class="docutils literal notranslate"><span class="pre">BPF_SK_LOOKUP</span></code>) exist for both TCP and UDP.</p>
+<section id="motivation">
+<h2>Motivation<a class="headerlink" href="#motivation" title="Permalink to this headline">¶</a></h2>
+<p>BPF sk_lookup program type was introduced to address setup scenarios where
+binding sockets to an address with <code class="docutils literal notranslate"><span class="pre">bind()</span></code> socket call is impractical, such
+as:</p>
+<ol class="arabic simple">
+<li><p>receiving connections on a range of IP addresses, e.g. 192.0.2.0/24, when
+binding to a wildcard address <code class="docutils literal notranslate"><span class="pre">INADRR_ANY</span></code> is not possible due to a port
+conflict,</p></li>
+<li><p>receiving connections on all or a wide range of ports, i.e. an L7 proxy use
+case.</p></li>
+</ol>
+<p>Such setups would require creating and <code class="docutils literal notranslate"><span class="pre">bind()</span></code>’ing one socket to each of the
+IP address/port in the range, leading to resource consumption and potential
+latency spikes during socket lookup.</p>
+</section>
+<section id="attachment">
+<h2>Attachment<a class="headerlink" href="#attachment" title="Permalink to this headline">¶</a></h2>
+<p>BPF sk_lookup program can be attached to a network namespace with
+<code class="docutils literal notranslate"><span class="pre">bpf(BPF_LINK_CREATE,</span> <span class="pre">...)</span></code> syscall using the <code class="docutils literal notranslate"><span class="pre">BPF_SK_LOOKUP</span></code> attach type and a
+netns FD as attachment <code class="docutils literal notranslate"><span class="pre">target_fd</span></code>.</p>
+<p>Multiple programs can be attached to one network namespace. Programs will be
+invoked in the same order as they were attached.</p>
+</section>
+<section id="hooks">
+<h2>Hooks<a class="headerlink" href="#hooks" title="Permalink to this headline">¶</a></h2>
+<p>The attached BPF sk_lookup programs run whenever the transport layer needs to
+find a listening (TCP) or an unconnected (UDP) socket for an incoming packet.</p>
+<p>Incoming traffic to established (TCP) and connected (UDP) sockets is delivered
+as usual without triggering the BPF sk_lookup hook.</p>
+<p>The attached BPF programs must return with either <code class="docutils literal notranslate"><span class="pre">SK_PASS</span></code> or <code class="docutils literal notranslate"><span class="pre">SK_DROP</span></code>
+verdict code. As for other BPF program types that are network filters,
+<code class="docutils literal notranslate"><span class="pre">SK_PASS</span></code> signifies that the socket lookup should continue on to regular
+hashtable-based lookup, while <code class="docutils literal notranslate"><span class="pre">SK_DROP</span></code> causes the transport layer to drop the
+packet.</p>
+<p>A BPF sk_lookup program can also select a socket to receive the packet by
+calling <code class="docutils literal notranslate"><span class="pre">bpf_sk_assign()</span></code> BPF helper. Typically, the program looks up a socket
+in a map holding sockets, such as <code class="docutils literal notranslate"><span class="pre">SOCKMAP</span></code> or <code class="docutils literal notranslate"><span class="pre">SOCKHASH</span></code>, and passes a
+<code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">bpf_sock</span> <span class="pre">*</span></code> to <code class="docutils literal notranslate"><span class="pre">bpf_sk_assign()</span></code> helper to record the
+selection. Selecting a socket only takes effect if the program has terminated
+with <code class="docutils literal notranslate"><span class="pre">SK_PASS</span></code> code.</p>
+<p>When multiple programs are attached, the end result is determined from return
+codes of all the programs according to the following rules:</p>
+<ol class="arabic simple">
+<li><p>If any program returned <code class="docutils literal notranslate"><span class="pre">SK_PASS</span></code> and selected a valid socket, the socket
+is used as the result of the socket lookup.</p></li>
+<li><p>If more than one program returned <code class="docutils literal notranslate"><span class="pre">SK_PASS</span></code> and selected a socket, the last
+selection takes effect.</p></li>
+<li><p>If any program returned <code class="docutils literal notranslate"><span class="pre">SK_DROP</span></code>, and no program returned <code class="docutils literal notranslate"><span class="pre">SK_PASS</span></code> and
+selected a socket, socket lookup fails.</p></li>
+<li><p>If all programs returned <code class="docutils literal notranslate"><span class="pre">SK_PASS</span></code> and none of them selected a socket,
+socket lookup continues on.</p></li>
+</ol>
+</section>
+<section id="api">
+<h2>API<a class="headerlink" href="#api" title="Permalink to this headline">¶</a></h2>
+<p>In its context, an instance of <code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">bpf_sk_lookup</span></code>, BPF sk_lookup program
+receives information about the packet that triggered the socket lookup. Namely:</p>
+<ul class="simple">
+<li><p>IP version (<code class="docutils literal notranslate"><span class="pre">AF_INET</span></code> or <code class="docutils literal notranslate"><span class="pre">AF_INET6</span></code>),</p></li>
+<li><p>L4 protocol identifier (<code class="docutils literal notranslate"><span class="pre">IPPROTO_TCP</span></code> or <code class="docutils literal notranslate"><span class="pre">IPPROTO_UDP</span></code>),</p></li>
+<li><p>source and destination IP address,</p></li>
+<li><p>source and destination L4 port,</p></li>
+<li><p>the socket that has been selected with <code class="docutils literal notranslate"><span class="pre">bpf_sk_assign()</span></code>.</p></li>
+</ul>
+<p>Refer to <code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">bpf_sk_lookup</span></code> declaration in <code class="docutils literal notranslate"><span class="pre">linux/bpf.h</span></code> user API
+header, and <a class="reference external" href="https://man7.org/linux/man-pages/man7/bpf-helpers.7.html">bpf-helpers(7)</a> man-page section
+for <code class="docutils literal notranslate"><span class="pre">bpf_sk_assign()</span></code> for details.</p>
+</section>
+<section id="example">
+<h2>Example<a class="headerlink" href="#example" title="Permalink to this headline">¶</a></h2>
+<p>See <code class="docutils literal notranslate"><span class="pre">tools/testing/selftests/bpf/prog_tests/sk_lookup.c</span></code> for the reference
+implementation.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">BPF sk_lookup program</a><ul>
+<li><a class="reference internal" href="#motivation">Motivation</a></li>
+<li><a class="reference internal" href="#attachment">Attachment</a></li>
+<li><a class="reference internal" href="#hooks">Hooks</a></li>
+<li><a class="reference internal" href="#api">API</a></li>
+<li><a class="reference internal" href="#example">Example</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/bpf/prog_sk_lookup.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/bpf/prog_sk_lookup.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

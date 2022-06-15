@@ -1,0 +1,289 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Kernel driver i2c-parport &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Kernel driver i2c-pca-isa" href="i2c-pca-isa.html" />
+    <link rel="prev" title="Kernel driver i2c-ocores" href="i2c-ocores.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="kernel-driver-i2c-parport">
+<h1>Kernel driver i2c-parport<a class="headerlink" href="#kernel-driver-i2c-parport" title="Permalink to this headline">¶</a></h1>
+<p>Author: Jean Delvare &lt;<a class="reference external" href="mailto:jdelvare&#37;&#52;&#48;suse&#46;de">jdelvare<span>&#64;</span>suse<span>&#46;</span>de</a>&gt;</p>
+<p>This is a unified driver for several i2c-over-parallel-port adapters,
+such as the ones made by Philips, Velleman or ELV. This driver is
+meant as a replacement for the older, individual drivers:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>i2c-philips-par</p></li>
+<li><p>i2c-elv</p></li>
+<li><p>i2c-velleman</p></li>
+<li><p>video/i2c-parport
+(NOT the same as this one, dedicated to home brew teletext adapters)</p></li>
+</ul>
+</div></blockquote>
+<p>It currently supports the following devices:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>(type=0) Philips adapter</p></li>
+<li><p>(type=1) home brew teletext adapter</p></li>
+<li><p>(type=2) Velleman K8000 adapter</p></li>
+<li><p>(type=3) ELV adapter</p></li>
+<li><p>(type=4) Analog Devices ADM1032 evaluation board</p></li>
+<li><p>(type=5) Analog Devices evaluation boards: ADM1025, ADM1030, ADM1031</p></li>
+<li><p>(type=6) Barco LPT-&gt;DVI (K5800236) adapter</p></li>
+<li><p>(type=7) One For All JP1 parallel port adapter</p></li>
+<li><p>(type=8) VCT-jig</p></li>
+</ul>
+</div></blockquote>
+<p>These devices use different pinout configurations, so you have to tell
+the driver what you have, using the type module parameter. There is no
+way to autodetect the devices. Support for different pinout configurations
+can be easily added when needed.</p>
+<p>Earlier kernels defaulted to type=0 (Philips).  But now, if the type
+parameter is missing, the driver will simply fail to initialize.</p>
+<p>SMBus alert support is available on adapters which have this line properly
+connected to the parallel port’s interrupt pin.</p>
+<section id="building-your-own-adapter">
+<h2>Building your own adapter<a class="headerlink" href="#building-your-own-adapter" title="Permalink to this headline">¶</a></h2>
+<p>If you want to build you own i2c-over-parallel-port adapter, here is
+a sample electronics schema (credits go to Sylvain Munaut):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Device                                                      PC
+Side          ___________________Vdd (+)                    Side
+               |    |         |
+              ---  ---       ---
+              | |  | |       | |
+              |R|  |R|       |R|
+              | |  | |       | |
+              ---  ---       ---
+               |    |         |
+               |    |    /|   |
+SCL  ----------x--------o |-----------x-------------------  pin 2
+                    |    \|   |       |
+                    |         |       |
+                    |   |\    |       |
+SDA  ----------x----x---| o---x---------------------------  pin 13
+               |        |/            |
+               |                      |
+               |         /|           |
+               ---------o |----------------x--------------  pin 3
+                         \|           |    |
+                                      |    |
+                                     ---  ---
+                                     | |  | |
+                                     |R|  |R|
+                                     | |  | |
+                                     ---  ---
+                                      |    |
+                                     ###  ###
+                                     GND  GND
+</pre></div>
+</div>
+<dl>
+<dt>Remarks:</dt><dd><ul>
+<li><p>This is the exact pinout and electronics used on the Analog Devices
+evaluation boards.</p></li>
+<li><p>All inverters:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>  /|
+-o |-
+  \|
+</pre></div>
+</div>
+<p>must be 74HC05, they must be open collector output.</p>
+</li>
+<li><p>All resitors are 10k.</p></li>
+<li><p>Pins 18-25 of the parallel port connected to GND.</p></li>
+<li><p>Pins 4-9 (D2-D7) could be used as VDD is the driver drives them high.
+The ADM1032 evaluation board uses D4-D7. Beware that the amount of
+current you can draw from the parallel port is limited. Also note that
+all connected lines MUST BE driven at the same state, else you’ll short
+circuit the output buffers! So plugging the I2C adapter after loading
+the i2c-parport module might be a good safety since data line state
+prior to init may be unknown.</p></li>
+<li><p>This is 5V!</p></li>
+<li><p>Obviously you cannot read SCL (so it’s not really standard-compliant).
+Pretty easy to add, just copy the SDA part and use another input pin.
+That would give (ELV compatible pinout):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Device                                                      PC
+Side          ______________________________Vdd (+)         Side
+               |    |            |    |
+              ---  ---          ---  ---
+              | |  | |          | |  | |
+              |R|  |R|          |R|  |R|
+              | |  | |          | |  | |
+              ---  ---          ---  ---
+               |    |            |    |
+               |    |      |\    |    |
+SCL  ----------x--------x--| o---x------------------------  pin 15
+                    |   |  |/         |
+                    |   |             |
+                    |   |   /|        |
+                    |   ---o |-------------x--------------  pin 2
+                    |       \|        |    |
+                    |                 |    |
+                    |                 |    |
+                    |      |\         |    |
+SDA  ---------------x---x--| o--------x-------------------  pin 10
+                        |  |/              |
+                        |                  |
+                        |   /|             |
+                        ---o |------------------x---------  pin 3
+                            \|             |    |
+                                           |    |
+                                          ---  ---
+                                          | |  | |
+                                          |R|  |R|
+                                          | |  | |
+                                          ---  ---
+                                           |    |
+                                          ###  ###
+                                          GND  GND
+</pre></div>
+</div>
+</li>
+</ul>
+</dd>
+</dl>
+<p>If possible, you should use the same pinout configuration as existing
+adapters do, so you won’t even have to change the code.</p>
+</section>
+<section id="similar-but-different-drivers">
+<h2>Similar (but different) drivers<a class="headerlink" href="#similar-but-different-drivers" title="Permalink to this headline">¶</a></h2>
+<p>This driver is NOT the same as the i2c-pport driver found in the i2c
+package. The i2c-pport driver makes use of modern parallel port features so
+that you don’t need additional electronics. It has other restrictions
+however, and was not ported to Linux 2.6 (yet).</p>
+<p>This driver is also NOT the same as the i2c-pcf-epp driver found in the
+lm_sensors package. The i2c-pcf-epp driver doesn’t use the parallel port as
+an I2C bus directly. Instead, it uses it to control an external I2C bus
+master. That driver was not ported to Linux 2.6 (yet) either.</p>
+</section>
+<section id="legacy-documentation-for-velleman-adapter">
+<h2>Legacy documentation for Velleman adapter<a class="headerlink" href="#legacy-documentation-for-velleman-adapter" title="Permalink to this headline">¶</a></h2>
+<p>Useful links:</p>
+<ul class="simple">
+<li><p>Velleman                <a class="reference external" href="http://www.velleman.be/">http://www.velleman.be/</a></p></li>
+<li><p>Velleman K8000 Howto    <a class="reference external" href="http://howto.htlw16.ac.at/k8000-howto.html">http://howto.htlw16.ac.at/k8000-howto.html</a></p></li>
+</ul>
+<p>The project has lead to new libs for the Velleman K8000 and K8005:</p>
+<blockquote>
+<div><p>LIBK8000 v1.99.1 and LIBK8005 v0.21</p>
+</div></blockquote>
+<p>With these libs, you can control the K8000 interface card and the K8005
+stepper motor card with the simple commands which are in the original
+Velleman software, like SetIOchannel, ReadADchannel, SendStepCCWFull and
+many more, using /dev/velleman.</p>
+<blockquote>
+<div><ul class="simple">
+<li><p><a class="reference external" href="http://home.wanadoo.nl/hihihi/libk8000.htm">http://home.wanadoo.nl/hihihi/libk8000.htm</a></p></li>
+<li><p><a class="reference external" href="http://home.wanadoo.nl/hihihi/libk8005.htm">http://home.wanadoo.nl/hihihi/libk8005.htm</a></p></li>
+<li><p><a class="reference external" href="http://struyve.mine.nu:8080/index.php?block=k8000">http://struyve.mine.nu:8080/index.php?block=k8000</a></p></li>
+<li><p><a class="reference external" href="http://sourceforge.net/projects/libk8005/">http://sourceforge.net/projects/libk8005/</a></p></li>
+</ul>
+</div></blockquote>
+</section>
+<section id="one-for-all-jp1-parallel-port-adapter">
+<h2>One For All JP1 parallel port adapter<a class="headerlink" href="#one-for-all-jp1-parallel-port-adapter" title="Permalink to this headline">¶</a></h2>
+<p>The JP1 project revolves around a set of remote controls which expose
+the I2C bus their internal configuration EEPROM lives on via a 6 pin
+jumper in the battery compartment. More details can be found at:</p>
+<p><a class="reference external" href="http://www.hifi-remote.com/jp1/">http://www.hifi-remote.com/jp1/</a></p>
+<p>Details of the simple parallel port hardware can be found at:</p>
+<p><a class="reference external" href="http://www.hifi-remote.com/jp1/hardware.shtml">http://www.hifi-remote.com/jp1/hardware.shtml</a></p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Kernel driver i2c-parport</a><ul>
+<li><a class="reference internal" href="#building-your-own-adapter">Building your own adapter</a></li>
+<li><a class="reference internal" href="#similar-but-different-drivers">Similar (but different) drivers</a></li>
+<li><a class="reference internal" href="#legacy-documentation-for-velleman-adapter">Legacy documentation for Velleman adapter</a></li>
+<li><a class="reference internal" href="#one-for-all-jp1-parallel-port-adapter">One For All JP1 parallel port adapter</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/i2c/busses/i2c-parport.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/i2c/busses/i2c-parport.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,189 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>7. Kernel Entries &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="8. Early Printk" href="earlyprintk.html" />
+    <link rel="prev" title="6. Kernel Stacks" href="kernel-stacks.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="kernel-entries">
+<h1><span class="section-number">7. </span>Kernel Entries<a class="headerlink" href="#kernel-entries" title="Permalink to this headline">¶</a></h1>
+<p>This file documents some of the kernel entries in
+arch/x86/entry/entry_64.S.  A lot of this explanation is adapted from
+an email from Ingo Molnar:</p>
+<p><a class="reference external" href="https://lore.kernel.org/r/20110529191055.GC9835%40elte.hu">https://lore.kernel.org/r/20110529191055.GC9835%40elte.hu</a></p>
+<p>The x86 architecture has quite a few different ways to jump into
+kernel code.  Most of these entry points are registered in
+arch/x86/kernel/traps.c and implemented in arch/x86/entry/entry_64.S
+for 64-bit, arch/x86/entry/entry_32.S for 32-bit and finally
+arch/x86/entry/entry_64_compat.S which implements the 32-bit compatibility
+syscall entry points and thus provides for 32-bit processes the
+ability to execute syscalls when running on 64-bit kernels.</p>
+<p>The IDT vector assignments are listed in arch/x86/include/asm/irq_vectors.h.</p>
+<p>Some of these entries are:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>system_call: syscall instruction from 64-bit code.</p></li>
+<li><p>entry_INT80_compat: int 0x80 from 32-bit or 64-bit code; compat syscall
+either way.</p></li>
+<li><p>entry_INT80_compat, ia32_sysenter: syscall and sysenter from 32-bit
+code</p></li>
+<li><p>interrupt: An array of entries.  Every IDT vector that doesn’t
+explicitly point somewhere else gets set to the corresponding
+value in interrupts.  These point to a whole array of
+magically-generated functions that make their way to common_interrupt()
+with the interrupt number as a parameter.</p></li>
+<li><p>APIC interrupts: Various special-purpose interrupts for things
+like TLB shootdown.</p></li>
+<li><p>Architecturally-defined exceptions like divide_error.</p></li>
+</ul>
+</div></blockquote>
+<p>There are a few complexities here.  The different x86-64 entries
+have different calling conventions.  The syscall and sysenter
+instructions have their own peculiar calling conventions.  Some of
+the IDT entries push an error code onto the stack; others don’t.
+IDT entries using the IST alternative stack mechanism need their own
+magic to get the stack frames right.  (You can find some
+documentation in the AMD APM, Volume 2, Chapter 8 and the Intel SDM,
+Volume 3, Chapter 6.)</p>
+<p>Dealing with the swapgs instruction is especially tricky.  Swapgs
+toggles whether gs is the kernel gs or the user gs.  The swapgs
+instruction is rather fragile: it must nest perfectly and only in
+single depth, it should only be used if entering from user mode to
+kernel mode and then when returning to user-space, and precisely
+so. If we mess that up even slightly, we crash.</p>
+<p>So when we have a secondary entry, already in kernel mode, we <em>must
+not</em> use SWAPGS blindly - nor must we forget doing a SWAPGS when it’s
+not switched/swapped yet.</p>
+<p>Now, there’s a secondary complication: there’s a cheap way to test
+which mode the CPU is in and an expensive way.</p>
+<p>The cheap way is to pick this info off the entry frame on the kernel
+stack, from the CS of the ptregs area of the kernel stack:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>xorl %ebx,%ebx
+testl $3,CS+8(%rsp)
+je error_kernelspace
+SWAPGS
+</pre></div>
+</div>
+<p>The expensive (paranoid) way is to read back the MSR_GS_BASE value
+(which is what SWAPGS modifies):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>      movl $1,%ebx
+      movl $MSR_GS_BASE,%ecx
+      rdmsr
+      testl %edx,%edx
+      js 1f   /* negative -&gt; in kernel */
+      SWAPGS
+      xorl %ebx,%ebx
+1:    ret
+</pre></div>
+</div>
+<p>If we are at an interrupt or user-trap/gate-alike boundary then we can
+use the faster check: the stack will be a reliable indicator of
+whether SWAPGS was already done: if we see that we are a secondary
+entry interrupting kernel mode execution, then we know that the GS
+base has already been switched. If it says that we interrupted
+user-space execution then we must do the SWAPGS.</p>
+<p>But if we are in an NMI/MCE/DEBUG/whatever super-atomic entry context,
+which might have triggered right after a normal entry wrote CS to the
+stack but before we executed SWAPGS, then the only safe way to check
+for GS is the slower method: the RDMSR.</p>
+<p>Therefore, super-atomic entries (except NMI, which is handled separately)
+must use idtentry with paranoid=1 to handle gsbase correctly.  This
+triggers three main behavior changes:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Interrupt entry will use the slower gsbase check.</p></li>
+<li><p>Interrupt entry from user mode will switch off the IST stack.</p></li>
+<li><p>Interrupt exit to kernel mode will not attempt to reschedule.</p></li>
+</ul>
+</div></blockquote>
+<p>We try to only use IST entries and the paranoid entry code for vectors
+that absolutely need the more expensive check for the GS base - and we
+generate all ‘normal’ entry points with the regular (faster) paranoid=0
+variant.</p>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/x86/entry_64.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/x86/entry_64.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,310 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>In-kernel API for FPGA Programming &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="ACPI Support" href="../acpi/index.html" />
+    <link rel="prev" title="FPGA Region" href="fpga-region.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="in-kernel-api-for-fpga-programming">
+<h1>In-kernel API for FPGA Programming<a class="headerlink" href="#in-kernel-api-for-fpga-programming" title="Permalink to this headline">¶</a></h1>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Permalink to this headline">¶</a></h2>
+<p>The in-kernel API for FPGA programming is a combination of APIs from
+FPGA manager, bridge, and regions.  The actual function used to
+trigger FPGA programming is <a class="reference internal" href="#c.fpga_region_program_fpga" title="fpga_region_program_fpga"><code class="xref c c-func docutils literal notranslate"><span class="pre">fpga_region_program_fpga()</span></code></a>.</p>
+<p><a class="reference internal" href="#c.fpga_region_program_fpga" title="fpga_region_program_fpga"><code class="xref c c-func docutils literal notranslate"><span class="pre">fpga_region_program_fpga()</span></code></a> uses functionality supplied by
+the FPGA manager and bridges.  It will:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>lock the region’s mutex</p></li>
+<li><p>lock the mutex of the region’s FPGA manager</p></li>
+<li><p>build a list of FPGA bridges if a method has been specified to do so</p></li>
+<li><p>disable the bridges</p></li>
+<li><p>program the FPGA using info passed in <code class="docutils literal notranslate"><span class="pre">fpga_region-&gt;info</span></code>.</p></li>
+<li><p>re-enable the bridges</p></li>
+<li><p>release the locks</p></li>
+</ul>
+</div></blockquote>
+<p>The <a class="reference internal" href="#c.fpga_image_info" title="fpga_image_info"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">fpga_image_info</span></code></a> specifies what FPGA image to program.  It is
+allocated/freed by <a class="reference internal" href="#c.fpga_image_info_alloc" title="fpga_image_info_alloc"><code class="xref c c-func docutils literal notranslate"><span class="pre">fpga_image_info_alloc()</span></code></a> and freed with
+<a class="reference internal" href="#c.fpga_image_info_free" title="fpga_image_info_free"><code class="xref c c-func docutils literal notranslate"><span class="pre">fpga_image_info_free()</span></code></a></p>
+</section>
+<section id="how-to-program-an-fpga-using-a-region">
+<h2>How to program an FPGA using a region<a class="headerlink" href="#how-to-program-an-fpga-using-a-region" title="Permalink to this headline">¶</a></h2>
+<p>When the FPGA region driver probed, it was given a pointer to an FPGA manager
+driver so it knows which manager to use.  The region also either has a list of
+bridges to control during programming or it has a pointer to a function that
+will generate that list.  Here’s some sample code of what to do next:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#include &lt;linux/fpga/fpga-mgr.h&gt;
+#include &lt;linux/fpga/fpga-region.h&gt;
+
+struct fpga_image_info *info;
+int ret;
+
+/*
+ * First, alloc the struct with information about the FPGA image to
+ * program.
+ */
+info = fpga_image_info_alloc(dev);
+if (!info)
+        return -ENOMEM;
+
+/* Set flags as needed, such as: */
+info-&gt;flags = FPGA_MGR_PARTIAL_RECONFIG;
+
+/*
+ * Indicate where the FPGA image is. This is pseudo-code; you&#39;re
+ * going to use one of these three.
+ */
+if (image is in a scatter gather table) {
+
+        info-&gt;sgt = [your scatter gather table]
+
+} else if (image is in a buffer) {
+
+        info-&gt;buf = [your image buffer]
+        info-&gt;count = [image buffer size]
+
+} else if (image is in a firmware file) {
+
+        info-&gt;firmware_name = devm_kstrdup(dev, firmware_name,
+                                           GFP_KERNEL);
+
+}
+
+/* Add info to region and do the programming */
+region-&gt;info = info;
+ret = fpga_region_program_fpga(region);
+
+/* Deallocate the image info if you&#39;re done with it */
+region-&gt;info = NULL;
+fpga_image_info_free(info);
+
+if (ret)
+        return ret;
+
+/* Now enumerate whatever hardware has appeared in the FPGA. */
+</pre></div>
+</div>
+</section>
+<section id="api-for-programming-an-fpga">
+<h2>API for programming an FPGA<a class="headerlink" href="#api-for-programming-an-fpga" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p><a class="reference internal" href="#c.fpga_region_program_fpga" title="fpga_region_program_fpga"><code class="xref c c-func docutils literal notranslate"><span class="pre">fpga_region_program_fpga()</span></code></a> -  Program an FPGA</p></li>
+<li><p><a class="reference internal" href="#c.fpga_image_info" title="fpga_image_info"><code class="xref c c-func docutils literal notranslate"><span class="pre">fpga_image_info()</span></code></a> -  Specifies what FPGA image to program</p></li>
+<li><p><a class="reference internal" href="#c.fpga_image_info_alloc" title="fpga_image_info_alloc"><code class="xref c c-func docutils literal notranslate"><span class="pre">fpga_image_info_alloc()</span></code></a> -  Allocate an FPGA image info struct</p></li>
+<li><p><a class="reference internal" href="#c.fpga_image_info_free" title="fpga_image_info_free"><code class="xref c c-func docutils literal notranslate"><span class="pre">fpga_image_info_free()</span></code></a> -  Free an FPGA image info struct</p></li>
+</ul>
+<dl class="function">
+<dt id="c.fpga_region_program_fpga">
+int <code class="sig-name descname">fpga_region_program_fpga</code><span class="sig-paren">(</span>struct <a class="reference internal" href="fpga-region.html#c.fpga_region" title="fpga_region">fpga_region</a><em> *region</em><span class="sig-paren">)</span><a class="headerlink" href="#c.fpga_region_program_fpga" title="Permalink to this definition">¶</a></dt>
+<dd><p>program FPGA</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">fpga_region</span> <span class="pre">*region</span></code></dt><dd><p>FPGA region</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Program an FPGA using fpga image info (region-&gt;info).
+If the region has a get_bridges function, the exclusive reference for the
+bridges will be held if programming succeeds.  This is intended to prevent
+reprogramming the region until the caller considers it safe to do so.
+The caller will need to call <a class="reference internal" href="fpga-region.html#c.fpga_bridges_put" title="fpga_bridges_put"><code class="xref c c-func docutils literal notranslate"><span class="pre">fpga_bridges_put()</span></code></a> before attempting to
+reprogram the region.</p>
+<p>Return 0 for success or negative error code.</p>
+</div>
+<p>FPGA Manager flags</p>
+<p>Flags used in the <a class="reference internal" href="#c.fpga_image_info" title="fpga_image_info"><code class="xref c c-type docutils literal notranslate"><span class="pre">fpga_image_info-&gt;flags</span></code></a> field</p>
+<p><code class="docutils literal notranslate"><span class="pre">FPGA_MGR_PARTIAL_RECONFIG</span></code>: do partial reconfiguration if supported</p>
+<p><code class="docutils literal notranslate"><span class="pre">FPGA_MGR_EXTERNAL_CONFIG</span></code>: FPGA has been configured prior to Linux booting</p>
+<p><code class="docutils literal notranslate"><span class="pre">FPGA_MGR_ENCRYPTED_BITSTREAM</span></code>: indicates bitstream is encrypted</p>
+<p><code class="docutils literal notranslate"><span class="pre">FPGA_MGR_BITSTREAM_LSB_FIRST</span></code>: SPI bitstream bit order is LSB first</p>
+<p><code class="docutils literal notranslate"><span class="pre">FPGA_MGR_COMPRESSED_BITSTREAM</span></code>: FPGA bitstream is compressed</p>
+<dl class="type">
+<dt id="c.fpga_image_info">
+struct <code class="sig-name descname">fpga_image_info</code><a class="headerlink" href="#c.fpga_image_info" title="Permalink to this definition">¶</a></dt>
+<dd><p>information specific to an FPGA image</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct fpga_image_info {
+    u32 flags;
+    u32 enable_timeout_us;
+    u32 disable_timeout_us;
+    u32 config_complete_timeout_us;
+    char *firmware_name;
+    struct sg_table *sgt;
+    const char *buf;
+    size_t count;
+    size_t header_size;
+    size_t data_size;
+    int region_id;
+    struct device *dev;
+#ifdef CONFIG_OF;
+    struct device_node *overlay;
+#endif;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">flags</span></code></dt><dd><p>boolean flags as defined above</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">enable_timeout_us</span></code></dt><dd><p>maximum time to enable traffic through bridge (uSec)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">disable_timeout_us</span></code></dt><dd><p>maximum time to disable traffic through bridge (uSec)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">config_complete_timeout_us</span></code></dt><dd><p>maximum time for FPGA to switch to operating
+status in the write_complete op.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">firmware_name</span></code></dt><dd><p>name of FPGA image firmware file</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">sgt</span></code></dt><dd><p>scatter/gather table containing FPGA image</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">buf</span></code></dt><dd><p>contiguous buffer containing FPGA image</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">count</span></code></dt><dd><p>size of buf</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">header_size</span></code></dt><dd><p>size of image header.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">data_size</span></code></dt><dd><p>size of image data to be sent to the device. If not specified,
+whole image will be used. Header may be skipped in either case.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">region_id</span></code></dt><dd><p>id of target region</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dev</span></code></dt><dd><p>device that owns this</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">overlay</span></code></dt><dd><p>Device Tree overlay</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.fpga_image_info_alloc">
+struct <a class="reference internal" href="#c.fpga_image_info" title="fpga_image_info">fpga_image_info</a> * <code class="sig-name descname">fpga_image_info_alloc</code><span class="sig-paren">(</span>struct <a class="reference internal" href="../infrastructure.html#c.device" title="device">device</a><em> *dev</em><span class="sig-paren">)</span><a class="headerlink" href="#c.fpga_image_info_alloc" title="Permalink to this definition">¶</a></dt>
+<dd><p>Allocate an FPGA image info struct</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>owning device</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p><a class="reference internal" href="#c.fpga_image_info" title="fpga_image_info"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">fpga_image_info</span></code></a> or NULL</p>
+</div>
+<dl class="function">
+<dt id="c.fpga_image_info_free">
+void <code class="sig-name descname">fpga_image_info_free</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.fpga_image_info" title="fpga_image_info">fpga_image_info</a><em> *info</em><span class="sig-paren">)</span><a class="headerlink" href="#c.fpga_image_info_free" title="Permalink to this definition">¶</a></dt>
+<dd><p>Free an FPGA image info struct</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">fpga_image_info</span> <span class="pre">*info</span></code></dt><dd><p>FPGA image info struct to free</p>
+</dd>
+</dl>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">In-kernel API for FPGA Programming</a><ul>
+<li><a class="reference internal" href="#overview">Overview</a></li>
+<li><a class="reference internal" href="#how-to-program-an-fpga-using-a-region">How to program an FPGA using a region</a></li>
+<li><a class="reference internal" href="#api-for-programming-an-fpga">API for programming an FPGA</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/fpga/fpga-programming.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/fpga/fpga-programming.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

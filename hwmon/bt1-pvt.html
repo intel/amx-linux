@@ -1,0 +1,272 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Kernel driver bt1-pvt &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Kernel driver coretemp" href="coretemp.html" />
+    <link rel="prev" title="Kernel driver bpa-rs600" href="bpa-rs600.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="kernel-driver-bt1-pvt">
+<h1>Kernel driver bt1-pvt<a class="headerlink" href="#kernel-driver-bt1-pvt" title="Permalink to this headline">¶</a></h1>
+<p>Supported chips:</p>
+<blockquote>
+<div><ul>
+<li><p>Baikal-T1 PVT sensor (in SoC)</p>
+<p>Prefix: ‘bt1-pvt’</p>
+<p>Addresses scanned: -</p>
+<p>Datasheet: Provided by BAIKAL ELECTRONICS upon request and under NDA</p>
+</li>
+</ul>
+</div></blockquote>
+<dl class="simple">
+<dt>Authors:</dt><dd><p>Maxim Kaurkin &lt;<a class="reference external" href="mailto:maxim&#46;kaurkin&#37;&#52;&#48;baikalelectronics&#46;ru">maxim<span>&#46;</span>kaurkin<span>&#64;</span>baikalelectronics<span>&#46;</span>ru</a>&gt;
+Serge Semin &lt;<a class="reference external" href="mailto:Sergey&#46;Semin&#37;&#52;&#48;baikalelectronics&#46;ru">Sergey<span>&#46;</span>Semin<span>&#64;</span>baikalelectronics<span>&#46;</span>ru</a>&gt;</p>
+</dd>
+</dl>
+<section id="description">
+<h2>Description<a class="headerlink" href="#description" title="Permalink to this headline">¶</a></h2>
+<p>This driver implements support for the hardware monitoring capabilities of the
+embedded into Baikal-T1 process, voltage and temperature sensors. PVT IP-core
+consists of one temperature and four voltage sensors, which can be used to
+monitor the chip internal environment like heating, supply voltage and
+transistors performance. The driver can optionally provide the hwmon alarms
+for each sensor the PVT controller supports. The alarms functionality is made
+compile-time configurable due to the hardware interface implementation
+peculiarity, which is connected with an ability to convert data from only one
+sensor at a time. Additional limitation is that the controller performs the
+thresholds checking synchronously with the data conversion procedure. Due to
+these in order to have the hwmon alarms automatically detected the driver code
+must switch from one sensor to another, read converted data and manually check
+the threshold status bits. Depending on the measurements timeout settings
+(update_interval sysfs node value) this design may cause additional burden on
+the system performance. So in case if alarms are unnecessary in your system
+design it’s recommended to have them disabled to prevent the PVT IRQs being
+periodically raised to get the data cache/alarms status up to date. By default
+in alarm-less configuration the data conversion is performed by the driver
+on demand when read operation is requested via corresponding _input-file.</p>
+</section>
+<section id="temperature-monitoring">
+<h2>Temperature Monitoring<a class="headerlink" href="#temperature-monitoring" title="Permalink to this headline">¶</a></h2>
+<p>Temperature is measured with 10-bit resolution and reported in millidegree
+Celsius. The driver performs all the scaling by itself therefore reports true
+temperatures that don’t need any user-space adjustments. While the data
+translation formulae isn’t linear, which gives us non-linear discreteness,
+it’s close to one, but giving a bit better accuracy for higher temperatures.
+The temperature input is mapped as follows (the last column indicates the input
+ranges):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>temp1: CPU embedded diode       -48.38C - +147.438C
+</pre></div>
+</div>
+<p>In case if the alarms kernel config is enabled in the driver the temperature input
+has associated min and max limits which trigger an alarm when crossed.</p>
+</section>
+<section id="voltage-monitoring">
+<h2>Voltage Monitoring<a class="headerlink" href="#voltage-monitoring" title="Permalink to this headline">¶</a></h2>
+<p>The voltage inputs are also sampled with 10-bit resolution and reported in
+millivolts. But in this case the data translation formulae is linear, which
+provides a constant measurements discreteness. The data scaling is also
+performed by the driver, so returning true millivolts. The voltage inputs are
+mapped as follows (the last column indicates the input ranges):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>in0: VDD                (processor core)                0.62V - 1.168V
+in1: Low-Vt             (low voltage threshold)         0.62V - 1.168V
+in2: High-Vt            (high voltage threshold)        0.62V - 1.168V
+in3: Standard-Vt        (standard voltage threshold)    0.62V - 1.168V
+</pre></div>
+</div>
+<p>In case if the alarms config is enabled in the driver the voltage inputs
+have associated min and max limits which trigger an alarm when crossed.</p>
+</section>
+<section id="sysfs-attributes">
+<h2>Sysfs Attributes<a class="headerlink" href="#sysfs-attributes" title="Permalink to this headline">¶</a></h2>
+<p>Following is a list of all sysfs attributes that the driver provides, their
+permissions and a short description:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 40%" />
+<col style="width: 9%" />
+<col style="width: 51%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Name</p></th>
+<th class="head"><p>Perm</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>update_interval</p></td>
+<td><p>RW</p></td>
+<td><p>Measurements update interval per
+sensor.</p></td>
+</tr>
+<tr class="row-odd"><td><p>temp1_type</p></td>
+<td><p>RO</p></td>
+<td><p>Sensor type (always 1 as CPU embedded
+diode).</p></td>
+</tr>
+<tr class="row-even"><td><p>temp1_label</p></td>
+<td><p>RO</p></td>
+<td><p>CPU Core Temperature sensor.</p></td>
+</tr>
+<tr class="row-odd"><td><p>temp1_input</p></td>
+<td><p>RO</p></td>
+<td><p>Measured temperature in millidegree
+Celsius.</p></td>
+</tr>
+<tr class="row-even"><td><p>temp1_min</p></td>
+<td><p>RW</p></td>
+<td><p>Low limit for temp input.</p></td>
+</tr>
+<tr class="row-odd"><td><p>temp1_max</p></td>
+<td><p>RW</p></td>
+<td><p>High limit for temp input.</p></td>
+</tr>
+<tr class="row-even"><td><p>temp1_min_alarm</p></td>
+<td><p>RO</p></td>
+<td><p>Temperature input alarm. Returns 1 if
+temperature input went below min limit,
+0 otherwise.</p></td>
+</tr>
+<tr class="row-odd"><td><p>temp1_max_alarm</p></td>
+<td><p>RO</p></td>
+<td><p>Temperature input alarm. Returns 1 if
+temperature input went above max limit,
+0 otherwise.</p></td>
+</tr>
+<tr class="row-even"><td><p>temp1_offset</p></td>
+<td><p>RW</p></td>
+<td><p>Temperature offset in millidegree
+Celsius which is added to the
+temperature reading by the chip. It can
+be used to manually adjust the
+temperature measurements within 7.130
+degrees Celsius.</p></td>
+</tr>
+<tr class="row-odd"><td><p>in[0-3]_label</p></td>
+<td><p>RO</p></td>
+<td><p>CPU Voltage sensor (either core or
+low/high/standard thresholds).</p></td>
+</tr>
+<tr class="row-even"><td><p>in[0-3]_input</p></td>
+<td><p>RO</p></td>
+<td><p>Measured voltage in millivolts.</p></td>
+</tr>
+<tr class="row-odd"><td><p>in[0-3]_min</p></td>
+<td><p>RW</p></td>
+<td><p>Low limit for voltage input.</p></td>
+</tr>
+<tr class="row-even"><td><p>in[0-3]_max</p></td>
+<td><p>RW</p></td>
+<td><p>High limit for voltage input.</p></td>
+</tr>
+<tr class="row-odd"><td><p>in[0-3]_min_alarm</p></td>
+<td><p>RO</p></td>
+<td><p>Voltage input alarm. Returns 1 if
+voltage input went below min limit,
+0 otherwise.</p></td>
+</tr>
+<tr class="row-even"><td><p>in[0-3]_max_alarm</p></td>
+<td><p>RO</p></td>
+<td><p>Voltage input alarm. Returns 1 if
+voltage input went above max limit,
+0 otherwise.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Kernel driver bt1-pvt</a><ul>
+<li><a class="reference internal" href="#description">Description</a></li>
+<li><a class="reference internal" href="#temperature-monitoring">Temperature Monitoring</a></li>
+<li><a class="reference internal" href="#voltage-monitoring">Voltage Monitoring</a></li>
+<li><a class="reference internal" href="#sysfs-attributes">Sysfs Attributes</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/hwmon/bt1-pvt.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/hwmon/bt1-pvt.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

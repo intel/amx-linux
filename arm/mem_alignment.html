@@ -1,0 +1,159 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Memory alignment &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="ARM TCM (Tightly-Coupled Memory) handling in Linux" href="tcm.html" />
+    <link rel="prev" title="Kernel Memory Layout on ARM Linux" href="memory.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="memory-alignment">
+<h1>Memory alignment<a class="headerlink" href="#memory-alignment" title="Permalink to this headline">¶</a></h1>
+<p>Too many problems popped up because of unnoticed misaligned memory access in
+kernel code lately.  Therefore the alignment fixup is now unconditionally
+configured in for SA11x0 based targets.  According to Alan Cox, this is a
+bad idea to configure it out, but Russell King has some good reasons for
+doing so on some f***ed up ARM architectures like the EBSA110.  However
+this is not the case on many design I’m aware of, like all SA11x0 based
+ones.</p>
+<p>Of course this is a bad idea to rely on the alignment trap to perform
+unaligned memory access in general.  If those access are predictable, you
+are better to use the macros provided by include/asm/unaligned.h.  The
+alignment trap can fixup misaligned access for the exception cases, but at
+a high performance cost.  It better be rare.</p>
+<p>Now for user space applications, it is possible to configure the alignment
+trap to SIGBUS any code performing unaligned access (good for debugging bad
+code), or even fixup the access by software like for kernel code.  The later
+mode isn’t recommended for performance reasons (just think about the
+floating point emulation that works about the same way).  Fix your code
+instead!</p>
+<p>Please note that randomly changing the behaviour without good thought is
+real bad - it changes the behaviour of all unaligned instructions in user
+space, and might cause programs to fail unexpectedly.</p>
+<p>To change the alignment trap behavior, simply echo a number into
+/proc/cpu/alignment.  The number is made up from various bits:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 5%" />
+<col style="width: 95%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>bit</p></th>
+<th class="head"><p>behavior when set</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>0</p></td>
+<td><p>A user process performing an unaligned memory access
+will cause the kernel to print a message indicating
+process name, pid, pc, instruction, address, and the
+fault code.</p></td>
+</tr>
+<tr class="row-odd"><td><p>1</p></td>
+<td><p>The kernel will attempt to fix up the user process
+performing the unaligned access.  This is of course
+slow (think about the floating point emulator) and
+not recommended for production use.</p></td>
+</tr>
+<tr class="row-even"><td><p>2</p></td>
+<td><p>The kernel will send a SIGBUS signal to the user process
+performing the unaligned access.</p></td>
+</tr>
+</tbody>
+</table>
+<p>Note that not all combinations are supported - only values 0 through 5.
+(6 and 7 don’t make sense).</p>
+<p>For example, the following will turn on the warnings, but without
+fixing up or sending SIGBUS signals:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>echo 1 &gt; /proc/cpu/alignment
+</pre></div>
+</div>
+<p>You can also read the content of the same file to get statistical
+information on unaligned access occurrences plus the current mode of
+operation for user space code.</p>
+<p>Nicolas Pitre, Mar 13, 2001.  Modified Russell King, Nov 30, 2001.</p>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/arm/mem_alignment.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/arm/mem_alignment.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,178 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>HOWTO for multiqueue network device support &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Netconsole" href="netconsole.html" />
+    <link rel="prev" title="MPTCP Sysfs variables" href="mptcp-sysctl.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="howto-for-multiqueue-network-device-support">
+<h1>HOWTO for multiqueue network device support<a class="headerlink" href="#howto-for-multiqueue-network-device-support" title="Permalink to this headline">¶</a></h1>
+<section id="section-1-base-driver-requirements-for-implementing-multiqueue-support">
+<h2>Section 1: Base driver requirements for implementing multiqueue support<a class="headerlink" href="#section-1-base-driver-requirements-for-implementing-multiqueue-support" title="Permalink to this headline">¶</a></h2>
+<section id="intro-kernel-support-for-multiqueue-devices">
+<h3>Intro: Kernel support for multiqueue devices<a class="headerlink" href="#intro-kernel-support-for-multiqueue-devices" title="Permalink to this headline">¶</a></h3>
+<p>Kernel support for multiqueue devices is always present.</p>
+<p>Base drivers are required to use the new alloc_etherdev_mq() or
+alloc_netdev_mq() functions to allocate the subqueues for the device.  The
+underlying kernel API will take care of the allocation and deallocation of
+the subqueue memory, as well as netdev configuration of where the queues
+exist in memory.</p>
+<p>The base driver will also need to manage the queues as it does the global
+netdev-&gt;queue_lock today.  Therefore base drivers should use the
+netif_{start|stop|wake}_subqueue() functions to manage each queue while the
+device is still operational.  netdev-&gt;queue_lock is still used when the device
+comes online or when it’s completely shut down (<a class="reference internal" href="kapi.html#c.unregister_netdev" title="unregister_netdev"><code class="xref c c-func docutils literal notranslate"><span class="pre">unregister_netdev()</span></code></a>, etc.).</p>
+</section>
+</section>
+<section id="section-2-qdisc-support-for-multiqueue-devices">
+<h2>Section 2: Qdisc support for multiqueue devices<a class="headerlink" href="#section-2-qdisc-support-for-multiqueue-devices" title="Permalink to this headline">¶</a></h2>
+<p>Currently two qdiscs are optimized for multiqueue devices.  The first is the
+default pfifo_fast qdisc.  This qdisc supports one qdisc per hardware queue.
+A new round-robin qdisc, sch_multiq also supports multiple hardware queues. The
+qdisc is responsible for classifying the skb’s and then directing the skb’s to
+bands and queues based on the value in skb-&gt;queue_mapping.  Use this field in
+the base driver to determine which queue to send the skb to.</p>
+<p>sch_multiq has been added for hardware that wishes to avoid head-of-line
+blocking.  It will cycle though the bands and verify that the hardware queue
+associated with the band is not stopped prior to dequeuing a packet.</p>
+<p>On qdisc load, the number of bands is based on the number of queues on the
+hardware.  Once the association is made, any skb with skb-&gt;queue_mapping set,
+will be queued to the band associated with the hardware queue.</p>
+</section>
+<section id="section-3-brief-howto-using-multiq-for-multiqueue-devices">
+<h2>Section 3: Brief howto using MULTIQ for multiqueue devices<a class="headerlink" href="#section-3-brief-howto-using-multiq-for-multiqueue-devices" title="Permalink to this headline">¶</a></h2>
+<p>The userspace command ‘tc,’ part of the iproute2 package, is used to configure
+qdiscs.  To add the MULTIQ qdisc to your network device, assuming the device
+is called eth0, run the following command:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># tc qdisc add dev eth0 root handle 1: multiq
+</pre></div>
+</div>
+<p>The qdisc will allocate the number of bands to equal the number of queues that
+the device reports, and bring the qdisc online.  Assuming eth0 has 4 Tx
+queues, the band mapping would look like:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>band 0 =&gt; queue 0
+band 1 =&gt; queue 1
+band 2 =&gt; queue 2
+band 3 =&gt; queue 3
+</pre></div>
+</div>
+<p>Traffic will begin flowing through each queue based on either the simple_tx_hash
+function or based on netdev-&gt;select_queue() if you have it defined.</p>
+<p>The behavior of tc filters remains the same.  However a new tc action,
+skbedit, has been added.  Assuming you wanted to route all traffic to a
+specific host, for example 192.168.0.3, through a specific queue you could use
+this action and establish a filter such as:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>tc filter add dev eth0 parent 1: protocol ip prio 1 u32 \
+        match ip dst 192.168.0.3 \
+        action skbedit queue_mapping 3
+</pre></div>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Author</dt>
+<dd class="field-odd"><p>Alexander Duyck &lt;<a class="reference external" href="mailto:alexander&#46;h&#46;duyck&#37;&#52;&#48;intel&#46;com">alexander<span>&#46;</span>h<span>&#46;</span>duyck<span>&#64;</span>intel<span>&#46;</span>com</a>&gt;</p>
+</dd>
+<dt class="field-even">Original Author</dt>
+<dd class="field-even"><p>Peter P. Waskiewicz Jr. &lt;<a class="reference external" href="mailto:peter&#46;p&#46;waskiewicz&#46;jr&#37;&#52;&#48;intel&#46;com">peter<span>&#46;</span>p<span>&#46;</span>waskiewicz<span>&#46;</span>jr<span>&#64;</span>intel<span>&#46;</span>com</a>&gt;</p>
+</dd>
+</dl>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">HOWTO for multiqueue network device support</a><ul>
+<li><a class="reference internal" href="#section-1-base-driver-requirements-for-implementing-multiqueue-support">Section 1: Base driver requirements for implementing multiqueue support</a><ul>
+<li><a class="reference internal" href="#intro-kernel-support-for-multiqueue-devices">Intro: Kernel support for multiqueue devices</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#section-2-qdisc-support-for-multiqueue-devices">Section 2: Qdisc support for multiqueue devices</a></li>
+<li><a class="reference internal" href="#section-3-brief-howto-using-multiq-for-multiqueue-devices">Section 3: Brief howto using MULTIQ for multiqueue devices</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/networking/multiqueue.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/networking/multiqueue.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

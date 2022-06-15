@@ -1,0 +1,358 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Netconsole &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Netdev features mess and how to get out from it alive" href="netdev-features.html" />
+    <link rel="prev" title="HOWTO for multiqueue network device support" href="multiqueue.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="netconsole">
+<h1>Netconsole<a class="headerlink" href="#netconsole" title="Permalink to this headline">¶</a></h1>
+<p>started by Ingo Molnar &lt;<a class="reference external" href="mailto:mingo&#37;&#52;&#48;redhat&#46;com">mingo<span>&#64;</span>redhat<span>&#46;</span>com</a>&gt;, 2001.09.17</p>
+<p>2.6 port and netpoll api by Matt Mackall &lt;<a class="reference external" href="mailto:mpm&#37;&#52;&#48;selenic&#46;com">mpm<span>&#64;</span>selenic<span>&#46;</span>com</a>&gt;, Sep 9 2003</p>
+<p>IPv6 support by Cong Wang &lt;<a class="reference external" href="mailto:xiyou&#46;wangcong&#37;&#52;&#48;gmail&#46;com">xiyou<span>&#46;</span>wangcong<span>&#64;</span>gmail<span>&#46;</span>com</a>&gt;, Jan 1 2013</p>
+<p>Extended console support by Tejun Heo &lt;<a class="reference external" href="mailto:tj&#37;&#52;&#48;kernel&#46;org">tj<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;, May 1 2015</p>
+<p>Please send bug reports to Matt Mackall &lt;<a class="reference external" href="mailto:mpm&#37;&#52;&#48;selenic&#46;com">mpm<span>&#64;</span>selenic<span>&#46;</span>com</a>&gt;
+Satyam Sharma &lt;<a class="reference external" href="mailto:satyam&#46;sharma&#37;&#52;&#48;gmail&#46;com">satyam<span>&#46;</span>sharma<span>&#64;</span>gmail<span>&#46;</span>com</a>&gt;, and Cong Wang &lt;<a class="reference external" href="mailto:xiyou&#46;wangcong&#37;&#52;&#48;gmail&#46;com">xiyou<span>&#46;</span>wangcong<span>&#64;</span>gmail<span>&#46;</span>com</a>&gt;</p>
+<section id="introduction">
+<h2>Introduction:<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>This module logs kernel printk messages over UDP allowing debugging of
+problem where disk logging fails and serial consoles are impractical.</p>
+<p>It can be used either built-in or as a module. As a built-in,
+netconsole initializes immediately after NIC cards and will bring up
+the specified interface as soon as possible. While this doesn’t allow
+capture of early kernel panics, it does capture most of the boot
+process.</p>
+</section>
+<section id="sender-and-receiver-configuration">
+<h2>Sender and receiver configuration:<a class="headerlink" href="#sender-and-receiver-configuration" title="Permalink to this headline">¶</a></h2>
+<p>It takes a string configuration parameter “netconsole” in the
+following format:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>netconsole=[+][src-port]@[src-ip]/[&lt;dev&gt;],[tgt-port]@&lt;tgt-ip&gt;/[tgt-macaddr]
+
+  where
+       +             if present, enable extended console support
+       src-port      source for UDP packets (defaults to 6665)
+       src-ip        source IP to use (interface address)
+       dev           network interface (eth0)
+       tgt-port      port for logging agent (6666)
+       tgt-ip        IP address for logging agent
+       tgt-macaddr   ethernet MAC address for logging agent (broadcast)
+</pre></div>
+</div>
+<p>Examples:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>linux netconsole=4444@10.0.0.1/eth1,9353@10.0.0.2/12:34:56:78:9a:bc
+</pre></div>
+</div>
+<p>or:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>insmod netconsole netconsole=@/,@10.0.0.2/
+</pre></div>
+</div>
+<p>or using IPv6:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>insmod netconsole netconsole=@/,@fd00:1:2:3::1/
+</pre></div>
+</div>
+<p>It also supports logging to multiple remote agents by specifying
+parameters for the multiple agents separated by semicolons and the
+complete string enclosed in “quotes”, thusly:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>modprobe netconsole netconsole=&quot;@/,@10.0.0.2/;@/eth1,6892@10.0.0.3/&quot;
+</pre></div>
+</div>
+<p>Built-in netconsole starts immediately after the TCP stack is
+initialized and attempts to bring up the supplied dev at the supplied
+address.</p>
+<p>The remote host has several options to receive the kernel messages,
+for example:</p>
+<ol class="arabic">
+<li><p>syslogd</p></li>
+<li><p>netcat</p>
+<p>On distributions using a BSD-based netcat version (e.g. Fedora,
+openSUSE and Ubuntu) the listening port must be specified without
+the -p switch:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>    nc -u -l -p &lt;port&gt;&#39; / &#39;nc -u -l &lt;port&gt;
+
+or::
+
+    netcat -u -l -p &lt;port&gt;&#39; / &#39;netcat -u -l &lt;port&gt;
+</pre></div>
+</div>
+</li>
+<li><p>socat</p></li>
+</ol>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>socat udp-recv:&lt;port&gt; -
+</pre></div>
+</div>
+</section>
+<section id="dynamic-reconfiguration">
+<h2>Dynamic reconfiguration:<a class="headerlink" href="#dynamic-reconfiguration" title="Permalink to this headline">¶</a></h2>
+<p>Dynamic reconfigurability is a useful addition to netconsole that enables
+remote logging targets to be dynamically added, removed, or have their
+parameters reconfigured at runtime from a configfs-based userspace interface.
+[ Note that the parameters of netconsole targets that were specified/created
+from the boot/module option are not exposed via this interface, and hence
+cannot be modified dynamically. ]</p>
+<p>To include this feature, select CONFIG_NETCONSOLE_DYNAMIC when building the
+netconsole module (or kernel, if netconsole is built-in).</p>
+<p>Some examples follow (where configfs is mounted at the /sys/kernel/config
+mountpoint).</p>
+<p>To add a remote logging target (target names can be arbitrary):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>cd /sys/kernel/config/netconsole/
+mkdir target1
+</pre></div>
+</div>
+<p>Note that newly created targets have default parameter values (as mentioned
+above) and are disabled by default – they must first be enabled by writing
+“1” to the “enabled” attribute (usually after setting parameters accordingly)
+as described below.</p>
+<p>To remove a target:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>rmdir /sys/kernel/config/netconsole/othertarget/
+</pre></div>
+</div>
+<p>The interface exposes these parameters of a netconsole target to userspace:</p>
+<blockquote>
+<div><table class="docutils align-default">
+<colgroup>
+<col style="width: 24%" />
+<col style="width: 56%" />
+<col style="width: 20%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>enabled</p></td>
+<td><p>Is this target currently enabled?</p></td>
+<td><p>(read-write)</p></td>
+</tr>
+<tr class="row-even"><td><p>extended</p></td>
+<td><p>Extended mode enabled</p></td>
+<td><p>(read-write)</p></td>
+</tr>
+<tr class="row-odd"><td><p>dev_name</p></td>
+<td><p>Local network interface name</p></td>
+<td><p>(read-write)</p></td>
+</tr>
+<tr class="row-even"><td><p>local_port</p></td>
+<td><p>Source UDP port to use</p></td>
+<td><p>(read-write)</p></td>
+</tr>
+<tr class="row-odd"><td><p>remote_port</p></td>
+<td><p>Remote agent’s UDP port</p></td>
+<td><p>(read-write)</p></td>
+</tr>
+<tr class="row-even"><td><p>local_ip</p></td>
+<td><p>Source IP address to use</p></td>
+<td><p>(read-write)</p></td>
+</tr>
+<tr class="row-odd"><td><p>remote_ip</p></td>
+<td><p>Remote agent’s IP address</p></td>
+<td><p>(read-write)</p></td>
+</tr>
+<tr class="row-even"><td><p>local_mac</p></td>
+<td><p>Local interface’s MAC address</p></td>
+<td><p>(read-only)</p></td>
+</tr>
+<tr class="row-odd"><td><p>remote_mac</p></td>
+<td><p>Remote agent’s MAC address</p></td>
+<td><p>(read-write)</p></td>
+</tr>
+</tbody>
+</table>
+</div></blockquote>
+<p>The “enabled” attribute is also used to control whether the parameters of
+a target can be updated or not – you can modify the parameters of only
+disabled targets (i.e. if “enabled” is 0).</p>
+<p>To update a target’s parameters:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>cat enabled                            # check if enabled is 1
+echo 0 &gt; enabled                       # disable the target (if required)
+echo eth2 &gt; dev_name                   # set local interface
+echo 10.0.0.4 &gt; remote_ip              # update some parameter
+echo cb:a9:87:65:43:21 &gt; remote_mac    # update more parameters
+echo 1 &gt; enabled                       # enable target again
+</pre></div>
+</div>
+<p>You can also update the local interface dynamically. This is especially
+useful if you want to use interfaces that have newly come up (and may not
+have existed when netconsole was loaded / initialized).</p>
+</section>
+<section id="extended-console">
+<h2>Extended console:<a class="headerlink" href="#extended-console" title="Permalink to this headline">¶</a></h2>
+<p>If ‘+’ is prefixed to the configuration line or “extended” config file
+is set to 1, extended console support is enabled. An example boot
+param follows:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>linux netconsole=+4444@10.0.0.1/eth1,9353@10.0.0.2/12:34:56:78:9a:bc
+</pre></div>
+</div>
+<p>Log messages are transmitted with extended metadata header in the
+following format which is the same as /dev/kmsg:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>&lt;level&gt;,&lt;sequnum&gt;,&lt;timestamp&gt;,&lt;contflag&gt;;&lt;message text&gt;
+</pre></div>
+</div>
+<p>Non printable characters in &lt;message text&gt; are escaped using “xff”
+notation. If the message contains optional dictionary, verbatim
+newline is used as the delimeter.</p>
+<p>If a message doesn’t fit in certain number of bytes (currently 1000),
+the message is split into multiple fragments by netconsole. These
+fragments are transmitted with “ncfrag” header field added:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ncfrag=&lt;byte-offset&gt;/&lt;total-bytes&gt;
+</pre></div>
+</div>
+<p>For example, assuming a lot smaller chunk size, a message “the first
+chunk, the 2nd chunk.” may be split as follows:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>6,416,1758426,-,ncfrag=0/31;the first chunk,
+6,416,1758426,-,ncfrag=16/31; the 2nd chunk.
+</pre></div>
+</div>
+</section>
+<section id="miscellaneous-notes">
+<h2>Miscellaneous notes:<a class="headerlink" href="#miscellaneous-notes" title="Permalink to this headline">¶</a></h2>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>the default target ethernet setting uses the broadcast
+ethernet address to send packets, which can cause increased load on
+other systems on the same ethernet segment.</p>
+</div>
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<p>some LAN switches may be configured to suppress ethernet broadcasts
+so it is advised to explicitly specify the remote agents’ MAC addresses
+from the config parameters passed to netconsole.</p>
+</div>
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<p>to find out the MAC address of, say, 10.0.0.2, you may try using:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ping -c 1 10.0.0.2 ; /sbin/arp -n | grep 10.0.0.2
+</pre></div>
+</div>
+</div>
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<p>in case the remote logging agent is on a separate LAN subnet than
+the sender, it is suggested to try specifying the MAC address of the
+default gateway (you may use /sbin/route -n to find it out) as the
+remote MAC address instead.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>the network device (eth1 in the above case) can run any kind
+of other network traffic, netconsole is not intrusive. Netconsole
+might cause slight delays in other traffic if the volume of kernel
+messages is high, but should have no other impact.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>if you find that the remote logging agent is not receiving or
+printing all messages from the sender, it is likely that you have set
+the “console_loglevel” parameter (on the sender) to only send high
+priority messages to the console. You can change this at runtime using:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>dmesg -n 8
+</pre></div>
+</div>
+<p>or by specifying “debug” on the kernel command line at boot, to send
+all kernel messages to the console. A specific value for this parameter
+can also be set using the “loglevel” kernel boot option. See the
+dmesg(8) man page and <a class="reference internal" href="../admin-guide/kernel-parameters.html"><span class="doc">The kernel’s command-line parameters</span></a>
+for details.</p>
+</div>
+<p>Netconsole was designed to be as instantaneous as possible, to
+enable the logging of even the most critical kernel bugs. It works
+from IRQ contexts as well, and does not enable interrupts while
+sending packets. Due to these unique needs, configuration cannot
+be more automatic, and some fundamental limitations will remain:
+only IP networks, UDP packets and ethernet devices are supported.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Netconsole</a><ul>
+<li><a class="reference internal" href="#introduction">Introduction:</a></li>
+<li><a class="reference internal" href="#sender-and-receiver-configuration">Sender and receiver configuration:</a></li>
+<li><a class="reference internal" href="#dynamic-reconfiguration">Dynamic reconfiguration:</a></li>
+<li><a class="reference internal" href="#extended-console">Extended console:</a></li>
+<li><a class="reference internal" href="#miscellaneous-notes">Miscellaneous notes:</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/networking/netconsole.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/networking/netconsole.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

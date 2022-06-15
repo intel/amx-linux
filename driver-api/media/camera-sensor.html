@@ -1,0 +1,252 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>8. Writing camera sensor drivers &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="9. Media driver-specific documentation" href="drivers/index.html" />
+    <link rel="prev" title="7. Pixel data transmitter and receiver drivers" href="tx-rx.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="writing-camera-sensor-drivers">
+<h1><span class="section-number">8. </span>Writing camera sensor drivers<a class="headerlink" href="#writing-camera-sensor-drivers" title="Permalink to this headline">¶</a></h1>
+<section id="csi-2-and-parallel-bt-601-and-bt-656-busses">
+<h2><span class="section-number">8.1. </span>CSI-2 and parallel (BT.601 and BT.656) busses<a class="headerlink" href="#csi-2-and-parallel-bt-601-and-bt-656-busses" title="Permalink to this headline">¶</a></h2>
+<p>Please see <a class="reference internal" href="tx-rx.html#transmitter-receiver"><span class="std std-ref">Pixel data transmitter and receiver drivers</span></a>.</p>
+</section>
+<section id="handling-clocks">
+<h2><span class="section-number">8.2. </span>Handling clocks<a class="headerlink" href="#handling-clocks" title="Permalink to this headline">¶</a></h2>
+<p>Camera sensors have an internal clock tree including a PLL and a number of
+divisors. The clock tree is generally configured by the driver based on a few
+input parameters that are specific to the hardware:: the external clock frequency
+and the link frequency. The two parameters generally are obtained from system
+firmware. <strong>No other frequencies should be used in any circumstances.</strong></p>
+<p>The reason why the clock frequencies are so important is that the clock signals
+come out of the SoC, and in many cases a specific frequency is designed to be
+used in the system. Using another frequency may cause harmful effects
+elsewhere. Therefore only the pre-determined frequencies are configurable by the
+user.</p>
+<section id="acpi">
+<h3><span class="section-number">8.2.1. </span>ACPI<a class="headerlink" href="#acpi" title="Permalink to this headline">¶</a></h3>
+<p>Read the <code class="docutils literal notranslate"><span class="pre">clock-frequency</span></code> _DSD property to denote the frequency. The driver
+can rely on this frequency being used.</p>
+</section>
+<section id="devicetree">
+<h3><span class="section-number">8.2.2. </span>Devicetree<a class="headerlink" href="#devicetree" title="Permalink to this headline">¶</a></h3>
+<p>The currently preferred way to achieve this is using <code class="docutils literal notranslate"><span class="pre">assigned-clocks</span></code>,
+<code class="docutils literal notranslate"><span class="pre">assigned-clock-parents</span></code> and <code class="docutils literal notranslate"><span class="pre">assigned-clock-rates</span></code> properties. See
+<code class="docutils literal notranslate"><span class="pre">Documentation/devicetree/bindings/clock/clock-bindings.txt</span></code> for more
+information. The driver then gets the frequency using <code class="docutils literal notranslate"><span class="pre">clk_get_rate()</span></code>.</p>
+<p>This approach has the drawback that there’s no guarantee that the frequency
+hasn’t been modified directly or indirectly by another driver, or supported by
+the board’s clock tree to begin with. Changes to the Common Clock Framework API
+are required to ensure reliability.</p>
+</section>
+</section>
+<section id="frame-size">
+<h2><span class="section-number">8.3. </span>Frame size<a class="headerlink" href="#frame-size" title="Permalink to this headline">¶</a></h2>
+<p>There are two distinct ways to configure the frame size produced by camera
+sensors.</p>
+<section id="freely-configurable-camera-sensor-drivers">
+<h3><span class="section-number">8.3.1. </span>Freely configurable camera sensor drivers<a class="headerlink" href="#freely-configurable-camera-sensor-drivers" title="Permalink to this headline">¶</a></h3>
+<p>Freely configurable camera sensor drivers expose the device’s internal
+processing pipeline as one or more sub-devices with different cropping and
+scaling configurations. The output size of the device is the result of a series
+of cropping and scaling operations from the device’s pixel array’s size.</p>
+<p>An example of such a driver is the CCS driver (see <code class="docutils literal notranslate"><span class="pre">drivers/media/i2c/ccs</span></code>).</p>
+</section>
+<section id="register-list-based-drivers">
+<h3><span class="section-number">8.3.2. </span>Register list based drivers<a class="headerlink" href="#register-list-based-drivers" title="Permalink to this headline">¶</a></h3>
+<p>Register list based drivers generally, instead of able to configure the device
+they control based on user requests, are limited to a number of preset
+configurations that combine a number of different parameters that on hardware
+level are independent. How a driver picks such configuration is based on the
+format set on a source pad at the end of the device’s internal pipeline.</p>
+<p>Most sensor drivers are implemented this way, see e.g.
+<code class="docutils literal notranslate"><span class="pre">drivers/media/i2c/imx319.c</span></code> for an example.</p>
+</section>
+</section>
+<section id="frame-interval-configuration">
+<h2><span class="section-number">8.4. </span>Frame interval configuration<a class="headerlink" href="#frame-interval-configuration" title="Permalink to this headline">¶</a></h2>
+<p>There are two different methods for obtaining possibilities for different frame
+intervals as well as configuring the frame interval. Which one to implement
+depends on the type of the device.</p>
+<section id="raw-camera-sensors">
+<h3><span class="section-number">8.4.1. </span>Raw camera sensors<a class="headerlink" href="#raw-camera-sensors" title="Permalink to this headline">¶</a></h3>
+<p>Instead of a high level parameter such as frame interval, the frame interval is
+a result of the configuration of a number of camera sensor implementation
+specific parameters. Luckily, these parameters tend to be the same for more or
+less all modern raw camera sensors.</p>
+<p>The frame interval is calculated using the following equation:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>frame interval = (analogue crop width + horizontal blanking) *
+                 (analogue crop height + vertical blanking) / pixel rate
+</pre></div>
+</div>
+<p>The formula is bus independent and is applicable for raw timing parameters on
+large variety of devices beyond camera sensors. Devices that have no analogue
+crop, use the full source image size, i.e. pixel array size.</p>
+<p>Horizontal and vertical blanking are specified by <code class="docutils literal notranslate"><span class="pre">V4L2_CID_HBLANK</span></code> and
+<code class="docutils literal notranslate"><span class="pre">V4L2_CID_VBLANK</span></code>, respectively. The unit of the <code class="docutils literal notranslate"><span class="pre">V4L2_CID_HBLANK</span></code> control
+is pixels and the unit of the <code class="docutils literal notranslate"><span class="pre">V4L2_CID_VBLANK</span></code> is lines. The pixel rate in
+the sensor’s <strong>pixel array</strong> is specified by <code class="docutils literal notranslate"><span class="pre">V4L2_CID_PIXEL_RATE</span></code> in the same
+sub-device. The unit of that control is pixels per second.</p>
+<p>Register list based drivers need to implement read-only sub-device nodes for the
+purpose. Devices that are not register list based need these to configure the
+device’s internal processing pipeline.</p>
+<p>The first entity in the linear pipeline is the pixel array. The pixel array may
+be followed by other entities that are there to allow configuring binning,
+skipping, scaling or digital crop <a class="reference internal" href="../../userspace-api/media/v4l/dev-subdev.html#v4l2-subdev-selections"><span class="std std-ref">Selections: cropping, scaling and composition</span></a>.</p>
+</section>
+<section id="usb-cameras-etc-devices">
+<h3><span class="section-number">8.4.2. </span>USB cameras etc. devices<a class="headerlink" href="#usb-cameras-etc-devices" title="Permalink to this headline">¶</a></h3>
+<p>USB video class hardware, as well as many cameras offering a similar higher
+level interface natively, generally use the concept of frame interval (or frame
+rate) on device level in firmware or hardware. This means lower level controls
+implemented by raw cameras may not be used on uAPI (or even kAPI) to control the
+frame interval on these devices.</p>
+</section>
+</section>
+<section id="power-management">
+<h2><span class="section-number">8.5. </span>Power management<a class="headerlink" href="#power-management" title="Permalink to this headline">¶</a></h2>
+<p>Always use runtime PM to manage the power states of your device. Camera sensor
+drivers are in no way special in this respect: they are responsible for
+controlling the power state of the device they otherwise control as well. In
+general, the device must be powered on at least when its registers are being
+accessed and when it is streaming.</p>
+<p>Existing camera sensor drivers may rely on the old
+<a class="reference internal" href="v4l2-subdev.html#c.v4l2_subdev_core_ops" title="v4l2_subdev_core_ops"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">v4l2_subdev_core_ops</span></code></a>-&gt;s_power() callback for bridge or ISP drivers to
+manage their power state. This is however <strong>deprecated</strong>. If you feel you need
+to begin calling an s_power from an ISP or a bridge driver, instead please add
+runtime PM support to the sensor driver you are using. Likewise, new drivers
+should not use s_power.</p>
+<p>Please see examples in e.g. <code class="docutils literal notranslate"><span class="pre">drivers/media/i2c/ov8856.c</span></code> and
+<code class="docutils literal notranslate"><span class="pre">drivers/media/i2c/ccs/ccs-core.c</span></code>. The two drivers work in both ACPI
+and DT based systems.</p>
+<section id="control-framework">
+<h3><span class="section-number">8.5.1. </span>Control framework<a class="headerlink" href="#control-framework" title="Permalink to this headline">¶</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">v4l2_ctrl_handler_setup()</span></code> function may not be used in the device’s runtime
+PM <code class="docutils literal notranslate"><span class="pre">runtime_resume</span></code> callback, as it has no way to figure out the power state
+of the device. This is because the power state of the device is only changed
+after the power state transition has taken place. The <code class="docutils literal notranslate"><span class="pre">s_ctrl</span></code> callback can be
+used to obtain device’s power state after the power state transition:</p>
+<dl class="function">
+<dt>
+<code class="sig-name descname">int pm_runtime_get_if_in_use(struct device *dev);</code></dt>
+<dd></dd></dl>
+
+<p>The function returns a non-zero value if it succeeded getting the power count or
+runtime PM was disabled, in either of which cases the driver may proceed to
+access the device.</p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">8. Writing camera sensor drivers</a><ul>
+<li><a class="reference internal" href="#csi-2-and-parallel-bt-601-and-bt-656-busses">8.1. CSI-2 and parallel (BT.601 and BT.656) busses</a></li>
+<li><a class="reference internal" href="#handling-clocks">8.2. Handling clocks</a><ul>
+<li><a class="reference internal" href="#acpi">8.2.1. ACPI</a></li>
+<li><a class="reference internal" href="#devicetree">8.2.2. Devicetree</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#frame-size">8.3. Frame size</a><ul>
+<li><a class="reference internal" href="#freely-configurable-camera-sensor-drivers">8.3.1. Freely configurable camera sensor drivers</a></li>
+<li><a class="reference internal" href="#register-list-based-drivers">8.3.2. Register list based drivers</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#frame-interval-configuration">8.4. Frame interval configuration</a><ul>
+<li><a class="reference internal" href="#raw-camera-sensors">8.4.1. Raw camera sensors</a></li>
+<li><a class="reference internal" href="#usb-cameras-etc-devices">8.4.2. USB cameras etc. devices</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#power-management">8.5. Power management</a><ul>
+<li><a class="reference internal" href="#control-framework">8.5.1. Control framework</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/media/camera-sensor.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/media/camera-sensor.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

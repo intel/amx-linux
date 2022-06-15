@@ -1,0 +1,316 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Runtime Verification &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Deterministic Automata" href="deterministic_automata.html" />
+    <link rel="prev" title="Runtime Verification" href="index.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="runtime-verification">
+<h1>Runtime Verification<a class="headerlink" href="#runtime-verification" title="Permalink to this headline">¶</a></h1>
+<p>Runtime Verification (RV) is a lightweight (yet rigorous) method that
+complements classical exhaustive verification techniques (such as <em>model
+checking</em> and <em>theorem proving</em>) with a more practical approach for complex
+systems.</p>
+<p>Instead of relying on a fine-grained model of a system (e.g., a
+re-implementation a instruction level), RV works by analyzing the trace of the
+system’s actual execution, comparing it against a formal specification of
+the system behavior.</p>
+<p>The main advantage is that RV can give precise information on the runtime
+behavior of the monitored system, without the pitfalls of developing models
+that require a re-implementation of the entire system in a modeling language.
+Moreover, given an efficient monitoring method, it is possible execute an
+<em>online</em> verification of a system, enabling the <em>reaction</em> for unexpected
+events, avoiding, for example, the propagation of a failure on safety-critical
+systems.</p>
+<section id="runtime-monitors-and-reactors">
+<h2>Runtime Monitors and Reactors<a class="headerlink" href="#runtime-monitors-and-reactors" title="Permalink to this headline">¶</a></h2>
+<p>A monitor is the central part of the runtime verification of a system. The
+monitor stands in between the formal specification of the desired (or
+undesired) behavior, and the trace of the actual system.</p>
+<p>In Linux terms, the runtime verification monitors are encapsulated inside the
+<em>RV monitor</em> abstraction. A <em>RV monitor</em> includes a reference model of the
+system, a set of instances of the monitor (per-cpu monitor, per-task monitor,
+and so on), and the helper functions that glue the monitor to the system via
+trace, as depicted bellow:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Linux   +---- RV Monitor ----------------------------------+ Formal
+ Realm  |                                                  |  Realm
+ +-------------------+     +----------------+     +-----------------+
+ |   Linux kernel    |     |     Monitor    |     |     Reference   |
+ |     Tracing       |  -&gt; |   Instance(s)  | &lt;-  |       Model     |
+ | (instrumentation) |     | (verification) |     | (specification) |
+ +-------------------+     +----------------+     +-----------------+
+        |                          |                       |
+        |                          V                       |
+        |                     +----------+                 |
+        |                     | Reaction |                 |
+        |                     +--+--+--+-+                 |
+        |                        |  |  |                   |
+        |                        |  |  +-&gt; trace output ?  |
+        +------------------------|--|----------------------+
+                                 |  +----&gt; panic ?
+                                 +-------&gt; &lt;user-specified&gt;
+</pre></div>
+</div>
+<p>In addition to the verification and monitoring of the system, a monitor can
+react to an unexpected event. The forms of reaction can vary from logging the
+event occurrence to the enforcement of the correct behavior to the extreme
+action of taking a system down to avoid the propagation of a failure.</p>
+<p>In Linux terms, a <em>reactor</em> is an reaction method available for <em>RV monitors</em>.
+By default, all monitors should provide a trace output of their actions,
+which is already a reaction. In addition, other reactions will be available
+so the user can enable them as needed.</p>
+<p>For further information about the principles of runtime verification and
+RV applied to Linux:</p>
+<blockquote>
+<div><p>Bartocci, Ezio, et al. <em>Introduction to runtime verification.</em> In: Lectures on
+Runtime Verification. Springer, Cham, 2018. p. 1-33.</p>
+<p>Falcone, Ylies, et al. <em>A taxonomy for classifying runtime verification tools.</em>
+In: International Conference on Runtime Verification. Springer, Cham, 2018. p.
+241-262.</p>
+<p>De Oliveira, Daniel Bristot. <em>Automata-based formal analysis and
+verification of the real-time Linux kernel.</em> Ph.D. Thesis, 2020.</p>
+</div></blockquote>
+</section>
+<section id="online-rv-monitors">
+<h2>Online RV monitors<a class="headerlink" href="#online-rv-monitors" title="Permalink to this headline">¶</a></h2>
+<p>Monitors can be classified as <em>offline</em> and <em>online</em> monitors. <em>Offline</em>
+monitor process the traces generated by a system after the events, generally by
+reading the trace execution from a permanent storage system. <em>Online</em> monitors
+process the trace during the execution of the system. Online monitors are said
+to be <em>synchronous</em> if the processing of an event is attached to the system
+execution, blocking the system during the event monitoring. On the other hand,
+an <em>asynchronous</em> monitor has its execution detached from the system. Each type
+of monitor has a set of advantages. For example, <em>offline</em> monitors can be
+executed on different machines but require operations to save the log to a
+file. In contrast, <em>synchronous online</em> method can react at the exact moment
+a violation occurs.</p>
+<p>Another important aspect regarding monitors is the overhead associated with the
+event analysis. If the system generates events at a frequency higher than the
+monitor’s ability to process them in the same system, only the <em>offline</em>
+methods are viable. On the other hand, if the tracing of the events incurs
+on higher overhead than the simple handling of an event by a monitor, then a
+<em>synchronous online</em> monitors will incur on lower overhead.</p>
+<p>Indeed, the research presented in:</p>
+<blockquote>
+<div><p>De Oliveira, Daniel Bristot; Cucinotta, Tommaso; De Oliveira, Romulo Silva.
+<em>Efficient formal verification for the Linux kernel.</em> In: International
+Conference on Software Engineering and Formal Methods. Springer, Cham, 2019.
+p. 315-332.</p>
+</div></blockquote>
+<p>Shows that for Deterministic Automata models, the synchronous processing of
+events in-kernel causes lower overhead than saving the same events to the trace
+buffer, not even considering collecting the trace for user-space analysis.
+This motivated the development of an in-kernel interface for online monitors.</p>
+<p>For further information about modeling of Linux kernel behavior using automata,
+see:</p>
+<blockquote>
+<div><p>De Oliveira, Daniel B.; De Oliveira, Romulo S.; Cucinotta, Tommaso. <em>A thread
+synchronization model for the PREEMPT_RT Linux kernel.</em> Journal of Systems
+Architecture, 2020, 107: 101729.</p>
+</div></blockquote>
+</section>
+<section id="the-user-interface">
+<h2>The user interface<a class="headerlink" href="#the-user-interface" title="Permalink to this headline">¶</a></h2>
+<p>The user interface resembles the tracing interface (on purpose). It is
+currently at “/sys/kernel/tracing/rv/”.</p>
+<p>The following files/folders are currently available:</p>
+<p><strong>available_monitors</strong></p>
+<ul class="simple">
+<li><p>Reading list the available monitors, one per line</p></li>
+</ul>
+<p>For example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># cat available_monitors
+wip
+wwnr
+</pre></div>
+</div>
+<p><strong>available_reactors</strong></p>
+<ul class="simple">
+<li><p>Reading shows the available reactors, one per line.</p></li>
+</ul>
+<p>For example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># cat available_reactors
+nop
+panic
+printk
+</pre></div>
+</div>
+<p><strong>enabled_monitors</strong>:</p>
+<ul class="simple">
+<li><p>Reading lists the enabled monitors, one per line</p></li>
+<li><p>Writing to it enables a given monitor</p></li>
+<li><p>Writing a monitor name with a ‘!’ prefix disables it</p></li>
+<li><p>Truncating the file disables all enabled monitors</p></li>
+</ul>
+<p>For example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># cat enabled_monitors
+# echo wip &gt; enabled_monitors
+# echo wwnr &gt;&gt; enabled_monitors
+# cat enabled_monitors
+wip
+wwnr
+# echo &#39;!wip&#39; &gt;&gt; enabled_monitors
+# cat enabled_monitors
+wwnr
+# echo &gt; enabled_monitors
+# cat enabled_monitors
+#
+</pre></div>
+</div>
+<p>Note that it is possible to enable more than one monitor concurrently.</p>
+<p><strong>monitoring_on</strong></p>
+<p>This is an on/off general switcher for monitoring. It resembles the
+“tracing_on” switcher in the trace interface.</p>
+<ul class="simple">
+<li><p>Writing “0” stops the monitoring</p></li>
+<li><p>Writing “1” continues the monitoring</p></li>
+<li><p>Reading returns the current status of the monitoring</p></li>
+</ul>
+<p>Note that it does not disable enabled monitors but stop the per-entity
+monitors monitoring the events received from the system.</p>
+<p><strong>reacting_on</strong></p>
+<ul class="simple">
+<li><p>Writing “0” prevents reactions for happening</p></li>
+<li><p>Writing “1” enable reactions</p></li>
+<li><p>Reading returns the current status of the reaction</p></li>
+</ul>
+<p><strong>monitors/</strong></p>
+<p>Each monitor will have its own directory inside “monitors/”. There the
+monitor-specific files will be presented. The “monitors/” directory resembles
+the “events” directory on tracefs.</p>
+<p>For example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># cd monitors/wip/
+# ls
+desc  enable
+# cat desc
+wakeup in preemptive per-cpu testing monitor.
+# cat enable
+0
+</pre></div>
+</div>
+<p><strong>monitors/MONITOR/desc</strong></p>
+<ul class="simple">
+<li><p>Reading shows a description of the monitor <em>MONITOR</em></p></li>
+</ul>
+<p><strong>monitors/MONITOR/enable</strong></p>
+<ul class="simple">
+<li><p>Writing “0” disables the <em>MONITOR</em></p></li>
+<li><p>Writing “1” enables the <em>MONITOR</em></p></li>
+<li><p>Reading return the current status of the <em>MONITOR</em></p></li>
+</ul>
+<p><strong>monitors/MONITOR/reactors</strong></p>
+<ul class="simple">
+<li><p>List available reactors, with the select reaction for the given <em>MONITOR</em>
+inside “[]”. The default one is the nop (no operation) reactor.</p></li>
+<li><p>Writing the name of a reactor enables it to the given MONITOR.</p></li>
+</ul>
+<p>For example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># cat monitors/wip/reactors
+[nop]
+panic
+printk
+# echo panic &gt; monitors/wip/reactors
+# cat monitors/wip/reactors
+nop
+[panic]
+printk
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Runtime Verification</a><ul>
+<li><a class="reference internal" href="#runtime-monitors-and-reactors">Runtime Monitors and Reactors</a></li>
+<li><a class="reference internal" href="#online-rv-monitors">Online RV monitors</a></li>
+<li><a class="reference internal" href="#the-user-interface">The user interface</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/trace/rv/runtime-verification.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/trace/rv/runtime-verification.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

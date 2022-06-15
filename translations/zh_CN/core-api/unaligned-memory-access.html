@@ -1,0 +1,322 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>非对齐内存访问 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="内存管理APIs" href="mm-api.html" />
+    <link rel="prev" title="内存分配指南" href="memory-allocation.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../core-api/unaligned-memory-access.html"><span class="doc">Unaligned Memory Accesses</span></a></p>
+</dd>
+<dt class="field-even">翻译</dt>
+<dd class="field-even"><p>司延腾 Yanteng Si &lt;<a class="reference external" href="mailto:siyanteng&#37;&#52;&#48;loongson&#46;cn">siyanteng<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+<dt class="field-odd">校译</dt>
+<dd class="field-odd"><p>时奎亮 &lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;</p>
+</dd>
+</dl>
+<section id="cn-core-api-unaligned-memory-access">
+<span id="id1"></span><h1>非对齐内存访问<a class="headerlink" href="#cn-core-api-unaligned-memory-access" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">作者</dt>
+<dd class="field-odd"><p>Daniel Drake &lt;<a class="reference external" href="mailto:dsd&#37;&#52;&#48;gentoo&#46;org">dsd<span>&#64;</span>gentoo<span>&#46;</span>org</a>&gt;,</p>
+</dd>
+<dt class="field-even">作者</dt>
+<dd class="field-even"><p>Johannes Berg &lt;<a class="reference external" href="mailto:johannes&#37;&#52;&#48;sipsolutions&#46;net">johannes<span>&#64;</span>sipsolutions<span>&#46;</span>net</a>&gt;</p>
+</dd>
+<dt class="field-odd">感谢他们的帮助</dt>
+<dd class="field-odd"><p>Alan Cox, Avuton Olrich, Heikki Orsila, Jan Engelhardt,
+Kyle McMartin, Kyle Moffett, Randy Dunlap, Robert Hancock, Uli Kunitz,
+Vadim Lobanov</p>
+</dd>
+</dl>
+<p>Linux运行在各种各样的架构上，这些架构在内存访问方面有不同的表现。本文介绍了一些
+关于不对齐访问的细节，为什么你需要编写不引起不对齐访问的代码，以及如何编写这样的
+代码</p>
+<section id="id2">
+<h2>非对齐访问的定义<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>当你试图从一个不被N偶数整除的地址（即addr % N != 0）开始读取N字节的数据时，就
+会发生无对齐内存访问。例如，从地址0x10004读取4个字节的数据是可以的，但从地址
+0x10005读取4个字节的数据将是一个不对齐的内存访问。</p>
+<p>上述内容可能看起来有点模糊，因为内存访问可以以不同的方式发生。这里的背景是在机器
+码层面上：某些指令在内存中读取或写入一些字节（例如x86汇编中的movb、movw、movl）。
+正如将变得清晰的那样，相对容易发现那些将编译为多字节内存访问指令的C语句，即在处理
+u16、u32和u64等类型时。</p>
+</section>
+<section id="id3">
+<h2>自然对齐<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h2>
+<p>上面提到的规则构成了我们所说的自然对齐。当访问N个字节的内存时，基础内存地址必须被
+N平均分割，即addr % N == 0。</p>
+<p>在编写代码时，假设目标架构有自然对齐的要求。</p>
+<p>在现实中，只有少数架构在所有大小的内存访问上都要求自然对齐。然而，我们必须考虑所
+有支持的架构；编写满足自然对齐要求的代码是实现完全可移植性的最简单方法。</p>
+</section>
+<section id="id4">
+<h2>为什么非对齐访问时坏事<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h2>
+<p>执行非对齐内存访问的效果因架构不同而不同。在这里写一整篇关于这些差异的文档是很容
+易的；下面是对常见情况的总结:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>一些架构能够透明地执行非对齐内存访问，但通常会有很大的性能代价。</p></li>
+<li><p>当不对齐的访问发生时，一些架构会引发处理器异常。异常处理程序能够纠正不对齐的
+访问，但要付出很大的性能代价。</p></li>
+<li><p>一些架构在发生不对齐访问时，会引发处理器异常，但异常中并没有包含足够的信息来
+纠正不对齐访问。</p></li>
+<li><p>有些架构不能进行无对齐内存访问，但会默默地执行与请求不同的内存访问，从而导致
+难以发现的微妙的代码错误!</p></li>
+</ul>
+</div></blockquote>
+<p>从上文可以看出，如果你的代码导致不对齐的内存访问发生，那么你的代码在某些平台上将无
+法正常工作，在其他平台上将导致性能问题。</p>
+</section>
+<section id="id5">
+<h2>不会导致非对齐访问的代码<a class="headerlink" href="#id5" title="Permalink to this headline">¶</a></h2>
+<p>起初，上面的概念似乎有点难以与实际编码实践联系起来。毕竟，你对某些变量的内存地址没
+有很大的控制权，等等。</p>
+<p>幸运的是事情并不复杂，因为在大多数情况下，编译器会确保代码工作正常。例如，以下面的
+结构体为例:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct foo {
+        u16 field1;
+        u32 field2;
+        u8 field3;
+};
+</pre></div>
+</div>
+<p>让我们假设上述结构体的一个实例驻留在从地址0x10000开始的内存中。根据基本的理解，访问
+field2会导致非对齐访问，这并不是不合理的。你会期望field2位于该结构体的2个字节的偏移
+量，即地址0x10002，但该地址不能被4平均整除（注意，我们在这里读一个4字节的值）。</p>
+<p>幸运的是，编译器理解对齐约束，所以在上述情况下，它会在field1和field2之间插入2个字节
+的填充。因此，对于标准的结构体类型，你总是可以依靠编译器来填充结构体，以便对字段的访
+问可以适当地对齐（假设你没有将字段定义不同长度的类型）。</p>
+<p>同样，你也可以依靠编译器根据变量类型的大小，将变量和函数参数对齐到一个自然对齐的方案。</p>
+<p>在这一点上，应该很清楚，访问单个字节（u8或char）永远不会导致无对齐访问，因为所有的内
+存地址都可以被1均匀地整除。</p>
+<p>在一个相关的话题上，考虑到上述因素，你可以观察到，你可以对结构体中的字段进行重新排序，
+以便将字段放在不重排就会插入填充物的地方，从而减少结构体实例的整体常驻内存大小。上述
+例子的最佳布局是:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct foo {
+        u32 field2;
+        u16 field1;
+        u8 field3;
+};
+</pre></div>
+</div>
+<p>对于一个自然对齐方案，编译器只需要在结构的末尾添加一个字节的填充。添加这种填充是为了满
+足这些结构的数组的对齐约束。</p>
+<p>另一点值得一提的是在结构体类型上使用__attribute__((packed))。这个GCC特有的属性告诉编
+译器永远不要在结构体中插入任何填充，当你想用C结构体来表示一些“off the wire”的固定排列
+的数据时，这个属性很有用。</p>
+<p>你可能会倾向于认为，在访问不满足架构对齐要求的字段时，使用这个属性很容易导致不对齐的访
+问。然而，编译器也意识到了对齐的限制，并且会产生额外的指令来执行内存访问，以避免造成不
+对齐的访问。当然，与non-packed的情况相比，额外的指令显然会造成性能上的损失，所以packed
+属性应该只在避免结构填充很重要的时候使用。</p>
+</section>
+<section id="id6">
+<h2>导致非对齐访问的代码<a class="headerlink" href="#id6" title="Permalink to this headline">¶</a></h2>
+<p>考虑到上述情况，让我们来看看一个现实生活中可能导致非对齐内存访问的函数的例子。下面这个
+函数取自include/linux/etherdevice.h，是一个优化的例程，用于比较两个以太网MAC地址是否
+相等:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>bool ether_addr_equal(const u8 *addr1, const u8 *addr2)
+{
+#ifdef CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS
+      u32 fold = ((*(const u32 *)addr1) ^ (*(const u32 *)addr2)) |
+                 ((*(const u16 *)(addr1 + 4)) ^ (*(const u16 *)(addr2 + 4)));
+
+      return fold == 0;
+#else
+      const u16 *a = (const u16 *)addr1;
+      const u16 *b = (const u16 *)addr2;
+      return ((a[0] ^ b[0]) | (a[1] ^ b[1]) | (a[2] ^ b[2])) == 0;
+#endif
+}
+</pre></div>
+</div>
+<p>在上述函数中，当硬件具有高效的非对齐访问能力时，这段代码没有问题。但是当硬件不能在任意
+边界上访问内存时，对a[0]的引用导致从地址addr1开始的2个字节（16位）被读取。</p>
+<p>想一想，如果addr1是一个奇怪的地址，如0x10003，会发生什么？(提示：这将是一个非对齐访
+问。)</p>
+<p>尽管上述函数存在潜在的非对齐访问问题，但它还是被包含在内核中，但被理解为只在16位对齐
+的地址上正常工作。调用者应该确保这种对齐方式或者根本不使用这个函数。这个不对齐的函数
+仍然是有用的，因为它是在你能确保对齐的情况下的一个很好的优化，这在以太网网络环境中几
+乎是一直如此。</p>
+<p>下面是另一个可能导致非对齐访问的代码的例子:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void myfunc(u8 *data, u32 value)
+{
+        [...]
+        *((u32 *) data) = cpu_to_le32(value);
+        [...]
+}
+</pre></div>
+</div>
+<p>每当数据参数指向的地址不被4均匀整除时，这段代码就会导致非对齐访问。</p>
+<p>综上所述，你可能遇到非对齐访问问题的两种主要情况包括:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>将变量定义不同长度的类型</p></li>
+<li><p>指针运算后访问至少2个字节的数据</p></li>
+</ol>
+</div></blockquote>
+</section>
+<section id="id7">
+<h2>避免非对齐访问<a class="headerlink" href="#id7" title="Permalink to this headline">¶</a></h2>
+<p>避免非对齐访问的最简单方法是使用&lt;asm/unaligned.h&gt;头文件提供的get_unaligned()和
+put_unaligned()宏。</p>
+<p>回到前面的一个可能导致非对齐访问的代码例子:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void myfunc(u8 *data, u32 value)
+{
+        [...]
+        *((u32 *) data) = cpu_to_le32(value);
+        [...]
+}
+</pre></div>
+</div>
+<p>为了避免非对齐的内存访问，你可以将其改写如下:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void myfunc(u8 *data, u32 value)
+{
+        [...]
+        value = cpu_to_le32(value);
+        put_unaligned(value, (u32 *) data);
+        [...]
+}
+</pre></div>
+</div>
+<p>get_unaligned()宏的工作原理与此类似。假设’data’是一个指向内存的指针，并且你希望避免
+非对齐访问，其用法如下:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>u32 value = get_unaligned((u32 *) data);
+</pre></div>
+</div>
+<p>这些宏适用于任何长度的内存访问（不仅仅是上面例子中的32位）。请注意，与标准的对齐内存
+访问相比，使用这些宏来访问非对齐内存可能会在性能上付出代价。</p>
+<p>如果使用这些宏不方便，另一个选择是使用<a class="reference internal" href="../../../core-api/kernel-api.html#c.memcpy" title="memcpy"><code class="xref c c-func docutils literal notranslate"><span class="pre">memcpy()</span></code></a>，其中源或目标（或两者）的类型为u8*或
+非对齐char*。由于这种操作的字节性质，避免了非对齐访问。</p>
+</section>
+<section id="vs">
+<h2>对齐 vs. 网络<a class="headerlink" href="#vs" title="Permalink to this headline">¶</a></h2>
+<p>在需要对齐负载的架构上，网络要求IP头在四字节边界上对齐，以优化IP栈。对于普通的以太网
+硬件，常数NET_IP_ALIGN被使用。在大多数架构上，这个常数的值是2，因为正常的以太网头是
+14个字节，所以为了获得适当的对齐，需要DMA到一个可以表示为4*n+2的地址。一个值得注意的
+例外是powerpc，它将NET_IP_ALIGN定义为0，因为DMA到未对齐的地址可能非常昂贵，与未对齐
+的负载的成本相比相形见绌。</p>
+<p>对于一些不能DMA到未对齐地址的以太网硬件，如4*n+2或非以太网硬件，这可能是一个问题，这
+时需要将传入的帧复制到一个对齐的缓冲区。因为这在可以进行非对齐访问的架构上是不必要的，
+所以可以使代码依赖于CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS，像这样:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#ifdef CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS
+        skb = original skb
+#else
+        skb = copy skb
+#endif
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">非对齐内存访问</a><ul>
+<li><a class="reference internal" href="#id2">非对齐访问的定义</a></li>
+<li><a class="reference internal" href="#id3">自然对齐</a></li>
+<li><a class="reference internal" href="#id4">为什么非对齐访问时坏事</a></li>
+<li><a class="reference internal" href="#id5">不会导致非对齐访问的代码</a></li>
+<li><a class="reference internal" href="#id6">导致非对齐访问的代码</a></li>
+<li><a class="reference internal" href="#id7">避免非对齐访问</a></li>
+<li><a class="reference internal" href="#vs">对齐 vs. 网络</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/core-api/unaligned-memory-access.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/core-api/unaligned-memory-access.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

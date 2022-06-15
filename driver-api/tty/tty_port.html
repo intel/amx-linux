@@ -1,0 +1,667 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>TTY Port &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="TTY Struct" href="tty_struct.html" />
+    <link rel="prev" title="TTY Driver and TTY Operations" href="tty_driver.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="tty-port">
+<h1>TTY Port<a class="headerlink" href="#tty-port" title="Permalink to this headline">¶</a></h1>
+<div class="contents local topic" id="contents">
+<ul class="simple">
+<li><p><a class="reference internal" href="#tty-port-functions" id="id1">TTY Port Functions</a></p>
+<ul>
+<li><p><a class="reference internal" href="#init-destroy" id="id2">Init &amp; Destroy</a></p></li>
+<li><p><a class="reference internal" href="#open-close-hangup-helpers" id="id3">Open/Close/Hangup Helpers</a></p></li>
+<li><p><a class="reference internal" href="#tty-refcounting" id="id4">TTY Refcounting</a></p></li>
+<li><p><a class="reference internal" href="#tty-helpers" id="id5">TTY Helpers</a></p></li>
+<li><p><a class="reference internal" href="#modem-signals" id="id6">Modem Signals</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#tty-port-reference" id="id7">TTY Port Reference</a></p></li>
+<li><p><a class="reference internal" href="#tty-port-operations-reference" id="id8">TTY Port Operations Reference</a></p></li>
+</ul>
+</div>
+<p>The TTY drivers are advised to use <a class="reference internal" href="#c.tty_port" title="tty_port"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span></code></a> helpers as much as possible.
+If the drivers implement <code class="xref c c-member docutils literal notranslate"><span class="pre">tty_port.ops.activate()</span></code> and
+<code class="xref c c-member docutils literal notranslate"><span class="pre">tty_port.ops.shutdown()</span></code>, they can use <a class="reference internal" href="#c.tty_port_open" title="tty_port_open"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_port_open()</span></code></a>,
+<a class="reference internal" href="#c.tty_port_close" title="tty_port_close"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_port_close()</span></code></a>, and <a class="reference internal" href="#c.tty_port_hangup" title="tty_port_hangup"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_port_hangup()</span></code></a> in respective
+<code class="xref c c-member docutils literal notranslate"><span class="pre">tty_struct.ops</span></code> hooks.</p>
+<p>The reference and details are contained in the <a class="reference internal" href="#tty-port-reference">TTY Port Reference</a> and <a class="reference internal" href="#tty-port-operations-reference">TTY
+Port Operations Reference</a> sections at the bottom.</p>
+<section id="tty-port-functions">
+<h2><a class="toc-backref" href="#id1">TTY Port Functions</a><a class="headerlink" href="#tty-port-functions" title="Permalink to this headline">¶</a></h2>
+<section id="init-destroy">
+<h3><a class="toc-backref" href="#id2">Init &amp; Destroy</a><a class="headerlink" href="#init-destroy" title="Permalink to this headline">¶</a></h3>
+<dl class="function">
+<dt id="c.tty_port_init">
+void <code class="sig-name descname">tty_port_init</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.tty_port" title="tty_port">tty_port</a><em> *port</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_port_init" title="Permalink to this definition">¶</a></dt>
+<dd><ul class="simple">
+<li><p>initialize tty_port</p></li>
+</ul>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>tty_port to initialize</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Initializes the state of <a class="reference internal" href="#c.tty_port" title="tty_port"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span></code></a>. When a port was initialized using
+this function, one has to destroy the port by <a class="reference internal" href="#c.tty_port_destroy" title="tty_port_destroy"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_port_destroy()</span></code></a>. Either
+indirectly by using <a class="reference internal" href="#c.tty_port" title="tty_port"><code class="xref c c-type docutils literal notranslate"><span class="pre">tty_port</span></code></a> refcounting (<a class="reference internal" href="#c.tty_port_put" title="tty_port_put"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_port_put()</span></code></a>) or directly if
+refcounting is not used.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_port_destroy">
+void <code class="sig-name descname">tty_port_destroy</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.tty_port" title="tty_port">tty_port</a><em> *port</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_port_destroy" title="Permalink to this definition">¶</a></dt>
+<dd><ul class="simple">
+<li><p>destroy inited port</p></li>
+</ul>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>tty port to be destroyed</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>When a port was initialized using <a class="reference internal" href="#c.tty_port_init" title="tty_port_init"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_port_init()</span></code></a>, one has to destroy the
+port by this function. Either indirectly by using <a class="reference internal" href="#c.tty_port" title="tty_port"><code class="xref c c-type docutils literal notranslate"><span class="pre">tty_port</span></code></a> refcounting
+(<a class="reference internal" href="#c.tty_port_put" title="tty_port_put"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_port_put()</span></code></a>) or directly if refcounting is not used.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_port_put">
+void <code class="sig-name descname">tty_port_put</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.tty_port" title="tty_port">tty_port</a><em> *port</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_port_put" title="Permalink to this definition">¶</a></dt>
+<dd><ul class="simple">
+<li><p>drop a reference to tty_port</p></li>
+</ul>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>port to drop a reference of (can be NULL)</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>The final put will destroy and free up the <strong>port</strong> using
+<strong>port-&gt;ops-&gt;destruct()</strong> hook, or using <a class="reference internal" href="../../core-api/mm-api.html#c.kfree" title="kfree"><code class="xref c c-func docutils literal notranslate"><span class="pre">kfree()</span></code></a> if not provided.</p>
+</div>
+</section>
+<section id="open-close-hangup-helpers">
+<h3><a class="toc-backref" href="#id3">Open/Close/Hangup Helpers</a><a class="headerlink" href="#open-close-hangup-helpers" title="Permalink to this headline">¶</a></h3>
+<dl class="function">
+<dt id="c.tty_port_shutdown">
+void <code class="sig-name descname">tty_port_shutdown</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.tty_port" title="tty_port">tty_port</a><em> *port</em>, struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_port_shutdown" title="Permalink to this definition">¶</a></dt>
+<dd><p>internal helper to shutdown the device</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>tty port to be shut down</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>the associated tty</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>It is used by <a class="reference internal" href="#c.tty_port_hangup" title="tty_port_hangup"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_port_hangup()</span></code></a> and <a class="reference internal" href="#c.tty_port_close" title="tty_port_close"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_port_close()</span></code></a>. Its task is to
+shutdown the device if it was initialized (note consoles remain
+functioning). It lowers DTR/RTS (if <strong>tty</strong> has HUPCL set) and invokes
+<strong>port-&gt;ops-&gt;shutdown()</strong>.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_port_hangup">
+void <code class="sig-name descname">tty_port_hangup</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.tty_port" title="tty_port">tty_port</a><em> *port</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_port_hangup" title="Permalink to this definition">¶</a></dt>
+<dd><p>hangup helper</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>tty port</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Perform port level tty hangup flag and count changes. Drop the tty
+reference.</p>
+<p>Caller holds tty lock.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_port_block_til_ready">
+int <code class="sig-name descname">tty_port_block_til_ready</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.tty_port" title="tty_port">tty_port</a><em> *port</em>, struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em>, struct file<em> *filp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_port_block_til_ready" title="Permalink to this definition">¶</a></dt>
+<dd><p>Waiting logic for tty open</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>the tty port being opened</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>the tty device being bound</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">file</span> <span class="pre">*filp</span></code></dt><dd><p>the file pointer of the opener or <code class="docutils literal notranslate"><span class="pre">NULL</span></code></p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Implement the core POSIX/SuS tty behaviour when opening a tty device.
+Handles:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>hangup (both before and during)</p></li>
+<li><p>non blocking open</p></li>
+<li><p>rts/dtr/dcd</p></li>
+<li><p>signals</p></li>
+<li><p>port flags and counts</p></li>
+</ul>
+</div></blockquote>
+<p>The passed <strong>port</strong> must implement the <strong>port-&gt;ops-&gt;carrier_raised</strong> method if it
+can do carrier detect and the <strong>port-&gt;ops-&gt;dtr_rts</strong> method if it supports
+software management of these lines. Note that the dtr/rts raise is done each
+iteration as a hangup may have previously dropped them while we wait.</p>
+<p>Caller holds tty lock.</p>
+<p><strong>Note</strong></p>
+<p>May drop and reacquire tty lock when blocking, so <strong>tty</strong> and <strong>port</strong> may
+have changed state (eg., may have been hung up).</p>
+</div>
+<dl class="function">
+<dt id="c.tty_port_close_start">
+int <code class="sig-name descname">tty_port_close_start</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.tty_port" title="tty_port">tty_port</a><em> *port</em>, struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em>, struct file<em> *filp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_port_close_start" title="Permalink to this definition">¶</a></dt>
+<dd><p>helper for tty-&gt;ops-&gt;close, part 1/2</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>tty_port of the device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty being closed</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">file</span> <span class="pre">*filp</span></code></dt><dd><p>passed file pointer</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Decrements and checks open count. Flushes the port if this is the last
+close. That means, dropping the data from the outpu buffer on the device and
+waiting for sending logic to finish. The rest of close handling is performed
+in <a class="reference internal" href="#c.tty_port_close_end" title="tty_port_close_end"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_port_close_end()</span></code></a>.</p>
+<p>Locking: Caller holds tty lock.</p>
+<p><strong>Return</strong></p>
+<p>1 if this is the last close, otherwise 0</p>
+</div>
+<dl class="function">
+<dt id="c.tty_port_close_end">
+void <code class="sig-name descname">tty_port_close_end</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.tty_port" title="tty_port">tty_port</a><em> *port</em>, struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_port_close_end" title="Permalink to this definition">¶</a></dt>
+<dd><p>helper for tty-&gt;ops-&gt;close, part 2/2</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>tty_port of the device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty being closed</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This is a continuation of the first part: <a class="reference internal" href="#c.tty_port_close_start" title="tty_port_close_start"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_port_close_start()</span></code></a>. This
+should be called after turning off the device. It flushes the data from the
+line discipline and delays the close by <strong>port-&gt;close_delay</strong>.</p>
+<p>Locking: Caller holds tty lock.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_port_close">
+void <code class="sig-name descname">tty_port_close</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.tty_port" title="tty_port">tty_port</a><em> *port</em>, struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em>, struct file<em> *filp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_port_close" title="Permalink to this definition">¶</a></dt>
+<dd><p>generic tty-&gt;ops-&gt;close handler</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>tty_port of the device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty being closed</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">file</span> <span class="pre">*filp</span></code></dt><dd><p>passed file pointer</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>It is a generic helper to be used in driver’s <strong>tty-&gt;ops-&gt;close</strong>. It wraps a
+sequence of <a class="reference internal" href="#c.tty_port_close_start" title="tty_port_close_start"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_port_close_start()</span></code></a>, <a class="reference internal" href="#c.tty_port_shutdown" title="tty_port_shutdown"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_port_shutdown()</span></code></a>, and
+<a class="reference internal" href="#c.tty_port_close_end" title="tty_port_close_end"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_port_close_end()</span></code></a>. The latter two are called only if this is the last
+close. See the respective functions for the details.</p>
+<p>Locking: Caller holds tty lock</p>
+</div>
+<dl class="function">
+<dt id="c.tty_port_install">
+int <code class="sig-name descname">tty_port_install</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.tty_port" title="tty_port">tty_port</a><em> *port</em>, struct <a class="reference internal" href="tty_driver.html#c.tty_driver" title="tty_driver">tty_driver</a><em> *driver</em>, struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_port_install" title="Permalink to this definition">¶</a></dt>
+<dd><p>generic tty-&gt;ops-&gt;install handler</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>tty_port of the device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_driver</span> <span class="pre">*driver</span></code></dt><dd><p>tty_driver for this device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty to be installed</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>It is the same as <a class="reference internal" href="tty_struct.html#c.tty_standard_install" title="tty_standard_install"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_standard_install()</span></code></a> except the provided <strong>port</strong> is linked
+to a concrete tty specified by <strong>tty</strong>. Use this or <a class="reference internal" href="tty_driver.html#c.tty_port_register_device" title="tty_port_register_device"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_port_register_device()</span></code></a>
+(or both). Call <a class="reference internal" href="tty_driver.html#c.tty_port_link_device" title="tty_port_link_device"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_port_link_device()</span></code></a> as a last resort.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_port_open">
+int <code class="sig-name descname">tty_port_open</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.tty_port" title="tty_port">tty_port</a><em> *port</em>, struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em>, struct file<em> *filp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_port_open" title="Permalink to this definition">¶</a></dt>
+<dd><p>generic tty-&gt;ops-&gt;open handler</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>tty_port of the device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty to be opened</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">file</span> <span class="pre">*filp</span></code></dt><dd><p>passed file pointer</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>It is a generic helper to be used in driver’s <strong>tty-&gt;ops-&gt;open</strong>. It activates
+the devices using <strong>port-&gt;ops-&gt;activate</strong> if not active already. And waits for
+the device to be ready using <a class="reference internal" href="#c.tty_port_block_til_ready" title="tty_port_block_til_ready"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_port_block_til_ready()</span></code></a> (e.g.  raises
+DTR/CTS and waits for carrier).</p>
+<p>Note that <strong>port-&gt;ops-&gt;shutdown</strong> is not called when <strong>port-&gt;ops-&gt;activate</strong>
+returns an error (on the contrary, <strong>tty-&gt;ops-&gt;close</strong> is).</p>
+<p>Locking: Caller holds tty lock.</p>
+<p><strong>Note</strong></p>
+<p>may drop and reacquire tty lock (in <a class="reference internal" href="#c.tty_port_block_til_ready" title="tty_port_block_til_ready"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_port_block_til_ready()</span></code></a>) so
+<strong>tty</strong> and <strong>port</strong> may have changed state (eg., may be hung up now).</p>
+</div>
+</section>
+<section id="tty-refcounting">
+<h3><a class="toc-backref" href="#id4">TTY Refcounting</a><a class="headerlink" href="#tty-refcounting" title="Permalink to this headline">¶</a></h3>
+<dl class="function">
+<dt id="c.tty_port_tty_get">
+struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a> * <code class="sig-name descname">tty_port_tty_get</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.tty_port" title="tty_port">tty_port</a><em> *port</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_port_tty_get" title="Permalink to this definition">¶</a></dt>
+<dd><p>get a tty reference</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>tty port</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Return a refcount protected tty instance or <code class="docutils literal notranslate"><span class="pre">NULL</span></code> if the port is not
+associated with a tty (eg due to close or hangup).</p>
+</div>
+<dl class="function">
+<dt id="c.tty_port_tty_set">
+void <code class="sig-name descname">tty_port_tty_set</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.tty_port" title="tty_port">tty_port</a><em> *port</em>, struct <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_port_tty_set" title="Permalink to this definition">¶</a></dt>
+<dd><p>set the tty of a port</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>tty port</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>the tty</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Associate the port and tty pair. Manages any internal refcounts. Pass <code class="docutils literal notranslate"><span class="pre">NULL</span></code>
+to deassociate a port.</p>
+</div>
+</section>
+<section id="tty-helpers">
+<h3><a class="toc-backref" href="#id5">TTY Helpers</a><a class="headerlink" href="#tty-helpers" title="Permalink to this headline">¶</a></h3>
+<dl class="function">
+<dt id="c.tty_port_tty_hangup">
+void <code class="sig-name descname">tty_port_tty_hangup</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.tty_port" title="tty_port">tty_port</a><em> *port</em>, bool<em> check_clocal</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_port_tty_hangup" title="Permalink to this definition">¶</a></dt>
+<dd><p>helper to hang up a tty</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>tty port</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">bool</span> <span class="pre">check_clocal</span></code></dt><dd><p>hang only ttys with <code class="docutils literal notranslate"><span class="pre">CLOCAL</span></code> unset?</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.tty_port_tty_wakeup">
+void <code class="sig-name descname">tty_port_tty_wakeup</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.tty_port" title="tty_port">tty_port</a><em> *port</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_port_tty_wakeup" title="Permalink to this definition">¶</a></dt>
+<dd><p>helper to wake up a tty</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>tty port</p>
+</dd>
+</dl>
+</div>
+</section>
+<section id="modem-signals">
+<h3><a class="toc-backref" href="#id6">Modem Signals</a><a class="headerlink" href="#modem-signals" title="Permalink to this headline">¶</a></h3>
+<dl class="function">
+<dt id="c.tty_port_carrier_raised">
+int <code class="sig-name descname">tty_port_carrier_raised</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.tty_port" title="tty_port">tty_port</a><em> *port</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_port_carrier_raised" title="Permalink to this definition">¶</a></dt>
+<dd><p>carrier raised check</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>tty port</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Wrapper for the carrier detect logic. For the moment this is used
+to hide some internal details. This will eventually become entirely
+internal to the tty port.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_port_raise_dtr_rts">
+void <code class="sig-name descname">tty_port_raise_dtr_rts</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.tty_port" title="tty_port">tty_port</a><em> *port</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_port_raise_dtr_rts" title="Permalink to this definition">¶</a></dt>
+<dd><p>Raise DTR/RTS</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>tty port</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Wrapper for the DTR/RTS raise logic. For the moment this is used to hide
+some internal details. This will eventually become entirely internal to the
+tty port.</p>
+</div>
+<dl class="function">
+<dt id="c.tty_port_lower_dtr_rts">
+void <code class="sig-name descname">tty_port_lower_dtr_rts</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.tty_port" title="tty_port">tty_port</a><em> *port</em><span class="sig-paren">)</span><a class="headerlink" href="#c.tty_port_lower_dtr_rts" title="Permalink to this definition">¶</a></dt>
+<dd><p>Lower DTR/RTS</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span> <span class="pre">*port</span></code></dt><dd><p>tty port</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Wrapper for the DTR/RTS raise logic. For the moment this is used to hide
+some internal details. This will eventually become entirely internal to the
+tty port.</p>
+</div>
+</section>
+</section>
+<hr class="docutils" />
+<section id="tty-port-reference">
+<h2><a class="toc-backref" href="#id7">TTY Port Reference</a><a class="headerlink" href="#tty-port-reference" title="Permalink to this headline">¶</a></h2>
+<dl class="type">
+<dt id="c.tty_port">
+struct <code class="sig-name descname">tty_port</code><a class="headerlink" href="#c.tty_port" title="Permalink to this definition">¶</a></dt>
+<dd><ul class="simple">
+<li><p>port level information</p></li>
+</ul>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct tty_port {
+    struct tty_bufhead      buf;
+    struct tty_struct       *tty;
+    struct tty_struct       *itty;
+    const struct tty_port_operations *ops;
+    const struct tty_port_client_operations *client_ops;
+    spinlock_t lock;
+    int blocked_open;
+    int count;
+    wait_queue_head_t open_wait;
+    wait_queue_head_t delta_msr_wait;
+    unsigned long           flags;
+    unsigned long           iflags;
+    unsigned char           console:1;
+    struct mutex            mutex;
+    struct mutex            buf_mutex;
+    unsigned char           *xmit_buf;
+    unsigned char *xmit_fifo;
+    unsigned int            close_delay;
+    unsigned int            closing_wait;
+    int drain_delay;
+    struct kref             kref;
+    void *client_data;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">buf</span></code></dt><dd><p>buffer for this port, locked internally</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">tty</span></code></dt><dd><p>back pointer to <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span></code></a>, valid only if the tty is open. Use
+<a class="reference internal" href="#c.tty_port_tty_get" title="tty_port_tty_get"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_port_tty_get()</span></code></a> to obtain it (and <a class="reference internal" href="tty_struct.html#c.tty_kref_put" title="tty_kref_put"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_kref_put()</span></code></a> to release).</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">itty</span></code></dt><dd><p>internal back pointer to <a class="reference internal" href="tty_struct.html#c.tty_struct" title="tty_struct"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span></code></a>. Avoid this. It should be
+eliminated in the long term.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">ops</span></code></dt><dd><p>tty port operations (like activate, shutdown), see <a class="reference internal" href="#c.tty_port_operations" title="tty_port_operations"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span>
+<span class="pre">tty_port_operations</span></code></a></p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">client_ops</span></code></dt><dd><p>tty port client operations (like receive_buf, write_wakeup).
+By default, tty_port_default_client_ops is used.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">lock</span></code></dt><dd><p>lock protecting <strong>tty</strong></p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">blocked_open</span></code></dt><dd><p># of procs waiting for open in <a class="reference internal" href="#c.tty_port_block_til_ready" title="tty_port_block_til_ready"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_port_block_til_ready()</span></code></a></p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">count</span></code></dt><dd><p>usage count</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">open_wait</span></code></dt><dd><p>open waiters queue (waiting e.g. for a carrier)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">delta_msr_wait</span></code></dt><dd><p>modem status change queue (waiting for MSR changes)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">flags</span></code></dt><dd><p>user TTY flags (<code class="docutils literal notranslate"><span class="pre">ASYNC_</span></code>)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">iflags</span></code></dt><dd><p>internal flags (<code class="docutils literal notranslate"><span class="pre">TTY_PORT_</span></code>)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">console</span></code></dt><dd><p>when set, the port is a console</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">mutex</span></code></dt><dd><p>locking, for open, shutdown and other port operations</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">buf_mutex</span></code></dt><dd><p><strong>xmit_buf</strong> alloc lock</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">xmit_buf</span></code></dt><dd><p>optional xmit buffer used by some drivers</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">xmit_fifo</span></code></dt><dd><p>optional xmit buffer used by some drivers</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">close_delay</span></code></dt><dd><p>delay in jiffies to wait when closing the port</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">closing_wait</span></code></dt><dd><p>delay in jiffies for output to be sent before closing</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">drain_delay</span></code></dt><dd><p>set to zero if no pure time based drain is needed else set to
+size of fifo</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">kref</span></code></dt><dd><p>references counter. Reaching zero calls <strong>ops-&gt;destruct()</strong> if non-<code class="docutils literal notranslate"><span class="pre">NULL</span></code>
+or frees the port otherwise.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">client_data</span></code></dt><dd><p>pointer to private data, for <strong>client_ops</strong></p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>Each device keeps its own port level information. <a class="reference internal" href="#c.tty_port" title="tty_port"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span></code></a> was
+introduced as a common structure for such information. As every TTY device
+shall have a backing tty_port structure, every driver can use these members.</p>
+<p>The tty port has a different lifetime to the tty so must be kept apart.
+In addition be careful as tty -&gt; port mappings are valid for the life
+of the tty object but in many cases port -&gt; tty mappings are valid only
+until a hangup so don’t use the wrong path.</p>
+<p>Tty port shall be initialized by <a class="reference internal" href="#c.tty_port_init" title="tty_port_init"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_port_init()</span></code></a> and shut down either by
+<a class="reference internal" href="#c.tty_port_destroy" title="tty_port_destroy"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_port_destroy()</span></code></a> (refcounting not used), or <a class="reference internal" href="#c.tty_port_put" title="tty_port_put"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_port_put()</span></code></a> (refcounting).</p>
+<p>There is a lot of helpers around <a class="reference internal" href="#c.tty_port" title="tty_port"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_port</span></code></a> too. To name the most
+significant ones: <a class="reference internal" href="#c.tty_port_open" title="tty_port_open"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_port_open()</span></code></a>, <a class="reference internal" href="#c.tty_port_close" title="tty_port_close"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_port_close()</span></code></a> (or
+<a class="reference internal" href="#c.tty_port_close_start" title="tty_port_close_start"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_port_close_start()</span></code></a> and <a class="reference internal" href="#c.tty_port_close_end" title="tty_port_close_end"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_port_close_end()</span></code></a> separately if need be), and
+<a class="reference internal" href="#c.tty_port_hangup" title="tty_port_hangup"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_port_hangup()</span></code></a>. These call <strong>ops-&gt;activate()</strong> and <strong>ops-&gt;shutdown()</strong> as
+needed.</p>
+</section>
+<hr class="docutils" />
+<section id="tty-port-operations-reference">
+<h2><a class="toc-backref" href="#id8">TTY Port Operations Reference</a><a class="headerlink" href="#tty-port-operations-reference" title="Permalink to this headline">¶</a></h2>
+<dl class="type">
+<dt id="c.tty_port_operations">
+struct <code class="sig-name descname">tty_port_operations</code><a class="headerlink" href="#c.tty_port_operations" title="Permalink to this definition">¶</a></dt>
+<dd><ul class="simple">
+<li><p>operations on tty_port</p></li>
+</ul>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct tty_port_operations {
+    int (*carrier_raised)(struct tty_port *port);
+    void (*dtr_rts)(struct tty_port *port, int raise);
+    void (*shutdown)(struct tty_port *port);
+    int (*activate)(struct tty_port *port, struct tty_struct *tty);
+    void (*destruct)(struct tty_port *port);
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl>
+<dt><code class="docutils literal notranslate"><span class="pre">carrier_raised</span></code></dt><dd><p>return 1 if the carrier is raised on <strong>port</strong></p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dtr_rts</span></code></dt><dd><p>raise the DTR line if <strong>raise</strong> is nonzero, otherwise lower DTR</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">shutdown</span></code></dt><dd><p>called when the last close completes or a hangup finishes IFF the
+port was initialized. Do not use to free resources. Turn off the device
+only. Called under the port mutex to serialize against <strong>activate</strong> and
+<strong>shutdown</strong>.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">activate</span></code></dt><dd><p>called under the port mutex from <a class="reference internal" href="#c.tty_port_open" title="tty_port_open"><code class="xref c c-func docutils literal notranslate"><span class="pre">tty_port_open()</span></code></a>, serialized using
+the port mutex. Supposed to turn on the device.</p>
+<p>FIXME: long term getting the tty argument <em>out</em> of this would be good
+for consoles.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">destruct</span></code></dt><dd><p>called on the final put of a port. Free resources, possibly incl.
+the port itself.</p>
+</dd>
+</dl>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">TTY Port</a><ul>
+<li><a class="reference internal" href="#tty-port-functions">TTY Port Functions</a><ul>
+<li><a class="reference internal" href="#init-destroy">Init &amp; Destroy</a></li>
+<li><a class="reference internal" href="#open-close-hangup-helpers">Open/Close/Hangup Helpers</a></li>
+<li><a class="reference internal" href="#tty-refcounting">TTY Refcounting</a></li>
+<li><a class="reference internal" href="#tty-helpers">TTY Helpers</a></li>
+<li><a class="reference internal" href="#modem-signals">Modem Signals</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#tty-port-reference">TTY Port Reference</a></li>
+<li><a class="reference internal" href="#tty-port-operations-reference">TTY Port Operations Reference</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/tty/tty_port.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/tty/tty_port.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

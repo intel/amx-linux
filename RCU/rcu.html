@@ -1,0 +1,181 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>RCU Concepts &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Using RCU hlist_nulls to protect list and objects" href="rculist_nulls.html" />
+    <link rel="prev" title="What is RCU? – “Read, Copy, Update”" href="whatisRCU.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="rcu-concepts">
+<span id="rcu-doc"></span><h1>RCU Concepts<a class="headerlink" href="#rcu-concepts" title="Permalink to this headline">¶</a></h1>
+<p>The basic idea behind RCU (read-copy update) is to split destructive
+operations into two parts, one that prevents anyone from seeing the data
+item being destroyed, and one that actually carries out the destruction.
+A “grace period” must elapse between the two parts, and this grace period
+must be long enough that any readers accessing the item being deleted have
+since dropped their references.  For example, an RCU-protected deletion
+from a linked list would first remove the item from the list, wait for
+a grace period to elapse, then free the element.  See <a class="reference internal" href="listRCU.html"><span class="doc">Using RCU to Protect Read-Mostly Linked Lists</span></a> for more
+information on using RCU with linked lists.</p>
+<section id="frequently-asked-questions">
+<h2>Frequently Asked Questions<a class="headerlink" href="#frequently-asked-questions" title="Permalink to this headline">¶</a></h2>
+<ul>
+<li><p>Why would anyone want to use RCU?</p>
+<p>The advantage of RCU’s two-part approach is that RCU readers need
+not acquire any locks, perform any atomic instructions, write to
+shared memory, or (on CPUs other than Alpha) execute any memory
+barriers.  The fact that these operations are quite expensive
+on modern CPUs is what gives RCU its performance advantages
+in read-mostly situations.  The fact that RCU readers need not
+acquire locks can also greatly simplify deadlock-avoidance code.</p>
+</li>
+<li><p>How can the updater tell when a grace period has completed
+if the RCU readers give no indication when they are done?</p>
+<p>Just as with spinlocks, RCU readers are not permitted to
+block, switch to user-mode execution, or enter the idle loop.
+Therefore, as soon as a CPU is seen passing through any of these
+three states, we know that that CPU has exited any previous RCU
+read-side critical sections.  So, if we remove an item from a
+linked list, and then wait until all CPUs have switched context,
+executed in user mode, or executed in the idle loop, we can
+safely free up that item.</p>
+<p>Preemptible variants of RCU (CONFIG_PREEMPT_RCU) get the
+same effect, but require that the readers manipulate CPU-local
+counters.  These counters allow limited types of blocking within
+RCU read-side critical sections.  SRCU also uses CPU-local
+counters, and permits general blocking within RCU read-side
+critical sections.  These variants of RCU detect grace periods
+by sampling these counters.</p>
+</li>
+<li><p>If I am running on a uniprocessor kernel, which can only do one
+thing at a time, why should I wait for a grace period?</p>
+<p>See <a class="reference internal" href="UP.html"><span class="doc">RCU on Uniprocessor Systems</span></a> for more information.</p>
+</li>
+<li><p>How can I see where RCU is currently used in the Linux kernel?</p>
+<p>Search for “rcu_read_lock”, “rcu_read_unlock”, “call_rcu”,
+“rcu_read_lock_bh”, “rcu_read_unlock_bh”, “srcu_read_lock”,
+“srcu_read_unlock”, “synchronize_rcu”, “synchronize_net”,
+“synchronize_srcu”, and the other RCU primitives.  Or grab one
+of the cscope databases from:</p>
+<p>(<a class="reference external" href="http://www.rdrop.com/users/paulmck/RCU/linuxusage/rculocktab.html">http://www.rdrop.com/users/paulmck/RCU/linuxusage/rculocktab.html</a>).</p>
+</li>
+<li><p>What guidelines should I follow when writing code that uses RCU?</p>
+<p>See <a class="reference internal" href="checklist.html"><span class="doc">Review Checklist for RCU Patches</span></a>.</p>
+</li>
+<li><p>Why the name “RCU”?</p>
+<p>“RCU” stands for “read-copy update”.
+<a class="reference internal" href="listRCU.html"><span class="doc">Using RCU to Protect Read-Mostly Linked Lists</span></a> has more information on where this name came from, search
+for “read-copy update” to find it.</p>
+</li>
+<li><p>I hear that RCU is patented?  What is with that?</p>
+<p>Yes, it is.  There are several known patents related to RCU,
+search for the string “Patent” in Documentation/RCU/RTFP.txt to find them.
+Of these, one was allowed to lapse by the assignee, and the
+others have been contributed to the Linux kernel under GPL.
+There are now also LGPL implementations of user-level RCU
+available (<a class="reference external" href="https://liburcu.org/">https://liburcu.org/</a>).</p>
+</li>
+<li><p>I hear that RCU needs work in order to support realtime kernels?</p>
+<p>Realtime-friendly RCU can be enabled via the CONFIG_PREEMPT_RCU
+kernel configuration parameter.</p>
+</li>
+<li><p>Where can I find more information on RCU?</p>
+<p>See the Documentation/RCU/RTFP.txt file.
+Or point your browser at (<a class="reference external" href="http://www.rdrop.com/users/paulmck/RCU/">http://www.rdrop.com/users/paulmck/RCU/</a>).</p>
+</li>
+</ul>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">RCU Concepts</a><ul>
+<li><a class="reference internal" href="#frequently-asked-questions">Frequently Asked Questions</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/RCU/rcu.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/RCU/rcu.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

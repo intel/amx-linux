@@ -1,0 +1,240 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Virtual Memory Layout on RISC-V Linux &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="RISC-V Linux User ABI" href="uabi.html" />
+    <link rel="prev" title="Boot image header in RISC-V Linux" href="boot-image-header.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="virtual-memory-layout-on-risc-v-linux">
+<h1>Virtual Memory Layout on RISC-V Linux<a class="headerlink" href="#virtual-memory-layout-on-risc-v-linux" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">Author</dt>
+<dd class="field-odd"><p>Alexandre Ghiti &lt;<a class="reference external" href="mailto:alex&#37;&#52;&#48;ghiti&#46;fr">alex<span>&#64;</span>ghiti<span>&#46;</span>fr</a>&gt;</p>
+</dd>
+<dt class="field-even">Date</dt>
+<dd class="field-even"><p>12 February 2021</p>
+</dd>
+</dl>
+<p>This document describes the virtual memory layout used by the RISC-V Linux
+Kernel.</p>
+<section id="risc-v-linux-kernel-32bit">
+<h2>RISC-V Linux Kernel 32bit<a class="headerlink" href="#risc-v-linux-kernel-32bit" title="Permalink to this headline">¶</a></h2>
+<section id="risc-v-linux-kernel-sv32">
+<h3>RISC-V Linux Kernel SV32<a class="headerlink" href="#risc-v-linux-kernel-sv32" title="Permalink to this headline">¶</a></h3>
+<p>TODO</p>
+</section>
+</section>
+<section id="risc-v-linux-kernel-64bit">
+<h2>RISC-V Linux Kernel 64bit<a class="headerlink" href="#risc-v-linux-kernel-64bit" title="Permalink to this headline">¶</a></h2>
+<p>The RISC-V privileged architecture document states that the 64bit addresses
+“must have bits 63–48 all equal to bit 47, or else a page-fault exception will
+occur.”: that splits the virtual address space into 2 halves separated by a very
+big hole, the lower half is where the userspace resides, the upper half is where
+the RISC-V Linux Kernel resides.</p>
+<section id="risc-v-linux-kernel-sv39">
+<h3>RISC-V Linux Kernel SV39<a class="headerlink" href="#risc-v-linux-kernel-sv39" title="Permalink to this headline">¶</a></h3>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>========================================================================================================================
+    Start addr    |   Offset   |     End addr     |  Size   | VM area description
+========================================================================================================================
+                  |            |                  |         |
+ 0000000000000000 |    0       | 0000003fffffffff |  256 GB | user-space virtual memory, different per mm
+__________________|____________|__________________|_________|___________________________________________________________
+                  |            |                  |         |
+ 0000004000000000 | +256    GB | ffffffbfffffffff | ~16M TB | ... huge, almost 64 bits wide hole of non-canonical
+                  |            |                  |         |     virtual memory addresses up to the -256 GB
+                  |            |                  |         |     starting offset of kernel mappings.
+__________________|____________|__________________|_________|___________________________________________________________
+                                                            |
+                                                            | Kernel-space virtual memory, shared between all processes:
+____________________________________________________________|___________________________________________________________
+                  |            |                  |         |
+ ffffffc6fee00000 | -228    GB | ffffffc6feffffff |    2 MB | fixmap
+ ffffffc6ff000000 | -228    GB | ffffffc6ffffffff |   16 MB | PCI io
+ ffffffc700000000 | -228    GB | ffffffc7ffffffff |    4 GB | vmemmap
+ ffffffc800000000 | -224    GB | ffffffd7ffffffff |   64 GB | vmalloc/ioremap space
+ ffffffd800000000 | -160    GB | fffffff6ffffffff |  124 GB | direct mapping of all physical memory
+ fffffff700000000 |  -36    GB | fffffffeffffffff |   32 GB | kasan
+__________________|____________|__________________|_________|____________________________________________________________
+                                                            |
+                                                            |
+____________________________________________________________|____________________________________________________________
+                  |            |                  |         |
+ ffffffff00000000 |   -4    GB | ffffffff7fffffff |    2 GB | modules, BPF
+ ffffffff80000000 |   -2    GB | ffffffffffffffff |    2 GB | kernel
+__________________|____________|__________________|_________|____________________________________________________________
+</pre></div>
+</div>
+</section>
+<section id="risc-v-linux-kernel-sv48">
+<h3>RISC-V Linux Kernel SV48<a class="headerlink" href="#risc-v-linux-kernel-sv48" title="Permalink to this headline">¶</a></h3>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>========================================================================================================================
+     Start addr    |   Offset   |     End addr     |  Size   | VM area description
+========================================================================================================================
+                   |            |                  |         |
+  0000000000000000 |    0       | 00007fffffffffff |  128 TB | user-space virtual memory, different per mm
+ __________________|____________|__________________|_________|___________________________________________________________
+                   |            |                  |         |
+  0000800000000000 | +128    TB | ffff7fffffffffff | ~16M TB | ... huge, almost 64 bits wide hole of non-canonical
+                   |            |                  |         | virtual memory addresses up to the -128 TB
+                   |            |                  |         | starting offset of kernel mappings.
+ __________________|____________|__________________|_________|___________________________________________________________
+                                                             |
+                                                             | Kernel-space virtual memory, shared between all processes:
+ ____________________________________________________________|___________________________________________________________
+                   |            |                  |         |
+  ffff8d7ffee00000 |  -114.5 TB | ffff8d7ffeffffff |    2 MB | fixmap
+  ffff8d7fff000000 |  -114.5 TB | ffff8d7fffffffff |   16 MB | PCI io
+  ffff8d8000000000 |  -114.5 TB | ffff8f7fffffffff |    2 TB | vmemmap
+  ffff8f8000000000 |  -112.5 TB | ffffaf7fffffffff |   32 TB | vmalloc/ioremap space
+  ffffaf8000000000 |  -80.5  TB | ffffef7fffffffff |   64 TB | direct mapping of all physical memory
+  ffffef8000000000 |  -16.5  TB | fffffffeffffffff | 16.5 TB | kasan
+ __________________|____________|__________________|_________|____________________________________________________________
+                                                             |
+                                                             | Identical layout to the 39-bit one from here on:
+ ____________________________________________________________|____________________________________________________________
+                   |            |                  |         |
+  ffffffff00000000 |   -4    GB | ffffffff7fffffff |    2 GB | modules, BPF
+  ffffffff80000000 |   -2    GB | ffffffffffffffff |    2 GB | kernel
+ __________________|____________|__________________|_________|____________________________________________________________
+</pre></div>
+</div>
+</section>
+<section id="risc-v-linux-kernel-sv57">
+<h3>RISC-V Linux Kernel SV57<a class="headerlink" href="#risc-v-linux-kernel-sv57" title="Permalink to this headline">¶</a></h3>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>========================================================================================================================
+     Start addr    |   Offset   |     End addr     |  Size   | VM area description
+========================================================================================================================
+                   |            |                  |         |
+  0000000000000000 |   0        | 00ffffffffffffff |   64 PB | user-space virtual memory, different per mm
+ __________________|____________|__________________|_________|___________________________________________________________
+                   |            |                  |         |
+  0100000000000000 | +64     PB | feffffffffffffff | ~16K PB | ... huge, almost 64 bits wide hole of non-canonical
+                   |            |                  |         | virtual memory addresses up to the -64 PB
+                   |            |                  |         | starting offset of kernel mappings.
+ __________________|____________|__________________|_________|___________________________________________________________
+                                                             |
+                                                             | Kernel-space virtual memory, shared between all processes:
+ ____________________________________________________________|___________________________________________________________
+                   |            |                  |         |
+  ff1bfffffee00000 | -57     PB | ff1bfffffeffffff |    2 MB | fixmap
+  ff1bffffff000000 | -57     PB | ff1bffffffffffff |   16 MB | PCI io
+  ff1c000000000000 | -57     PB | ff1fffffffffffff |    1 PB | vmemmap
+  ff20000000000000 | -56     PB | ff5fffffffffffff |   16 PB | vmalloc/ioremap space
+  ff60000000000000 | -40     PB | ffdeffffffffffff |   32 PB | direct mapping of all physical memory
+  ffdf000000000000 |  -8     PB | fffffffeffffffff |    8 PB | kasan
+ __________________|____________|__________________|_________|____________________________________________________________
+                                                             |
+                                                             | Identical layout to the 39-bit one from here on:
+ ____________________________________________________________|____________________________________________________________
+                   |            |                  |         |
+  ffffffff00000000 |  -4     GB | ffffffff7fffffff |    2 GB | modules, BPF
+  ffffffff80000000 |  -2     GB | ffffffffffffffff |    2 GB | kernel
+ __________________|____________|__________________|_________|____________________________________________________________
+</pre></div>
+</div>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Virtual Memory Layout on RISC-V Linux</a><ul>
+<li><a class="reference internal" href="#risc-v-linux-kernel-32bit">RISC-V Linux Kernel 32bit</a><ul>
+<li><a class="reference internal" href="#risc-v-linux-kernel-sv32">RISC-V Linux Kernel SV32</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#risc-v-linux-kernel-64bit">RISC-V Linux Kernel 64bit</a><ul>
+<li><a class="reference internal" href="#risc-v-linux-kernel-sv39">RISC-V Linux Kernel SV39</a></li>
+<li><a class="reference internal" href="#risc-v-linux-kernel-sv48">RISC-V Linux Kernel SV48</a></li>
+<li><a class="reference internal" href="#risc-v-linux-kernel-sv57">RISC-V Linux Kernel SV57</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/riscv/vm-layout.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/riscv/vm-layout.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

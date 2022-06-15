@@ -1,0 +1,224 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Kernel mode NEON &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Kernel-provided User Helpers" href="kernel_user_helpers.html" />
+    <link rel="prev" title="Interrupts" href="interrupts.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="kernel-mode-neon">
+<h1>Kernel mode NEON<a class="headerlink" href="#kernel-mode-neon" title="Permalink to this headline">¶</a></h1>
+<section id="tl-dr-summary">
+<h2>TL;DR summary<a class="headerlink" href="#tl-dr-summary" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p>Use only NEON instructions, or VFP instructions that don’t rely on support
+code</p></li>
+<li><p>Isolate your NEON code in a separate compilation unit, and compile it with
+‘-march=armv7-a -mfpu=neon -mfloat-abi=softfp’</p></li>
+<li><p>Put kernel_neon_begin() and kernel_neon_end() calls around the calls into your
+NEON code</p></li>
+<li><p>Don’t sleep in your NEON code, and be aware that it will be executed with
+preemption disabled</p></li>
+</ul>
+</section>
+<section id="introduction">
+<h2>Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>It is possible to use NEON instructions (and in some cases, VFP instructions) in
+code that runs in kernel mode. However, for performance reasons, the NEON/VFP
+register file is not preserved and restored at every context switch or taken
+exception like the normal register file is, so some manual intervention is
+required. Furthermore, special care is required for code that may sleep [i.e.,
+may call schedule()], as NEON or VFP instructions will be executed in a
+non-preemptible section for reasons outlined below.</p>
+</section>
+<section id="lazy-preserve-and-restore">
+<h2>Lazy preserve and restore<a class="headerlink" href="#lazy-preserve-and-restore" title="Permalink to this headline">¶</a></h2>
+<p>The NEON/VFP register file is managed using lazy preserve (on UP systems) and
+lazy restore (on both SMP and UP systems). This means that the register file is
+kept ‘live’, and is only preserved and restored when multiple tasks are
+contending for the NEON/VFP unit (or, in the SMP case, when a task migrates to
+another core). Lazy restore is implemented by disabling the NEON/VFP unit after
+every context switch, resulting in a trap when subsequently a NEON/VFP
+instruction is issued, allowing the kernel to step in and perform the restore if
+necessary.</p>
+<p>Any use of the NEON/VFP unit in kernel mode should not interfere with this, so
+it is required to do an ‘eager’ preserve of the NEON/VFP register file, and
+enable the NEON/VFP unit explicitly so no exceptions are generated on first
+subsequent use. This is handled by the function kernel_neon_begin(), which
+should be called before any kernel mode NEON or VFP instructions are issued.
+Likewise, the NEON/VFP unit should be disabled again after use to make sure user
+mode will hit the lazy restore trap upon next use. This is handled by the
+function kernel_neon_end().</p>
+</section>
+<section id="interruptions-in-kernel-mode">
+<h2>Interruptions in kernel mode<a class="headerlink" href="#interruptions-in-kernel-mode" title="Permalink to this headline">¶</a></h2>
+<p>For reasons of performance and simplicity, it was decided that there shall be no
+preserve/restore mechanism for the kernel mode NEON/VFP register contents. This
+implies that interruptions of a kernel mode NEON section can only be allowed if
+they are guaranteed not to touch the NEON/VFP registers. For this reason, the
+following rules and restrictions apply in the kernel:
+* NEON/VFP code is not allowed in interrupt context;
+* NEON/VFP code is not allowed to sleep;
+* NEON/VFP code is executed with preemption disabled.</p>
+<p>If latency is a concern, it is possible to put back to back calls to
+kernel_neon_end() and kernel_neon_begin() in places in your code where none of
+the NEON registers are live. (Additional calls to kernel_neon_begin() should be
+reasonably cheap if no context switch occurred in the meantime)</p>
+</section>
+<section id="vfp-and-support-code">
+<h2>VFP and support code<a class="headerlink" href="#vfp-and-support-code" title="Permalink to this headline">¶</a></h2>
+<p>Earlier versions of VFP (prior to version 3) rely on software support for things
+like IEEE-754 compliant underflow handling etc. When the VFP unit needs such
+software assistance, it signals the kernel by raising an undefined instruction
+exception. The kernel responds by inspecting the VFP control registers and the
+current instruction and arguments, and emulates the instruction in software.</p>
+<p>Such software assistance is currently not implemented for VFP instructions
+executed in kernel mode. If such a condition is encountered, the kernel will
+fail and generate an OOPS.</p>
+</section>
+<section id="separating-neon-code-from-ordinary-code">
+<h2>Separating NEON code from ordinary code<a class="headerlink" href="#separating-neon-code-from-ordinary-code" title="Permalink to this headline">¶</a></h2>
+<p>The compiler is not aware of the special significance of kernel_neon_begin() and
+kernel_neon_end(), i.e., that it is only allowed to issue NEON/VFP instructions
+between calls to these respective functions. Furthermore, GCC may generate NEON
+instructions of its own at -O3 level if -mfpu=neon is selected, and even if the
+kernel is currently compiled at -O2, future changes may result in NEON/VFP
+instructions appearing in unexpected places if no special care is taken.</p>
+<p>Therefore, the recommended and only supported way of using NEON/VFP in the
+kernel is by adhering to the following rules:</p>
+<ul class="simple">
+<li><p>isolate the NEON code in a separate compilation unit and compile it with
+‘-march=armv7-a -mfpu=neon -mfloat-abi=softfp’;</p></li>
+<li><p>issue the calls to kernel_neon_begin(), kernel_neon_end() as well as the calls
+into the unit containing the NEON code from a compilation unit which is <em>not</em>
+built with the GCC flag ‘-mfpu=neon’ set.</p></li>
+</ul>
+<p>As the kernel is compiled with ‘-msoft-float’, the above will guarantee that
+both NEON and VFP instructions will only ever appear in designated compilation
+units at any optimization level.</p>
+</section>
+<section id="neon-assembler">
+<h2>NEON assembler<a class="headerlink" href="#neon-assembler" title="Permalink to this headline">¶</a></h2>
+<p>NEON assembler is supported with no additional caveats as long as the rules
+above are followed.</p>
+</section>
+<section id="neon-code-generated-by-gcc">
+<h2>NEON code generated by GCC<a class="headerlink" href="#neon-code-generated-by-gcc" title="Permalink to this headline">¶</a></h2>
+<p>The GCC option -ftree-vectorize (implied by -O3) tries to exploit implicit
+parallelism, and generates NEON code from ordinary C source code. This is fully
+supported as long as the rules above are followed.</p>
+</section>
+<section id="neon-intrinsics">
+<h2>NEON intrinsics<a class="headerlink" href="#neon-intrinsics" title="Permalink to this headline">¶</a></h2>
+<p>NEON intrinsics are also supported. However, as code using NEON intrinsics
+relies on the GCC header &lt;arm_neon.h&gt;, (which #includes &lt;stdint.h&gt;), you should
+observe the following in addition to the rules above:</p>
+<ul class="simple">
+<li><p>Compile the unit containing the NEON intrinsics with ‘-ffreestanding’ so GCC
+uses its builtin version of &lt;stdint.h&gt; (this is a C99 header which the kernel
+does not supply);</p></li>
+<li><p>Include &lt;arm_neon.h&gt; last, or at least after &lt;linux/types.h&gt;</p></li>
+</ul>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Kernel mode NEON</a><ul>
+<li><a class="reference internal" href="#tl-dr-summary">TL;DR summary</a></li>
+<li><a class="reference internal" href="#introduction">Introduction</a></li>
+<li><a class="reference internal" href="#lazy-preserve-and-restore">Lazy preserve and restore</a></li>
+<li><a class="reference internal" href="#interruptions-in-kernel-mode">Interruptions in kernel mode</a></li>
+<li><a class="reference internal" href="#vfp-and-support-code">VFP and support code</a></li>
+<li><a class="reference internal" href="#separating-neon-code-from-ordinary-code">Separating NEON code from ordinary code</a></li>
+<li><a class="reference internal" href="#neon-assembler">NEON assembler</a></li>
+<li><a class="reference internal" href="#neon-code-generated-by-gcc">NEON code generated by GCC</a></li>
+<li><a class="reference internal" href="#neon-intrinsics">NEON intrinsics</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/arm/kernel_mode_neon.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/arm/kernel_mode_neon.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

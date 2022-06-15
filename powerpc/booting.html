@@ -1,0 +1,201 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>DeviceTree Booting &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="The PowerPC boot wrapper" href="bootwrapper.html" />
+    <link rel="prev" title="NUMA resource associativity" href="associativity.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="devicetree-booting">
+<h1>DeviceTree Booting<a class="headerlink" href="#devicetree-booting" title="Permalink to this headline">¶</a></h1>
+<p>During the development of the Linux/ppc64 kernel, and more specifically, the
+addition of new platform types outside of the old IBM pSeries/iSeries pair, it
+was decided to enforce some strict rules regarding the kernel entry and
+bootloader &lt;-&gt; kernel interfaces, in order to avoid the degeneration that had
+become the ppc32 kernel entry point and the way a new platform should be added
+to the kernel. The legacy iSeries platform breaks those rules as it predates
+this scheme, but no new board support will be accepted in the main tree that
+doesn’t follow them properly.  In addition, since the advent of the arch/powerpc
+merged architecture for ppc32 and ppc64, new 32-bit platforms and 32-bit
+platforms which move into arch/powerpc will be required to use these rules as
+well.</p>
+<p>The main requirement that will be defined in more detail below is the presence
+of a device-tree whose format is defined after Open Firmware specification.
+However, in order to make life easier to embedded board vendors, the kernel
+doesn’t require the device-tree to represent every device in the system and only
+requires some nodes and properties to be present. For example, the kernel does
+not require you to create a node for every PCI device in the system. It is a
+requirement to have a node for PCI host bridges in order to provide interrupt
+routing information and memory/IO ranges, among others. It is also recommended
+to define nodes for on chip devices and other buses that don’t specifically fit
+in an existing OF specification. This creates a great flexibility in the way the
+kernel can then probe those and match drivers to device, without having to hard
+code all sorts of tables. It also makes it more flexible for board vendors to do
+minor hardware upgrades without significantly impacting the kernel code or
+cluttering it with special cases.</p>
+<section id="entry-point">
+<h2>Entry point<a class="headerlink" href="#entry-point" title="Permalink to this headline">¶</a></h2>
+<p>There is one single entry point to the kernel, at the start
+of the kernel image. That entry point supports two calling
+conventions:</p>
+<blockquote>
+<div><p>a) Boot from Open Firmware. If your firmware is compatible
+with Open Firmware (IEEE 1275) or provides an OF compatible
+client interface API (support for “interpret” callback of
+forth words isn’t required), you can enter the kernel with:</p>
+<blockquote>
+<div><p>r5 : OF callback pointer as defined by IEEE 1275
+bindings to powerpc. Only the 32-bit client interface
+is currently supported</p>
+<p>r3, r4 : address &amp; length of an initrd if any or 0</p>
+<p>The MMU is either on or off; the kernel will run the
+trampoline located in arch/powerpc/kernel/prom_init.c to
+extract the device-tree and other information from open
+firmware and build a flattened device-tree as described
+in b). prom_init() will then re-enter the kernel using
+the second method. This trampoline code runs in the
+context of the firmware, which is supposed to handle all
+exceptions during that time.</p>
+</div></blockquote>
+<p>b) Direct entry with a flattened device-tree block. This entry
+point is called by a) after the OF trampoline and can also be
+called directly by a bootloader that does not support the Open
+Firmware client interface. It is also used by “kexec” to
+implement “hot” booting of a new kernel from a previous
+running one. This method is what I will describe in more
+details in this document, as method a) is simply standard Open
+Firmware, and thus should be implemented according to the
+various standard documents defining it and its binding to the
+PowerPC platform. The entry point definition then becomes:</p>
+<blockquote>
+<div><p>r3 : physical pointer to the device-tree block
+(defined in chapter II) in RAM</p>
+<p>r4 : physical pointer to the kernel itself. This is
+used by the assembly code to properly disable the MMU
+in case you are entering the kernel with MMU enabled
+and a non-1:1 mapping.</p>
+<p>r5 : NULL (as to differentiate with method a)</p>
+</div></blockquote>
+</div></blockquote>
+<p>Note about SMP entry: Either your firmware puts your other
+CPUs in some sleep loop or spin loop in ROM where you can get
+them out via a soft reset or some other means, in which case
+you don’t need to care, or you’ll have to enter the kernel
+with all CPUs. The way to do that with method b) will be
+described in a later revision of this document.</p>
+<p>Board supports (platforms) are not exclusive config options. An
+arbitrary set of board supports can be built in a single kernel
+image. The kernel will “know” what set of functions to use for a
+given platform based on the content of the device-tree. Thus, you
+should:</p>
+<blockquote>
+<div><p>a) add your platform support as a _boolean_ option in
+arch/powerpc/Kconfig, following the example of PPC_PSERIES,
+PPC_PMAC and PPC_MAPLE. The latter is probably a good
+example of a board support to start from.</p>
+<p>b) create your main platform file as
+“arch/powerpc/platforms/myplatform/myboard_setup.c” and add it
+to the Makefile under the condition of your <code class="docutils literal notranslate"><span class="pre">CONFIG_</span></code>
+option. This file will define a structure of type “ppc_md”
+containing the various callbacks that the generic code will
+use to get to your platform specific code</p>
+</div></blockquote>
+<p>A kernel image may support multiple platforms, but only if the
+platforms feature the same core architecture.  A single kernel build
+cannot support both configurations with Book E and configurations
+with classic Powerpc architectures.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">DeviceTree Booting</a><ul>
+<li><a class="reference internal" href="#entry-point">Entry point</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/powerpc/booting.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/powerpc/booting.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,219 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>IP over InfiniBand &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Intel Omni-Path (OPA) Virtual Network Interface Controller (VNIC)" href="opa_vnic.html" />
+    <link rel="prev" title="InfiniBand Midlayer Locking" href="core_locking.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="ip-over-infiniband">
+<h1>IP over InfiniBand<a class="headerlink" href="#ip-over-infiniband" title="Permalink to this headline">¶</a></h1>
+<blockquote>
+<div><p>The ib_ipoib driver is an implementation of the IP over InfiniBand
+protocol as specified by RFC 4391 and 4392, issued by the IETF ipoib
+working group.  It is a “native” implementation in the sense of
+setting the interface type to ARPHRD_INFINIBAND and the hardware
+address length to 20 (earlier proprietary implementations
+masqueraded to the kernel as ethernet interfaces).</p>
+</div></blockquote>
+<section id="partitions-and-p-keys">
+<h2>Partitions and P_Keys<a class="headerlink" href="#partitions-and-p-keys" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>When the IPoIB driver is loaded, it creates one interface for each
+port using the P_Key at index 0.  To create an interface with a
+different P_Key, write the desired P_Key into the main interface’s
+/sys/class/net/&lt;intf name&gt;/create_child file.  For example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>echo 0x8001 &gt; /sys/class/net/ib0/create_child
+</pre></div>
+</div>
+<p>This will create an interface named ib0.8001 with P_Key 0x8001.  To
+remove a subinterface, use the “delete_child” file:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>echo 0x8001 &gt; /sys/class/net/ib0/delete_child
+</pre></div>
+</div>
+<p>The P_Key for any interface is given by the “pkey” file, and the
+main interface for a subinterface is in “parent.”</p>
+<p>Child interface create/delete can also be done using IPoIB’s
+rtnl_link_ops, where children created using either way behave the same.</p>
+</div></blockquote>
+</section>
+<section id="datagram-vs-connected-modes">
+<h2>Datagram vs Connected modes<a class="headerlink" href="#datagram-vs-connected-modes" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>The IPoIB driver supports two modes of operation: datagram and
+connected.  The mode is set and read through an interface’s
+/sys/class/net/&lt;intf name&gt;/mode file.</p>
+<p>In datagram mode, the IB UD (Unreliable Datagram) transport is used
+and so the interface MTU has is equal to the IB L2 MTU minus the
+IPoIB encapsulation header (4 bytes).  For example, in a typical IB
+fabric with a 2K MTU, the IPoIB MTU will be 2048 - 4 = 2044 bytes.</p>
+<p>In connected mode, the IB RC (Reliable Connected) transport is used.
+Connected mode takes advantage of the connected nature of the IB
+transport and allows an MTU up to the maximal IP packet size of 64K,
+which reduces the number of IP packets needed for handling large UDP
+datagrams, TCP segments, etc and increases the performance for large
+messages.</p>
+<p>In connected mode, the interface’s UD QP is still used for multicast
+and communication with peers that don’t support connected mode. In
+this case, RX emulation of ICMP PMTU packets is used to cause the
+networking stack to use the smaller UD MTU for these neighbours.</p>
+</div></blockquote>
+</section>
+<section id="stateless-offloads">
+<h2>Stateless offloads<a class="headerlink" href="#stateless-offloads" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>If the IB HW supports IPoIB stateless offloads, IPoIB advertises
+TCP/IP checksum and/or Large Send (LSO) offloading capability to the
+network stack.</p>
+<p>Large Receive (LRO) offloading is also implemented and may be turned
+on/off using ethtool calls.  Currently LRO is supported only for
+checksum offload capable devices.</p>
+<p>Stateless offloads are supported only in datagram mode.</p>
+</div></blockquote>
+</section>
+<section id="interrupt-moderation">
+<h2>Interrupt moderation<a class="headerlink" href="#interrupt-moderation" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>If the underlying IB device supports CQ event moderation, one can
+use ethtool to set interrupt mitigation parameters and thus reduce
+the overhead incurred by handling interrupts.  The main code path of
+IPoIB doesn’t use events for TX completion signaling so only RX
+moderation is supported.</p>
+</div></blockquote>
+</section>
+<section id="debugging-information">
+<h2>Debugging Information<a class="headerlink" href="#debugging-information" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>By compiling the IPoIB driver with CONFIG_INFINIBAND_IPOIB_DEBUG set
+to ‘y’, tracing messages are compiled into the driver.  They are
+turned on by setting the module parameters debug_level and
+mcast_debug_level to 1.  These parameters can be controlled at
+runtime through files in /sys/module/ib_ipoib/.</p>
+<p>CONFIG_INFINIBAND_IPOIB_DEBUG also enables files in the debugfs
+virtual filesystem.  By mounting this filesystem, for example with:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>mount -t debugfs none /sys/kernel/debug
+</pre></div>
+</div>
+<p>it is possible to get statistics about multicast groups from the
+files /sys/kernel/debug/ipoib/ib0_mcg and so on.</p>
+<p>The performance impact of this option is negligible, so it
+is safe to enable this option with debug_level set to 0 for normal
+operation.</p>
+<p>CONFIG_INFINIBAND_IPOIB_DEBUG_DATA enables even more debug output in
+the data path when data_debug_level is set to 1.  However, even with
+the output disabled, enabling this configuration option will affect
+performance, because it adds tests to the fast path.</p>
+</div></blockquote>
+</section>
+<section id="references">
+<h2>References<a class="headerlink" href="#references" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><dl class="simple">
+<dt>Transmission of IP over InfiniBand (IPoIB) (RFC 4391)</dt><dd><p><a class="reference external" href="http://ietf.org/rfc/rfc4391.txt">http://ietf.org/rfc/rfc4391.txt</a></p>
+</dd>
+<dt>IP over InfiniBand (IPoIB) Architecture (RFC 4392)</dt><dd><p><a class="reference external" href="http://ietf.org/rfc/rfc4392.txt">http://ietf.org/rfc/rfc4392.txt</a></p>
+</dd>
+<dt>IP over InfiniBand: Connected Mode (RFC 4755)</dt><dd><p><a class="reference external" href="http://ietf.org/rfc/rfc4755.txt">http://ietf.org/rfc/rfc4755.txt</a></p>
+</dd>
+</dl>
+</div></blockquote>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">IP over InfiniBand</a><ul>
+<li><a class="reference internal" href="#partitions-and-p-keys">Partitions and P_Keys</a></li>
+<li><a class="reference internal" href="#datagram-vs-connected-modes">Datagram vs Connected modes</a></li>
+<li><a class="reference internal" href="#stateless-offloads">Stateless offloads</a></li>
+<li><a class="reference internal" href="#interrupt-moderation">Interrupt moderation</a></li>
+<li><a class="reference internal" href="#debugging-information">Debugging Information</a></li>
+<li><a class="reference internal" href="#references">References</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/infiniband/ipoib.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/infiniband/ipoib.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

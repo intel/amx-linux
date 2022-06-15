@@ -1,0 +1,368 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>phylink &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="IP-Aliasing" href="alias.html" />
+    <link rel="prev" title="PHY Abstraction Layer" href="phy.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="phylink">
+<h1>phylink<a class="headerlink" href="#phylink" title="Permalink to this headline">¶</a></h1>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Permalink to this headline">¶</a></h2>
+<p>phylink is a mechanism to support hot-pluggable networking modules
+directly connected to a MAC without needing to re-initialise the
+adapter on hot-plug events.</p>
+<p>phylink supports conventional phylib-based setups, fixed link setups
+and SFP (Small Formfactor Pluggable) modules at present.</p>
+</section>
+<section id="modes-of-operation">
+<h2>Modes of operation<a class="headerlink" href="#modes-of-operation" title="Permalink to this headline">¶</a></h2>
+<p>phylink has several modes of operation, which depend on the firmware
+settings.</p>
+<ol class="arabic">
+<li><p>PHY mode</p>
+<p>In PHY mode, we use phylib to read the current link settings from
+the PHY, and pass them to the MAC driver.  We expect the MAC driver
+to configure exactly the modes that are specified without any
+negotiation being enabled on the link.</p>
+</li>
+<li><p>Fixed mode</p>
+<p>Fixed mode is the same as PHY mode as far as the MAC driver is
+concerned.</p>
+</li>
+<li><p>In-band mode</p>
+<p>In-band mode is used with 802.3z, SGMII and similar interface modes,
+and we are expecting to use and honor the in-band negotiation or
+control word sent across the serdes channel.</p>
+</li>
+</ol>
+<p>By example, what this means is that:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>&amp;eth {
+  phy = &lt;&amp;phy&gt;;
+  phy-mode = &quot;sgmii&quot;;
+};
+</pre></div>
+</div>
+<p>does not use in-band SGMII signalling.  The PHY is expected to follow
+exactly the settings given to it in its <a class="reference internal" href="kapi.html#c.mac_config" title="mac_config"><code class="xref c c-func docutils literal notranslate"><span class="pre">mac_config()</span></code></a> function.
+The link should be forced up or down appropriately in the
+<a class="reference internal" href="kapi.html#c.mac_link_up" title="mac_link_up"><code class="xref c c-func docutils literal notranslate"><span class="pre">mac_link_up()</span></code></a> and <a class="reference internal" href="kapi.html#c.mac_link_down" title="mac_link_down"><code class="xref c c-func docutils literal notranslate"><span class="pre">mac_link_down()</span></code></a> functions.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>&amp;eth {
+  managed = &quot;in-band-status&quot;;
+  phy = &lt;&amp;phy&gt;;
+  phy-mode = &quot;sgmii&quot;;
+};
+</pre></div>
+</div>
+<p>uses in-band mode, where results from the PHY’s negotiation are passed
+to the MAC through the SGMII control word, and the MAC is expected to
+acknowledge the control word.  The <a class="reference internal" href="kapi.html#c.mac_link_up" title="mac_link_up"><code class="xref c c-func docutils literal notranslate"><span class="pre">mac_link_up()</span></code></a> and
+<a class="reference internal" href="kapi.html#c.mac_link_down" title="mac_link_down"><code class="xref c c-func docutils literal notranslate"><span class="pre">mac_link_down()</span></code></a> functions must not force the MAC side link
+up and down.</p>
+</section>
+<section id="rough-guide-to-converting-a-network-driver-to-sfp-phylink">
+<h2>Rough guide to converting a network driver to sfp/phylink<a class="headerlink" href="#rough-guide-to-converting-a-network-driver-to-sfp-phylink" title="Permalink to this headline">¶</a></h2>
+<p>This guide briefly describes how to convert a network driver from
+phylib to the sfp/phylink support.  Please send patches to improve
+this documentation.</p>
+<ol class="arabic">
+<li><p>Optionally split the network driver’s phylib update function into
+two parts dealing with link-down and link-up. This can be done as
+a separate preparation commit.</p>
+<p>An older example of this preparation can be found in git commit
+fc548b991fb0, although this was splitting into three parts; the
+link-up part now includes configuring the MAC for the link settings.
+Please see <a class="reference internal" href="kapi.html#c.mac_link_up" title="mac_link_up"><code class="xref c c-func docutils literal notranslate"><span class="pre">mac_link_up()</span></code></a> for more information on this.</p>
+</li>
+<li><p>Replace:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>select FIXED_PHY
+select PHYLIB
+</pre></div>
+</div>
+<p>with:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>select PHYLINK
+</pre></div>
+</div>
+<p>in the driver’s Kconfig stanza.</p>
+</li>
+<li><p>Add:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#include &lt;linux/phylink.h&gt;
+</pre></div>
+</div>
+<p>to the driver’s list of header files.</p>
+</li>
+<li><p>Add:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct phylink *phylink;
+struct phylink_config phylink_config;
+</pre></div>
+</div>
+<p>to the driver’s private data structure.  We shall refer to the
+driver’s private data pointer as <code class="docutils literal notranslate"><span class="pre">priv</span></code> below, and the driver’s
+private data structure as <code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">foo_priv</span></code>.</p>
+</li>
+<li><p>Replace the following functions:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Original function</p></th>
+<th class="head"><p>Replacement function</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>phy_start(phydev)</p></td>
+<td><p>phylink_start(priv-&gt;phylink)</p></td>
+</tr>
+<tr class="row-odd"><td><p>phy_stop(phydev)</p></td>
+<td><p>phylink_stop(priv-&gt;phylink)</p></td>
+</tr>
+<tr class="row-even"><td><p>phy_mii_ioctl(phydev, ifr, cmd)</p></td>
+<td><p>phylink_mii_ioctl(priv-&gt;phylink, ifr, cmd)</p></td>
+</tr>
+<tr class="row-odd"><td><p>phy_ethtool_get_wol(phydev, wol)</p></td>
+<td><p>phylink_ethtool_get_wol(priv-&gt;phylink, wol)</p></td>
+</tr>
+<tr class="row-even"><td><p>phy_ethtool_set_wol(phydev, wol)</p></td>
+<td><p>phylink_ethtool_set_wol(priv-&gt;phylink, wol)</p></td>
+</tr>
+<tr class="row-odd"><td><p>phy_disconnect(phydev)</p></td>
+<td><p>phylink_disconnect_phy(priv-&gt;phylink)</p></td>
+</tr>
+</tbody>
+</table>
+<p>Please note that some of these functions must be called under the
+rtnl lock, and will warn if not. This will normally be the case,
+except if these are called from the driver suspend/resume paths.</p>
+</li>
+<li><p>Add/replace ksettings get/set methods with:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="k">static</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="nf">foo_ethtool_set_link_ksettings</span><span class="p">(</span><span class="k">struct</span> <span class="nc">net_device</span><span class="w"> </span><span class="o">*</span><span class="n">dev</span><span class="p">,</span><span class="w"></span>
+<span class="w">                                          </span><span class="k">const</span><span class="w"> </span><span class="k">struct</span> <span class="nc">ethtool_link_ksettings</span><span class="w"> </span><span class="o">*</span><span class="n">cmd</span><span class="p">)</span><span class="w"></span>
+<span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="k">struct</span> <span class="nc">foo_priv</span><span class="w"> </span><span class="o">*</span><span class="n">priv</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">netdev_priv</span><span class="p">(</span><span class="n">dev</span><span class="p">);</span><span class="w"></span>
+
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">phylink_ethtool_ksettings_set</span><span class="p">(</span><span class="n">priv</span><span class="o">-&gt;</span><span class="n">phylink</span><span class="p">,</span><span class="w"> </span><span class="n">cmd</span><span class="p">);</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+
+<span class="k">static</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="nf">foo_ethtool_get_link_ksettings</span><span class="p">(</span><span class="k">struct</span> <span class="nc">net_device</span><span class="w"> </span><span class="o">*</span><span class="n">dev</span><span class="p">,</span><span class="w"></span>
+<span class="w">                                          </span><span class="k">struct</span> <span class="nc">ethtool_link_ksettings</span><span class="w"> </span><span class="o">*</span><span class="n">cmd</span><span class="p">)</span><span class="w"></span>
+<span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="k">struct</span> <span class="nc">foo_priv</span><span class="w"> </span><span class="o">*</span><span class="n">priv</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">netdev_priv</span><span class="p">(</span><span class="n">dev</span><span class="p">);</span><span class="w"></span>
+
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">phylink_ethtool_ksettings_get</span><span class="p">(</span><span class="n">priv</span><span class="o">-&gt;</span><span class="n">phylink</span><span class="p">,</span><span class="w"> </span><span class="n">cmd</span><span class="p">);</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+</li>
+<li><p>Replace the call to:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>phy_dev = of_phy_connect(dev, node, link_func, flags, phy_interface);
+</pre></div>
+</div>
+<p>and associated code with a call to:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>err = phylink_of_phy_connect(priv-&gt;phylink, node, flags);
+</pre></div>
+</div>
+<p>For the most part, <code class="docutils literal notranslate"><span class="pre">flags</span></code> can be zero; these flags are passed to
+the <a class="reference internal" href="kapi.html#c.phy_attach_direct" title="phy_attach_direct"><code class="xref c c-func docutils literal notranslate"><span class="pre">phy_attach_direct()</span></code></a> inside this function call if a PHY is specified
+in the DT node <code class="docutils literal notranslate"><span class="pre">node</span></code>.</p>
+<p><code class="docutils literal notranslate"><span class="pre">node</span></code> should be the DT node which contains the network phy property,
+fixed link properties, and will also contain the sfp property.</p>
+<p>The setup of fixed links should also be removed; these are handled
+internally by phylink.</p>
+<p>of_phy_connect() was also passed a function pointer for link updates.
+This function is replaced by a different form of MAC updates
+described below in (8).</p>
+<p>Manipulation of the PHY’s supported/advertised happens within phylink
+based on the validate callback, see below in (8).</p>
+<p>Note that the driver no longer needs to store the <code class="docutils literal notranslate"><span class="pre">phy_interface</span></code>,
+and also note that <code class="docutils literal notranslate"><span class="pre">phy_interface</span></code> becomes a dynamic property,
+just like the speed, duplex etc. settings.</p>
+<p>Finally, note that the MAC driver has no direct access to the PHY
+anymore; that is because in the phylink model, the PHY can be
+dynamic.</p>
+</li>
+<li><p>Add a <a class="reference internal" href="kapi.html#c.phylink_mac_ops" title="phylink_mac_ops"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">phylink_mac_ops</span></code></a> instance to
+the driver, which is a table of function pointers, and implement
+these functions. The old link update function for
+<code class="xref c c-func docutils literal notranslate"><span class="pre">of_phy_connect()</span></code> becomes three methods: <a class="reference internal" href="kapi.html#c.mac_link_up" title="mac_link_up"><code class="xref c c-func docutils literal notranslate"><span class="pre">mac_link_up()</span></code></a>,
+<a class="reference internal" href="kapi.html#c.mac_link_down" title="mac_link_down"><code class="xref c c-func docutils literal notranslate"><span class="pre">mac_link_down()</span></code></a>, and <a class="reference internal" href="kapi.html#c.mac_config" title="mac_config"><code class="xref c c-func docutils literal notranslate"><span class="pre">mac_config()</span></code></a>. If step 1 was
+performed, then the functionality will have been split there.</p>
+<p>It is important that if in-band negotiation is used,
+<a class="reference internal" href="kapi.html#c.mac_link_up" title="mac_link_up"><code class="xref c c-func docutils literal notranslate"><span class="pre">mac_link_up()</span></code></a> and <a class="reference internal" href="kapi.html#c.mac_link_down" title="mac_link_down"><code class="xref c c-func docutils literal notranslate"><span class="pre">mac_link_down()</span></code></a> do not prevent the
+in-band negotiation from completing, since these functions are called
+when the in-band link state changes - otherwise the link will never
+come up.</p>
+<p>The <a class="reference internal" href="kapi.html#c.validate" title="validate"><code class="xref c c-func docutils literal notranslate"><span class="pre">validate()</span></code></a> method should mask the supplied supported mask,
+and <code class="docutils literal notranslate"><span class="pre">state-&gt;advertising</span></code> with the supported ethtool link modes.
+These are the new ethtool link modes, so bitmask operations must be
+used. For an example, see <code class="docutils literal notranslate"><span class="pre">drivers/net/ethernet/marvell/mvneta.c</span></code>.</p>
+<p>The <code class="xref c c-func docutils literal notranslate"><span class="pre">mac_link_state()</span></code> method is used to read the link state
+from the MAC, and report back the settings that the MAC is currently
+using. This is particularly important for in-band negotiation
+methods such as 1000base-X and SGMII.</p>
+<p>The <a class="reference internal" href="kapi.html#c.mac_link_up" title="mac_link_up"><code class="xref c c-func docutils literal notranslate"><span class="pre">mac_link_up()</span></code></a> method is used to inform the MAC that the
+link has come up. The call includes the negotiation mode and interface
+for reference only. The finalised link parameters are also supplied
+(speed, duplex and flow control/pause enablement settings) which
+should be used to configure the MAC when the MAC and PCS are not
+tightly integrated, or when the settings are not coming from in-band
+negotiation.</p>
+<p>The <a class="reference internal" href="kapi.html#c.mac_config" title="mac_config"><code class="xref c c-func docutils literal notranslate"><span class="pre">mac_config()</span></code></a> method is used to update the MAC with the
+requested state, and must avoid unnecessarily taking the link down
+when making changes to the MAC configuration.  This means the
+function should modify the state and only take the link down when
+absolutely necessary to change the MAC configuration.  An example
+of how to do this can be found in <code class="xref c c-func docutils literal notranslate"><span class="pre">mvneta_mac_config()</span></code> in
+<code class="docutils literal notranslate"><span class="pre">drivers/net/ethernet/marvell/mvneta.c</span></code>.</p>
+<p>For further information on these methods, please see the inline
+documentation in <a class="reference internal" href="kapi.html#c.phylink_mac_ops" title="phylink_mac_ops"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">phylink_mac_ops</span></code></a>.</p>
+</li>
+<li><p>Remove calls to <a class="reference internal" href="../devicetree/kernel-api.html#c.of_parse_phandle" title="of_parse_phandle"><code class="xref c c-func docutils literal notranslate"><span class="pre">of_parse_phandle()</span></code></a> for the PHY,
+of_phy_register_fixed_link() for fixed links etc. from the probe
+function, and replace with:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="k">struct</span> <span class="nc">phylink</span><span class="w"> </span><span class="o">*</span><span class="n">phylink</span><span class="p">;</span><span class="w"></span>
+<span class="n">priv</span><span class="o">-&gt;</span><span class="n">phylink_config</span><span class="p">.</span><span class="n">dev</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">dev</span><span class="p">.</span><span class="n">dev</span><span class="p">;</span><span class="w"></span>
+<span class="n">priv</span><span class="o">-&gt;</span><span class="n">phylink_config</span><span class="p">.</span><span class="n">type</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">PHYLINK_NETDEV</span><span class="p">;</span><span class="w"></span>
+
+<span class="n">phylink</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">phylink_create</span><span class="p">(</span><span class="o">&amp;</span><span class="n">priv</span><span class="o">-&gt;</span><span class="n">phylink_config</span><span class="p">,</span><span class="w"> </span><span class="n">node</span><span class="p">,</span><span class="w"> </span><span class="n">phy_mode</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">phylink_ops</span><span class="p">);</span><span class="w"></span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">IS_ERR</span><span class="p">(</span><span class="n">phylink</span><span class="p">))</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="n">err</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">PTR_ERR</span><span class="p">(</span><span class="n">phylink</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="n">fail</span><span class="w"> </span><span class="n">probe</span><span class="p">;</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+
+<span class="n">priv</span><span class="o">-&gt;</span><span class="n">phylink</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">phylink</span><span class="p">;</span><span class="w"></span>
+</pre></div>
+</div>
+<p>and arrange to destroy the phylink in the probe failure path as
+appropriate and the removal path too by calling:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">phylink_destroy</span><span class="p">(</span><span class="n">priv</span><span class="o">-&gt;</span><span class="n">phylink</span><span class="p">);</span><span class="w"></span>
+</pre></div>
+</div>
+</li>
+<li><p>Arrange for MAC link state interrupts to be forwarded into
+phylink, via:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">phylink_mac_change</span><span class="p">(</span><span class="n">priv</span><span class="o">-&gt;</span><span class="n">phylink</span><span class="p">,</span><span class="w"> </span><span class="n">link_is_up</span><span class="p">);</span><span class="w"></span>
+</pre></div>
+</div>
+<p>where <code class="docutils literal notranslate"><span class="pre">link_is_up</span></code> is true if the link is currently up or false
+otherwise. If a MAC is unable to provide these interrupts, then
+it should set <code class="docutils literal notranslate"><span class="pre">priv-&gt;phylink_config.pcs_poll</span> <span class="pre">=</span> <span class="pre">true;</span></code> in step 9.</p>
+</li>
+<li><p>Verify that the driver does not call:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>netif_carrier_on()
+netif_carrier_off()
+</pre></div>
+</div>
+</li>
+</ol>
+<blockquote>
+<div><p>as these will interfere with phylink’s tracking of the link state,
+and cause phylink to omit calls via the <a class="reference internal" href="kapi.html#c.mac_link_up" title="mac_link_up"><code class="xref c c-func docutils literal notranslate"><span class="pre">mac_link_up()</span></code></a> and
+<a class="reference internal" href="kapi.html#c.mac_link_down" title="mac_link_down"><code class="xref c c-func docutils literal notranslate"><span class="pre">mac_link_down()</span></code></a> methods.</p>
+</div></blockquote>
+<p>Network drivers should call <a class="reference internal" href="kapi.html#c.phylink_stop" title="phylink_stop"><code class="xref c c-func docutils literal notranslate"><span class="pre">phylink_stop()</span></code></a> and <a class="reference internal" href="kapi.html#c.phylink_start" title="phylink_start"><code class="xref c c-func docutils literal notranslate"><span class="pre">phylink_start()</span></code></a> via their
+suspend/resume paths, which ensures that the appropriate
+<a class="reference internal" href="kapi.html#c.phylink_mac_ops" title="phylink_mac_ops"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">phylink_mac_ops</span></code></a> methods are called
+as necessary.</p>
+<p>For information describing the SFP cage in DT, please see the binding
+documentation in the kernel source tree
+<code class="docutils literal notranslate"><span class="pre">Documentation/devicetree/bindings/net/sff,sfp.yaml</span></code>.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">phylink</a><ul>
+<li><a class="reference internal" href="#overview">Overview</a></li>
+<li><a class="reference internal" href="#modes-of-operation">Modes of operation</a></li>
+<li><a class="reference internal" href="#rough-guide-to-converting-a-network-driver-to-sfp-phylink">Rough guide to converting a network driver to sfp/phylink</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/networking/sfp-phylink.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/networking/sfp-phylink.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,296 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>drm/vkms Virtual Kernel Modesetting &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="drm/bridge/dw-hdmi Synopsys DesignWare HDMI Controller" href="bridge/dw-hdmi.html" />
+    <link rel="prev" title="drm/vc4 Broadcom VC4 Graphics Driver" href="vc4.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="drm-vkms-virtual-kernel-modesetting">
+<span id="vkms"></span><h1>drm/vkms Virtual Kernel Modesetting<a class="headerlink" href="#drm-vkms-virtual-kernel-modesetting" title="Permalink to this headline">¶</a></h1>
+<p>VKMS is a software-only model of a KMS driver that is useful for testing
+and for running X (or similar) on headless machines. VKMS aims to enable
+a virtual display with no need of a hardware display capability, releasing
+the GPU in DRM API tests.</p>
+<section id="setup">
+<h2>Setup<a class="headerlink" href="#setup" title="Permalink to this headline">¶</a></h2>
+<p>The VKMS driver can be setup with the following steps:</p>
+<p>To check if VKMS is loaded, run:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>lsmod | grep vkms
+</pre></div>
+</div>
+<p>This should list the VKMS driver. If no output is obtained, then
+you need to enable and/or load the VKMS driver.
+Ensure that the VKMS driver has been set as a loadable module in your
+kernel config file. Do:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>make nconfig
+
+Go to `Device Drivers&gt; Graphics support`
+
+Enable `Virtual KMS (EXPERIMENTAL)`
+</pre></div>
+</div>
+<p>Compile and build the kernel for the changes to get reflected.
+Now, to load the driver, use:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>sudo modprobe vkms
+</pre></div>
+</div>
+<p>On running the lsmod command now, the VKMS driver will appear listed.
+You can also observe the driver being loaded in the dmesg logs.</p>
+<p>The VKMS driver has optional features to simulate different kinds of hardware,
+which are exposed as module options. You can use the <cite>modinfo</cite> command
+to see the module options for vkms:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>modinfo vkms
+</pre></div>
+</div>
+<p>Module options are helpful when testing, and enabling modules
+can be done while loading vkms. For example, to load vkms with cursor enabled,
+use:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>sudo modprobe vkms enable_cursor=1
+</pre></div>
+</div>
+<p>To disable the driver, use</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>sudo modprobe -r vkms
+</pre></div>
+</div>
+</section>
+<section id="testing-with-igt">
+<h2>Testing With IGT<a class="headerlink" href="#testing-with-igt" title="Permalink to this headline">¶</a></h2>
+<p>The IGT GPU Tools is a test suite used specifically for debugging and
+development of the DRM drivers.
+The IGT Tools can be installed from
+<a class="reference external" href="https://gitlab.freedesktop.org/drm/igt-gpu-tools">here</a> .</p>
+<p>The tests need to be run without a compositor, so you need to switch to text
+only mode. You can do this by:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>sudo systemctl isolate multi-user.target
+</pre></div>
+</div>
+<p>To return to graphical mode, do:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>sudo systemctl isolate graphical.target
+</pre></div>
+</div>
+<p>Once you are in text only mode, you can run tests using the –device switch
+or IGT_DEVICE variable to specify the device filter for the driver we want
+to test. IGT_DEVICE can also be used with the run-test.sh script to run the
+tests for a specific driver:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>sudo ./build/tests/&lt;name of test&gt; --device &quot;sys:/sys/devices/platform/vkms&quot;
+sudo IGT_DEVICE=&quot;sys:/sys/devices/platform/vkms&quot; ./build/tests/&lt;name of test&gt;
+sudo IGT_DEVICE=&quot;sys:/sys/devices/platform/vkms&quot; ./scripts/run-tests.sh -t &lt;name of test&gt;
+</pre></div>
+</div>
+<p>For example, to test the functionality of the writeback library,
+we can run the kms_writeback test:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>sudo ./build/tests/kms_writeback --device &quot;sys:/sys/devices/platform/vkms&quot;
+sudo IGT_DEVICE=&quot;sys:/sys/devices/platform/vkms&quot; ./build/tests/kms_writeback
+sudo IGT_DEVICE=&quot;sys:/sys/devices/platform/vkms&quot; ./scripts/run-tests.sh -t kms_writeback
+</pre></div>
+</div>
+<p>You can also run subtests if you do not want to run the entire test:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>sudo ./build/tests/kms_flip --run-subtest basic-plain-flip --device &quot;sys:/sys/devices/platform/vkms&quot;
+sudo IGT_DEVICE=&quot;sys:/sys/devices/platform/vkms&quot; ./build/tests/kms_flip --run-subtest basic-plain-flip
+</pre></div>
+</div>
+</section>
+<section id="todo">
+<h2>TODO<a class="headerlink" href="#todo" title="Permalink to this headline">¶</a></h2>
+<p>If you want to do any of the items listed below, please share your interest
+with VKMS maintainers.</p>
+<section id="igt-better-support">
+<h3>IGT better support<a class="headerlink" href="#igt-better-support" title="Permalink to this headline">¶</a></h3>
+<p>Debugging:</p>
+<ul class="simple">
+<li><p>kms_plane: some test cases are failing due to timeout on capturing CRC;</p></li>
+</ul>
+<p>Virtual hardware (vblank-less) mode:</p>
+<ul class="simple">
+<li><p>VKMS already has support for vblanks simulated via hrtimers, which can be
+tested with kms_flip test; in some way, we can say that VKMS already mimics
+the real hardware vblank. However, we also have virtual hardware that does
+not support vblank interrupt and completes page_flip events right away; in
+this case, compositor developers may end up creating a busy loop on virtual
+hardware. It would be useful to support Virtual Hardware behavior in VKMS
+because this can help compositor developers to test their features in
+multiple scenarios.</p></li>
+</ul>
+</section>
+<section id="add-plane-features">
+<h3>Add Plane Features<a class="headerlink" href="#add-plane-features" title="Permalink to this headline">¶</a></h3>
+<p>There’s lots of plane features we could add support for:</p>
+<ul class="simple">
+<li><p>ARGB format on primary plane: blend the primary plane into background with
+translucent alpha.</p></li>
+<li><p>Add background color KMS property[Good to get started].</p></li>
+<li><p>Full alpha blending on all planes.</p></li>
+<li><p>Rotation, scaling.</p></li>
+<li><p>Additional buffer formats, especially YUV formats for video like NV12.
+Low/high bpp RGB formats would also be interesting.</p></li>
+<li><p>Async updates (currently only possible on cursor plane using the legacy
+cursor api).</p></li>
+</ul>
+<p>For all of these, we also want to review the igt test coverage and make sure
+all relevant igt testcases work on vkms. They are good options for internship
+project.</p>
+</section>
+<section id="runtime-configuration">
+<h3>Runtime Configuration<a class="headerlink" href="#runtime-configuration" title="Permalink to this headline">¶</a></h3>
+<p>We want to be able to reconfigure vkms instance without having to reload the
+module. Use/Test-cases:</p>
+<ul class="simple">
+<li><p>Hotplug/hotremove connectors on the fly (to be able to test DP MST handling
+of compositors).</p></li>
+<li><p>Configure planes/crtcs/connectors (we’d need some code to have more than 1 of
+them first).</p></li>
+<li><p>Change output configuration: Plug/unplug screens, change EDID, allow changing
+the refresh rate.</p></li>
+</ul>
+<p>The currently proposed solution is to expose vkms configuration through
+configfs. All existing module options should be supported through configfs
+too.</p>
+</section>
+<section id="writeback-support">
+<h3>Writeback support<a class="headerlink" href="#writeback-support" title="Permalink to this headline">¶</a></h3>
+<ul class="simple">
+<li><p>The writeback and CRC capture operations share the use of composer_enabled
+boolean to ensure vblanks. Probably, when these operations work together,
+composer_enabled needs to refcounting the composer state to proper work.
+[Good to get started]</p></li>
+<li><p>Add support for cloned writeback outputs and related test cases using a
+cloned output in the IGT kms_writeback.</p></li>
+<li><p>As a v4l device. This is useful for debugging compositors on special vkms
+configurations, so that developers see what’s really going on.</p></li>
+</ul>
+</section>
+<section id="output-features">
+<h3>Output Features<a class="headerlink" href="#output-features" title="Permalink to this headline">¶</a></h3>
+<ul class="simple">
+<li><p>Variable refresh rate/freesync support. This probably needs prime buffer
+sharing support, so that we can use vgem fences to simulate rendering in
+testing. Also needs support to specify the EDID.</p></li>
+<li><p>Add support for link status, so that compositors can validate their runtime
+fallbacks when e.g. a Display Port link goes bad.</p></li>
+</ul>
+</section>
+<section id="crc-api-improvements">
+<h3>CRC API Improvements<a class="headerlink" href="#crc-api-improvements" title="Permalink to this headline">¶</a></h3>
+<ul class="simple">
+<li><p>Optimize CRC computation <code class="docutils literal notranslate"><span class="pre">compute_crc()</span></code> and plane blending <code class="docutils literal notranslate"><span class="pre">blend()</span></code></p></li>
+</ul>
+</section>
+<section id="atomic-check-using-ebpf">
+<h3>Atomic Check using eBPF<a class="headerlink" href="#atomic-check-using-ebpf" title="Permalink to this headline">¶</a></h3>
+<p>Atomic drivers have lots of restrictions which are not exposed to userspace in
+any explicit form through e.g. possible property values. Userspace can only
+inquiry about these limits through the atomic IOCTL, possibly using the
+TEST_ONLY flag. Trying to add configurable code for all these limits, to allow
+compositors to be tested against them, would be rather futile exercise. Instead
+we could add support for eBPF to validate any kind of atomic state, and
+implement a library of different restrictions.</p>
+<p>This needs a bunch of features (plane compositing, multiple outputs, …)
+enabled already to make sense.</p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">drm/vkms Virtual Kernel Modesetting</a><ul>
+<li><a class="reference internal" href="#setup">Setup</a></li>
+<li><a class="reference internal" href="#testing-with-igt">Testing With IGT</a></li>
+<li><a class="reference internal" href="#todo">TODO</a><ul>
+<li><a class="reference internal" href="#igt-better-support">IGT better support</a></li>
+<li><a class="reference internal" href="#add-plane-features">Add Plane Features</a></li>
+<li><a class="reference internal" href="#runtime-configuration">Runtime Configuration</a></li>
+<li><a class="reference internal" href="#writeback-support">Writeback support</a></li>
+<li><a class="reference internal" href="#output-features">Output Features</a></li>
+<li><a class="reference internal" href="#crc-api-improvements">CRC API Improvements</a></li>
+<li><a class="reference internal" href="#atomic-check-using-ebpf">Atomic Check using eBPF</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/gpu/vkms.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/gpu/vkms.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,532 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Generic vm interface &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="XICS interrupt controller" href="xics.html" />
+    <link rel="prev" title="VFIO virtual device" href="vfio.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="generic-vm-interface">
+<h1>Generic vm interface<a class="headerlink" href="#generic-vm-interface" title="Permalink to this headline">¶</a></h1>
+<p>The virtual machine “device” also accepts the ioctls KVM_SET_DEVICE_ATTR,
+KVM_GET_DEVICE_ATTR, and KVM_HAS_DEVICE_ATTR. The interface uses the same
+struct kvm_device_attr as other devices, but targets VM-wide settings
+and controls.</p>
+<p>The groups and attributes per virtual machine, if any, are architecture
+specific.</p>
+<section id="group-kvm-s390-vm-mem-ctrl">
+<h2>1. GROUP: KVM_S390_VM_MEM_CTRL<a class="headerlink" href="#group-kvm-s390-vm-mem-ctrl" title="Permalink to this headline">¶</a></h2>
+<dl class="field-list simple">
+<dt class="field-odd">Architectures</dt>
+<dd class="field-odd"><p>s390</p>
+</dd>
+</dl>
+<section id="attribute-kvm-s390-vm-mem-enable-cmma">
+<h3>1.1. ATTRIBUTE: KVM_S390_VM_MEM_ENABLE_CMMA<a class="headerlink" href="#attribute-kvm-s390-vm-mem-enable-cmma" title="Permalink to this headline">¶</a></h3>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p>none</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>-EBUSY if a vcpu is already defined, otherwise 0</p>
+</dd>
+</dl>
+<p>Enables Collaborative Memory Management Assist (CMMA) for the virtual machine.</p>
+</section>
+<section id="attribute-kvm-s390-vm-mem-clr-cmma">
+<h3>1.2. ATTRIBUTE: KVM_S390_VM_MEM_CLR_CMMA<a class="headerlink" href="#attribute-kvm-s390-vm-mem-clr-cmma" title="Permalink to this headline">¶</a></h3>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p>none</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>-EINVAL if CMMA was not enabled;
+0 otherwise</p>
+</dd>
+</dl>
+<p>Clear the CMMA status for all guest pages, so any pages the guest marked
+as unused are again used any may not be reclaimed by the host.</p>
+</section>
+<section id="attribute-kvm-s390-vm-mem-limit-size">
+<h3>1.3. ATTRIBUTE KVM_S390_VM_MEM_LIMIT_SIZE<a class="headerlink" href="#attribute-kvm-s390-vm-mem-limit-size" title="Permalink to this headline">¶</a></h3>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p>in attr-&gt;addr the address for the new limit of guest memory</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>-EFAULT if the given address is not accessible;
+-EINVAL if the virtual machine is of type UCONTROL;
+-E2BIG if the given guest memory is to big for that machine;
+-EBUSY if a vcpu is already defined;
+-ENOMEM if not enough memory is available for a new shadow guest mapping;
+0 otherwise.</p>
+</dd>
+</dl>
+<p>Allows userspace to query the actual limit and set a new limit for
+the maximum guest memory size. The limit will be rounded up to
+2048 MB, 4096 GB, 8192 TB respectively, as this limit is governed by
+the number of page table levels. In the case that there is no limit we will set
+the limit to KVM_S390_NO_MEM_LIMIT (U64_MAX).</p>
+</section>
+</section>
+<section id="group-kvm-s390-vm-cpu-model">
+<h2>2. GROUP: KVM_S390_VM_CPU_MODEL<a class="headerlink" href="#group-kvm-s390-vm-cpu-model" title="Permalink to this headline">¶</a></h2>
+<dl class="field-list simple">
+<dt class="field-odd">Architectures</dt>
+<dd class="field-odd"><p>s390</p>
+</dd>
+</dl>
+<section id="attribute-kvm-s390-vm-cpu-machine-r-o">
+<h3>2.1. ATTRIBUTE: KVM_S390_VM_CPU_MACHINE (r/o)<a class="headerlink" href="#attribute-kvm-s390-vm-cpu-machine-r-o" title="Permalink to this headline">¶</a></h3>
+<p>Allows user space to retrieve machine and kvm specific cpu related information:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct kvm_s390_vm_cpu_machine {
+     __u64 cpuid;           # CPUID of host
+     __u32 ibc;             # IBC level range offered by host
+     __u8  pad[4];
+     __u64 fac_mask[256];   # set of cpu facilities enabled by KVM
+     __u64 fac_list[256];   # set of cpu facilities offered by host
+}
+</pre></div>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p>address of buffer to store the machine related cpu data
+of type struct kvm_s390_vm_cpu_machine*</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>-EFAULT if the given address is not accessible from kernel space;
+-ENOMEM if not enough memory is available to process the ioctl;
+0 in case of success.</p>
+</dd>
+</dl>
+</section>
+</section>
+<section id="attribute-kvm-s390-vm-cpu-processor-r-w">
+<h2>2.2. ATTRIBUTE: KVM_S390_VM_CPU_PROCESSOR (r/w)<a class="headerlink" href="#attribute-kvm-s390-vm-cpu-processor-r-w" title="Permalink to this headline">¶</a></h2>
+<p>Allows user space to retrieve or request to change cpu related information for a vcpu:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct kvm_s390_vm_cpu_processor {
+     __u64 cpuid;           # CPUID currently (to be) used by this vcpu
+     __u16 ibc;             # IBC level currently (to be) used by this vcpu
+     __u8  pad[6];
+     __u64 fac_list[256];   # set of cpu facilities currently (to be) used
+                            # by this vcpu
+}
+</pre></div>
+</div>
+<p>KVM does not enforce or limit the cpu model data in any form. Take the information
+retrieved by means of KVM_S390_VM_CPU_MACHINE as hint for reasonable configuration
+setups. Instruction interceptions triggered by additionally set facility bits that
+are not handled by KVM need to by imlemented in the VM driver code.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p>address of buffer to store/set the processor related cpu
+data of type struct kvm_s390_vm_cpu_processor*.</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>-EBUSY in case 1 or more vcpus are already activated (only in write case);
+-EFAULT if the given address is not accessible from kernel space;
+-ENOMEM if not enough memory is available to process the ioctl;
+0 in case of success.</p>
+</dd>
+</dl>
+<section id="attribute-kvm-s390-vm-cpu-machine-feat-r-o">
+<span id="kvm-s390-vm-cpu-machine-feat"></span><h3>2.3. ATTRIBUTE: KVM_S390_VM_CPU_MACHINE_FEAT (r/o)<a class="headerlink" href="#attribute-kvm-s390-vm-cpu-machine-feat-r-o" title="Permalink to this headline">¶</a></h3>
+<p>Allows user space to retrieve available cpu features. A feature is available if
+provided by the hardware and supported by kvm. In theory, cpu features could
+even be completely emulated by kvm.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct kvm_s390_vm_cpu_feat {
+      __u64 feat[16]; # Bitmap (1 = feature available), MSB 0 bit numbering
+};
+</pre></div>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p>address of a buffer to load the feature list from.</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>-EFAULT if the given address is not accessible from kernel space;
+0 in case of success.</p>
+</dd>
+</dl>
+</section>
+<section id="attribute-kvm-s390-vm-cpu-processor-feat-r-w">
+<h3>2.4. ATTRIBUTE: KVM_S390_VM_CPU_PROCESSOR_FEAT (r/w)<a class="headerlink" href="#attribute-kvm-s390-vm-cpu-processor-feat-r-w" title="Permalink to this headline">¶</a></h3>
+<p>Allows user space to retrieve or change enabled cpu features for all VCPUs of a
+VM. Features that are not available cannot be enabled.</p>
+<p>See <a class="reference internal" href="#kvm-s390-vm-cpu-machine-feat"><span class="std std-ref">2.3. ATTRIBUTE: KVM_S390_VM_CPU_MACHINE_FEAT (r/o)</span></a> for
+a description of the parameter struct.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p>address of a buffer to store/load the feature list from.</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>-EFAULT if the given address is not accessible from kernel space;
+-EINVAL if a cpu feature that is not available is to be enabled;
+-EBUSY if at least one VCPU has already been defined;
+0 in case of success.</p>
+</dd>
+</dl>
+</section>
+<section id="attribute-kvm-s390-vm-cpu-machine-subfunc-r-o">
+<span id="kvm-s390-vm-cpu-machine-subfunc"></span><h3>2.5. ATTRIBUTE: KVM_S390_VM_CPU_MACHINE_SUBFUNC (r/o)<a class="headerlink" href="#attribute-kvm-s390-vm-cpu-machine-subfunc-r-o" title="Permalink to this headline">¶</a></h3>
+<p>Allows user space to retrieve available cpu subfunctions without any filtering
+done by a set IBC. These subfunctions are indicated to the guest VCPU via
+query or “test bit” subfunctions and used e.g. by cpacf functions, plo and ptff.</p>
+<p>A subfunction block is only valid if KVM_S390_VM_CPU_MACHINE contains the
+STFL(E) bit introducing the affected instruction. If the affected instruction
+indicates subfunctions via a “query subfunction”, the response block is
+contained in the returned struct. If the affected instruction
+indicates subfunctions via a “test bit” mechanism, the subfunction codes are
+contained in the returned struct in MSB 0 bit numbering.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct kvm_s390_vm_cpu_subfunc {
+     u8 plo[32];           # always valid (ESA/390 feature)
+     u8 ptff[16];          # valid with TOD-clock steering
+     u8 kmac[16];          # valid with Message-Security-Assist
+     u8 kmc[16];           # valid with Message-Security-Assist
+     u8 km[16];            # valid with Message-Security-Assist
+     u8 kimd[16];          # valid with Message-Security-Assist
+     u8 klmd[16];          # valid with Message-Security-Assist
+     u8 pckmo[16];         # valid with Message-Security-Assist-Extension 3
+     u8 kmctr[16];         # valid with Message-Security-Assist-Extension 4
+     u8 kmf[16];           # valid with Message-Security-Assist-Extension 4
+     u8 kmo[16];           # valid with Message-Security-Assist-Extension 4
+     u8 pcc[16];           # valid with Message-Security-Assist-Extension 4
+     u8 ppno[16];          # valid with Message-Security-Assist-Extension 5
+     u8 kma[16];           # valid with Message-Security-Assist-Extension 8
+     u8 kdsa[16];          # valid with Message-Security-Assist-Extension 9
+     u8 reserved[1792];    # reserved for future instructions
+};
+</pre></div>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p>address of a buffer to load the subfunction blocks from.</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>-EFAULT if the given address is not accessible from kernel space;
+0 in case of success.</p>
+</dd>
+</dl>
+</section>
+<section id="attribute-kvm-s390-vm-cpu-processor-subfunc-r-w">
+<h3>2.6. ATTRIBUTE: KVM_S390_VM_CPU_PROCESSOR_SUBFUNC (r/w)<a class="headerlink" href="#attribute-kvm-s390-vm-cpu-processor-subfunc-r-w" title="Permalink to this headline">¶</a></h3>
+<p>Allows user space to retrieve or change cpu subfunctions to be indicated for
+all VCPUs of a VM. This attribute will only be available if kernel and
+hardware support are in place.</p>
+<p>The kernel uses the configured subfunction blocks for indication to
+the guest. A subfunction block will only be used if the associated STFL(E) bit
+has not been disabled by user space (so the instruction to be queried is
+actually available for the guest).</p>
+<p>As long as no data has been written, a read will fail. The IBC will be used
+to determine available subfunctions in this case, this will guarantee backward
+compatibility.</p>
+<p>See <a class="reference internal" href="#kvm-s390-vm-cpu-machine-subfunc"><span class="std std-ref">2.5. ATTRIBUTE: KVM_S390_VM_CPU_MACHINE_SUBFUNC (r/o)</span></a> for a
+description of the parameter struct.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p>address of a buffer to store/load the subfunction blocks from.</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>-EFAULT if the given address is not accessible from kernel space;
+-EINVAL when reading, if there was no write yet;
+-EBUSY if at least one VCPU has already been defined;
+0 in case of success.</p>
+</dd>
+</dl>
+</section>
+</section>
+<section id="group-kvm-s390-vm-tod">
+<h2>3. GROUP: KVM_S390_VM_TOD<a class="headerlink" href="#group-kvm-s390-vm-tod" title="Permalink to this headline">¶</a></h2>
+<dl class="field-list simple">
+<dt class="field-odd">Architectures</dt>
+<dd class="field-odd"><p>s390</p>
+</dd>
+</dl>
+<section id="attribute-kvm-s390-vm-tod-high">
+<h3>3.1. ATTRIBUTE: KVM_S390_VM_TOD_HIGH<a class="headerlink" href="#attribute-kvm-s390-vm-tod-high" title="Permalink to this headline">¶</a></h3>
+<p>Allows user space to set/get the TOD clock extension (u8) (superseded by
+KVM_S390_VM_TOD_EXT).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p>address of a buffer in user space to store the data (u8) to</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>-EFAULT if the given address is not accessible from kernel space;
+-EINVAL if setting the TOD clock extension to != 0 is not supported
+-EOPNOTSUPP for a PV guest (TOD managed by the ultravisor)</p>
+</dd>
+</dl>
+</section>
+<section id="attribute-kvm-s390-vm-tod-low">
+<h3>3.2. ATTRIBUTE: KVM_S390_VM_TOD_LOW<a class="headerlink" href="#attribute-kvm-s390-vm-tod-low" title="Permalink to this headline">¶</a></h3>
+<p>Allows user space to set/get bits 0-63 of the TOD clock register as defined in
+the POP (u64).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p>address of a buffer in user space to store the data (u64) to</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>-EFAULT if the given address is not accessible from kernel space
+-EOPNOTSUPP for a PV guest (TOD managed by the ultravisor)</p>
+</dd>
+</dl>
+</section>
+<section id="attribute-kvm-s390-vm-tod-ext">
+<h3>3.3. ATTRIBUTE: KVM_S390_VM_TOD_EXT<a class="headerlink" href="#attribute-kvm-s390-vm-tod-ext" title="Permalink to this headline">¶</a></h3>
+<p>Allows user space to set/get bits 0-63 of the TOD clock register as defined in
+the POP (u64). If the guest CPU model supports the TOD clock extension (u8), it
+also allows user space to get/set it. If the guest CPU model does not support
+it, it is stored as 0 and not allowed to be set to a value != 0.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p>address of a buffer in user space to store the data
+(kvm_s390_vm_tod_clock) to</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>-EFAULT if the given address is not accessible from kernel space;
+-EINVAL if setting the TOD clock extension to != 0 is not supported
+-EOPNOTSUPP for a PV guest (TOD managed by the ultravisor)</p>
+</dd>
+</dl>
+</section>
+</section>
+<section id="group-kvm-s390-vm-crypto">
+<h2>4. GROUP: KVM_S390_VM_CRYPTO<a class="headerlink" href="#group-kvm-s390-vm-crypto" title="Permalink to this headline">¶</a></h2>
+<dl class="field-list simple">
+<dt class="field-odd">Architectures</dt>
+<dd class="field-odd"><p>s390</p>
+</dd>
+</dl>
+<section id="attribute-kvm-s390-vm-crypto-enable-aes-kw-w-o">
+<h3>4.1. ATTRIBUTE: KVM_S390_VM_CRYPTO_ENABLE_AES_KW (w/o)<a class="headerlink" href="#attribute-kvm-s390-vm-crypto-enable-aes-kw-w-o" title="Permalink to this headline">¶</a></h3>
+<p>Allows user space to enable aes key wrapping, including generating a new
+wrapping key.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p>none</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>0</p>
+</dd>
+</dl>
+</section>
+<section id="attribute-kvm-s390-vm-crypto-enable-dea-kw-w-o">
+<h3>4.2. ATTRIBUTE: KVM_S390_VM_CRYPTO_ENABLE_DEA_KW (w/o)<a class="headerlink" href="#attribute-kvm-s390-vm-crypto-enable-dea-kw-w-o" title="Permalink to this headline">¶</a></h3>
+<p>Allows user space to enable dea key wrapping, including generating a new
+wrapping key.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p>none</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>0</p>
+</dd>
+</dl>
+</section>
+<section id="attribute-kvm-s390-vm-crypto-disable-aes-kw-w-o">
+<h3>4.3. ATTRIBUTE: KVM_S390_VM_CRYPTO_DISABLE_AES_KW (w/o)<a class="headerlink" href="#attribute-kvm-s390-vm-crypto-disable-aes-kw-w-o" title="Permalink to this headline">¶</a></h3>
+<p>Allows user space to disable aes key wrapping, clearing the wrapping key.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p>none</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>0</p>
+</dd>
+</dl>
+</section>
+<section id="attribute-kvm-s390-vm-crypto-disable-dea-kw-w-o">
+<h3>4.4. ATTRIBUTE: KVM_S390_VM_CRYPTO_DISABLE_DEA_KW (w/o)<a class="headerlink" href="#attribute-kvm-s390-vm-crypto-disable-dea-kw-w-o" title="Permalink to this headline">¶</a></h3>
+<p>Allows user space to disable dea key wrapping, clearing the wrapping key.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p>none</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>0</p>
+</dd>
+</dl>
+</section>
+</section>
+<section id="group-kvm-s390-vm-migration">
+<h2>5. GROUP: KVM_S390_VM_MIGRATION<a class="headerlink" href="#group-kvm-s390-vm-migration" title="Permalink to this headline">¶</a></h2>
+<dl class="field-list simple">
+<dt class="field-odd">Architectures</dt>
+<dd class="field-odd"><p>s390</p>
+</dd>
+</dl>
+<section id="attribute-kvm-s390-vm-migration-stop-w-o">
+<h3>5.1. ATTRIBUTE: KVM_S390_VM_MIGRATION_STOP (w/o)<a class="headerlink" href="#attribute-kvm-s390-vm-migration-stop-w-o" title="Permalink to this headline">¶</a></h3>
+<p>Allows userspace to stop migration mode, needed for PGSTE migration.
+Setting this attribute when migration mode is not active will have no
+effects.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p>none</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>0</p>
+</dd>
+</dl>
+</section>
+<section id="attribute-kvm-s390-vm-migration-start-w-o">
+<h3>5.2. ATTRIBUTE: KVM_S390_VM_MIGRATION_START (w/o)<a class="headerlink" href="#attribute-kvm-s390-vm-migration-start-w-o" title="Permalink to this headline">¶</a></h3>
+<p>Allows userspace to start migration mode, needed for PGSTE migration.
+Setting this attribute when migration mode is already active will have
+no effects.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p>none</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>-ENOMEM if there is not enough free memory to start migration mode;
+-EINVAL if the state of the VM is invalid (e.g. no memory defined);
+0 in case of success.</p>
+</dd>
+</dl>
+</section>
+<section id="attribute-kvm-s390-vm-migration-status-r-o">
+<h3>5.3. ATTRIBUTE: KVM_S390_VM_MIGRATION_STATUS (r/o)<a class="headerlink" href="#attribute-kvm-s390-vm-migration-status-r-o" title="Permalink to this headline">¶</a></h3>
+<p>Allows userspace to query the status of migration mode.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p>address of a buffer in user space to store the data (u64) to;
+the data itself is either 0 if migration mode is disabled or 1
+if it is enabled</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>-EFAULT if the given address is not accessible from kernel space;
+0 in case of success.</p>
+</dd>
+</dl>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Generic vm interface</a><ul>
+<li><a class="reference internal" href="#group-kvm-s390-vm-mem-ctrl">1. GROUP: KVM_S390_VM_MEM_CTRL</a><ul>
+<li><a class="reference internal" href="#attribute-kvm-s390-vm-mem-enable-cmma">1.1. ATTRIBUTE: KVM_S390_VM_MEM_ENABLE_CMMA</a></li>
+<li><a class="reference internal" href="#attribute-kvm-s390-vm-mem-clr-cmma">1.2. ATTRIBUTE: KVM_S390_VM_MEM_CLR_CMMA</a></li>
+<li><a class="reference internal" href="#attribute-kvm-s390-vm-mem-limit-size">1.3. ATTRIBUTE KVM_S390_VM_MEM_LIMIT_SIZE</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#group-kvm-s390-vm-cpu-model">2. GROUP: KVM_S390_VM_CPU_MODEL</a><ul>
+<li><a class="reference internal" href="#attribute-kvm-s390-vm-cpu-machine-r-o">2.1. ATTRIBUTE: KVM_S390_VM_CPU_MACHINE (r/o)</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#attribute-kvm-s390-vm-cpu-processor-r-w">2.2. ATTRIBUTE: KVM_S390_VM_CPU_PROCESSOR (r/w)</a><ul>
+<li><a class="reference internal" href="#attribute-kvm-s390-vm-cpu-machine-feat-r-o">2.3. ATTRIBUTE: KVM_S390_VM_CPU_MACHINE_FEAT (r/o)</a></li>
+<li><a class="reference internal" href="#attribute-kvm-s390-vm-cpu-processor-feat-r-w">2.4. ATTRIBUTE: KVM_S390_VM_CPU_PROCESSOR_FEAT (r/w)</a></li>
+<li><a class="reference internal" href="#attribute-kvm-s390-vm-cpu-machine-subfunc-r-o">2.5. ATTRIBUTE: KVM_S390_VM_CPU_MACHINE_SUBFUNC (r/o)</a></li>
+<li><a class="reference internal" href="#attribute-kvm-s390-vm-cpu-processor-subfunc-r-w">2.6. ATTRIBUTE: KVM_S390_VM_CPU_PROCESSOR_SUBFUNC (r/w)</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#group-kvm-s390-vm-tod">3. GROUP: KVM_S390_VM_TOD</a><ul>
+<li><a class="reference internal" href="#attribute-kvm-s390-vm-tod-high">3.1. ATTRIBUTE: KVM_S390_VM_TOD_HIGH</a></li>
+<li><a class="reference internal" href="#attribute-kvm-s390-vm-tod-low">3.2. ATTRIBUTE: KVM_S390_VM_TOD_LOW</a></li>
+<li><a class="reference internal" href="#attribute-kvm-s390-vm-tod-ext">3.3. ATTRIBUTE: KVM_S390_VM_TOD_EXT</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#group-kvm-s390-vm-crypto">4. GROUP: KVM_S390_VM_CRYPTO</a><ul>
+<li><a class="reference internal" href="#attribute-kvm-s390-vm-crypto-enable-aes-kw-w-o">4.1. ATTRIBUTE: KVM_S390_VM_CRYPTO_ENABLE_AES_KW (w/o)</a></li>
+<li><a class="reference internal" href="#attribute-kvm-s390-vm-crypto-enable-dea-kw-w-o">4.2. ATTRIBUTE: KVM_S390_VM_CRYPTO_ENABLE_DEA_KW (w/o)</a></li>
+<li><a class="reference internal" href="#attribute-kvm-s390-vm-crypto-disable-aes-kw-w-o">4.3. ATTRIBUTE: KVM_S390_VM_CRYPTO_DISABLE_AES_KW (w/o)</a></li>
+<li><a class="reference internal" href="#attribute-kvm-s390-vm-crypto-disable-dea-kw-w-o">4.4. ATTRIBUTE: KVM_S390_VM_CRYPTO_DISABLE_DEA_KW (w/o)</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#group-kvm-s390-vm-migration">5. GROUP: KVM_S390_VM_MIGRATION</a><ul>
+<li><a class="reference internal" href="#attribute-kvm-s390-vm-migration-stop-w-o">5.1. ATTRIBUTE: KVM_S390_VM_MIGRATION_STOP (w/o)</a></li>
+<li><a class="reference internal" href="#attribute-kvm-s390-vm-migration-start-w-o">5.2. ATTRIBUTE: KVM_S390_VM_MIGRATION_START (w/o)</a></li>
+<li><a class="reference internal" href="#attribute-kvm-s390-vm-migration-status-r-o">5.3. ATTRIBUTE: KVM_S390_VM_MIGRATION_STATUS (r/o)</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/virt/kvm/devices/vm.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/virt/kvm/devices/vm.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,201 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Lockdep-RCU Splat &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="RCU and Unloadable Modules" href="rcubarrier.html" />
+    <link rel="prev" title="RCU and lockdep checking" href="lockdep.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="lockdep-rcu-splat">
+<h1>Lockdep-RCU Splat<a class="headerlink" href="#lockdep-rcu-splat" title="Permalink to this headline">¶</a></h1>
+<p>Lockdep-RCU was added to the Linux kernel in early 2010
+(<a class="reference external" href="http://lwn.net/Articles/371986/">http://lwn.net/Articles/371986/</a>).  This facility checks for some common
+misuses of the RCU API, most notably using one of the <a class="reference internal" href="../core-api/kernel-api.html#c.rcu_dereference" title="rcu_dereference"><code class="xref c c-func docutils literal notranslate"><span class="pre">rcu_dereference()</span></code></a>
+family to access an RCU-protected pointer without the proper protection.
+When such misuse is detected, an lockdep-RCU splat is emitted.</p>
+<p>The usual cause of a lockdep-RCU slat is someone accessing an
+RCU-protected data structure without either (1) being in the right kind of
+RCU read-side critical section or (2) holding the right update-side lock.
+This problem can therefore be serious: it might result in random memory
+overwriting or worse.  There can of course be false positives, this
+being the real world and all that.</p>
+<p>So let’s look at an example RCU lockdep splat from 3.0-rc5, one that
+has long since been fixed:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>=============================
+WARNING: suspicious RCU usage
+-----------------------------
+block/cfq-iosched.c:2776 suspicious rcu_dereference_protected() usage!
+</pre></div>
+</div>
+<p>other info that might help us debug this:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>rcu_scheduler_active = 1, debug_locks = 0
+3 locks held by scsi_scan_6/1552:
+#0:  (&amp;shost-&gt;scan_mutex){+.+.}, at: [&lt;ffffffff8145efca&gt;]
+scsi_scan_host_selected+0x5a/0x150
+#1:  (&amp;eq-&gt;sysfs_lock){+.+.}, at: [&lt;ffffffff812a5032&gt;]
+elevator_exit+0x22/0x60
+#2:  (&amp;(&amp;q-&gt;__queue_lock)-&gt;rlock){-.-.}, at: [&lt;ffffffff812b6233&gt;]
+cfq_exit_queue+0x43/0x190
+
+stack backtrace:
+Pid: 1552, comm: scsi_scan_6 Not tainted 3.0.0-rc5 #17
+Call Trace:
+[&lt;ffffffff810abb9b&gt;] lockdep_rcu_dereference+0xbb/0xc0
+[&lt;ffffffff812b6139&gt;] __cfq_exit_single_io_context+0xe9/0x120
+[&lt;ffffffff812b626c&gt;] cfq_exit_queue+0x7c/0x190
+[&lt;ffffffff812a5046&gt;] elevator_exit+0x36/0x60
+[&lt;ffffffff812a802a&gt;] blk_cleanup_queue+0x4a/0x60
+[&lt;ffffffff8145cc09&gt;] scsi_free_queue+0x9/0x10
+[&lt;ffffffff81460944&gt;] __scsi_remove_device+0x84/0xd0
+[&lt;ffffffff8145dca3&gt;] scsi_probe_and_add_lun+0x353/0xb10
+[&lt;ffffffff817da069&gt;] ? error_exit+0x29/0xb0
+[&lt;ffffffff817d98ed&gt;] ? _raw_spin_unlock_irqrestore+0x3d/0x80
+[&lt;ffffffff8145e722&gt;] __scsi_scan_target+0x112/0x680
+[&lt;ffffffff812c690d&gt;] ? trace_hardirqs_off_thunk+0x3a/0x3c
+[&lt;ffffffff817da069&gt;] ? error_exit+0x29/0xb0
+[&lt;ffffffff812bcc60&gt;] ? kobject_del+0x40/0x40
+[&lt;ffffffff8145ed16&gt;] scsi_scan_channel+0x86/0xb0
+[&lt;ffffffff8145f0b0&gt;] scsi_scan_host_selected+0x140/0x150
+[&lt;ffffffff8145f149&gt;] do_scsi_scan_host+0x89/0x90
+[&lt;ffffffff8145f170&gt;] do_scan_async+0x20/0x160
+[&lt;ffffffff8145f150&gt;] ? do_scsi_scan_host+0x90/0x90
+[&lt;ffffffff810975b6&gt;] kthread+0xa6/0xb0
+[&lt;ffffffff817db154&gt;] kernel_thread_helper+0x4/0x10
+[&lt;ffffffff81066430&gt;] ? finish_task_switch+0x80/0x110
+[&lt;ffffffff817d9c04&gt;] ? retint_restore_args+0xe/0xe
+[&lt;ffffffff81097510&gt;] ? __kthread_init_worker+0x70/0x70
+[&lt;ffffffff817db150&gt;] ? gs_change+0xb/0xb
+</pre></div>
+</div>
+<p>Line 2776 of block/cfq-iosched.c in v3.0-rc5 is as follows:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>if (rcu_dereference(ioc-&gt;ioc_data) == cic) {
+</pre></div>
+</div>
+<p>This form says that it must be in a plain vanilla RCU read-side critical
+section, but the “other info” list above shows that this is not the
+case.  Instead, we hold three locks, one of which might be RCU related.
+And maybe that lock really does protect this reference.  If so, the fix
+is to inform RCU, perhaps by changing __cfq_exit_single_io_context() to
+take the struct request_queue “q” from cfq_exit_queue() as an argument,
+which would permit us to invoke rcu_dereference_protected as follows:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>if (rcu_dereference_protected(ioc-&gt;ioc_data,
+                              lockdep_is_held(&amp;q-&gt;queue_lock)) == cic) {
+</pre></div>
+</div>
+<p>With this change, there would be no lockdep-RCU splat emitted if this
+code was invoked either from within an RCU read-side critical section
+or with the -&gt;queue_lock held.  In particular, this would have suppressed
+the above lockdep-RCU splat because -&gt;queue_lock is held (see #2 in the
+list above).</p>
+<p>On the other hand, perhaps we really do need an RCU read-side critical
+section.  In this case, the critical section must span the use of the
+return value from <a class="reference internal" href="../core-api/kernel-api.html#c.rcu_dereference" title="rcu_dereference"><code class="xref c c-func docutils literal notranslate"><span class="pre">rcu_dereference()</span></code></a>, or at least until there is some
+reference count incremented or some such.  One way to handle this is to
+add <a class="reference internal" href="../core-api/kernel-api.html#c.rcu_read_lock" title="rcu_read_lock"><code class="xref c c-func docutils literal notranslate"><span class="pre">rcu_read_lock()</span></code></a> and <a class="reference internal" href="../core-api/kernel-api.html#c.rcu_read_unlock" title="rcu_read_unlock"><code class="xref c c-func docutils literal notranslate"><span class="pre">rcu_read_unlock()</span></code></a> as follows:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>rcu_read_lock();
+if (rcu_dereference(ioc-&gt;ioc_data) == cic) {
+        spin_lock(&amp;ioc-&gt;lock);
+        rcu_assign_pointer(ioc-&gt;ioc_data, NULL);
+        spin_unlock(&amp;ioc-&gt;lock);
+}
+rcu_read_unlock();
+</pre></div>
+</div>
+<p>With this change, the <a class="reference internal" href="../core-api/kernel-api.html#c.rcu_dereference" title="rcu_dereference"><code class="xref c c-func docutils literal notranslate"><span class="pre">rcu_dereference()</span></code></a> is always within an RCU
+read-side critical section, which again would have suppressed the
+above lockdep-RCU splat.</p>
+<p>But in this particular case, we don’t actually dereference the pointer
+returned from <a class="reference internal" href="../core-api/kernel-api.html#c.rcu_dereference" title="rcu_dereference"><code class="xref c c-func docutils literal notranslate"><span class="pre">rcu_dereference()</span></code></a>.  Instead, that pointer is just compared
+to the cic pointer, which means that the <a class="reference internal" href="../core-api/kernel-api.html#c.rcu_dereference" title="rcu_dereference"><code class="xref c c-func docutils literal notranslate"><span class="pre">rcu_dereference()</span></code></a> can be replaced
+by <a class="reference internal" href="../core-api/kernel-api.html#c.rcu_access_pointer" title="rcu_access_pointer"><code class="xref c c-func docutils literal notranslate"><span class="pre">rcu_access_pointer()</span></code></a> as follows:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>if (rcu_access_pointer(ioc-&gt;ioc_data) == cic) {
+</pre></div>
+</div>
+<p>Because it is legal to invoke <a class="reference internal" href="../core-api/kernel-api.html#c.rcu_access_pointer" title="rcu_access_pointer"><code class="xref c c-func docutils literal notranslate"><span class="pre">rcu_access_pointer()</span></code></a> without protection,
+this change would also suppress the above lockdep-RCU splat.</p>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/RCU/lockdep-splat.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/RCU/lockdep-splat.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

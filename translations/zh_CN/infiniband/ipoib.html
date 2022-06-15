@@ -1,0 +1,220 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>infiniband上的IP（IPoIB） &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../infiniband/ipoib.html"><span class="doc">IP over InfiniBand</span></a></p>
+</dd>
+<dt class="field-even">翻译</dt>
+<dd class="field-even"><p>司延腾 Yanteng Si &lt;<a class="reference external" href="mailto:siyanteng&#37;&#52;&#48;loongson&#46;cn">siyanteng<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+<dt class="field-odd">校译</dt>
+<dd class="field-odd"><p>王普宇 Puyu Wang &lt;<a class="reference external" href="mailto:realpuyuwang&#37;&#52;&#48;gmail&#46;com">realpuyuwang<span>&#64;</span>gmail<span>&#46;</span>com</a>&gt;
+时奎亮 Alex Shi &lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;</p>
+</dd>
+</dl>
+<section id="infinibandip-ipoib">
+<span id="cn-infiniband-ipoib"></span><h1>infiniband上的IP（IPoIB）<a class="headerlink" href="#infinibandip-ipoib" title="Permalink to this headline">¶</a></h1>
+<blockquote>
+<div><p>ib_ipoib驱动是IETF ipoib工作组发布的RFC 4391和4392所规定的
+infiniband上IP协议的一个实现。它是一个“本地”实现，即把接口类型设置为
+ARPHRD_INFINIBAND，硬件地址长度为20（早期的专有实现向内核伪装为以太网
+接口）。</p>
+</div></blockquote>
+<section id="p-keys">
+<h2>分区和P_Keys<a class="headerlink" href="#p-keys" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>当IPoIB驱动被加载时，它会使用索引为0的P_Key给每个端口创建一个接口。要用
+不同的P_Key创建一个接口，将所需的P_Key写入主接口的
+/sys/class/net/&lt;intf name&gt;/create_child文件里面。比如说:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>echo 0x8001 &gt; /sys/class/net/ib0/create_child
+</pre></div>
+</div>
+<p>这将用P_Key 0x8001创建一个名为ib0.8001的接口。要删除一个子接口，使用
+<code class="docutils literal notranslate"><span class="pre">delete_child</span></code> 文件:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>echo 0x8001 &gt; /sys/class/net/ib0/delete_child
+</pre></div>
+</div>
+<p>任何接口的P_Key都由“pkey”文件给出，而子接口的主接口在“parent”中。</p>
+<p>子接口的创建/删除也可以使用IPoIB的rtnl_link_ops来完成，使用两种
+方式创建的子接口的行为是一样的。</p>
+</div></blockquote>
+</section>
+<section id="id1">
+<h2>数据报与连接模式<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>IPoIB驱动支持两种操作模式：数据报和连接。模式是通过接口的
+/sys/class/net/&lt;intf name&gt;/mode文件设置和读取的。</p>
+<p>在数据报模式下，使用IB UD（不可靠数据报）传输，因此接口MTU等于IB L2 MTU
+减去IPoIB封装头（4字节）。例如，在一个典型的具有2K MTU的IB结构中，IPoIB
+MTU将是2048 - 4 = 2044字节。</p>
+<p>在连接模式下，使用IB RC（可靠的连接）传输。连接模式利用IB传输的连接特性，
+允许MTU达到最大的IP包大小64K，这减少了处理大型UDP数据包、TCP段等所需的
+IP包数量，提高了大型信息的性能。</p>
+<p>在连接模式下，接口的UD QP仍被用于组播和与不支持连接模式的对等体的通信。
+在这种情况下，ICMP PMTU数据包的RX仿真被用来使网络堆栈对这些邻居使用较
+小的UD MTU。</p>
+</div></blockquote>
+</section>
+<section id="id2">
+<h2>无状态卸载<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>如果IB HW支持IPoIB无状态卸载，IPoIB会向网络堆栈广播TCP/IP校验和/或大量
+传送（LSO）负载转移能力。</p>
+<p>大量传送（LSO）负载转移也已实现，可以使用ethtool调用打开/关闭。目前，LRO
+只支持具有校验和卸载能力的设备。</p>
+<p>无状态卸载只在数据报模式下支持。</p>
+</div></blockquote>
+</section>
+<section id="id3">
+<h2>中断管理<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>如果底层IB设备支持CQ事件管理，可以使用ethtool来设置中断缓解参数，从而减少
+处理中断产生的开销。IPoIB的主要代码路径不使用TX完成信号的事件，所以只支持
+RX管理。</p>
+</div></blockquote>
+</section>
+<section id="id4">
+<h2>调试信息<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>通过将CONFIG_INFINIBAND_IPOIB_DEBUG设置为“y”来编译IPoIB驱动，跟踪信
+息被编译到驱动中。通过将模块参数debug_level和mcast_debug_level设置为1来
+打开它们。这些参数可以在运行时通过/sys/module/ib_ipoib/的文件来控制。</p>
+<p>CONFIG_INFINIBAND_IPOIB_DEBUG也启用debugfs虚拟文件系统中的文件。通过挂
+载这个文件系统，例如用:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>mount -t debugfs none /sys/kernel/debug
+</pre></div>
+</div>
+<p>可以从/sys/kernel/debug/ipoib/ib0_mcg等文件中获得关于多播组的统计数据。</p>
+<p>这个选项对性能的影响可以忽略不计，所以在正常运行时，在debug_level设置为
+0的情况下启用这个选项是安全的。</p>
+<p>CONFIG_INFINIBAND_IPOIB_DEBUG_DATA当data_debug_level设置为1时，可以
+在数据路径中启用更多的调试输出。 然而，即使禁用输出，启用这个配置选项也
+会影响性能，因为它在快速路径中增加了测试。</p>
+</div></blockquote>
+</section>
+<section id="id5">
+<h2>引用<a class="headerlink" href="#id5" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><dl class="simple">
+<dt>在InfiniBand上传输IP（IPoIB）（RFC 4391）。</dt><dd><p><a class="reference external" href="http://ietf.org/rfc/rfc4391.txt">http://ietf.org/rfc/rfc4391.txt</a></p>
+</dd>
+<dt>infiniband上的IP:上的IP架构（RFC 4392）。</dt><dd><p><a class="reference external" href="http://ietf.org/rfc/rfc4392.txt">http://ietf.org/rfc/rfc4392.txt</a></p>
+</dd>
+<dt>infiniband上的IP: 连接模式 (RFC 4755)</dt><dd><p><a class="reference external" href="http://ietf.org/rfc/rfc4755.txt">http://ietf.org/rfc/rfc4755.txt</a></p>
+</dd>
+</dl>
+</div></blockquote>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">infiniband上的IP（IPoIB）</a><ul>
+<li><a class="reference internal" href="#p-keys">分区和P_Keys</a></li>
+<li><a class="reference internal" href="#id1">数据报与连接模式</a></li>
+<li><a class="reference internal" href="#id2">无状态卸载</a></li>
+<li><a class="reference internal" href="#id3">中断管理</a></li>
+<li><a class="reference internal" href="#id4">调试信息</a></li>
+<li><a class="reference internal" href="#id5">引用</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/infiniband/ipoib.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/infiniband/ipoib.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

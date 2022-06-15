@@ -1,0 +1,246 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>NETIF Msg Level &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Resilient Next-hop Groups" href="nexthop-group-resilient.html" />
+    <link rel="prev" title="Netfilter Sysfs variables" href="netfilter-sysctl.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="netif-msg-level">
+<h1>NETIF Msg Level<a class="headerlink" href="#netif-msg-level" title="Permalink to this headline">¶</a></h1>
+<p>The design of the network interface message level setting.</p>
+<section id="history">
+<h2>History<a class="headerlink" href="#history" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>The design of the debugging message interface was guided and
+constrained by backwards compatibility previous practice.  It is useful
+to understand the history and evolution in order to understand current
+practice and relate it to older driver source code.</p>
+<p>From the beginning of Linux, each network device driver has had a local
+integer variable that controls the debug message level.  The message
+level ranged from 0 to 7, and monotonically increased in verbosity.</p>
+<p>The message level was not precisely defined past level 3, but were
+always implemented within +-1 of the specified level.  Drivers tended
+to shed the more verbose level messages as they matured.</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>0  Minimal messages, only essential information on fatal errors.</p></li>
+<li><p>1  Standard messages, initialization status.  No run-time messages</p></li>
+<li><p>2  Special media selection messages, generally timer-driver.</p></li>
+<li><p>3  Interface starts and stops, including normal status messages</p></li>
+<li><p>4  Tx and Rx frame error messages, and abnormal driver operation</p></li>
+<li><p>5  Tx packet queue information, interrupt events.</p></li>
+<li><p>6  Status on each completed Tx packet and received Rx packets</p></li>
+<li><p>7  Initial contents of Tx and Rx packets</p></li>
+</ul>
+</div></blockquote>
+<p>Initially this message level variable was uniquely named in each driver
+e.g. “lance_debug”, so that a kernel symbolic debugger could locate and
+modify the setting.  When kernel modules became common, the variables
+were consistently renamed to “debug” and allowed to be set as a module
+parameter.</p>
+<p>This approach worked well.  However there is always a demand for
+additional features.  Over the years the following emerged as
+reasonable and easily implemented enhancements</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Using an ioctl() call to modify the level.</p></li>
+<li><p>Per-interface rather than per-driver message level setting.</p></li>
+<li><p>More selective control over the type of messages emitted.</p></li>
+</ul>
+</div></blockquote>
+<p>The netif_msg recommendation adds these features with only a minor
+complexity and code size increase.</p>
+<p>The recommendation is the following points</p>
+<blockquote>
+<div><ul>
+<li><p>Retaining the per-driver integer variable “debug” as a module
+parameter with a default level of ‘1’.</p></li>
+<li><p>Adding a per-interface private variable named “msg_enable”.  The
+variable is a bit map rather than a level, and is initialized as:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>1 &lt;&lt; debug
+</pre></div>
+</div>
+<p>Or more precisely:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>debug &lt; 0 ? 0 : 1 &lt;&lt; min(sizeof(int)-1, debug)
+</pre></div>
+</div>
+<p>Messages should changes from:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>if (debug &gt; 1)
+     printk(MSG_DEBUG &quot;%s: ...
+</pre></div>
+</div>
+<p>to:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>if (np-&gt;msg_enable &amp; NETIF_MSG_LINK)
+     printk(MSG_DEBUG &quot;%s: ...
+</pre></div>
+</div>
+</li>
+</ul>
+</div></blockquote>
+</div></blockquote>
+<p>The set of message levels is named</p>
+<blockquote>
+<div><table class="docutils align-default">
+<colgroup>
+<col style="width: 23%" />
+<col style="width: 48%" />
+<col style="width: 30%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Old level</p></th>
+<th class="head"><p>Name</p></th>
+<th class="head"><p>Bit position</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>0</p></td>
+<td><p>NETIF_MSG_DRV</p></td>
+<td><p>0x0001</p></td>
+</tr>
+<tr class="row-odd"><td><p>1</p></td>
+<td><p>NETIF_MSG_PROBE</p></td>
+<td><p>0x0002</p></td>
+</tr>
+<tr class="row-even"><td><p>2</p></td>
+<td><p>NETIF_MSG_LINK</p></td>
+<td><p>0x0004</p></td>
+</tr>
+<tr class="row-odd"><td><p>2</p></td>
+<td><p>NETIF_MSG_TIMER</p></td>
+<td><p>0x0004</p></td>
+</tr>
+<tr class="row-even"><td><p>3</p></td>
+<td><p>NETIF_MSG_IFDOWN</p></td>
+<td><p>0x0008</p></td>
+</tr>
+<tr class="row-odd"><td><p>3</p></td>
+<td><p>NETIF_MSG_IFUP</p></td>
+<td><p>0x0008</p></td>
+</tr>
+<tr class="row-even"><td><p>4</p></td>
+<td><p>NETIF_MSG_RX_ERR</p></td>
+<td><p>0x0010</p></td>
+</tr>
+<tr class="row-odd"><td><p>4</p></td>
+<td><p>NETIF_MSG_TX_ERR</p></td>
+<td><p>0x0010</p></td>
+</tr>
+<tr class="row-even"><td><p>5</p></td>
+<td><p>NETIF_MSG_TX_QUEUED</p></td>
+<td><p>0x0020</p></td>
+</tr>
+<tr class="row-odd"><td><p>5</p></td>
+<td><p>NETIF_MSG_INTR</p></td>
+<td><p>0x0020</p></td>
+</tr>
+<tr class="row-even"><td><p>6</p></td>
+<td><p>NETIF_MSG_TX_DONE</p></td>
+<td><p>0x0040</p></td>
+</tr>
+<tr class="row-odd"><td><p>6</p></td>
+<td><p>NETIF_MSG_RX_STATUS</p></td>
+<td><p>0x0040</p></td>
+</tr>
+<tr class="row-even"><td><p>7</p></td>
+<td><p>NETIF_MSG_PKTDATA</p></td>
+<td><p>0x0080</p></td>
+</tr>
+</tbody>
+</table>
+</div></blockquote>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">NETIF Msg Level</a><ul>
+<li><a class="reference internal" href="#history">History</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/networking/netif-msg.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/networking/netif-msg.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,177 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>zsmalloc &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="BPF Documentation" href="../bpf/index.html" />
+    <link rel="prev" title="z3fold" href="z3fold.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="zsmalloc">
+<span id="id1"></span><h1>zsmalloc<a class="headerlink" href="#zsmalloc" title="Permalink to this headline">¶</a></h1>
+<p>This allocator is designed for use with zram. Thus, the allocator is
+supposed to work well under low memory conditions. In particular, it
+never attempts higher order page allocation which is very likely to
+fail under memory pressure. On the other hand, if we just use single
+(0-order) pages, it would suffer from very high fragmentation –
+any object of size PAGE_SIZE/2 or larger would occupy an entire page.
+This was one of the major issues with its predecessor (xvmalloc).</p>
+<p>To overcome these issues, zsmalloc allocates a bunch of 0-order pages
+and links them together using various ‘struct page’ fields. These linked
+pages act as a single higher-order page i.e. an object can span 0-order
+page boundaries. The code refers to these linked pages as a single entity
+called zspage.</p>
+<p>For simplicity, zsmalloc can only allocate objects of size up to PAGE_SIZE
+since this satisfies the requirements of all its current users (in the
+worst case, page is incompressible and is thus stored “as-is” i.e. in
+uncompressed form). For allocation requests larger than this size, failure
+is returned (see zs_malloc).</p>
+<p>Additionally, zs_malloc() does not return a dereferenceable pointer.
+Instead, it returns an opaque handle (unsigned long) which encodes actual
+location of the allocated object. The reason for this indirection is that
+zsmalloc does not keep zspages permanently mapped since that would cause
+issues on 32-bit systems where the VA region for kernel space mappings
+is very small. So, before using the allocating memory, the object has to
+be mapped using zs_map_object() to get a usable pointer and subsequently
+unmapped using zs_unmap_object().</p>
+<section id="stat">
+<h2>stat<a class="headerlink" href="#stat" title="Permalink to this headline">¶</a></h2>
+<p>With CONFIG_ZSMALLOC_STAT, we could see zsmalloc internal information via
+<code class="docutils literal notranslate"><span class="pre">/sys/kernel/debug/zsmalloc/&lt;user</span> <span class="pre">name&gt;</span></code>. Here is a sample of stat output:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># cat /sys/kernel/debug/zsmalloc/zram0/classes
+
+class  size almost_full almost_empty obj_allocated   obj_used pages_used pages_per_zspage
+   ...
+   ...
+    9   176           0            1           186        129          8                4
+   10   192           1            0          2880       2872        135                3
+   11   208           0            1           819        795         42                2
+   12   224           0            1           219        159         12                4
+   ...
+   ...
+</pre></div>
+</div>
+<dl class="simple">
+<dt>class</dt><dd><p>index</p>
+</dd>
+<dt>size</dt><dd><p>object size zspage stores</p>
+</dd>
+<dt>almost_empty</dt><dd><p>the number of ZS_ALMOST_EMPTY zspages(see below)</p>
+</dd>
+<dt>almost_full</dt><dd><p>the number of ZS_ALMOST_FULL zspages(see below)</p>
+</dd>
+<dt>obj_allocated</dt><dd><p>the number of objects allocated</p>
+</dd>
+<dt>obj_used</dt><dd><p>the number of objects allocated to the user</p>
+</dd>
+<dt>pages_used</dt><dd><p>the number of pages allocated for the class</p>
+</dd>
+<dt>pages_per_zspage</dt><dd><p>the number of 0-order pages to make a zspage</p>
+</dd>
+</dl>
+<p>We assign a zspage to ZS_ALMOST_EMPTY fullness group when n &lt;= N / f, where</p>
+<ul class="simple">
+<li><p>n = number of allocated objects</p></li>
+<li><p>N = total number of objects zspage can store</p></li>
+<li><p>f = fullness_threshold_frac(ie, 4 at the moment)</p></li>
+</ul>
+<p>Similarly, we assign zspage to:</p>
+<ul class="simple">
+<li><p>ZS_ALMOST_FULL  when n &gt; N / f</p></li>
+<li><p>ZS_EMPTY        when n == 0</p></li>
+<li><p>ZS_FULL         when n == N</p></li>
+</ul>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">zsmalloc</a><ul>
+<li><a class="reference internal" href="#stat">stat</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/mm/zsmalloc.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/mm/zsmalloc.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

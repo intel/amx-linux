@@ -1,0 +1,235 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>9.1.12. Cropping and Scaling algorithm, used in the sh_mobile_ceu_camera driver &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="9.1.13. Tuner drivers" href="tuners.html" />
+    <link rel="prev" title="9.1.11. The saa7134 driver" href="saa7134-devel.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="cropping-and-scaling-algorithm-used-in-the-sh-mobile-ceu-camera-driver">
+<h1><span class="section-number">9.1.12. </span>Cropping and Scaling algorithm, used in the sh_mobile_ceu_camera driver<a class="headerlink" href="#cropping-and-scaling-algorithm-used-in-the-sh-mobile-ceu-camera-driver" title="Permalink to this headline">¶</a></h1>
+<p>Author: Guennadi Liakhovetski &lt;<a class="reference external" href="mailto:g&#46;liakhovetski&#37;&#52;&#48;gmx&#46;de">g<span>&#46;</span>liakhovetski<span>&#64;</span>gmx<span>&#46;</span>de</a>&gt;</p>
+<section id="terminology">
+<h2><span class="section-number">9.1.12.1. </span>Terminology<a class="headerlink" href="#terminology" title="Permalink to this headline">¶</a></h2>
+<p>sensor scales: horizontal and vertical scales, configured by the sensor driver
+host scales: -”- host driver
+combined scales: sensor_scale * host_scale</p>
+</section>
+<section id="generic-scaling-cropping-scheme">
+<h2><span class="section-number">9.1.12.2. </span>Generic scaling / cropping scheme<a class="headerlink" href="#generic-scaling-cropping-scheme" title="Permalink to this headline">¶</a></h2>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>-1--
+|
+-2-- -\
+|      --\
+|         --\
++-5-- .      -- -3-- -\
+|      `...            -\
+|          `... -4-- .   - -7..
+|                     `.
+|                       `. .6--
+|
+|                        . .6&#39;-
+|                      .´
+|           ... -4&#39;- .´
+|       ...´             - -7&#39;.
++-5&#39;- .´               -/
+|            -- -3&#39;- -/
+|         --/
+|      --/
+-2&#39;- -/
+|
+|
+-1&#39;-
+</pre></div>
+</div>
+<p>In the above chart minuses and slashes represent “real” data amounts, points and
+accents represent “useful” data, basically, CEU scaled and cropped output,
+mapped back onto the client’s source plane.</p>
+<p>Such a configuration can be produced by user requests:</p>
+<p>S_CROP(left / top = (5) - (1), width / height = (5’) - (5))
+S_FMT(width / height = (6’) - (6))</p>
+<p>Here:</p>
+<p>(1) to (1’) - whole max width or height
+(1) to (2)  - sensor cropped left or top
+(2) to (2’) - sensor cropped width or height
+(3) to (3’) - sensor scale
+(3) to (4)  - CEU cropped left or top
+(4) to (4’) - CEU cropped width or height
+(5) to (5’) - reverse sensor scale applied to CEU cropped width or height
+(2) to (5)  - reverse sensor scale applied to CEU cropped left or top
+(6) to (6’) - CEU scale - user window</p>
+</section>
+<section id="s-fmt">
+<h2><span class="section-number">9.1.12.3. </span>S_FMT<a class="headerlink" href="#s-fmt" title="Permalink to this headline">¶</a></h2>
+<p>Do not touch input rectangle - it is already optimal.</p>
+<ol class="arabic">
+<li><p>Calculate current sensor scales:</p>
+<blockquote>
+<div><p>scale_s = ((2’) - (2)) / ((3’) - (3))</p>
+</div></blockquote>
+</li>
+</ol>
+<p>2. Calculate “effective” input crop (sensor subwindow) - CEU crop scaled back at
+current sensor scales onto input window - this is user S_CROP:</p>
+<blockquote>
+<div><p>width_u = (5’) - (5) = ((4’) - (4)) * scale_s</p>
+</div></blockquote>
+<p>3. Calculate new combined scales from “effective” input window to requested user
+window:</p>
+<blockquote>
+<div><p>scale_comb = width_u / ((6’) - (6))</p>
+</div></blockquote>
+<p>4. Calculate sensor output window by applying combined scales to real input
+window:</p>
+<blockquote>
+<div><p>width_s_out = ((7’) - (7)) = ((2’) - (2)) / scale_comb</p>
+</div></blockquote>
+<ol class="arabic" start="5">
+<li><p>Apply iterative sensor S_FMT for sensor output window.</p>
+<blockquote>
+<div><p>subdev-&gt;video_ops-&gt;s_fmt(.width = width_s_out)</p>
+</div></blockquote>
+</li>
+<li><p>Retrieve sensor output window (g_fmt)</p></li>
+<li><p>Calculate new sensor scales:</p>
+<blockquote>
+<div><p>scale_s_new = ((3’)_new - (3)_new) / ((2’) - (2))</p>
+</div></blockquote>
+</li>
+</ol>
+<p>8. Calculate new CEU crop - apply sensor scales to previously calculated
+“effective” crop:</p>
+<blockquote>
+<div><p>width_ceu = (4’)_new - (4)_new = width_u / scale_s_new
+left_ceu = (4)_new - (3)_new = ((5) - (2)) / scale_s_new</p>
+</div></blockquote>
+<ol class="arabic" start="9">
+<li><p>Use CEU cropping to crop to the new window:</p>
+<blockquote>
+<div><p>ceu_crop(.width = width_ceu, .left = left_ceu)</p>
+</div></blockquote>
+</li>
+<li><p>Use CEU scaling to scale to the requested user window:</p>
+<blockquote>
+<div><p>scale_ceu = width_ceu / width</p>
+</div></blockquote>
+</li>
+</ol>
+</section>
+<section id="s-crop">
+<h2><span class="section-number">9.1.12.4. </span>S_CROP<a class="headerlink" href="#s-crop" title="Permalink to this headline">¶</a></h2>
+<p>The <a class="reference internal" href="../../../userspace-api/media/v4l/crop.html#crop-scale"><span class="std std-ref">V4L2 crop API</span></a> says:</p>
+<p>“…specification does not define an origin or units. However by convention
+drivers should horizontally count unscaled samples relative to 0H.”</p>
+<p>We choose to follow the advise and interpret cropping units as client input
+pixels.</p>
+<p>Cropping is performed in the following 6 steps:</p>
+<ol class="arabic simple">
+<li><p>Request exactly user rectangle from the sensor.</p></li>
+<li><p>If smaller - iterate until a larger one is obtained. Result: sensor cropped
+to 2 : 2’, target crop 5 : 5’, current output format 6’ - 6.</p></li>
+<li><p>In the previous step the sensor has tried to preserve its output frame as
+good as possible, but it could have changed. Retrieve it again.</p></li>
+<li><p>Sensor scaled to 3 : 3’. Sensor’s scale is (2’ - 2) / (3’ - 3). Calculate
+intermediate window: 4’ - 4 = (5’ - 5) * (3’ - 3) / (2’ - 2)</p></li>
+<li><p>Calculate and apply host scale = (6’ - 6) / (4’ - 4)</p></li>
+<li><p>Calculate and apply host crop: 6 - 7 = (5 - 2) * (6’ - 6) / (5’ - 5)</p></li>
+</ol>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">9.1.12. Cropping and Scaling algorithm, used in the sh_mobile_ceu_camera driver</a><ul>
+<li><a class="reference internal" href="#terminology">9.1.12.1. Terminology</a></li>
+<li><a class="reference internal" href="#generic-scaling-cropping-scheme">9.1.12.2. Generic scaling / cropping scheme</a></li>
+<li><a class="reference internal" href="#s-fmt">9.1.12.3. S_FMT</a></li>
+<li><a class="reference internal" href="#s-crop">9.1.12.4. S_CROP</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/driver-api/media/drivers/sh_mobile_ceu_camera.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/driver-api/media/drivers/sh_mobile_ceu_camera.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

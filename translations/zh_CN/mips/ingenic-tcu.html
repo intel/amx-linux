@@ -1,0 +1,204 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>2. 君正 JZ47xx SoC定时器/计数器硬件单元 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="3. Feature status on mips architecture" href="features.html" />
+    <link rel="prev" title="1. BMIPS设备树引导" href="booting.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../mips/ingenic-tcu.html"><span class="doc">Ingenic JZ47xx SoCs Timer/Counter Unit hardware</span></a></p>
+</dd>
+<dt class="field-even">翻译</dt>
+<dd class="field-even"><p>司延腾 Yanteng Si &lt;<a class="reference external" href="mailto:siyanteng&#37;&#52;&#48;loongson&#46;cn">siyanteng<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+</dl>
+<section id="jz47xx-soc">
+<span id="cn-ingenic-tcu"></span><h1><span class="section-number">2. </span>君正 JZ47xx SoC定时器/计数器硬件单元<a class="headerlink" href="#jz47xx-soc" title="Permalink to this headline">¶</a></h1>
+<p>君正 JZ47xx SoC中的定时器/计数器单元(TCU)是一个多功能硬件块。它有多达
+8个通道，可以用作计数器，计时器，或脉冲宽度调制器。</p>
+<ul>
+<li><p>JZ4725B, JZ4750, JZ4755 只有６个TCU通道。其它SoC都有８个通道。</p></li>
+<li><p>JZ4725B引入了一个独立的通道，称为操作系统计时器(OST)。这是一个32位可
+编程定时器。在JZ4760B及以上型号上，它是64位的。</p></li>
+<li><p>每个TCU通道都有自己的时钟源，可以通过 TCSR 寄存器设置通道的父级时钟
+源（pclk、ext、rtc）、开关以及分频。</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>看门狗和OST硬件模块在它们的寄存器空间中也有相同形式的TCSR寄存器。</p></li>
+<li><p>用于关闭/开启的 TCU 寄存器也可以关闭/开启看门狗和 OST 时钟。</p></li>
+</ul>
+</div></blockquote>
+</li>
+<li><p>每个TCU通道在两种模式的其中一种模式下运行：</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>模式 TCU1：通道无法在睡眠模式下运行，但更易于操作。</p></li>
+<li><p>模式 TCU2：通道可以在睡眠模式下运行，但操作比 TCU1 通道复杂一些。</p></li>
+</ul>
+</div></blockquote>
+</li>
+<li><p>每个 TCU 通道的模式取决于使用的SoC：</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>在最老的SoC（高于JZ4740），八个通道都运行在TCU1模式。</p></li>
+<li><p>在 JZ4725B，通道5运行在TCU2,其它通道则运行在TCU1。</p></li>
+<li><p>在最新的SoC（JZ4750及之后），通道1-2运行在TCU2，其它通道则运行
+在TCU1。</p></li>
+</ul>
+</div></blockquote>
+</li>
+<li><p>每个通道都可以生成中断。有些通道共享一条中断线，而有些没有，其在SoC型
+号之间的变更：</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>在很老的SoC（JZ4740及更低），通道0和通道1有它们自己的中断线；通
+道2-7共享最后一条中断线。</p></li>
+<li><p>在 JZ4725B，通道0有它自己的中断线；通道1-5共享一条中断线；OST
+使用最后一条中断线。</p></li>
+<li><p>在比较新的SoC（JZ4750及以后），通道5有它自己的中断线；通
+道0-4和（如果是8通道）6-7全部共享一条中断线；OST使用最后一条中
+断线。</p></li>
+</ul>
+</div></blockquote>
+</li>
+</ul>
+<section id="id1">
+<h2><span class="section-number">2.1. </span>实现<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>TCU硬件的功能分布在多个驱动程序：</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 29%" />
+<col style="width: 71%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>时钟</p></td>
+<td><p>drivers/clk/ingenic/tcu.c</p></td>
+</tr>
+<tr class="row-even"><td><p>中断</p></td>
+<td><p>drivers/irqchip/irq-ingenic-tcu.c</p></td>
+</tr>
+<tr class="row-odd"><td><p>定时器</p></td>
+<td><p>drivers/clocksource/ingenic-timer.c</p></td>
+</tr>
+<tr class="row-even"><td><p>OST</p></td>
+<td><p>drivers/clocksource/ingenic-ost.c</p></td>
+</tr>
+<tr class="row-odd"><td><p>脉冲宽度调制器</p></td>
+<td><p>drivers/pwm/pwm-jz4740.c</p></td>
+</tr>
+<tr class="row-even"><td><p>看门狗</p></td>
+<td><p>drivers/watchdog/jz4740_wdt.c</p></td>
+</tr>
+</tbody>
+</table>
+<p>因为可以从相同的寄存器控制属于不同驱动程序和框架的TCU的各种功能，所以
+所有这些驱动程序都通过相同的控制总线通用接口访问它们的寄存器。</p>
+<p>有关TCU驱动程序的设备树绑定的更多信息，请参阅:
+Documentation/devicetree/bindings/timer/ingenic,tcu.yaml.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">2. 君正 JZ47xx SoC定时器/计数器硬件单元</a><ul>
+<li><a class="reference internal" href="#id1">2.1. 实现</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/mips/ingenic-tcu.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/mips/ingenic-tcu.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

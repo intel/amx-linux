@@ -1,0 +1,173 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>File system Monitoring with fanotify &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="NFS" href="nfs/index.html" />
+    <link rel="prev" title="ext4 General Information" href="ext4.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="file-system-monitoring-with-fanotify">
+<h1>File system Monitoring with fanotify<a class="headerlink" href="#file-system-monitoring-with-fanotify" title="Permalink to this headline">¶</a></h1>
+<section id="file-system-error-reporting">
+<h2>File system Error Reporting<a class="headerlink" href="#file-system-error-reporting" title="Permalink to this headline">¶</a></h2>
+<p>Fanotify supports the FAN_FS_ERROR event type for file system-wide error
+reporting.  It is meant to be used by file system health monitoring
+daemons, which listen for these events and take actions (notify
+sysadmin, start recovery) when a file system problem is detected.</p>
+<p>By design, a FAN_FS_ERROR notification exposes sufficient information
+for a monitoring tool to know a problem in the file system has happened.
+It doesn’t necessarily provide a user space application with semantics
+to verify an IO operation was successfully executed.  That is out of
+scope for this feature.  Instead, it is only meant as a framework for
+early file system problem detection and reporting recovery tools.</p>
+<p>When a file system operation fails, it is common for dozens of kernel
+errors to cascade after the initial failure, hiding the original failure
+log, which is usually the most useful debug data to troubleshoot the
+problem.  For this reason, FAN_FS_ERROR tries to report only the first
+error that occurred for a file system since the last notification, and
+it simply counts additional errors.  This ensures that the most
+important pieces of information are never lost.</p>
+<p>FAN_FS_ERROR requires the fanotify group to be setup with the
+FAN_REPORT_FID flag.</p>
+<p>At the time of this writing, the only file system that emits FAN_FS_ERROR
+notifications is Ext4.</p>
+<p>A FAN_FS_ERROR Notification has the following format:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>::
+
+   [ Notification Metadata (Mandatory) ]
+   [ Generic Error Record  (Mandatory) ]
+   [ FID record            (Mandatory) ]
+</pre></div>
+</div>
+<p>The order of records is not guaranteed, and new records might be added
+in the future.  Therefore, applications must not rely on the order and
+must be prepared to skip over unknown records. Please refer to
+<code class="docutils literal notranslate"><span class="pre">samples/fanotify/fs-monitor.c</span></code> for an example parser.</p>
+<section id="generic-error-record">
+<h3>Generic error record<a class="headerlink" href="#generic-error-record" title="Permalink to this headline">¶</a></h3>
+<p>The generic error record provides enough information for a file system
+agnostic tool to learn about a problem in the file system, without
+providing any additional details about the problem.  This record is
+identified by <code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">fanotify_event_info_header.info_type</span></code> being set
+to FAN_EVENT_INFO_TYPE_ERROR.</p>
+<blockquote>
+<div><div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct fanotify_event_info_error {
+     struct fanotify_event_info_header hdr;
+    __s32 error;
+    __u32 error_count;
+};
+</pre></div>
+</div>
+</div></blockquote>
+<p>The <cite>error</cite> field identifies the type of error using errno values.
+<cite>error_count</cite> tracks the number of errors that occurred and were
+suppressed to preserve the original error information, since the last
+notification.</p>
+</section>
+<section id="fid-record">
+<h3>FID record<a class="headerlink" href="#fid-record" title="Permalink to this headline">¶</a></h3>
+<p>The FID record can be used to uniquely identify the inode that triggered
+the error through the combination of fsid and file handle.  A file system
+specific application can use that information to attempt a recovery
+procedure.  Errors that are not related to an inode are reported with an
+empty file handle of type FILEID_INVALID.</p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">File system Monitoring with fanotify</a><ul>
+<li><a class="reference internal" href="#file-system-error-reporting">File system Error Reporting</a><ul>
+<li><a class="reference internal" href="#generic-error-record">Generic error record</a></li>
+<li><a class="reference internal" href="#fid-record">FID record</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/admin-guide/filesystem-monitoring.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/admin-guide/filesystem-monitoring.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

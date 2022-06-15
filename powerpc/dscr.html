@@ -1,0 +1,192 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>DSCR (Data Stream Control Register) &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="PCI Bus EEH Error Recovery" href="eeh-pci-error-recovery.html" />
+    <link rel="prev" title="DAWR issues on POWER9" href="dawr-power9.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="dscr-data-stream-control-register">
+<h1>DSCR (Data Stream Control Register)<a class="headerlink" href="#dscr-data-stream-control-register" title="Permalink to this headline">¶</a></h1>
+<p>DSCR register in powerpc allows user to have some control of prefetch of data
+stream in the processor. Please refer to the ISA documents or related manual
+for more detailed information regarding how to use this DSCR to attain this
+control of the prefetches . This document here provides an overview of kernel
+support for DSCR, related kernel objects, it’s functionalities and exported
+user interface.</p>
+<ol class="upperalpha">
+<li><p>Data Structures:</p>
+<blockquote>
+<div><ol class="arabic">
+<li><p>thread_struct:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>dscr            /* Thread DSCR value */
+dscr_inherit    /* Thread has changed default DSCR */
+</pre></div>
+</div>
+</li>
+<li><p>PACA:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>dscr_default    /* per-CPU DSCR default value */
+</pre></div>
+</div>
+</li>
+<li><p>sysfs.c:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>dscr_default    /* System DSCR default value */
+</pre></div>
+</div>
+</li>
+</ol>
+</div></blockquote>
+</li>
+<li><p>Scheduler Changes:</p>
+<blockquote>
+<div><p>Scheduler will write the per-CPU DSCR default which is stored in the
+CPU’s PACA value into the register if the thread has dscr_inherit value
+cleared which means that it has not changed the default DSCR till now.
+If the dscr_inherit value is set which means that it has changed the
+default DSCR value, scheduler will write the changed value which will
+now be contained in thread struct’s dscr into the register instead of
+the per-CPU default PACA based DSCR value.</p>
+<p>NOTE: Please note here that the system wide global DSCR value never
+gets used directly in the scheduler process context switch at all.</p>
+</div></blockquote>
+</li>
+<li><p>SYSFS Interface:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Global DSCR default:          /sys/devices/system/cpu/dscr_default</p></li>
+<li><p>CPU specific DSCR default:    /sys/devices/system/cpu/cpuN/dscr</p></li>
+</ul>
+<p>Changing the global DSCR default in the sysfs will change all the CPU
+specific DSCR defaults immediately in their PACA structures. Again if
+the current process has the dscr_inherit clear, it also writes the new
+value into every CPU’s DSCR register right away and updates the current
+thread’s DSCR value as well.</p>
+<p>Changing the CPU specific DSCR default value in the sysfs does exactly
+the same thing as above but unlike the global one above, it just changes
+stuff for that particular CPU instead for all the CPUs on the system.</p>
+</div></blockquote>
+</li>
+<li><p>User Space Instructions:</p>
+<blockquote>
+<div><p>The DSCR register can be accessed in the user space using any of these
+two SPR numbers available for that purpose.</p>
+<ol class="arabic simple">
+<li><p>Problem state SPR:          0x03    (Un-privileged, POWER8 only)</p></li>
+<li><p>Privileged state SPR:       0x11    (Privileged)</p></li>
+</ol>
+<p>Accessing DSCR through privileged SPR number (0x11) from user space
+works, as it is emulated following an illegal instruction exception
+inside the kernel. Both mfspr and mtspr instructions are emulated.</p>
+<p>Accessing DSCR through user level SPR (0x03) from user space will first
+create a facility unavailable exception. Inside this exception handler
+all mfspr instruction based read attempts will get emulated and returned
+where as the first mtspr instruction based write attempts will enable
+the DSCR facility for the next time around (both for read and write) by
+setting DSCR facility in the FSCR register.</p>
+</div></blockquote>
+</li>
+<li><p>Specifics about ‘dscr_inherit’:</p>
+<blockquote>
+<div><p>The thread struct element ‘dscr_inherit’ represents whether the thread
+in question has attempted and changed the DSCR itself using any of the
+following methods. This element signifies whether the thread wants to
+use the CPU default DSCR value or its own changed DSCR value in the
+kernel.</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>mtspr instruction   (SPR number 0x03)</p></li>
+<li><p>mtspr instruction   (SPR number 0x11)</p></li>
+<li><p>ptrace interface    (Explicitly set user DSCR value)</p></li>
+</ol>
+</div></blockquote>
+<p>Any child of the process created after this event in the process inherits
+this same behaviour as well.</p>
+</div></blockquote>
+</li>
+</ol>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/powerpc/dscr.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/powerpc/dscr.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

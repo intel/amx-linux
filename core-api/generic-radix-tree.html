@@ -1,0 +1,266 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Generic radix trees/sparse arrays &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Generic bitfield packing and unpacking functions" href="packing.html" />
+    <link rel="prev" title="Red-black Trees (rbtree) in Linux" href="rbtree.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="generic-radix-trees-sparse-arrays">
+<h1>Generic radix trees/sparse arrays<a class="headerlink" href="#generic-radix-trees-sparse-arrays" title="Permalink to this headline">¶</a></h1>
+<p>Very simple and minimalistic, supporting arbitrary size entries up to
+PAGE_SIZE.</p>
+<p>A genradix is defined with the type it will store, like so:</p>
+<p>static GENRADIX(struct foo) foo_genradix;</p>
+<p>The main operations are:</p>
+<ul class="simple">
+<li><p>genradix_init(radix) - initialize an empty genradix</p></li>
+<li><p>genradix_free(radix) - free all memory owned by the genradix and
+reinitialize it</p></li>
+<li><p>genradix_ptr(radix, idx) - gets a pointer to the entry at idx, returning
+NULL if that entry does not exist</p></li>
+<li><p>genradix_ptr_alloc(radix, idx, gfp) - gets a pointer to an entry,
+allocating it if necessary</p></li>
+<li><p>genradix_for_each(radix, iter, p) - iterate over each entry in a genradix</p></li>
+</ul>
+<p>The radix tree allocates one page of entries at a time, so entries may exist
+that were never explicitly allocated - they will be initialized to all
+zeroes.</p>
+<p>Internally, a genradix is just a radix tree of pages, and indexing works in
+terms of byte offsets. The wrappers in this header file use sizeof on the
+type the radix contains to calculate a byte offset from the index - see
+__idx_to_offset.</p>
+<section id="generic-radix-tree-functions">
+<h2>generic radix tree functions<a class="headerlink" href="#generic-radix-tree-functions" title="Permalink to this headline">¶</a></h2>
+<dl class="function">
+<dt id="c.genradix_init">
+<code class="sig-name descname">genradix_init</code><span class="sig-paren">(</span><em>_radix</em><span class="sig-paren">)</span><a class="headerlink" href="#c.genradix_init" title="Permalink to this definition">¶</a></dt>
+<dd><p>initialize a genradix</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">_radix</span></code></dt><dd><p>genradix to initialize</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Does not fail</p>
+</div>
+<dl class="function">
+<dt id="c.genradix_free">
+<code class="sig-name descname">genradix_free</code><span class="sig-paren">(</span><em>_radix</em><span class="sig-paren">)</span><a class="headerlink" href="#c.genradix_free" title="Permalink to this definition">¶</a></dt>
+<dd><p>free all memory owned by a genradix</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">_radix</span></code></dt><dd><p>the genradix to free</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>After freeing, <strong>_radix</strong> will be reinitialized and empty</p>
+</div>
+<dl class="function">
+<dt id="c.genradix_ptr">
+<code class="sig-name descname">genradix_ptr</code><span class="sig-paren">(</span><em>_radix</em>, <em>_idx</em><span class="sig-paren">)</span><a class="headerlink" href="#c.genradix_ptr" title="Permalink to this definition">¶</a></dt>
+<dd><p>get a pointer to a genradix entry</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">_radix</span></code></dt><dd><p>genradix to access</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">_idx</span></code></dt><dd><p>index to fetch</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Returns a pointer to entry at <strong>_idx</strong>, or NULL if that entry does not exist.</p>
+</div>
+<dl class="function">
+<dt id="c.genradix_ptr_alloc">
+<code class="sig-name descname">genradix_ptr_alloc</code><span class="sig-paren">(</span><em>_radix</em>, <em>_idx</em>, <em>_gfp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.genradix_ptr_alloc" title="Permalink to this definition">¶</a></dt>
+<dd><p>get a pointer to a genradix entry, allocating it if necessary</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">_radix</span></code></dt><dd><p>genradix to access</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">_idx</span></code></dt><dd><p>index to fetch</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">_gfp</span></code></dt><dd><p>gfp mask</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Returns a pointer to entry at <strong>_idx</strong>, or NULL on allocation failure</p>
+</div>
+<dl class="function">
+<dt id="c.genradix_iter_init">
+<code class="sig-name descname">genradix_iter_init</code><span class="sig-paren">(</span><em>_radix</em>, <em>_idx</em><span class="sig-paren">)</span><a class="headerlink" href="#c.genradix_iter_init" title="Permalink to this definition">¶</a></dt>
+<dd><p>initialize a genradix_iter</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">_radix</span></code></dt><dd><p>genradix that will be iterated over</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">_idx</span></code></dt><dd><p>index to start iterating from</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.genradix_iter_peek">
+<code class="sig-name descname">genradix_iter_peek</code><span class="sig-paren">(</span><em>_iter</em>, <em>_radix</em><span class="sig-paren">)</span><a class="headerlink" href="#c.genradix_iter_peek" title="Permalink to this definition">¶</a></dt>
+<dd><p>get first entry at or above iterator’s current position</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">_iter</span></code></dt><dd><p>a genradix_iter</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">_radix</span></code></dt><dd><p>genradix being iterated over</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>If no more entries exist at or above <strong>_iter</strong>’s current position, returns NULL</p>
+</div>
+<dl class="function">
+<dt id="c.genradix_for_each">
+<code class="sig-name descname">genradix_for_each</code><span class="sig-paren">(</span><em>_radix</em>, <em>_iter</em>, <em>_p</em><span class="sig-paren">)</span><a class="headerlink" href="#c.genradix_for_each" title="Permalink to this definition">¶</a></dt>
+<dd><p>iterate over entry in a genradix</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">_radix</span></code></dt><dd><p>genradix to iterate over</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">_iter</span></code></dt><dd><p>a genradix_iter to track current position</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">_p</span></code></dt><dd><p>pointer to genradix entry type</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>On every iteration, <strong>_p</strong> will point to the current entry, and <strong>_iter.pos</strong>
+will be the current entry’s index.</p>
+</div>
+<dl class="function">
+<dt id="c.genradix_prealloc">
+<code class="sig-name descname">genradix_prealloc</code><span class="sig-paren">(</span><em>_radix</em>, <em>_nr</em>, <em>_gfp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.genradix_prealloc" title="Permalink to this definition">¶</a></dt>
+<dd><p>preallocate entries in a generic radix tree</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">_radix</span></code></dt><dd><p>genradix to preallocate</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">_nr</span></code></dt><dd><p>number of entries to preallocate</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">_gfp</span></code></dt><dd><p>gfp mask</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Returns 0 on success, -ENOMEM on failure</p>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Generic radix trees/sparse arrays</a><ul>
+<li><a class="reference internal" href="#generic-radix-tree-functions">generic radix tree functions</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/core-api/generic-radix-tree.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/core-api/generic-radix-tree.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

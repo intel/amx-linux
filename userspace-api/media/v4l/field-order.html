@@ -1,0 +1,259 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>3.6. Field Order &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="4. Interfaces" href="devices.html" />
+    <link rel="prev" title="3.5. Buffers" href="buffer.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="field-order">
+<span id="id1"></span><h1><span class="section-number">3.6. </span>Field Order<a class="headerlink" href="#field-order" title="Permalink to this headline">¶</a></h1>
+<p>We have to distinguish between progressive and interlaced video.
+Progressive video transmits all lines of a video image sequentially.
+Interlaced video divides an image into two fields, containing only the
+odd and even lines of the image, respectively. Alternating the so called
+odd and even field are transmitted, and due to a small delay between
+fields a cathode ray TV displays the lines interleaved, yielding the
+original frame. This curious technique was invented because at refresh
+rates similar to film the image would fade out too quickly. Transmitting
+fields reduces the flicker without the necessity of doubling the frame
+rate and with it the bandwidth required for each channel.</p>
+<p>It is important to understand a video camera does not expose one frame
+at a time, merely transmitting the frames separated into fields. The
+fields are in fact captured at two different instances in time. An
+object on screen may well move between one field and the next. For
+applications analysing motion it is of paramount importance to recognize
+which field of a frame is older, the <em>temporal order</em>.</p>
+<p>When the driver provides or accepts images field by field rather than
+interleaved, it is also important applications understand how the fields
+combine to frames. We distinguish between top (aka odd) and bottom (aka
+even) fields, the <em>spatial order</em>: The first line of the top field is
+the first line of an interlaced frame, the first line of the bottom
+field is the second line of that frame.</p>
+<p>However because fields were captured one after the other, arguing
+whether a frame commences with the top or bottom field is pointless. Any
+two successive top and bottom, or bottom and top fields yield a valid
+frame. Only when the source was progressive to begin with, e. g. when
+transferring film to video, two fields may come from the same frame,
+creating a natural order.</p>
+<p>Counter to intuition the top field is not necessarily the older field.
+Whether the older field contains the top or bottom lines is a convention
+determined by the video standard. Hence the distinction between temporal
+and spatial order of fields. The diagrams below should make this
+clearer.</p>
+<p>In V4L it is assumed that all video cameras transmit fields on the media
+bus in the same order they were captured, so if the top field was
+captured first (is the older field), the top field is also transmitted
+first on the bus.</p>
+<p>All video capture and output devices must report the current field
+order. Some drivers may permit the selection of a different order, to
+this end applications initialize the <code class="docutils literal notranslate"><span class="pre">field</span></code> field of struct
+<a class="reference internal" href="pixfmt-v4l2.html#c.v4l2_pix_format" title="v4l2_pix_format"><code class="xref c c-type docutils literal notranslate"><span class="pre">v4l2_pix_format</span></code></a> before calling the
+<a class="reference internal" href="vidioc-g-fmt.html#vidioc-g-fmt"><span class="std std-ref">VIDIOC_S_FMT</span></a> ioctl. If this is not desired it
+should have the value <code class="docutils literal notranslate"><span class="pre">V4L2_FIELD_ANY</span></code> (0).</p>
+<section id="enum-v4l2-field">
+<h2><span class="section-number">3.6.1. </span>enum v4l2_field<a class="headerlink" href="#enum-v4l2-field" title="Permalink to this headline">¶</a></h2>
+<dl class="type">
+<dt id="c.v4l2_field">
+<code class="sig-name descname">v4l2_field</code><a class="headerlink" href="#c.v4l2_field" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<table class="longtable docutils align-default">
+<colgroup>
+<col style="width: 38%" />
+<col style="width: 13%" />
+<col style="width: 50%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_FIELD_ANY</span></code></p></td>
+<td><p>0</p></td>
+<td><p>Applications request this field order when any field format
+is acceptable. Drivers choose depending on hardware capabilities or
+e.g. the requested image size, and return the actual field order.
+Drivers must never return <code class="docutils literal notranslate"><span class="pre">V4L2_FIELD_ANY</span></code>.
+If multiple field orders are possible the
+driver must choose one of the possible field orders during
+<a class="reference internal" href="vidioc-g-fmt.html#vidioc-g-fmt"><span class="std std-ref">VIDIOC_S_FMT</span></a> or
+<a class="reference internal" href="vidioc-g-fmt.html#vidioc-g-fmt"><span class="std std-ref">VIDIOC_TRY_FMT</span></a>. struct
+<code class="xref c c-type docutils literal notranslate"><span class="pre">v4l2_buffer</span></code> <code class="docutils literal notranslate"><span class="pre">field</span></code> can never be
+<code class="docutils literal notranslate"><span class="pre">V4L2_FIELD_ANY</span></code>.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_FIELD_NONE</span></code></p></td>
+<td><p>1</p></td>
+<td><p>Images are in progressive (frame-based) format, not interlaced
+(field-based).</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_FIELD_TOP</span></code></p></td>
+<td><p>2</p></td>
+<td><p>Images consist of the top (aka odd) field only.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_FIELD_BOTTOM</span></code></p></td>
+<td><p>3</p></td>
+<td><p>Images consist of the bottom (aka even) field only. Applications
+may wish to prevent a device from capturing interlaced images
+because they will have “comb” or “feathering” artefacts around
+moving objects.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_FIELD_INTERLACED</span></code></p></td>
+<td><p>4</p></td>
+<td><p>Images contain both fields, interleaved line by line. The temporal
+order of the fields (whether the top or bottom field is older)
+depends on the current video standard. In M/NTSC the bottom
+field is the older field. In all other standards the top field
+is the older field.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_FIELD_SEQ_TB</span></code></p></td>
+<td><p>5</p></td>
+<td><p>Images contain both fields, the top field lines are stored first
+in memory, immediately followed by the bottom field lines. Fields
+are always stored in temporal order, the older one first in
+memory. Image sizes refer to the frame, not fields.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_FIELD_SEQ_BT</span></code></p></td>
+<td><p>6</p></td>
+<td><p>Images contain both fields, the bottom field lines are stored
+first in memory, immediately followed by the top field lines.
+Fields are always stored in temporal order, the older one first in
+memory. Image sizes refer to the frame, not fields.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_FIELD_ALTERNATE</span></code></p></td>
+<td><p>7</p></td>
+<td><p>The two fields of a frame are passed in separate buffers, in
+temporal order, i. e. the older one first. To indicate the field
+parity (whether the current field is a top or bottom field) the
+driver or application, depending on data direction, must set
+struct <code class="xref c c-type docutils literal notranslate"><span class="pre">v4l2_buffer</span></code> <code class="docutils literal notranslate"><span class="pre">field</span></code> to
+<code class="docutils literal notranslate"><span class="pre">V4L2_FIELD_TOP</span></code> or <code class="docutils literal notranslate"><span class="pre">V4L2_FIELD_BOTTOM</span></code>. Any two successive
+fields pair to build a frame. If fields are successive, without
+any dropped fields between them (fields can drop individually),
+can be determined from the struct
+<code class="xref c c-type docutils literal notranslate"><span class="pre">v4l2_buffer</span></code> <code class="docutils literal notranslate"><span class="pre">sequence</span></code> field. This
+format cannot be selected when using the read/write I/O method
+since there is no way to communicate if a field was a top or
+bottom field.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_FIELD_INTERLACED_TB</span></code></p></td>
+<td><p>8</p></td>
+<td><p>Images contain both fields, interleaved line by line, top field
+first. The top field is the older field.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_FIELD_INTERLACED_BT</span></code></p></td>
+<td><p>9</p></td>
+<td><p>Images contain both fields, interleaved line by line, top field
+first. The bottom field is the older field.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="field-order-top-field-first-transmitted">
+<span id="fieldseq-tb"></span><h2><span class="section-number">3.6.2. </span>Field Order, Top Field First Transmitted<a class="headerlink" href="#field-order-top-field-first-transmitted" title="Permalink to this headline">¶</a></h2>
+<figure class="align-center" id="id2">
+<img alt="fieldseq_tb.svg" src="../../../_images/fieldseq_tb.svg" /><figcaption>
+<p><span class="caption-text">Field Order, Top Field First Transmitted</span><a class="headerlink" href="#id2" title="Permalink to this image">¶</a></p>
+</figcaption>
+</figure>
+</section>
+<section id="field-order-bottom-field-first-transmitted">
+<span id="fieldseq-bt"></span><h2><span class="section-number">3.6.3. </span>Field Order, Bottom Field First Transmitted<a class="headerlink" href="#field-order-bottom-field-first-transmitted" title="Permalink to this headline">¶</a></h2>
+<figure class="align-center" id="id3">
+<img alt="fieldseq_bt.svg" src="../../../_images/fieldseq_bt.svg" /><figcaption>
+<p><span class="caption-text">Field Order, Bottom Field First Transmitted</span><a class="headerlink" href="#id3" title="Permalink to this image">¶</a></p>
+</figcaption>
+</figure>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">3.6. Field Order</a><ul>
+<li><a class="reference internal" href="#enum-v4l2-field">3.6.1. enum v4l2_field</a></li>
+<li><a class="reference internal" href="#field-order-top-field-first-transmitted">3.6.2. Field Order, Top Field First Transmitted</a></li>
+<li><a class="reference internal" href="#field-order-bottom-field-first-transmitted">3.6.3. Field Order, Bottom Field First Transmitted</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/userspace-api/media/v4l/field-order.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/userspace-api/media/v4l/field-order.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

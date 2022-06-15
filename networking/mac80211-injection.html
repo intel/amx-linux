@@ -1,0 +1,219 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>How to use packet injection with mac80211 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Management Component Transport Protocol (MCTP)" href="mctp.html" />
+    <link rel="prev" title="The Linux LAPB Module Interface" href="lapb-module.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="how-to-use-packet-injection-with-mac80211">
+<h1>How to use packet injection with mac80211<a class="headerlink" href="#how-to-use-packet-injection-with-mac80211" title="Permalink to this headline">¶</a></h1>
+<p>mac80211 now allows arbitrary packets to be injected down any Monitor Mode
+interface from userland.  The packet you inject needs to be composed in the
+following format:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[ radiotap header  ]
+[ ieee80211 header ]
+[ payload ]
+</pre></div>
+</div>
+<p>The radiotap format is discussed in
+./Documentation/networking/radiotap-headers.rst.</p>
+<p>Despite many radiotap parameters being currently defined, most only make sense
+to appear on received packets.  The following information is parsed from the
+radiotap headers and used to control injection:</p>
+<blockquote>
+<div><ul>
+<li><p>IEEE80211_RADIOTAP_FLAGS</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 37%" />
+<col style="width: 63%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>IEEE80211_RADIOTAP_F_FCS</p></td>
+<td><p>FCS will be removed and recalculated</p></td>
+</tr>
+<tr class="row-even"><td><p>IEEE80211_RADIOTAP_F_WEP</p></td>
+<td><p>frame will be encrypted if key available</p></td>
+</tr>
+<tr class="row-odd"><td><p>IEEE80211_RADIOTAP_F_FRAG</p></td>
+<td><p>frame will be fragmented if longer than the
+current fragmentation threshold.</p></td>
+</tr>
+</tbody>
+</table>
+</li>
+<li><p>IEEE80211_RADIOTAP_TX_FLAGS</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 42%" />
+<col style="width: 58%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>IEEE80211_RADIOTAP_F_TX_NOACK</p></td>
+<td><p>frame should be sent without waiting for
+an ACK even if it is a unicast frame</p></td>
+</tr>
+</tbody>
+</table>
+</li>
+<li><p>IEEE80211_RADIOTAP_RATE</p>
+<p>legacy rate for the transmission (only for devices without own rate control)</p>
+</li>
+<li><p>IEEE80211_RADIOTAP_MCS</p>
+<p>HT rate for the transmission (only for devices without own rate control).
+Also some flags are parsed</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 54%" />
+<col style="width: 46%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>IEEE80211_RADIOTAP_MCS_SGI</p></td>
+<td><p>use short guard interval</p></td>
+</tr>
+<tr class="row-even"><td><p>IEEE80211_RADIOTAP_MCS_BW_40</p></td>
+<td><p>send in HT40 mode</p></td>
+</tr>
+</tbody>
+</table>
+</li>
+<li><p>IEEE80211_RADIOTAP_DATA_RETRIES</p>
+<p>number of retries when either IEEE80211_RADIOTAP_RATE or
+IEEE80211_RADIOTAP_MCS was used</p>
+</li>
+<li><p>IEEE80211_RADIOTAP_VHT</p>
+<p>VHT mcs and number of streams used in the transmission (only for devices
+without own rate control). Also other fields are parsed</p>
+<dl class="simple">
+<dt>flags field</dt><dd><p>IEEE80211_RADIOTAP_VHT_FLAG_SGI: use short guard interval</p>
+</dd>
+<dt>bandwidth field</dt><dd><ul class="simple">
+<li><p>1: send using 40MHz channel width</p></li>
+<li><p>4: send using 80MHz channel width</p></li>
+<li><p>11: send using 160MHz channel width</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+</ul>
+</div></blockquote>
+<p>The injection code can also skip all other currently defined radiotap fields
+facilitating replay of captured radiotap headers directly.</p>
+<p>Here is an example valid radiotap header defining some parameters:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>0x00, 0x00, // &lt;-- radiotap version
+0x0b, 0x00, // &lt;- radiotap header length
+0x04, 0x0c, 0x00, 0x00, // &lt;-- bitmap
+0x6c, // &lt;-- rate
+0x0c, //&lt;-- tx power
+0x01 //&lt;-- antenna
+</pre></div>
+</div>
+<p>The ieee80211 header follows immediately afterwards, looking for example like
+this:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>0x08, 0x01, 0x00, 0x00,
+0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+0x13, 0x22, 0x33, 0x44, 0x55, 0x66,
+0x13, 0x22, 0x33, 0x44, 0x55, 0x66,
+0x10, 0x86
+</pre></div>
+</div>
+<p>Then lastly there is the payload.</p>
+<p>After composing the packet contents, it is sent by send()-ing it to a logical
+mac80211 interface that is in Monitor mode.  Libpcap can also be used,
+(which is easier than doing the work to bind the socket to the right
+interface), along the following lines::</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ppcap = pcap_open_live(szInterfaceName, 800, 1, 20, szErrbuf);
+...
+r = pcap_inject(ppcap, u8aSendBuffer, nLength);
+</pre></div>
+</div>
+<p>You can also find a link to a complete inject application here:</p>
+<p><a class="reference external" href="https://wireless.wiki.kernel.org/en/users/Documentation/packetspammer">https://wireless.wiki.kernel.org/en/users/Documentation/packetspammer</a></p>
+<p>Andy Green &lt;<a class="reference external" href="mailto:andy&#37;&#52;&#48;warmcat&#46;com">andy<span>&#64;</span>warmcat<span>&#46;</span>com</a>&gt;</p>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/networking/mac80211-injection.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/networking/mac80211-injection.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

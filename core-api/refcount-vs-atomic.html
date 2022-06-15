@@ -1,0 +1,315 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>refcount_t API compared to atomic_t &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="IRQs" href="irq/index.html" />
+    <link rel="prev" title="Entry/exit handling for exceptions, interrupts, syscalls and KVM" href="entry.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="refcount-t-api-compared-to-atomic-t">
+<h1>refcount_t API compared to atomic_t<a class="headerlink" href="#refcount-t-api-compared-to-atomic-t" title="Permalink to this headline">¶</a></h1>
+<div class="contents local topic" id="contents">
+<ul class="simple">
+<li><p><a class="reference internal" href="#introduction" id="id1">Introduction</a></p></li>
+<li><p><a class="reference internal" href="#relevant-types-of-memory-ordering" id="id2">Relevant types of memory ordering</a></p></li>
+<li><p><a class="reference internal" href="#comparison-of-functions" id="id3">Comparison of functions</a></p>
+<ul>
+<li><p><a class="reference internal" href="#case-1-non-read-modify-write-rmw-ops" id="id4">case 1) - non-“Read/Modify/Write” (RMW) ops</a></p></li>
+<li><p><a class="reference internal" href="#case-2-increment-based-ops-that-return-no-value" id="id5">case 2) - increment-based ops that return no value</a></p></li>
+<li><p><a class="reference internal" href="#case-3-decrement-based-rmw-ops-that-return-no-value" id="id6">case 3) - decrement-based RMW ops that return no value</a></p></li>
+<li><p><a class="reference internal" href="#case-4-increment-based-rmw-ops-that-return-a-value" id="id7">case 4) - increment-based RMW ops that return a value</a></p></li>
+<li><p><a class="reference internal" href="#case-5-generic-dec-sub-decrement-based-rmw-ops-that-return-a-value" id="id8">case 5) - generic dec/sub decrement-based RMW ops that return a value</a></p></li>
+<li><p><a class="reference internal" href="#case-6-other-decrement-based-rmw-ops-that-return-a-value" id="id9">case 6) other decrement-based RMW ops that return a value</a></p></li>
+<li><p><a class="reference internal" href="#case-7-lock-based-rmw" id="id10">case 7) - lock-based RMW</a></p></li>
+</ul>
+</li>
+</ul>
+</div>
+<section id="introduction">
+<h2><a class="toc-backref" href="#id1">Introduction</a><a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>The goal of refcount_t API is to provide a minimal API for implementing
+an object’s reference counters. While a generic architecture-independent
+implementation from lib/refcount.c uses atomic operations underneath,
+there are a number of differences between some of the <code class="docutils literal notranslate"><span class="pre">refcount_*()</span></code> and
+<code class="docutils literal notranslate"><span class="pre">atomic_*()</span></code> functions with regards to the memory ordering guarantees.
+This document outlines the differences and provides respective examples
+in order to help maintainers validate their code against the change in
+these memory ordering guarantees.</p>
+<p>The terms used through this document try to follow the formal LKMM defined in
+tools/memory-model/Documentation/explanation.txt.</p>
+<p>memory-barriers.txt and atomic_t.txt provide more background to the
+memory ordering in general and for atomic operations specifically.</p>
+</section>
+<section id="relevant-types-of-memory-ordering">
+<h2><a class="toc-backref" href="#id2">Relevant types of memory ordering</a><a class="headerlink" href="#relevant-types-of-memory-ordering" title="Permalink to this headline">¶</a></h2>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The following section only covers some of the memory
+ordering types that are relevant for the atomics and reference
+counters and used through this document. For a much broader picture
+please consult memory-barriers.txt document.</p>
+</div>
+<p>In the absence of any memory ordering guarantees (i.e. fully unordered)
+atomics &amp; refcounters only provide atomicity and
+program order (po) relation (on the same CPU). It guarantees that
+each <code class="docutils literal notranslate"><span class="pre">atomic_*()</span></code> and <code class="docutils literal notranslate"><span class="pre">refcount_*()</span></code> operation is atomic and instructions
+are executed in program order on a single CPU.
+This is implemented using READ_ONCE()/WRITE_ONCE() and
+compare-and-swap primitives.</p>
+<p>A strong (full) memory ordering guarantees that all prior loads and
+stores (all po-earlier instructions) on the same CPU are completed
+before any po-later instruction is executed on the same CPU.
+It also guarantees that all po-earlier stores on the same CPU
+and all propagated stores from other CPUs must propagate to all
+other CPUs before any po-later instruction is executed on the original
+CPU (A-cumulative property). This is implemented using smp_mb().</p>
+<p>A RELEASE memory ordering guarantees that all prior loads and
+stores (all po-earlier instructions) on the same CPU are completed
+before the operation. It also guarantees that all po-earlier
+stores on the same CPU and all propagated stores from other CPUs
+must propagate to all other CPUs before the release operation
+(A-cumulative property). This is implemented using
+smp_store_release().</p>
+<p>An ACQUIRE memory ordering guarantees that all post loads and
+stores (all po-later instructions) on the same CPU are
+completed after the acquire operation. It also guarantees that all
+po-later stores on the same CPU must propagate to all other CPUs
+after the acquire operation executes. This is implemented using
+smp_acquire__after_ctrl_dep().</p>
+<p>A control dependency (on success) for refcounters guarantees that
+if a reference for an object was successfully obtained (reference
+counter increment or addition happened, function returned true),
+then further stores are ordered against this operation.
+Control dependency on stores are not implemented using any explicit
+barriers, but rely on CPU not to speculate on stores. This is only
+a single CPU relation and provides no guarantees for other CPUs.</p>
+</section>
+<section id="comparison-of-functions">
+<h2><a class="toc-backref" href="#id3">Comparison of functions</a><a class="headerlink" href="#comparison-of-functions" title="Permalink to this headline">¶</a></h2>
+<section id="case-1-non-read-modify-write-rmw-ops">
+<h3><a class="toc-backref" href="#id4">case 1) - non-“Read/Modify/Write” (RMW) ops</a><a class="headerlink" href="#case-1-non-read-modify-write-rmw-ops" title="Permalink to this headline">¶</a></h3>
+<p>Function changes:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>atomic_set() –&gt; <a class="reference internal" href="../driver-api/basics.html#c.refcount_set" title="refcount_set"><code class="xref c c-func docutils literal notranslate"><span class="pre">refcount_set()</span></code></a></p></li>
+<li><p>atomic_read() –&gt; <a class="reference internal" href="../driver-api/basics.html#c.refcount_read" title="refcount_read"><code class="xref c c-func docutils literal notranslate"><span class="pre">refcount_read()</span></code></a></p></li>
+</ul>
+</div></blockquote>
+<p>Memory ordering guarantee changes:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>none (both fully unordered)</p></li>
+</ul>
+</div></blockquote>
+</section>
+<section id="case-2-increment-based-ops-that-return-no-value">
+<h3><a class="toc-backref" href="#id5">case 2) - increment-based ops that return no value</a><a class="headerlink" href="#case-2-increment-based-ops-that-return-no-value" title="Permalink to this headline">¶</a></h3>
+<p>Function changes:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>atomic_inc() –&gt; <a class="reference internal" href="../driver-api/basics.html#c.refcount_inc" title="refcount_inc"><code class="xref c c-func docutils literal notranslate"><span class="pre">refcount_inc()</span></code></a></p></li>
+<li><p>atomic_add() –&gt; <a class="reference internal" href="../driver-api/basics.html#c.refcount_add" title="refcount_add"><code class="xref c c-func docutils literal notranslate"><span class="pre">refcount_add()</span></code></a></p></li>
+</ul>
+</div></blockquote>
+<p>Memory ordering guarantee changes:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>none (both fully unordered)</p></li>
+</ul>
+</div></blockquote>
+</section>
+<section id="case-3-decrement-based-rmw-ops-that-return-no-value">
+<h3><a class="toc-backref" href="#id6">case 3) - decrement-based RMW ops that return no value</a><a class="headerlink" href="#case-3-decrement-based-rmw-ops-that-return-no-value" title="Permalink to this headline">¶</a></h3>
+<p>Function changes:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>atomic_dec() –&gt; <a class="reference internal" href="../driver-api/basics.html#c.refcount_dec" title="refcount_dec"><code class="xref c c-func docutils literal notranslate"><span class="pre">refcount_dec()</span></code></a></p></li>
+</ul>
+</div></blockquote>
+<p>Memory ordering guarantee changes:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>fully unordered –&gt; RELEASE ordering</p></li>
+</ul>
+</div></blockquote>
+</section>
+<section id="case-4-increment-based-rmw-ops-that-return-a-value">
+<h3><a class="toc-backref" href="#id7">case 4) - increment-based RMW ops that return a value</a><a class="headerlink" href="#case-4-increment-based-rmw-ops-that-return-a-value" title="Permalink to this headline">¶</a></h3>
+<p>Function changes:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>atomic_inc_not_zero() –&gt; <a class="reference internal" href="../driver-api/basics.html#c.refcount_inc_not_zero" title="refcount_inc_not_zero"><code class="xref c c-func docutils literal notranslate"><span class="pre">refcount_inc_not_zero()</span></code></a></p></li>
+<li><p>no atomic counterpart –&gt; <a class="reference internal" href="../driver-api/basics.html#c.refcount_add_not_zero" title="refcount_add_not_zero"><code class="xref c c-func docutils literal notranslate"><span class="pre">refcount_add_not_zero()</span></code></a></p></li>
+</ul>
+</div></blockquote>
+<p>Memory ordering guarantees changes:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>fully ordered –&gt; control dependency on success for stores</p></li>
+</ul>
+</div></blockquote>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>We really assume here that necessary ordering is provided as a
+result of obtaining pointer to the object!</p>
+</div>
+</section>
+<section id="case-5-generic-dec-sub-decrement-based-rmw-ops-that-return-a-value">
+<h3><a class="toc-backref" href="#id8">case 5) - generic dec/sub decrement-based RMW ops that return a value</a><a class="headerlink" href="#case-5-generic-dec-sub-decrement-based-rmw-ops-that-return-a-value" title="Permalink to this headline">¶</a></h3>
+<p>Function changes:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>atomic_dec_and_test() –&gt; <a class="reference internal" href="../driver-api/basics.html#c.refcount_dec_and_test" title="refcount_dec_and_test"><code class="xref c c-func docutils literal notranslate"><span class="pre">refcount_dec_and_test()</span></code></a></p></li>
+<li><p>atomic_sub_and_test() –&gt; <a class="reference internal" href="../driver-api/basics.html#c.refcount_sub_and_test" title="refcount_sub_and_test"><code class="xref c c-func docutils literal notranslate"><span class="pre">refcount_sub_and_test()</span></code></a></p></li>
+</ul>
+</div></blockquote>
+<p>Memory ordering guarantees changes:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>fully ordered –&gt; RELEASE ordering + ACQUIRE ordering on success</p></li>
+</ul>
+</div></blockquote>
+</section>
+<section id="case-6-other-decrement-based-rmw-ops-that-return-a-value">
+<h3><a class="toc-backref" href="#id9">case 6) other decrement-based RMW ops that return a value</a><a class="headerlink" href="#case-6-other-decrement-based-rmw-ops-that-return-a-value" title="Permalink to this headline">¶</a></h3>
+<p>Function changes:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>no atomic counterpart –&gt; <a class="reference internal" href="../driver-api/basics.html#c.refcount_dec_if_one" title="refcount_dec_if_one"><code class="xref c c-func docutils literal notranslate"><span class="pre">refcount_dec_if_one()</span></code></a></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">atomic_add_unless(&amp;var,</span> <span class="pre">-1,</span> <span class="pre">1)</span></code> –&gt; <code class="docutils literal notranslate"><span class="pre">refcount_dec_not_one(&amp;var)</span></code></p></li>
+</ul>
+</div></blockquote>
+<p>Memory ordering guarantees changes:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>fully ordered –&gt; RELEASE ordering + control dependency</p></li>
+</ul>
+</div></blockquote>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>atomic_add_unless() only provides full order on success.</p>
+</div>
+</section>
+<section id="case-7-lock-based-rmw">
+<h3><a class="toc-backref" href="#id10">case 7) - lock-based RMW</a><a class="headerlink" href="#case-7-lock-based-rmw" title="Permalink to this headline">¶</a></h3>
+<p>Function changes:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>atomic_dec_and_lock() –&gt; <a class="reference internal" href="../driver-api/basics.html#c.refcount_dec_and_lock" title="refcount_dec_and_lock"><code class="xref c c-func docutils literal notranslate"><span class="pre">refcount_dec_and_lock()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../kernel-hacking/locking.html#c.atomic_dec_and_mutex_lock" title="atomic_dec_and_mutex_lock"><code class="xref c c-func docutils literal notranslate"><span class="pre">atomic_dec_and_mutex_lock()</span></code></a> –&gt; <a class="reference internal" href="../driver-api/basics.html#c.refcount_dec_and_mutex_lock" title="refcount_dec_and_mutex_lock"><code class="xref c c-func docutils literal notranslate"><span class="pre">refcount_dec_and_mutex_lock()</span></code></a></p></li>
+</ul>
+</div></blockquote>
+<p>Memory ordering guarantees changes:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>fully ordered –&gt; RELEASE ordering + control dependency + hold
+spin_lock() on success</p></li>
+</ul>
+</div></blockquote>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">refcount_t API compared to atomic_t</a><ul>
+<li><a class="reference internal" href="#introduction">Introduction</a></li>
+<li><a class="reference internal" href="#relevant-types-of-memory-ordering">Relevant types of memory ordering</a></li>
+<li><a class="reference internal" href="#comparison-of-functions">Comparison of functions</a><ul>
+<li><a class="reference internal" href="#case-1-non-read-modify-write-rmw-ops">case 1) - non-“Read/Modify/Write” (RMW) ops</a></li>
+<li><a class="reference internal" href="#case-2-increment-based-ops-that-return-no-value">case 2) - increment-based ops that return no value</a></li>
+<li><a class="reference internal" href="#case-3-decrement-based-rmw-ops-that-return-no-value">case 3) - decrement-based RMW ops that return no value</a></li>
+<li><a class="reference internal" href="#case-4-increment-based-rmw-ops-that-return-a-value">case 4) - increment-based RMW ops that return a value</a></li>
+<li><a class="reference internal" href="#case-5-generic-dec-sub-decrement-based-rmw-ops-that-return-a-value">case 5) - generic dec/sub decrement-based RMW ops that return a value</a></li>
+<li><a class="reference internal" href="#case-6-other-decrement-based-rmw-ops-that-return-a-value">case 6) other decrement-based RMW ops that return a value</a></li>
+<li><a class="reference internal" href="#case-7-lock-based-rmw">case 7) - lock-based RMW</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/core-api/refcount-vs-atomic.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/core-api/refcount-vs-atomic.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

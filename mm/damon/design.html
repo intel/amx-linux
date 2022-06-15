@@ -1,0 +1,263 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Design &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="API Reference" href="api.html" />
+    <link rel="prev" title="Frequently Asked Questions" href="faq.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="design">
+<h1>Design<a class="headerlink" href="#design" title="Permalink to this headline">¶</a></h1>
+<section id="configurable-layers">
+<h2>Configurable Layers<a class="headerlink" href="#configurable-layers" title="Permalink to this headline">¶</a></h2>
+<p>DAMON provides data access monitoring functionality while making the accuracy
+and the overhead controllable.  The fundamental access monitorings require
+primitives that dependent on and optimized for the target address space.  On
+the other hand, the accuracy and overhead tradeoff mechanism, which is the core
+of DAMON, is in the pure logic space.  DAMON separates the two parts in
+different layers and defines its interface to allow various low level
+primitives implementations configurable with the core logic.  We call the low
+level primitives implementations monitoring operations.</p>
+<p>Due to this separated design and the configurable interface, users can extend
+DAMON for any address space by configuring the core logics with appropriate
+monitoring operations.  If appropriate one is not provided, users can implement
+the operations on their own.</p>
+<p>For example, physical memory, virtual memory, swap space, those for specific
+processes, NUMA nodes, files, and backing memory devices would be supportable.
+Also, if some architectures or devices support special optimized access check
+primitives, those will be easily configurable.</p>
+</section>
+<section id="reference-implementations-of-address-space-specific-monitoring-operations">
+<h2>Reference Implementations of Address Space Specific Monitoring Operations<a class="headerlink" href="#reference-implementations-of-address-space-specific-monitoring-operations" title="Permalink to this headline">¶</a></h2>
+<p>The monitoring operations are defined in two parts:</p>
+<ol class="arabic simple">
+<li><p>Identification of the monitoring target address range for the address space.</p></li>
+<li><p>Access check of specific address range in the target space.</p></li>
+</ol>
+<p>DAMON currently provides the implementations of the operations for the physical
+and virtual address spaces. Below two subsections describe how those work.</p>
+<section id="vma-based-target-address-range-construction">
+<h3>VMA-based Target Address Range Construction<a class="headerlink" href="#vma-based-target-address-range-construction" title="Permalink to this headline">¶</a></h3>
+<p>This is only for the virtual address space monitoring operations
+implementation.  That for the physical address space simply asks users to
+manually set the monitoring target address ranges.</p>
+<p>Only small parts in the super-huge virtual address space of the processes are
+mapped to the physical memory and accessed.  Thus, tracking the unmapped
+address regions is just wasteful.  However, because DAMON can deal with some
+level of noise using the adaptive regions adjustment mechanism, tracking every
+mapping is not strictly required but could even incur a high overhead in some
+cases.  That said, too huge unmapped areas inside the monitoring target should
+be removed to not take the time for the adaptive mechanism.</p>
+<p>For the reason, this implementation converts the complex mappings to three
+distinct regions that cover every mapped area of the address space.  The two
+gaps between the three regions are the two biggest unmapped areas in the given
+address space.  The two biggest unmapped areas would be the gap between the
+heap and the uppermost mmap()-ed region, and the gap between the lowermost
+mmap()-ed region and the stack in most of the cases.  Because these gaps are
+exceptionally huge in usual address spaces, excluding these will be sufficient
+to make a reasonable trade-off.  Below shows this in detail:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>&lt;heap&gt;
+&lt;BIG UNMAPPED REGION 1&gt;
+&lt;uppermost mmap()-ed region&gt;
+(small mmap()-ed regions and munmap()-ed regions)
+&lt;lowermost mmap()-ed region&gt;
+&lt;BIG UNMAPPED REGION 2&gt;
+&lt;stack&gt;
+</pre></div>
+</div>
+</section>
+<section id="pte-accessed-bit-based-access-check">
+<h3>PTE Accessed-bit Based Access Check<a class="headerlink" href="#pte-accessed-bit-based-access-check" title="Permalink to this headline">¶</a></h3>
+<p>Both of the implementations for physical and virtual address spaces use PTE
+Accessed-bit for basic access checks.  Only one difference is the way of
+finding the relevant PTE Accessed bit(s) from the address.  While the
+implementation for the virtual address walks the page table for the target task
+of the address, the implementation for the physical address walks every page
+table having a mapping to the address.  In this way, the implementations find
+and clear the bit(s) for next sampling target address and checks whether the
+bit(s) set again after one sampling period.  This could disturb other kernel
+subsystems using the Accessed bits, namely Idle page tracking and the reclaim
+logic.  DAMON does nothing to avoid disturbing Idle page tracking, so handling
+the interference is the responsibility of sysadmins.  However, it solves the
+conflict with the reclaim logic using <code class="docutils literal notranslate"><span class="pre">PG_idle</span></code> and <code class="docutils literal notranslate"><span class="pre">PG_young</span></code> page flags,
+as Idle page tracking does.</p>
+</section>
+</section>
+<section id="address-space-independent-core-mechanisms">
+<h2>Address Space Independent Core Mechanisms<a class="headerlink" href="#address-space-independent-core-mechanisms" title="Permalink to this headline">¶</a></h2>
+<p>Below four sections describe each of the DAMON core mechanisms and the five
+monitoring attributes, <code class="docutils literal notranslate"><span class="pre">sampling</span> <span class="pre">interval</span></code>, <code class="docutils literal notranslate"><span class="pre">aggregation</span> <span class="pre">interval</span></code>,
+<code class="docutils literal notranslate"><span class="pre">update</span> <span class="pre">interval</span></code>, <code class="docutils literal notranslate"><span class="pre">minimum</span> <span class="pre">number</span> <span class="pre">of</span> <span class="pre">regions</span></code>, and <code class="docutils literal notranslate"><span class="pre">maximum</span> <span class="pre">number</span> <span class="pre">of</span>
+<span class="pre">regions</span></code>.</p>
+<section id="access-frequency-monitoring">
+<h3>Access Frequency Monitoring<a class="headerlink" href="#access-frequency-monitoring" title="Permalink to this headline">¶</a></h3>
+<p>The output of DAMON says what pages are how frequently accessed for a given
+duration.  The resolution of the access frequency is controlled by setting
+<code class="docutils literal notranslate"><span class="pre">sampling</span> <span class="pre">interval</span></code> and <code class="docutils literal notranslate"><span class="pre">aggregation</span> <span class="pre">interval</span></code>.  In detail, DAMON checks
+access to each page per <code class="docutils literal notranslate"><span class="pre">sampling</span> <span class="pre">interval</span></code> and aggregates the results.  In
+other words, counts the number of the accesses to each page.  After each
+<code class="docutils literal notranslate"><span class="pre">aggregation</span> <span class="pre">interval</span></code> passes, DAMON calls callback functions that previously
+registered by users so that users can read the aggregated results and then
+clears the results.  This can be described in below simple pseudo-code:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>while monitoring_on:
+    for page in monitoring_target:
+        if accessed(page):
+            nr_accesses[page] += 1
+    if time() % aggregation_interval == 0:
+        for callback in user_registered_callbacks:
+            callback(monitoring_target, nr_accesses)
+        for page in monitoring_target:
+            nr_accesses[page] = 0
+    sleep(sampling interval)
+</pre></div>
+</div>
+<p>The monitoring overhead of this mechanism will arbitrarily increase as the
+size of the target workload grows.</p>
+</section>
+<section id="region-based-sampling">
+<h3>Region Based Sampling<a class="headerlink" href="#region-based-sampling" title="Permalink to this headline">¶</a></h3>
+<p>To avoid the unbounded increase of the overhead, DAMON groups adjacent pages
+that assumed to have the same access frequencies into a region.  As long as the
+assumption (pages in a region have the same access frequencies) is kept, only
+one page in the region is required to be checked.  Thus, for each <code class="docutils literal notranslate"><span class="pre">sampling</span>
+<span class="pre">interval</span></code>, DAMON randomly picks one page in each region, waits for one
+<code class="docutils literal notranslate"><span class="pre">sampling</span> <span class="pre">interval</span></code>, checks whether the page is accessed meanwhile, and
+increases the access frequency of the region if so.  Therefore, the monitoring
+overhead is controllable by setting the number of regions.  DAMON allows users
+to set the minimum and the maximum number of regions for the trade-off.</p>
+<p>This scheme, however, cannot preserve the quality of the output if the
+assumption is not guaranteed.</p>
+</section>
+<section id="adaptive-regions-adjustment">
+<h3>Adaptive Regions Adjustment<a class="headerlink" href="#adaptive-regions-adjustment" title="Permalink to this headline">¶</a></h3>
+<p>Even somehow the initial monitoring target regions are well constructed to
+fulfill the assumption (pages in same region have similar access frequencies),
+the data access pattern can be dynamically changed.  This will result in low
+monitoring quality.  To keep the assumption as much as possible, DAMON
+adaptively merges and splits each region based on their access frequency.</p>
+<p>For each <code class="docutils literal notranslate"><span class="pre">aggregation</span> <span class="pre">interval</span></code>, it compares the access frequencies of
+adjacent regions and merges those if the frequency difference is small.  Then,
+after it reports and clears the aggregated access frequency of each region, it
+splits each region into two or three regions if the total number of regions
+will not exceed the user-specified maximum number of regions after the split.</p>
+<p>In this way, DAMON provides its best-effort quality and minimal overhead while
+keeping the bounds users set for their trade-off.</p>
+</section>
+<section id="dynamic-target-space-updates-handling">
+<h3>Dynamic Target Space Updates Handling<a class="headerlink" href="#dynamic-target-space-updates-handling" title="Permalink to this headline">¶</a></h3>
+<p>The monitoring target address range could dynamically changed.  For example,
+virtual memory could be dynamically mapped and unmapped.  Physical memory could
+be hot-plugged.</p>
+<p>As the changes could be quite frequent in some cases, DAMON allows the
+monitoring operations to check dynamic changes including memory mapping changes
+and applies it to monitoring operations-related data structures such as the
+abstracted monitoring target memory area only for each of a user-specified time
+interval (<code class="docutils literal notranslate"><span class="pre">update</span> <span class="pre">interval</span></code>).</p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Design</a><ul>
+<li><a class="reference internal" href="#configurable-layers">Configurable Layers</a></li>
+<li><a class="reference internal" href="#reference-implementations-of-address-space-specific-monitoring-operations">Reference Implementations of Address Space Specific Monitoring Operations</a><ul>
+<li><a class="reference internal" href="#vma-based-target-address-range-construction">VMA-based Target Address Range Construction</a></li>
+<li><a class="reference internal" href="#pte-accessed-bit-based-access-check">PTE Accessed-bit Based Access Check</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#address-space-independent-core-mechanisms">Address Space Independent Core Mechanisms</a><ul>
+<li><a class="reference internal" href="#access-frequency-monitoring">Access Frequency Monitoring</a></li>
+<li><a class="reference internal" href="#region-based-sampling">Region Based Sampling</a></li>
+<li><a class="reference internal" href="#adaptive-regions-adjustment">Adaptive Regions Adjustment</a></li>
+<li><a class="reference internal" href="#dynamic-target-space-updates-handling">Dynamic Target Space Updates Handling</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/mm/damon/design.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/mm/damon/design.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

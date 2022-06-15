@@ -1,0 +1,233 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>EFI Real Time Clock driver &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="IPF Machine Check (MC) error inject tool" href="err_inject.html" />
+    <link rel="prev" title="Memory Attribute Aliasing on IA-64" href="aliasing.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="efi-real-time-clock-driver">
+<h1>EFI Real Time Clock driver<a class="headerlink" href="#efi-real-time-clock-driver" title="Permalink to this headline">¶</a></h1>
+<ol class="upperalpha simple" start="19">
+<li><p>Eranian &lt;<a class="reference external" href="mailto:eranian&#37;&#52;&#48;hpl&#46;hp&#46;com">eranian<span>&#64;</span>hpl<span>&#46;</span>hp<span>&#46;</span>com</a>&gt;</p></li>
+</ol>
+<p>March 2000</p>
+<section id="introduction">
+<h2>1. Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>This document describes the efirtc.c driver has provided for
+the IA-64 platform.</p>
+<p>The purpose of this driver is to supply an API for kernel and user applications
+to get access to the Time Service offered by EFI version 0.92.</p>
+<p>EFI provides 4 calls one can make once the OS is booted: GetTime(),
+SetTime(), GetWakeupTime(), SetWakeupTime() which are all supported by this
+driver. We describe those calls as well the design of the driver in the
+following sections.</p>
+</section>
+<section id="design-decisions">
+<h2>2. Design Decisions<a class="headerlink" href="#design-decisions" title="Permalink to this headline">¶</a></h2>
+<p>The original ideas was to provide a very simple driver to get access to,
+at first, the time of day service. This is required in order to access, in a
+portable way, the CMOS clock. A program like /sbin/hwclock uses such a clock
+to initialize the system view of the time during boot.</p>
+<p>Because we wanted to minimize the impact on existing user-level apps using
+the CMOS clock, we decided to expose an API that was very similar to the one
+used today with the legacy RTC driver (driver/char/rtc.c). However, because
+EFI provides a simpler services, not all ioctl() are available. Also
+new ioctl()s have been introduced for things that EFI provides but not the
+legacy.</p>
+<p>EFI uses a slightly different way of representing the time, noticeably
+the reference date is different. Year is the using the full 4-digit format.
+The Epoch is January 1st 1998. For backward compatibility reasons we don’t
+expose this new way of representing time. Instead we use something very
+similar to the struct tm, i.e. struct rtc_time, as used by hwclock.
+One of the reasons for doing it this way is to allow for EFI to still evolve
+without necessarily impacting any of the user applications. The decoupling
+enables flexibility and permits writing wrapper code is ncase things change.</p>
+<p>The driver exposes two interfaces, one via the device file and a set of
+ioctl()s. The other is read-only via the /proc filesystem.</p>
+<p>As of today we don’t offer a /proc/sys interface.</p>
+<p>To allow for a uniform interface between the legacy RTC and EFI time service,
+we have created the include/linux/rtc.h header file to contain only the
+“public” API of the two drivers.  The specifics of the legacy RTC are still
+in include/linux/mc146818rtc.h.</p>
+</section>
+<section id="time-of-day-service">
+<h2>3. Time of day service<a class="headerlink" href="#time-of-day-service" title="Permalink to this headline">¶</a></h2>
+<p>The part of the driver gives access to the time of day service of EFI.
+Two ioctl()s, compatible with the legacy RTC calls:</p>
+<blockquote>
+<div><p>Read the CMOS clock:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ioctl(d, RTC_RD_TIME, &amp;rtc);
+</pre></div>
+</div>
+<p>Write the CMOS clock:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ioctl(d, RTC_SET_TIME, &amp;rtc);
+</pre></div>
+</div>
+</div></blockquote>
+<p>The rtc is a pointer to a data structure defined in rtc.h which is close
+to a struct tm:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct rtc_time {
+        int tm_sec;
+        int tm_min;
+        int tm_hour;
+        int tm_mday;
+        int tm_mon;
+        int tm_year;
+        int tm_wday;
+        int tm_yday;
+        int tm_isdst;
+};
+</pre></div>
+</div>
+<p>The driver takes care of converting back an forth between the EFI time and
+this format.</p>
+<p>Those two ioctl()s can be exercised with the hwclock command:</p>
+<p>For reading:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># /sbin/hwclock --show
+Mon Mar  6 15:32:32 2000  -0.910248 seconds
+</pre></div>
+</div>
+<p>For setting:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># /sbin/hwclock --systohc
+</pre></div>
+</div>
+<p>Root privileges are required to be able to set the time of day.</p>
+</section>
+<section id="wakeup-alarm-service">
+<h2>4. Wakeup Alarm service<a class="headerlink" href="#wakeup-alarm-service" title="Permalink to this headline">¶</a></h2>
+<p>EFI provides an API by which one can program when a machine should wakeup,
+i.e. reboot. This is very different from the alarm provided by the legacy
+RTC which is some kind of interval timer alarm. For this reason we don’t use
+the same ioctl()s to get access to the service. Instead we have
+introduced 2 news ioctl()s to the interface of an RTC.</p>
+<p>We have added 2 new ioctl()s that are specific to the EFI driver:</p>
+<blockquote>
+<div><p>Read the current state of the alarm:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ioctl(d, RTC_WKALM_RD, &amp;wkt)
+</pre></div>
+</div>
+<p>Set the alarm or change its status:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ioctl(d, RTC_WKALM_SET, &amp;wkt)
+</pre></div>
+</div>
+</div></blockquote>
+<p>The wkt structure encapsulates a struct rtc_time + 2 extra fields to get
+status information:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct rtc_wkalrm {
+
+        unsigned char enabled; /* =1 if alarm is enabled */
+        unsigned char pending; /* =1 if alarm is pending  */
+
+        struct rtc_time time;
+}
+</pre></div>
+</div>
+<p>As of today, none of the existing user-level apps supports this feature.
+However writing such a program should be hard by simply using those two
+ioctl().</p>
+<p>Root privileges are required to be able to set the alarm.</p>
+</section>
+<section id="references">
+<h2>5. References<a class="headerlink" href="#references" title="Permalink to this headline">¶</a></h2>
+<p>Checkout the following Web site for more information on EFI:</p>
+<p><a class="reference external" href="http://developer.intel.com/technology/efi/">http://developer.intel.com/technology/efi/</a></p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">EFI Real Time Clock driver</a><ul>
+<li><a class="reference internal" href="#introduction">1. Introduction</a></li>
+<li><a class="reference internal" href="#design-decisions">2. Design Decisions</a></li>
+<li><a class="reference internal" href="#time-of-day-service">3. Time of day service</a></li>
+<li><a class="reference internal" href="#wakeup-alarm-service">4. Wakeup Alarm service</a></li>
+<li><a class="reference internal" href="#references">5. References</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/ia64/efirtc.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/ia64/efirtc.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

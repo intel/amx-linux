@@ -1,0 +1,296 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>通过gdb调试内核和模块 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="内核骇客指南" href="../kernel-hacking/index.html" />
+    <link rel="prev" title="内核地址消毒剂(KASAN)" href="kasan.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <dl class="field-list simple">
+<dt class="field-odd">orphan</dt>
+<dd class="field-odd"><p></p></dd>
+</dl>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../dev-tools/gdb-kernel-debugging.html"><span class="doc">Debugging kernel and modules via gdb</span></a></p>
+</dd>
+<dt class="field-even">Translator</dt>
+<dd class="field-even"><p>高超 gao chao &lt;<a class="reference external" href="mailto:gaochao49&#37;&#52;&#48;huawei&#46;com">gaochao49<span>&#64;</span>huawei<span>&#46;</span>com</a>&gt;</p>
+</dd>
+</dl>
+<section id="gdb">
+<h1>通过gdb调试内核和模块<a class="headerlink" href="#gdb" title="Permalink to this headline">¶</a></h1>
+<p>Kgdb内核调试器、QEMU等虚拟机管理程序或基于JTAG的硬件接口，支持在运行时使用gdb
+调试Linux内核及其模块。Gdb提供了一个强大的python脚本接口，内核也提供了一套
+辅助脚本以简化典型的内核调试步骤。本文档为如何启用和使用这些脚本提供了一个简要的教程。
+此教程基于QEMU/KVM虚拟机，但文中示例也适用于其他gdb stub。</p>
+<section id="id1">
+<h2>环境配置要求<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p>gdb 7.2+ (推荐版本: 7.4+) 且开启python支持 (通常发行版上都已支持)</p></li>
+</ul>
+</section>
+<section id="id2">
+<h2>设置<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<ul>
+<li><p>创建一个QEMU/KVM的linux虚拟机（详情请参考 www.linux-kvm.org 和 www.qemu.org ）。
+对于交叉开发，<a class="reference external" href="https://landley.net/aboriginal/bin">https://landley.net/aboriginal/bin</a> 提供了一些镜像和工具链，
+可以帮助搭建交叉开发环境。</p></li>
+<li><p>编译内核时开启CONFIG_GDB_SCRIPTS，关闭CONFIG_DEBUG_INFO_REDUCED。
+如果架构支持CONFIG_FRAME_POINTER，请保持开启。</p></li>
+<li><p>在guest环境上安装该内核。如有必要，通过在内核command line中添加“nokaslr”来关闭KASLR。
+此外，QEMU允许通过-kernel、-append、-initrd这些命令行选项直接启动内核。
+但这通常仅在不依赖内核模块时才有效。有关此模式的更多详细信息，请参阅QEMU文档。
+在这种情况下，如果架构支持KASLR，应该在禁用CONFIG_RANDOMIZE_BASE的情况下构建内核。</p></li>
+<li><p>启用QEMU/KVM的gdb stub，可以通过如下方式实现</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>在VM启动时，通过在QEMU命令行中添加“-s”参数</p></li>
+</ul>
+</div></blockquote>
+<p>或</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>在运行时通过从QEMU监视控制台发送“gdbserver”</p></li>
+</ul>
+</div></blockquote>
+</li>
+<li><p>切换到/path/to/linux-build(内核源码编译)目录</p></li>
+<li><p>启动gdb：gdb vmlinux</p>
+<p>注意：某些发行版可能会将gdb脚本的自动加载限制在已知的安全目录中。
+如果gdb报告拒绝加载vmlinux-gdb.py（相关命令找不到），请将:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>add-auto-load-safe-path /path/to/linux-build
+</pre></div>
+</div>
+<p>添加到~/.gdbinit。更多详细信息，请参阅gdb帮助信息。</p>
+</li>
+<li><p>连接到已启动的guest环境:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>(gdb) target remote :1234
+</pre></div>
+</div>
+</li>
+</ul>
+</section>
+<section id="linuxgdb">
+<h2>使用Linux提供的gdb脚本的示例<a class="headerlink" href="#linuxgdb" title="Permalink to this headline">¶</a></h2>
+<ul>
+<li><p>加载模块（以及主内核）符号:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>(gdb) lx-symbols
+loading vmlinux
+scanning for modules in /home/user/linux/build
+loading @0xffffffffa0020000: /home/user/linux/build/net/netfilter/xt_tcpudp.ko
+loading @0xffffffffa0016000: /home/user/linux/build/net/netfilter/xt_pkttype.ko
+loading @0xffffffffa0002000: /home/user/linux/build/net/netfilter/xt_limit.ko
+loading @0xffffffffa00ca000: /home/user/linux/build/net/packet/af_packet.ko
+loading @0xffffffffa003c000: /home/user/linux/build/fs/fuse/fuse.ko
+...
+loading @0xffffffffa0000000: /home/user/linux/build/drivers/ata/ata_generic.ko
+</pre></div>
+</div>
+</li>
+<li><p>对一些尚未加载的模块中的函数函数设置断点，例如:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>(gdb) b btrfs_init_sysfs
+Function &quot;btrfs_init_sysfs&quot; not defined.
+Make breakpoint pending on future shared library load? (y or [n]) y
+Breakpoint 1 (btrfs_init_sysfs) pending.
+</pre></div>
+</div>
+</li>
+<li><p>继续执行:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>(gdb) c
+</pre></div>
+</div>
+</li>
+<li><p>加载模块并且能观察到正在加载的符号以及断点命中:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>loading @0xffffffffa0034000: /home/user/linux/build/lib/libcrc32c.ko
+loading @0xffffffffa0050000: /home/user/linux/build/lib/lzo/lzo_compress.ko
+loading @0xffffffffa006e000: /home/user/linux/build/lib/zlib_deflate/zlib_deflate.ko
+loading @0xffffffffa01b1000: /home/user/linux/build/fs/btrfs/btrfs.ko
+
+Breakpoint 1, btrfs_init_sysfs () at /home/user/linux/fs/btrfs/sysfs.c:36
+36              btrfs_kset = kset_create_and_add(&quot;btrfs&quot;, NULL, fs_kobj);
+</pre></div>
+</div>
+</li>
+<li><p>查看内核的日志缓冲区:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>(gdb) lx-dmesg
+[     0.000000] Initializing cgroup subsys cpuset
+[     0.000000] Initializing cgroup subsys cpu
+[     0.000000] Linux version 3.8.0-rc4-dbg+ (...
+[     0.000000] Command line: root=/dev/sda2 resume=/dev/sda1 vga=0x314
+[     0.000000] e820: BIOS-provided physical RAM map:
+[     0.000000] BIOS-e820: [mem 0x0000000000000000-0x000000000009fbff] usable
+[     0.000000] BIOS-e820: [mem 0x000000000009fc00-0x000000000009ffff] reserved
+....
+</pre></div>
+</div>
+</li>
+<li><p>查看当前task struct结构体的字段（仅x86和arm64支持）:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>(gdb) p $lx_current().pid
+$1 = 4998
+(gdb) p $lx_current().comm
+$2 = &quot;modprobe\000\000\000\000\000\000\000&quot;
+</pre></div>
+</div>
+</li>
+<li><p>对当前或指定的CPU使用per-cpu函数:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>(gdb) p $lx_per_cpu(&quot;runqueues&quot;).nr_running
+$3 = 1
+(gdb) p $lx_per_cpu(&quot;runqueues&quot;, 2).nr_running
+$4 = 0
+</pre></div>
+</div>
+</li>
+<li><p>使用container_of查看更多hrtimers信息:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>(gdb) set $next = $lx_per_cpu(&quot;hrtimer_bases&quot;).clock_base[0].active.next
+(gdb) p *$container_of($next, &quot;struct hrtimer&quot;, &quot;node&quot;)
+$5 = {
+  node = {
+    node = {
+      __rb_parent_color = 18446612133355256072,
+      rb_right = 0x0 &lt;irq_stack_union&gt;,
+      rb_left = 0x0 &lt;irq_stack_union&gt;
+    },
+    expires = {
+      tv64 = 1835268000000
+    }
+  },
+  _softexpires = {
+    tv64 = 1835268000000
+  },
+  function = 0xffffffff81078232 &lt;tick_sched_timer&gt;,
+  base = 0xffff88003fd0d6f0,
+  state = 1,
+  start_pid = 0,
+  start_site = 0xffffffff81055c1f &lt;hrtimer_start_range_ns+20&gt;,
+  start_comm = &quot;swapper/2\000\000\000\000\000\000&quot;
+}
+</pre></div>
+</div>
+</li>
+</ul>
+</section>
+<section id="id3">
+<h2>命令和辅助调试功能列表<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h2>
+<p>命令和辅助调试功能可能会随着时间的推移而改进，此文显示的是初始版本的部分示例:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>(gdb) apropos lx
+function lx_current -- Return current task
+function lx_module -- Find module by name and return the module variable
+function lx_per_cpu -- Return per-cpu variable
+function lx_task_by_pid -- Find Linux task by PID and return the task_struct variable
+function lx_thread_info -- Calculate Linux thread_info from task variable
+lx-dmesg -- Print Linux kernel log buffer
+lx-lsmod -- List currently loaded modules
+lx-symbols -- (Re-)load symbols of Linux kernel and currently loaded modules
+</pre></div>
+</div>
+<p>可以通过“help &lt;command-name&gt;”或“help function &lt;function-name&gt;”命令
+获取指定命令或指定调试功能的更多详细信息。</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">通过gdb调试内核和模块</a><ul>
+<li><a class="reference internal" href="#id1">环境配置要求</a></li>
+<li><a class="reference internal" href="#id2">设置</a></li>
+<li><a class="reference internal" href="#linuxgdb">使用Linux提供的gdb脚本的示例</a></li>
+<li><a class="reference internal" href="#id3">命令和辅助调试功能列表</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/dev-tools/gdb-kernel-debugging.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/dev-tools/gdb-kernel-debugging.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

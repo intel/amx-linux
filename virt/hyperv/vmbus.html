@@ -1,0 +1,382 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>VMbus &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Clocks and Timers" href="clocks.html" />
+    <link rel="prev" title="Overview" href="overview.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="vmbus">
+<h1>VMbus<a class="headerlink" href="#vmbus" title="Permalink to this headline">¶</a></h1>
+<p>VMbus is a software construct provided by Hyper-V to guest VMs.  It
+consists of a control path and common facilities used by synthetic
+devices that Hyper-V presents to guest VMs.   The control path is
+used to offer synthetic devices to the guest VM and, in some cases,
+to rescind those devices.   The common facilities include software
+channels for communicating between the device driver in the guest VM
+and the synthetic device implementation that is part of Hyper-V, and
+signaling primitives to allow Hyper-V and the guest to interrupt
+each other.</p>
+<p>VMbus is modeled in Linux as a bus, with the expected /sys/bus/vmbus
+entry in a running Linux guest.  The VMbus driver (drivers/hv/vmbus_drv.c)
+establishes the VMbus control path with the Hyper-V host, then
+registers itself as a Linux bus driver.  It implements the standard
+bus functions for adding and removing devices to/from the bus.</p>
+<p>Most synthetic devices offered by Hyper-V have a corresponding Linux
+device driver.  These devices include:</p>
+<ul class="simple">
+<li><p>SCSI controller</p></li>
+<li><p>NIC</p></li>
+<li><p>Graphics frame buffer</p></li>
+<li><p>Keyboard</p></li>
+<li><p>Mouse</p></li>
+<li><p>PCI device pass-thru</p></li>
+<li><p>Heartbeat</p></li>
+<li><p>Time Sync</p></li>
+<li><p>Shutdown</p></li>
+<li><p>Memory balloon</p></li>
+<li><p>Key/Value Pair (KVP) exchange with Hyper-V</p></li>
+<li><p>Hyper-V online backup (a.k.a. VSS)</p></li>
+</ul>
+<p>Guest VMs may have multiple instances of the synthetic SCSI
+controller, synthetic NIC, and PCI pass-thru devices.  Other
+synthetic devices are limited to a single instance per VM.  Not
+listed above are a small number of synthetic devices offered by
+Hyper-V that are used only by Windows guests and for which Linux
+does not have a driver.</p>
+<p>Hyper-V uses the terms “VSP” and “VSC” in describing synthetic
+devices.  “VSP” refers to the Hyper-V code that implements a
+particular synthetic device, while “VSC” refers to the driver for
+the device in the guest VM.  For example, the Linux driver for the
+synthetic NIC is referred to as “netvsc” and the Linux driver for
+the synthetic SCSI controller is “storvsc”.  These drivers contain
+functions with names like “storvsc_connect_to_vsp”.</p>
+<section id="vmbus-channels">
+<h2>VMbus channels<a class="headerlink" href="#vmbus-channels" title="Permalink to this headline">¶</a></h2>
+<p>An instance of a synthetic device uses VMbus channels to communicate
+between the VSP and the VSC.  Channels are bi-directional and used
+for passing messages.   Most synthetic devices use a single channel,
+but the synthetic SCSI controller and synthetic NIC may use multiple
+channels to achieve higher performance and greater parallelism.</p>
+<p>Each channel consists of two ring buffers.  These are classic ring
+buffers from a university data structures textbook.  If the read
+and writes pointers are equal, the ring buffer is considered to be
+empty, so a full ring buffer always has at least one byte unused.
+The “in” ring buffer is for messages from the Hyper-V host to the
+guest, and the “out” ring buffer is for messages from the guest to
+the Hyper-V host.  In Linux, the “in” and “out” designations are as
+viewed by the guest side.  The ring buffers are memory that is
+shared between the guest and the host, and they follow the standard
+paradigm where the memory is allocated by the guest, with the list
+of GPAs that make up the ring buffer communicated to the host.  Each
+ring buffer consists of a header page (4 Kbytes) with the read and
+write indices and some control flags, followed by the memory for the
+actual ring.  The size of the ring is determined by the VSC in the
+guest and is specific to each synthetic device.   The list of GPAs
+making up the ring is communicated to the Hyper-V host over the
+VMbus control path as a GPA Descriptor List (GPADL).  See function
+vmbus_establish_gpadl().</p>
+<p>Each ring buffer is mapped into contiguous Linux kernel virtual
+space in three parts:  1) the 4 Kbyte header page, 2) the memory
+that makes up the ring itself, and 3) a second mapping of the memory
+that makes up the ring itself.  Because (2) and (3) are contiguous
+in kernel virtual space, the code that copies data to and from the
+ring buffer need not be concerned with ring buffer wrap-around.
+Once a copy operation has completed, the read or write index may
+need to be reset to point back into the first mapping, but the
+actual data copy does not need to be broken into two parts.  This
+approach also allows complex data structures to be easily accessed
+directly in the ring without handling wrap-around.</p>
+<p>On arm64 with page sizes &gt; 4 Kbytes, the header page must still be
+passed to Hyper-V as a 4 Kbyte area.  But the memory for the actual
+ring must be aligned to PAGE_SIZE and have a size that is a multiple
+of PAGE_SIZE so that the duplicate mapping trick can be done.  Hence
+a portion of the header page is unused and not communicated to
+Hyper-V.  This case is handled by vmbus_establish_gpadl().</p>
+<p>Hyper-V enforces a limit on the aggregate amount of guest memory
+that can be shared with the host via GPADLs.  This limit ensures
+that a rogue guest can’t force the consumption of excessive host
+resources.  For Windows Server 2019 and later, this limit is
+approximately 1280 Mbytes.  For versions prior to Windows Server
+2019, the limit is approximately 384 Mbytes.</p>
+</section>
+<section id="vmbus-messages">
+<h2>VMbus messages<a class="headerlink" href="#vmbus-messages" title="Permalink to this headline">¶</a></h2>
+<p>All VMbus messages have a standard header that includes the message
+length, the offset of the message payload, some flags, and a
+transactionID.  The portion of the message after the header is
+unique to each VSP/VSC pair.</p>
+<p>Messages follow one of two patterns:</p>
+<ul class="simple">
+<li><p>Unidirectional:  Either side sends a message and does not
+expect a response message</p></li>
+<li><p>Request/response:  One side (usually the guest) sends a message
+and expects a response</p></li>
+</ul>
+<p>The transactionID (a.k.a. “requestID”) is for matching requests &amp;
+responses.  Some synthetic devices allow multiple requests to be in-
+flight simultaneously, so the guest specifies a transactionID when
+sending a request.  Hyper-V sends back the same transactionID in the
+matching response.</p>
+<p>Messages passed between the VSP and VSC are control messages.  For
+example, a message sent from the storvsc driver might be “execute
+this SCSI command”.   If a message also implies some data transfer
+between the guest and the Hyper-V host, the actual data to be
+transferred may be embedded with the control message, or it may be
+specified as a separate data buffer that the Hyper-V host will
+access as a DMA operation.  The former case is used when the size of
+the data is small and the cost of copying the data to and from the
+ring buffer is minimal.  For example, time sync messages from the
+Hyper-V host to the guest contain the actual time value.  When the
+data is larger, a separate data buffer is used.  In this case, the
+control message contains a list of GPAs that describe the data
+buffer.  For example, the storvsc driver uses this approach to
+specify the data buffers to/from which disk I/O is done.</p>
+<p>Three functions exist to send VMbus messages:</p>
+<ol class="arabic simple">
+<li><p>vmbus_sendpacket():  Control-only messages and messages with
+embedded data – no GPAs</p></li>
+<li><p>vmbus_sendpacket_pagebuffer(): Message with list of GPAs
+identifying data to transfer.  An offset and length is
+associated with each GPA so that multiple discontinuous areas
+of guest memory can be targeted.</p></li>
+<li><p>vmbus_sendpacket_mpb_desc(): Message with list of GPAs
+identifying data to transfer.  A single offset and length is
+associated with a list of GPAs.  The GPAs must describe a
+single logical area of guest memory to be targeted.</p></li>
+</ol>
+<p>Historically, Linux guests have trusted Hyper-V to send well-formed
+and valid messages, and Linux drivers for synthetic devices did not
+fully validate messages.  With the introduction of processor
+technologies that fully encrypt guest memory and that allow the
+guest to not trust the hypervisor (AMD SNP-SEV, Intel TDX), trusting
+the Hyper-V host is no longer a valid assumption.  The drivers for
+VMbus synthetic devices are being updated to fully validate any
+values read from memory that is shared with Hyper-V, which includes
+messages from VMbus devices.  To facilitate such validation,
+messages read by the guest from the “in” ring buffer are copied to a
+temporary buffer that is not shared with Hyper-V.  Validation is
+performed in this temporary buffer without the risk of Hyper-V
+maliciously modifying the message after it is validated but before
+it is used.</p>
+</section>
+<section id="vmbus-interrupts">
+<h2>VMbus interrupts<a class="headerlink" href="#vmbus-interrupts" title="Permalink to this headline">¶</a></h2>
+<p>VMbus provides a mechanism for the guest to interrupt the host when
+the guest has queued new messages in a ring buffer.  The host
+expects that the guest will send an interrupt only when an “out”
+ring buffer transitions from empty to non-empty.  If the guest sends
+interrupts at other times, the host deems such interrupts to be
+unnecessary.  If a guest sends an excessive number of unnecessary
+interrupts, the host may throttle that guest by suspending its
+execution for a few seconds to prevent a denial-of-service attack.</p>
+<p>Similarly, the host will interrupt the guest when it sends a new
+message on the VMbus control path, or when a VMbus channel “in” ring
+buffer transitions from empty to non-empty.  Each CPU in the guest
+may receive VMbus interrupts, so they are best modeled as per-CPU
+interrupts in Linux.  This model works well on arm64 where a single
+per-CPU IRQ is allocated for VMbus.  Since x86/x64 lacks support for
+per-CPU IRQs, an x86 interrupt vector is statically allocated (see
+HYPERVISOR_CALLBACK_VECTOR) across all CPUs and explicitly coded to
+call the VMbus interrupt service routine.  These interrupts are
+visible in /proc/interrupts on the “HYP” line.</p>
+<p>The guest CPU that a VMbus channel will interrupt is selected by the
+guest when the channel is created, and the host is informed of that
+selection.  VMbus devices are broadly grouped into two categories:</p>
+<ol class="arabic simple">
+<li><p>“Slow” devices that need only one VMbus channel.  The devices
+(such as keyboard, mouse, heartbeat, and timesync) generate
+relatively few interrupts.  Their VMbus channels are all
+assigned to interrupt the VMBUS_CONNECT_CPU, which is always
+CPU 0.</p></li>
+<li><p>“High speed” devices that may use multiple VMbus channels for
+higher parallelism and performance.  These devices include the
+synthetic SCSI controller and synthetic NIC.  Their VMbus
+channels interrupts are assigned to CPUs that are spread out
+among the available CPUs in the VM so that interrupts on
+multiple channels can be processed in parallel.</p></li>
+</ol>
+<p>The assignment of VMbus channel interrupts to CPUs is done in the
+function init_vp_index().  This assignment is done outside of the
+normal Linux interrupt affinity mechanism, so the interrupts are
+neither “unmanaged” nor “managed” interrupts.</p>
+<p>The CPU that a VMbus channel will interrupt can be seen in
+/sys/bus/vmbus/devices/&lt;deviceGUID&gt;/ channels/&lt;channelRelID&gt;/cpu.
+When running on later versions of Hyper-V, the CPU can be changed
+by writing a new value to this sysfs entry.  Because the interrupt
+assignment is done outside of the normal Linux affinity mechanism,
+there are no entries in /proc/irq corresponding to individual
+VMbus channel interrupts.</p>
+<p>An online CPU in a Linux guest may not be taken offline if it has
+VMbus channel interrupts assigned to it.  Any such channel
+interrupts must first be manually reassigned to another CPU as
+described above.  When no channel interrupts are assigned to the
+CPU, it can be taken offline.</p>
+<p>When a guest CPU receives a VMbus interrupt from the host, the
+function vmbus_isr() handles the interrupt.  It first checks for
+channel interrupts by calling vmbus_chan_sched(), which looks at a
+bitmap setup by the host to determine which channels have pending
+interrupts on this CPU.  If multiple channels have pending
+interrupts for this CPU, they are processed sequentially.  When all
+channel interrupts have been processed, vmbus_isr() checks for and
+processes any message received on the VMbus control path.</p>
+<p>The VMbus channel interrupt handling code is designed to work
+correctly even if an interrupt is received on a CPU other than the
+CPU assigned to the channel.  Specifically, the code does not use
+CPU-based exclusion for correctness.  In normal operation, Hyper-V
+will interrupt the assigned CPU.  But when the CPU assigned to a
+channel is being changed via sysfs, the guest doesn’t know exactly
+when Hyper-V will make the transition.  The code must work correctly
+even if there is a time lag before Hyper-V starts interrupting the
+new CPU.  See comments in target_cpu_store().</p>
+</section>
+<section id="vmbus-device-creation-deletion">
+<h2>VMbus device creation/deletion<a class="headerlink" href="#vmbus-device-creation-deletion" title="Permalink to this headline">¶</a></h2>
+<p>Hyper-V and the Linux guest have a separate message-passing path
+that is used for synthetic device creation and deletion. This
+path does not use a VMbus channel.  See vmbus_post_msg() and
+vmbus_on_msg_dpc().</p>
+<p>The first step is for the guest to connect to the generic
+Hyper-V VMbus mechanism.  As part of establishing this connection,
+the guest and Hyper-V agree on a VMbus protocol version they will
+use.  This negotiation allows newer Linux kernels to run on older
+Hyper-V versions, and vice versa.</p>
+<p>The guest then tells Hyper-V to “send offers”.  Hyper-V sends an
+offer message to the guest for each synthetic device that the VM
+is configured to have. Each VMbus device type has a fixed GUID
+known as the “class ID”, and each VMbus device instance is also
+identified by a GUID. The offer message from Hyper-V contains
+both GUIDs to uniquely (within the VM) identify the device.
+There is one offer message for each device instance, so a VM with
+two synthetic NICs will get two offers messages with the NIC
+class ID. The ordering of offer messages can vary from boot-to-boot
+and must not be assumed to be consistent in Linux code. Offer
+messages may also arrive long after Linux has initially booted
+because Hyper-V supports adding devices, such as synthetic NICs,
+to running VMs. A new offer message is processed by
+vmbus_process_offer(), which indirectly invokes vmbus_add_channel_work().</p>
+<p>Upon receipt of an offer message, the guest identifies the device
+type based on the class ID, and invokes the correct driver to set up
+the device.  Driver/device matching is performed using the standard
+Linux mechanism.</p>
+<p>The device driver probe function opens the primary VMbus channel to
+the corresponding VSP. It allocates guest memory for the channel
+ring buffers and shares the ring buffer with the Hyper-V host by
+giving the host a list of GPAs for the ring buffer memory.  See
+vmbus_establish_gpadl().</p>
+<p>Once the ring buffer is set up, the device driver and VSP exchange
+setup messages via the primary channel.  These messages may include
+negotiating the device protocol version to be used between the Linux
+VSC and the VSP on the Hyper-V host.  The setup messages may also
+include creating additional VMbus channels, which are somewhat
+mis-named as “sub-channels” since they are functionally
+equivalent to the primary channel once they are created.</p>
+<p>Finally, the device driver may create entries in /dev as with
+any device driver.</p>
+<p>The Hyper-V host can send a “rescind” message to the guest to
+remove a device that was previously offered. Linux drivers must
+handle such a rescind message at any time. Rescinding a device
+invokes the device driver “remove” function to cleanly shut
+down the device and remove it. Once a synthetic device is
+rescinded, neither Hyper-V nor Linux retains any state about
+its previous existence. Such a device might be re-added later,
+in which case it is treated as an entirely new device. See
+vmbus_onoffer_rescind().</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">VMbus</a><ul>
+<li><a class="reference internal" href="#vmbus-channels">VMbus channels</a></li>
+<li><a class="reference internal" href="#vmbus-messages">VMbus messages</a></li>
+<li><a class="reference internal" href="#vmbus-interrupts">VMbus interrupts</a></li>
+<li><a class="reference internal" href="#vmbus-device-creation-deletion">VMbus device creation/deletion</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/virt/hyperv/vmbus.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/virt/hyperv/vmbus.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

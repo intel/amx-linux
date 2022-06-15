@@ -1,0 +1,246 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Perf &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Pointer authentication in AArch64 Linux" href="pointer-authentication.html" />
+    <link rel="prev" title="Memory Tagging Extension (MTE) in AArch64 Linux" href="memory-tagging-extension.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="perf">
+<span id="perf-index"></span><h1>Perf<a class="headerlink" href="#perf" title="Permalink to this headline">¶</a></h1>
+<section id="perf-event-attributes">
+<h2>Perf Event Attributes<a class="headerlink" href="#perf-event-attributes" title="Permalink to this headline">¶</a></h2>
+<dl class="field-list simple">
+<dt class="field-odd">Author</dt>
+<dd class="field-odd"><p>Andrew Murray &lt;<a class="reference external" href="mailto:andrew&#46;murray&#37;&#52;&#48;arm&#46;com">andrew<span>&#46;</span>murray<span>&#64;</span>arm<span>&#46;</span>com</a>&gt;</p>
+</dd>
+<dt class="field-even">Date</dt>
+<dd class="field-even"><p>2019-03-06</p>
+</dd>
+</dl>
+<section id="exclude-user">
+<h3>exclude_user<a class="headerlink" href="#exclude-user" title="Permalink to this headline">¶</a></h3>
+<p>This attribute excludes userspace.</p>
+<p>Userspace always runs at EL0 and thus this attribute will exclude EL0.</p>
+</section>
+<section id="exclude-kernel">
+<h3>exclude_kernel<a class="headerlink" href="#exclude-kernel" title="Permalink to this headline">¶</a></h3>
+<p>This attribute excludes the kernel.</p>
+<p>The kernel runs at EL2 with VHE and EL1 without. Guest kernels always run
+at EL1.</p>
+<p>For the host this attribute will exclude EL1 and additionally EL2 on a VHE
+system.</p>
+<p>For the guest this attribute will exclude EL1. Please note that EL2 is
+never counted within a guest.</p>
+</section>
+<section id="exclude-hv">
+<h3>exclude_hv<a class="headerlink" href="#exclude-hv" title="Permalink to this headline">¶</a></h3>
+<p>This attribute excludes the hypervisor.</p>
+<p>For a VHE host this attribute is ignored as we consider the host kernel to
+be the hypervisor.</p>
+<p>For a non-VHE host this attribute will exclude EL2 as we consider the
+hypervisor to be any code that runs at EL2 which is predominantly used for
+guest/host transitions.</p>
+<p>For the guest this attribute has no effect. Please note that EL2 is
+never counted within a guest.</p>
+</section>
+<section id="exclude-host-exclude-guest">
+<h3>exclude_host / exclude_guest<a class="headerlink" href="#exclude-host-exclude-guest" title="Permalink to this headline">¶</a></h3>
+<p>These attributes exclude the KVM host and guest, respectively.</p>
+<p>The KVM host may run at EL0 (userspace), EL1 (non-VHE kernel) and EL2 (VHE
+kernel or non-VHE hypervisor).</p>
+<p>The KVM guest may run at EL0 (userspace) and EL1 (kernel).</p>
+<p>Due to the overlapping exception levels between host and guests we cannot
+exclusively rely on the PMU’s hardware exception filtering - therefore we
+must enable/disable counting on the entry and exit to the guest. This is
+performed differently on VHE and non-VHE systems.</p>
+<p>For non-VHE systems we exclude EL2 for exclude_host - upon entering and
+exiting the guest we disable/enable the event as appropriate based on the
+exclude_host and exclude_guest attributes.</p>
+<p>For VHE systems we exclude EL1 for exclude_guest and exclude both EL0,EL2
+for exclude_host. Upon entering and exiting the guest we modify the event
+to include/exclude EL0 as appropriate based on the exclude_host and
+exclude_guest attributes.</p>
+<p>The statements above also apply when these attributes are used within a
+non-VHE guest however please note that EL2 is never counted within a guest.</p>
+</section>
+<section id="accuracy">
+<h3>Accuracy<a class="headerlink" href="#accuracy" title="Permalink to this headline">¶</a></h3>
+<p>On non-VHE hosts we enable/disable counters on the entry/exit of host/guest
+transition at EL2 - however there is a period of time between
+enabling/disabling the counters and entering/exiting the guest. We are
+able to eliminate counters counting host events on the boundaries of guest
+entry/exit when counting guest events by filtering out EL2 for
+exclude_host. However when using !exclude_hv there is a small blackout
+window at the guest entry/exit where host events are not captured.</p>
+<p>On VHE systems there are no blackout windows.</p>
+</section>
+</section>
+<section id="perf-userspace-pmu-hardware-counter-access">
+<h2>Perf Userspace PMU Hardware Counter Access<a class="headerlink" href="#perf-userspace-pmu-hardware-counter-access" title="Permalink to this headline">¶</a></h2>
+<section id="overview">
+<h3>Overview<a class="headerlink" href="#overview" title="Permalink to this headline">¶</a></h3>
+<p>The perf userspace tool relies on the PMU to monitor events. It offers an
+abstraction layer over the hardware counters since the underlying
+implementation is cpu-dependent.
+Arm64 allows userspace tools to have access to the registers storing the
+hardware counters’ values directly.</p>
+<p>This targets specifically self-monitoring tasks in order to reduce the overhead
+by directly accessing the registers without having to go through the kernel.</p>
+</section>
+<section id="how-to">
+<h3>How-to<a class="headerlink" href="#how-to" title="Permalink to this headline">¶</a></h3>
+<p>The focus is set on the armv8 PMUv3 which makes sure that the access to the pmu
+registers is enabled and that the userspace has access to the relevant
+information in order to use them.</p>
+<p>In order to have access to the hardware counters, the global sysctl
+kernel/perf_user_access must first be enabled:</p>
+<div class="highlight-sh notranslate"><div class="highlight"><pre><span></span><span class="nb">echo</span> <span class="m">1</span> &gt; /proc/sys/kernel/perf_user_access
+</pre></div>
+</div>
+<p>It is necessary to open the event using the perf tool interface with config1:1
+attr bit set: the sys_perf_event_open syscall returns a fd which can
+subsequently be used with the mmap syscall in order to retrieve a page of memory
+containing information about the event. The PMU driver uses this page to expose
+to the user the hardware counter’s index and other necessary data. Using this
+index enables the user to access the PMU registers using the <cite>mrs</cite> instruction.
+Access to the PMU registers is only valid while the sequence lock is unchanged.
+In particular, the PMSELR_EL0 register is zeroed each time the sequence lock is
+changed.</p>
+<p>The userspace access is supported in libperf using the perf_evsel__mmap()
+and perf_evsel__read() functions. See <a class="reference external" href="https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/tools/lib/perf/tests/test-evsel.c">tools/lib/perf/tests/test-evsel.c</a> for
+an example.</p>
+</section>
+<section id="about-heterogeneous-systems">
+<h3>About heterogeneous systems<a class="headerlink" href="#about-heterogeneous-systems" title="Permalink to this headline">¶</a></h3>
+<p>On heterogeneous systems such as big.LITTLE, userspace PMU counter access can
+only be enabled when the tasks are pinned to a homogeneous subset of cores and
+the corresponding PMU instance is opened by specifying the ‘type’ attribute.
+The use of generic event types is not supported in this case.</p>
+<p>Have a look at <a class="reference external" href="https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/tools/perf/arch/arm64/tests/user-events.c">tools/perf/arch/arm64/tests/user-events.c</a> for an example. It
+can be run using the perf tool to check that the access to the registers works
+correctly from userspace:</p>
+<div class="highlight-sh notranslate"><div class="highlight"><pre><span></span>perf <span class="nb">test</span> -v user
+</pre></div>
+</div>
+</section>
+<section id="about-chained-events-and-counter-sizes">
+<h3>About chained events and counter sizes<a class="headerlink" href="#about-chained-events-and-counter-sizes" title="Permalink to this headline">¶</a></h3>
+<p>The user can request either a 32-bit (config1:0 == 0) or 64-bit (config1:0 == 1)
+counter along with userspace access. The sys_perf_event_open syscall will fail
+if a 64-bit counter is requested and the hardware doesn’t support 64-bit
+counters. Chained events are not supported in conjunction with userspace counter
+access. If a 32-bit counter is requested on hardware with 64-bit counters, then
+userspace must treat the upper 32-bits read from the counter as UNKNOWN. The
+‘pmc_width’ field in the user page will indicate the valid width of the counter
+and should be used to mask the upper bits as needed.</p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Perf</a><ul>
+<li><a class="reference internal" href="#perf-event-attributes">Perf Event Attributes</a><ul>
+<li><a class="reference internal" href="#exclude-user">exclude_user</a></li>
+<li><a class="reference internal" href="#exclude-kernel">exclude_kernel</a></li>
+<li><a class="reference internal" href="#exclude-hv">exclude_hv</a></li>
+<li><a class="reference internal" href="#exclude-host-exclude-guest">exclude_host / exclude_guest</a></li>
+<li><a class="reference internal" href="#accuracy">Accuracy</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#perf-userspace-pmu-hardware-counter-access">Perf Userspace PMU Hardware Counter Access</a><ul>
+<li><a class="reference internal" href="#overview">Overview</a></li>
+<li><a class="reference internal" href="#how-to">How-to</a></li>
+<li><a class="reference internal" href="#about-heterogeneous-systems">About heterogeneous systems</a></li>
+<li><a class="reference internal" href="#about-chained-events-and-counter-sizes">About chained events and counter sizes</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/arm64/perf.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/arm64/perf.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

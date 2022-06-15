@@ -1,0 +1,164 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Deadline IO scheduler tunables &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Inline Encryption" href="inline-encryption.html" />
+    <link rel="prev" title="Data Integrity" href="data-integrity.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="deadline-io-scheduler-tunables">
+<h1>Deadline IO scheduler tunables<a class="headerlink" href="#deadline-io-scheduler-tunables" title="Permalink to this headline">¶</a></h1>
+<p>This little file attempts to document how the deadline io scheduler works.
+In particular, it will clarify the meaning of the exposed tunables that may be
+of interest to power users.</p>
+<section id="selecting-io-schedulers">
+<h2>Selecting IO schedulers<a class="headerlink" href="#selecting-io-schedulers" title="Permalink to this headline">¶</a></h2>
+<p>Refer to <a class="reference internal" href="switching-sched.html"><span class="doc">Switching Scheduler</span></a> for information on
+selecting an io scheduler on a per-device basis.</p>
+</section>
+<hr class="docutils" />
+<section id="read-expire-in-ms">
+<h2>read_expire     (in ms)<a class="headerlink" href="#read-expire-in-ms" title="Permalink to this headline">¶</a></h2>
+<p>The goal of the deadline io scheduler is to attempt to guarantee a start
+service time for a request. As we focus mainly on read latencies, this is
+tunable. When a read request first enters the io scheduler, it is assigned
+a deadline that is the current time + the read_expire value in units of
+milliseconds.</p>
+</section>
+<section id="write-expire-in-ms">
+<h2>write_expire    (in ms)<a class="headerlink" href="#write-expire-in-ms" title="Permalink to this headline">¶</a></h2>
+<p>Similar to read_expire mentioned above, but for writes.</p>
+</section>
+<section id="fifo-batch-number-of-requests">
+<h2>fifo_batch      (number of requests)<a class="headerlink" href="#fifo-batch-number-of-requests" title="Permalink to this headline">¶</a></h2>
+<p>Requests are grouped into <code class="docutils literal notranslate"><span class="pre">batches</span></code> of a particular data direction (read or
+write) which are serviced in increasing sector order.  To limit extra seeking,
+deadline expiries are only checked between batches.  fifo_batch controls the
+maximum number of requests per batch.</p>
+<p>This parameter tunes the balance between per-request latency and aggregate
+throughput.  When low latency is the primary concern, smaller is better (where
+a value of 1 yields first-come first-served behaviour).  Increasing fifo_batch
+generally improves throughput, at the cost of latency variation.</p>
+</section>
+<section id="writes-starved-number-of-dispatches">
+<h2>writes_starved  (number of dispatches)<a class="headerlink" href="#writes-starved-number-of-dispatches" title="Permalink to this headline">¶</a></h2>
+<p>When we have to move requests from the io scheduler queue to the block
+device dispatch queue, we always give a preference to reads. However, we
+don’t want to starve writes indefinitely either. So writes_starved controls
+how many times we give preference to reads over writes. When that has been
+done writes_starved number of times, we dispatch some writes based on the
+same criteria as reads.</p>
+</section>
+<section id="front-merges-bool">
+<h2>front_merges    (bool)<a class="headerlink" href="#front-merges-bool" title="Permalink to this headline">¶</a></h2>
+<p>Sometimes it happens that a request enters the io scheduler that is contiguous
+with a request that is already on the queue. Either it fits in the back of that
+request, or it fits at the front. That is called either a back merge candidate
+or a front merge candidate. Due to the way files are typically laid out,
+back merges are much more common than front merges. For some work loads, you
+may even know that it is a waste of time to spend any time attempting to
+front merge requests. Setting front_merges to 0 disables this functionality.
+Front merges may still occur due to the cached last_merge hint, but since
+that comes at basically 0 cost we leave that on. We simply disable the
+rbtree front sector lookup when the io scheduler merge function is called.</p>
+<p>Nov 11 2002, Jens Axboe &lt;<a class="reference external" href="mailto:jens&#46;axboe&#37;&#52;&#48;oracle&#46;com">jens<span>&#46;</span>axboe<span>&#64;</span>oracle<span>&#46;</span>com</a>&gt;</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Deadline IO scheduler tunables</a><ul>
+<li><a class="reference internal" href="#selecting-io-schedulers">Selecting IO schedulers</a></li>
+<li><a class="reference internal" href="#read-expire-in-ms">read_expire     (in ms)</a></li>
+<li><a class="reference internal" href="#write-expire-in-ms">write_expire    (in ms)</a></li>
+<li><a class="reference internal" href="#fifo-batch-number-of-requests">fifo_batch      (number of requests)</a></li>
+<li><a class="reference internal" href="#writes-starved-number-of-dispatches">writes_starved  (number of dispatches)</a></li>
+<li><a class="reference internal" href="#front-merges-bool">front_merges    (bool)</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/block/deadline-iosched.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/block/deadline-iosched.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

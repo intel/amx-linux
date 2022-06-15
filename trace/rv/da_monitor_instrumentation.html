@@ -1,0 +1,261 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Deterministic Automata Instrumentation &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Monitor wip" href="monitor_wip.html" />
+    <link rel="prev" title="Deterministic Automata Monitor Synthesis" href="da_monitor_synthesis.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="deterministic-automata-instrumentation">
+<h1>Deterministic Automata Instrumentation<a class="headerlink" href="#deterministic-automata-instrumentation" title="Permalink to this headline">¶</a></h1>
+<p>The RV monitor file created by dot2k, with the name “$MODEL_NAME.c”
+includes a section dedicated to instrumentation.</p>
+<p>In the example of the wip.dot monitor created on [1], it will look like:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/*
+ * This is the instrumentation part of the monitor.
+ *
+ * This is the section where manual work is required. Here the kernel events
+ * are translated into model&#39;s event.
+ *
+ */
+static void handle_preempt_disable(void *data, /* XXX: fill header */)
+{
+      da_handle_event_wip(preempt_disable_wip);
+}
+
+static void handle_preempt_enable(void *data, /* XXX: fill header */)
+{
+      da_handle_event_wip(preempt_enable_wip);
+}
+
+static void handle_sched_waking(void *data, /* XXX: fill header */)
+{
+      da_handle_event_wip(sched_waking_wip);
+}
+
+static int enable_wip(void)
+{
+      int retval;
+
+      retval = da_monitor_init_wip();
+      if (retval)
+              return retval;
+
+      rv_attach_trace_probe(&quot;wip&quot;, /* XXX: tracepoint */, handle_preempt_disable);
+      rv_attach_trace_probe(&quot;wip&quot;, /* XXX: tracepoint */, handle_preempt_enable);
+      rv_attach_trace_probe(&quot;wip&quot;, /* XXX: tracepoint */, handle_sched_waking);
+
+      return 0;
+}
+</pre></div>
+</div>
+<p>The comment at the top of the section explains the general idea: the
+instrumentation section translates <em>kernel events</em> into the <em>model’s
+event</em>.</p>
+<section id="tracing-callback-functions">
+<h2>Tracing callback functions<a class="headerlink" href="#tracing-callback-functions" title="Permalink to this headline">¶</a></h2>
+<p>The first three functions are the starting point of the callback <em>handler
+functions</em> for each of the three events from the wip model. The developer
+does not necessarily need to use them: they are just starting points.</p>
+<p>Using the example of:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void handle_preempt_disable(void *data, /* XXX: fill header */)
+{
+       da_handle_event_wip(preempt_disable_wip);
+}
+</pre></div>
+</div>
+<p>The preempt_disable event from the model connects directly to the
+preemptirq:preempt_disable. The preemptirq:preempt_disable event
+has the following signature, from include/trace/events/preemptirq.h:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>TP_PROTO(unsigned long ip, unsigned long parent_ip)
+</pre></div>
+</div>
+<p>Hence, the handle_preempt_disable() function will look like:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void handle_preempt_disable(void *data, unsigned long ip, unsigned long parent_ip)
+</pre></div>
+</div>
+<p>In this case, the kernel event translates one to one with the automata
+event, and indeed, no other change is required for this function.</p>
+<p>The next handler function, handle_preempt_enable() has the same argument
+list from the handle_preempt_disable(). The difference is that the
+preempt_enable event will be used to synchronize the system to the model.</p>
+<p>Initially, the <em>model</em> is placed in the initial state. However, the <em>system</em>
+might or might not be in the initial state. The monitor cannot start
+processing events until it knows that the system has reached the initial state.
+Otherwise, the monitor and the system could be out-of-sync.</p>
+<p>Looking at the automata definition, it is possible to see that the system
+and the model are expected to return to the initial state after the
+preempt_enable execution. Hence, it can be used to synchronize the
+system and the model at the initialization of the monitoring section.</p>
+<p>The start is informed via a special handle function, the
+“da_handle_start_event_$(MONITOR_NAME)(event)”, in this case:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>da_handle_start_event_wip(preempt_enable_wip);
+</pre></div>
+</div>
+<p>So, the callback function will look like:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void handle_preempt_enable(void *data, unsigned long ip, unsigned long parent_ip)
+{
+      da_handle_start_event_wip(preempt_enable_wip);
+}
+</pre></div>
+</div>
+<p>Finally, the “handle_sched_waking()” will look like:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void handle_sched_waking(void *data, struct task_struct *task)
+{
+      da_handle_event_wip(sched_waking_wip);
+}
+</pre></div>
+</div>
+<p>And the explanation is left for the reader as an exercise.</p>
+</section>
+<section id="enable-and-disable-functions">
+<h2>enable and disable functions<a class="headerlink" href="#enable-and-disable-functions" title="Permalink to this headline">¶</a></h2>
+<p>dot2k automatically creates two special functions:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>enable_$(MONITOR_NAME)()
+disable_$(MONITOR_NAME)()
+</pre></div>
+</div>
+<p>These functions are called when the monitor is enabled and disabled,
+respectively.</p>
+<p>They should be used to <em>attach</em> and <em>detach</em> the instrumentation to the running
+system. The developer must add to the relative function all that is needed to
+<em>attach</em> and <em>detach</em> its monitor to the system.</p>
+<p>For the wip case, these functions were named:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>enable_wip()
+disable_wip()
+</pre></div>
+</div>
+<p>But no change was required because: by default, these functions <em>attach</em> and
+<em>detach</em> the tracepoints_to_attach, which was enough for this case.</p>
+</section>
+<section id="instrumentation-helpers">
+<h2>Instrumentation helpers<a class="headerlink" href="#instrumentation-helpers" title="Permalink to this headline">¶</a></h2>
+<p>To complete the instrumentation, the <em>handler functions</em> need to be attached to a
+kernel event, at the monitoring enable phase.</p>
+<p>The RV interface also facilitates this step. For example, the macro “rv_attach_trace_probe()”
+is used to connect the wip model events to the relative kernel event. dot2k automatically
+adds “rv_attach_trace_probe()” function call for each model event in the enable phase, as
+a suggestion.</p>
+<p>For example, from the wip sample model:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>static int enable_wip(void)
+{
+      int retval;
+
+      retval = da_monitor_init_wip();
+      if (retval)
+              return retval;
+
+      rv_attach_trace_probe(&quot;wip&quot;, /* XXX: tracepoint */, handle_preempt_enable);
+      rv_attach_trace_probe(&quot;wip&quot;, /* XXX: tracepoint */, handle_sched_waking);
+      rv_attach_trace_probe(&quot;wip&quot;, /* XXX: tracepoint */, handle_preempt_disable);
+
+      return 0;
+}
+</pre></div>
+</div>
+<p>The probes then need to be detached at the disable phase.</p>
+<p>[1] The wip model is presented in:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Documentation/trace/rv/deterministic_automata.rst
+</pre></div>
+</div>
+<p>The wip monitor is presented in:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Documentation/trace/rv/da_monitor_synthesis.rst
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Deterministic Automata Instrumentation</a><ul>
+<li><a class="reference internal" href="#tracing-callback-functions">Tracing callback functions</a></li>
+<li><a class="reference internal" href="#enable-and-disable-functions">enable and disable functions</a></li>
+<li><a class="reference internal" href="#instrumentation-helpers">Instrumentation helpers</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/trace/rv/da_monitor_instrumentation.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/trace/rv/da_monitor_instrumentation.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

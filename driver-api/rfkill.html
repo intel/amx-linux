@@ -1,0 +1,233 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>rfkill - RF kill switch support &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Support for Serial devices" href="serial/index.html" />
+    <link rel="prev" title="Driver-specific callbacks" href="pldmfw/driver-ops.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="rfkill-rf-kill-switch-support">
+<h1><a class="toc-backref" href="#id1">rfkill - RF kill switch support</a><a class="headerlink" href="#rfkill-rf-kill-switch-support" title="Permalink to this headline">¶</a></h1>
+<div class="contents topic" id="contents">
+<p class="topic-title">Contents</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="#rfkill-rf-kill-switch-support" id="id1">rfkill - RF kill switch support</a></p>
+<ul>
+<li><p><a class="reference internal" href="#introduction" id="id2">Introduction</a></p></li>
+<li><p><a class="reference internal" href="#implementation-details" id="id3">Implementation details</a></p></li>
+<li><p><a class="reference internal" href="#kernel-api" id="id4">Kernel API</a></p></li>
+<li><p><a class="reference internal" href="#userspace-support" id="id5">Userspace support</a></p></li>
+</ul>
+</li>
+</ul>
+</div>
+<section id="introduction">
+<h2><a class="toc-backref" href="#id2">Introduction</a><a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>The rfkill subsystem provides a generic interface for disabling any radio
+transmitter in the system. When a transmitter is blocked, it shall not
+radiate any power.</p>
+<p>The subsystem also provides the ability to react on button presses and
+disable all transmitters of a certain type (or all). This is intended for
+situations where transmitters need to be turned off, for example on
+aircraft.</p>
+<p>The rfkill subsystem has a concept of “hard” and “soft” block, which
+differ little in their meaning (block == transmitters off) but rather in
+whether they can be changed or not:</p>
+<blockquote>
+<div><ul class="simple">
+<li><dl class="simple">
+<dt>hard block</dt><dd><p>read-only radio block that cannot be overridden by software</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>soft block</dt><dd><p>writable radio block (need not be readable) that is set by
+the system software.</p>
+</dd>
+</dl>
+</li>
+</ul>
+</div></blockquote>
+<p>The rfkill subsystem has two parameters, rfkill.default_state and
+rfkill.master_switch_mode, which are documented in
+admin-guide/kernel-parameters.rst.</p>
+</section>
+<section id="implementation-details">
+<h2><a class="toc-backref" href="#id3">Implementation details</a><a class="headerlink" href="#implementation-details" title="Permalink to this headline">¶</a></h2>
+<p>The rfkill subsystem is composed of three main components:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>the rfkill core,</p></li>
+<li><p>the deprecated rfkill-input module (an input layer handler, being
+replaced by userspace policy code) and</p></li>
+<li><p>the rfkill drivers.</p></li>
+</ul>
+</div></blockquote>
+<p>The rfkill core provides API for kernel drivers to register their radio
+transmitter with the kernel, methods for turning it on and off, and letting
+the system know about hardware-disabled states that may be implemented on
+the device.</p>
+<p>The rfkill core code also notifies userspace of state changes, and provides
+ways for userspace to query the current states. See the “Userspace support”
+section below.</p>
+<p>When the device is hard-blocked (either by a call to rfkill_set_hw_state()
+or from query_hw_block), set_block() will be invoked for additional software
+block, but drivers can ignore the method call since they can use the return
+value of the function rfkill_set_hw_state() to sync the software state
+instead of keeping track of calls to set_block(). In fact, drivers should
+use the return value of rfkill_set_hw_state() unless the hardware actually
+keeps track of soft and hard block separately.</p>
+</section>
+<section id="kernel-api">
+<h2><a class="toc-backref" href="#id4">Kernel API</a><a class="headerlink" href="#kernel-api" title="Permalink to this headline">¶</a></h2>
+<p>Drivers for radio transmitters normally implement an rfkill driver.</p>
+<p>Platform drivers might implement input devices if the rfkill button is just
+that, a button. If that button influences the hardware then you need to
+implement an rfkill driver instead. This also applies if the platform provides
+a way to turn on/off the transmitter(s).</p>
+<p>For some platforms, it is possible that the hardware state changes during
+suspend/hibernation, in which case it will be necessary to update the rfkill
+core with the current state at resume time.</p>
+<p>To create an rfkill driver, driver’s Kconfig needs to have:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>depends on RFKILL || !RFKILL
+</pre></div>
+</div>
+<p>to ensure the driver cannot be built-in when rfkill is modular. The !RFKILL
+case allows the driver to be built when rfkill is not configured, in which
+case all rfkill API can still be used but will be provided by static inlines
+which compile to almost nothing.</p>
+<p>Calling rfkill_set_hw_state() when a state change happens is required from
+rfkill drivers that control devices that can be hard-blocked unless they also
+assign the poll_hw_block() callback (then the rfkill core will poll the
+device). Don’t do this unless you cannot get the event in any other way.</p>
+<p>rfkill provides per-switch LED triggers, which can be used to drive LEDs
+according to the switch state (LED_FULL when blocked, LED_OFF otherwise).</p>
+</section>
+<section id="userspace-support">
+<h2><a class="toc-backref" href="#id5">Userspace support</a><a class="headerlink" href="#userspace-support" title="Permalink to this headline">¶</a></h2>
+<p>The recommended userspace interface to use is /dev/rfkill, which is a misc
+character device that allows userspace to obtain and set the state of rfkill
+devices and sets of devices. It also notifies userspace about device addition
+and removal. The API is a simple read/write API that is defined in
+linux/rfkill.h, with one ioctl that allows turning off the deprecated input
+handler in the kernel for the transition period.</p>
+<p>Except for the one ioctl, communication with the kernel is done via read()
+and write() of instances of ‘struct rfkill_event’. In this structure, the
+soft and hard block are properly separated (unlike sysfs, see below) and
+userspace is able to get a consistent snapshot of all rfkill devices in the
+system. Also, it is possible to switch all rfkill drivers (or all drivers of
+a specified type) into a state which also updates the default state for
+hotplugged devices.</p>
+<p>After an application opens /dev/rfkill, it can read the current state of all
+devices. Changes can be obtained by either polling the descriptor for
+hotplug or state change events or by listening for uevents emitted by the
+rfkill core framework.</p>
+<p>Additionally, each rfkill device is registered in sysfs and emits uevents.</p>
+<p>rfkill devices issue uevents (with an action of “change”), with the following
+environment variables set:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>RFKILL_NAME
+RFKILL_STATE
+RFKILL_TYPE
+</pre></div>
+</div>
+<p>The content of these variables corresponds to the “name”, “state” and
+“type” sysfs files explained above.</p>
+<p>For further details consult Documentation/ABI/stable/sysfs-class-rfkill.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">rfkill - RF kill switch support</a><ul>
+<li><a class="reference internal" href="#introduction">Introduction</a></li>
+<li><a class="reference internal" href="#implementation-details">Implementation details</a></li>
+<li><a class="reference internal" href="#kernel-api">Kernel API</a></li>
+<li><a class="reference internal" href="#userspace-support">Userspace support</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/driver-api/rfkill.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/driver-api/rfkill.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

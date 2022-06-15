@@ -1,0 +1,237 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>DMA with ISA and LPC devices &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Memory Management APIs" href="mm-api.html" />
+    <link rel="prev" title="DMA attributes" href="dma-attributes.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="dma-with-isa-and-lpc-devices">
+<h1>DMA with ISA and LPC devices<a class="headerlink" href="#dma-with-isa-and-lpc-devices" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">Author</dt>
+<dd class="field-odd"><p>Pierre Ossman &lt;<a class="reference external" href="mailto:drzeus&#37;&#52;&#48;drzeus&#46;cx">drzeus<span>&#64;</span>drzeus<span>&#46;</span>cx</a>&gt;</p>
+</dd>
+</dl>
+<p>This document describes how to do DMA transfers using the old ISA DMA
+controller. Even though ISA is more or less dead today the LPC bus
+uses the same DMA system so it will be around for quite some time.</p>
+<section id="headers-and-dependencies">
+<h2>Headers and dependencies<a class="headerlink" href="#headers-and-dependencies" title="Permalink to this headline">¶</a></h2>
+<p>To do ISA style DMA you need to include two headers:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#include &lt;linux/dma-mapping.h&gt;
+#include &lt;asm/dma.h&gt;
+</pre></div>
+</div>
+<p>The first is the generic DMA API used to convert virtual addresses to
+bus addresses (see <a class="reference internal" href="dma-api.html"><span class="doc">Dynamic DMA mapping using the generic device</span></a> for details).</p>
+<p>The second contains the routines specific to ISA DMA transfers. Since
+this is not present on all platforms make sure you construct your
+Kconfig to be dependent on ISA_DMA_API (not ISA) so that nobody tries
+to build your driver on unsupported platforms.</p>
+</section>
+<section id="buffer-allocation">
+<h2>Buffer allocation<a class="headerlink" href="#buffer-allocation" title="Permalink to this headline">¶</a></h2>
+<p>The ISA DMA controller has some very strict requirements on which
+memory it can access so extra care must be taken when allocating
+buffers.</p>
+<p>(You usually need a special buffer for DMA transfers instead of
+transferring directly to and from your normal data structures.)</p>
+<p>The DMA-able address space is the lowest 16 MB of _physical_ memory.
+Also the transfer block may not cross page boundaries (which are 64
+or 128 KiB depending on which channel you use).</p>
+<p>In order to allocate a piece of memory that satisfies all these
+requirements you pass the flag GFP_DMA to kmalloc.</p>
+<p>Unfortunately the memory available for ISA DMA is scarce so unless you
+allocate the memory during boot-up it’s a good idea to also pass
+__GFP_RETRY_MAYFAIL and __GFP_NOWARN to make the allocator try a bit harder.</p>
+<p>(This scarcity also means that you should allocate the buffer as
+early as possible and not release it until the driver is unloaded.)</p>
+</section>
+<section id="address-translation">
+<h2>Address translation<a class="headerlink" href="#address-translation" title="Permalink to this headline">¶</a></h2>
+<p>To translate the virtual address to a bus address, use the normal DMA
+API. Do _not_ use isa_virt_to_bus() even though it does the same
+thing. The reason for this is that the function isa_virt_to_bus()
+will require a Kconfig dependency to ISA, not just ISA_DMA_API which
+is really all you need. Remember that even though the DMA controller
+has its origins in ISA it is used elsewhere.</p>
+<p>Note: x86_64 had a broken DMA API when it came to ISA but has since
+been fixed. If your arch has problems then fix the DMA API instead of
+reverting to the ISA functions.</p>
+</section>
+<section id="channels">
+<h2>Channels<a class="headerlink" href="#channels" title="Permalink to this headline">¶</a></h2>
+<p>A normal ISA DMA controller has 8 channels. The lower four are for
+8-bit transfers and the upper four are for 16-bit transfers.</p>
+<p>(Actually the DMA controller is really two separate controllers where
+channel 4 is used to give DMA access for the second controller (0-3).
+This means that of the four 16-bits channels only three are usable.)</p>
+<p>You allocate these in a similar fashion as all basic resources:</p>
+<p>extern int request_dma(unsigned int dmanr, const char * device_id);
+extern void free_dma(unsigned int dmanr);</p>
+<p>The ability to use 16-bit or 8-bit transfers is _not_ up to you as a
+driver author but depends on what the hardware supports. Check your
+specs or test different channels.</p>
+</section>
+<section id="transfer-data">
+<h2>Transfer data<a class="headerlink" href="#transfer-data" title="Permalink to this headline">¶</a></h2>
+<p>Now for the good stuff, the actual DMA transfer. :)</p>
+<p>Before you use any ISA DMA routines you need to claim the DMA lock
+using claim_dma_lock(). The reason is that some DMA operations are
+not atomic so only one driver may fiddle with the registers at a
+time.</p>
+<p>The first time you use the DMA controller you should call
+clear_dma_ff(). This clears an internal register in the DMA
+controller that is used for the non-atomic operations. As long as you
+(and everyone else) uses the locking functions then you only need to
+reset this once.</p>
+<p>Next, you tell the controller in which direction you intend to do the
+transfer using set_dma_mode(). Currently you have the options
+DMA_MODE_READ and DMA_MODE_WRITE.</p>
+<p>Set the address from where the transfer should start (this needs to
+be 16-bit aligned for 16-bit transfers) and how many bytes to
+transfer. Note that it’s _bytes_. The DMA routines will do all the
+required translation to values that the DMA controller understands.</p>
+<p>The final step is enabling the DMA channel and releasing the DMA
+lock.</p>
+<p>Once the DMA transfer is finished (or timed out) you should disable
+the channel again. You should also check get_dma_residue() to make
+sure that all data has been transferred.</p>
+<p>Example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int flags, residue;
+
+flags = claim_dma_lock();
+
+clear_dma_ff();
+
+set_dma_mode(channel, DMA_MODE_WRITE);
+set_dma_addr(channel, phys_addr);
+set_dma_count(channel, num_bytes);
+
+dma_enable(channel);
+
+release_dma_lock(flags);
+
+while (!device_done());
+
+flags = claim_dma_lock();
+
+dma_disable(channel);
+
+residue = dma_get_residue(channel);
+if (residue != 0)
+        printk(KERN_ERR &quot;driver: Incomplete DMA transfer!&quot;
+                &quot; %d bytes left!\n&quot;, residue);
+
+release_dma_lock(flags);
+</pre></div>
+</div>
+</section>
+<section id="suspend-resume">
+<h2>Suspend/resume<a class="headerlink" href="#suspend-resume" title="Permalink to this headline">¶</a></h2>
+<p>It is the driver’s responsibility to make sure that the machine isn’t
+suspended while a DMA transfer is in progress. Also, all DMA settings
+are lost when the system suspends so if your driver relies on the DMA
+controller being in a certain state then you have to restore these
+registers upon resume.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">DMA with ISA and LPC devices</a><ul>
+<li><a class="reference internal" href="#headers-and-dependencies">Headers and dependencies</a></li>
+<li><a class="reference internal" href="#buffer-allocation">Buffer allocation</a></li>
+<li><a class="reference internal" href="#address-translation">Address translation</a></li>
+<li><a class="reference internal" href="#channels">Channels</a></li>
+<li><a class="reference internal" href="#transfer-data">Transfer data</a></li>
+<li><a class="reference internal" href="#suspend-resume">Suspend/resume</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/core-api/dma-isa-lpc.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/core-api/dma-isa-lpc.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

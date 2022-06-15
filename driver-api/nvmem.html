@@ -1,0 +1,289 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>NVMEM Subsystem &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="PARPORT interface documentation" href="parport-lowlevel.html" />
+    <link rel="prev" title="NTB Drivers" href="ntb.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="nvmem-subsystem">
+<h1>NVMEM Subsystem<a class="headerlink" href="#nvmem-subsystem" title="Permalink to this headline">¶</a></h1>
+<blockquote>
+<div><p>Srinivas Kandagatla &lt;<a class="reference external" href="mailto:srinivas&#46;kandagatla&#37;&#52;&#48;linaro&#46;org">srinivas<span>&#46;</span>kandagatla<span>&#64;</span>linaro<span>&#46;</span>org</a>&gt;</p>
+</div></blockquote>
+<p>This document explains the NVMEM Framework along with the APIs provided,
+and how to use it.</p>
+<section id="introduction">
+<h2>1. Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p><em>NVMEM</em> is the abbreviation for Non Volatile Memory layer. It is used to
+retrieve configuration of SOC or Device specific data from non volatile
+memories like eeprom, efuses and so on.</p>
+<p>Before this framework existed, NVMEM drivers like eeprom were stored in
+drivers/misc, where they all had to duplicate pretty much the same code to
+register a sysfs file, allow in-kernel users to access the content of the
+devices they were driving, etc.</p>
+<p>This was also a problem as far as other in-kernel users were involved, since
+the solutions used were pretty much different from one driver to another, there
+was a rather big abstraction leak.</p>
+<p>This framework aims at solve these problems. It also introduces DT
+representation for consumer devices to go get the data they require (MAC
+Addresses, SoC/Revision ID, part numbers, and so on) from the NVMEMs.</p>
+<section id="nvmem-providers">
+<h3>NVMEM Providers<a class="headerlink" href="#nvmem-providers" title="Permalink to this headline">¶</a></h3>
+<p>NVMEM provider refers to an entity that implements methods to initialize, read
+and write the non-volatile memory.</p>
+</section>
+</section>
+<section id="registering-unregistering-the-nvmem-provider">
+<h2>2. Registering/Unregistering the NVMEM provider<a class="headerlink" href="#registering-unregistering-the-nvmem-provider" title="Permalink to this headline">¶</a></h2>
+<p>A NVMEM provider can register with NVMEM core by supplying relevant
+nvmem configuration to nvmem_register(), on success core would return a valid
+nvmem_device pointer.</p>
+<p>nvmem_unregister(nvmem) is used to unregister a previously registered provider.</p>
+<p>For example, a simple nvram case:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>static int brcm_nvram_probe(struct platform_device *pdev)
+{
+      struct nvmem_config config = {
+              .name = &quot;brcm-nvram&quot;,
+              .reg_read = brcm_nvram_read,
+      };
+      ...
+      config.dev = &amp;pdev-&gt;dev;
+      config.priv = priv;
+      config.size = resource_size(res);
+
+      devm_nvmem_register(&amp;config);
+}
+</pre></div>
+</div>
+<p>Users of board files can define and register nvmem cells using the
+nvmem_cell_table struct:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>static struct nvmem_cell_info foo_nvmem_cells[] = {
+      {
+              .name           = &quot;macaddr&quot;,
+              .offset         = 0x7f00,
+              .bytes          = ETH_ALEN,
+      }
+};
+
+static struct nvmem_cell_table foo_nvmem_cell_table = {
+      .nvmem_name             = &quot;i2c-eeprom&quot;,
+      .cells                  = foo_nvmem_cells,
+      .ncells                 = ARRAY_SIZE(foo_nvmem_cells),
+};
+
+nvmem_add_cell_table(&amp;foo_nvmem_cell_table);
+</pre></div>
+</div>
+<p>Additionally it is possible to create nvmem cell lookup entries and register
+them with the nvmem framework from machine code as shown in the example below:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>static struct nvmem_cell_lookup foo_nvmem_lookup = {
+      .nvmem_name             = &quot;i2c-eeprom&quot;,
+      .cell_name              = &quot;macaddr&quot;,
+      .dev_id                 = &quot;foo_mac.0&quot;,
+      .con_id                 = &quot;mac-address&quot;,
+};
+
+nvmem_add_cell_lookups(&amp;foo_nvmem_lookup, 1);
+</pre></div>
+</div>
+<section id="nvmem-consumers">
+<h3>NVMEM Consumers<a class="headerlink" href="#nvmem-consumers" title="Permalink to this headline">¶</a></h3>
+<p>NVMEM consumers are the entities which make use of the NVMEM provider to
+read from and to NVMEM.</p>
+</section>
+</section>
+<section id="nvmem-cell-based-consumer-apis">
+<h2>3. NVMEM cell based consumer APIs<a class="headerlink" href="#nvmem-cell-based-consumer-apis" title="Permalink to this headline">¶</a></h2>
+<p>NVMEM cells are the data entries/fields in the NVMEM.
+The NVMEM framework provides 3 APIs to read/write NVMEM cells:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct nvmem_cell *nvmem_cell_get(struct device *dev, const char *name);
+struct nvmem_cell *devm_nvmem_cell_get(struct device *dev, const char *name);
+
+void nvmem_cell_put(struct nvmem_cell *cell);
+void devm_nvmem_cell_put(struct device *dev, struct nvmem_cell *cell);
+
+void *nvmem_cell_read(struct nvmem_cell *cell, ssize_t *len);
+int nvmem_cell_write(struct nvmem_cell *cell, void *buf, ssize_t len);
+</pre></div>
+</div>
+<p><cite>*nvmem_cell_get()</cite> apis will get a reference to nvmem cell for a given id,
+and nvmem_cell_read/write() can then read or write to the cell.
+Once the usage of the cell is finished the consumer should call
+<cite>*nvmem_cell_put()</cite> to free all the allocation memory for the cell.</p>
+</section>
+<section id="direct-nvmem-device-based-consumer-apis">
+<h2>4. Direct NVMEM device based consumer APIs<a class="headerlink" href="#direct-nvmem-device-based-consumer-apis" title="Permalink to this headline">¶</a></h2>
+<p>In some instances it is necessary to directly read/write the NVMEM.
+To facilitate such consumers NVMEM framework provides below apis:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct nvmem_device *nvmem_device_get(struct device *dev, const char *name);
+struct nvmem_device *devm_nvmem_device_get(struct device *dev,
+                                         const char *name);
+struct nvmem_device *nvmem_device_find(void *data,
+                      int (*match)(struct device *dev, const void *data));
+void nvmem_device_put(struct nvmem_device *nvmem);
+int nvmem_device_read(struct nvmem_device *nvmem, unsigned int offset,
+                    size_t bytes, void *buf);
+int nvmem_device_write(struct nvmem_device *nvmem, unsigned int offset,
+                     size_t bytes, void *buf);
+int nvmem_device_cell_read(struct nvmem_device *nvmem,
+                         struct nvmem_cell_info *info, void *buf);
+int nvmem_device_cell_write(struct nvmem_device *nvmem,
+                          struct nvmem_cell_info *info, void *buf);
+</pre></div>
+</div>
+<p>Before the consumers can read/write NVMEM directly, it should get hold
+of nvmem_controller from one of the <cite>*nvmem_device_get()</cite> api.</p>
+<p>The difference between these apis and cell based apis is that these apis always
+take nvmem_device as parameter.</p>
+</section>
+<section id="releasing-a-reference-to-the-nvmem">
+<h2>5. Releasing a reference to the NVMEM<a class="headerlink" href="#releasing-a-reference-to-the-nvmem" title="Permalink to this headline">¶</a></h2>
+<p>When a consumer no longer needs the NVMEM, it has to release the reference
+to the NVMEM it has obtained using the APIs mentioned in the above section.
+The NVMEM framework provides 2 APIs to release a reference to the NVMEM:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void nvmem_cell_put(struct nvmem_cell *cell);
+void devm_nvmem_cell_put(struct device *dev, struct nvmem_cell *cell);
+void nvmem_device_put(struct nvmem_device *nvmem);
+void devm_nvmem_device_put(struct device *dev, struct nvmem_device *nvmem);
+</pre></div>
+</div>
+<p>Both these APIs are used to release a reference to the NVMEM and
+devm_nvmem_cell_put and devm_nvmem_device_put destroys the devres associated
+with this NVMEM.</p>
+<section id="userspace">
+<h3>Userspace<a class="headerlink" href="#userspace" title="Permalink to this headline">¶</a></h3>
+</section>
+</section>
+<section id="userspace-binary-interface">
+<h2>6. Userspace binary interface<a class="headerlink" href="#userspace-binary-interface" title="Permalink to this headline">¶</a></h2>
+<p>Userspace can read/write the raw NVMEM file located at:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/sys/bus/nvmem/devices/*/nvmem
+</pre></div>
+</div>
+<p>ex:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>hexdump /sys/bus/nvmem/devices/qfprom0/nvmem
+
+0000000 0000 0000 0000 0000 0000 0000 0000 0000
+*
+00000a0 db10 2240 0000 e000 0c00 0c00 0000 0c00
+0000000 0000 0000 0000 0000 0000 0000 0000 0000
+...
+*
+0001000
+</pre></div>
+</div>
+</section>
+<section id="devicetree-binding">
+<h2>7. DeviceTree Binding<a class="headerlink" href="#devicetree-binding" title="Permalink to this headline">¶</a></h2>
+<p>See Documentation/devicetree/bindings/nvmem/nvmem.txt</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">NVMEM Subsystem</a><ul>
+<li><a class="reference internal" href="#introduction">1. Introduction</a><ul>
+<li><a class="reference internal" href="#nvmem-providers">NVMEM Providers</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#registering-unregistering-the-nvmem-provider">2. Registering/Unregistering the NVMEM provider</a><ul>
+<li><a class="reference internal" href="#nvmem-consumers">NVMEM Consumers</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#nvmem-cell-based-consumer-apis">3. NVMEM cell based consumer APIs</a></li>
+<li><a class="reference internal" href="#direct-nvmem-device-based-consumer-apis">4. Direct NVMEM device based consumer APIs</a></li>
+<li><a class="reference internal" href="#releasing-a-reference-to-the-nvmem">5. Releasing a reference to the NVMEM</a><ul>
+<li><a class="reference internal" href="#userspace">Userspace</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#userspace-binary-interface">6. Userspace binary interface</a></li>
+<li><a class="reference internal" href="#devicetree-binding">7. DeviceTree Binding</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/driver-api/nvmem.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/driver-api/nvmem.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

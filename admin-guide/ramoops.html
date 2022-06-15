@@ -1,0 +1,262 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Ramoops oops/panic logger &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Dynamic debug" href="dynamic-debug-howto.html" />
+    <link rel="prev" title="Tainted kernels" href="tainted-kernels.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="ramoops-oops-panic-logger">
+<h1>Ramoops oops/panic logger<a class="headerlink" href="#ramoops-oops-panic-logger" title="Permalink to this headline">¶</a></h1>
+<p>Sergiu Iordache &lt;<a class="reference external" href="mailto:sergiu&#37;&#52;&#48;chromium&#46;org">sergiu<span>&#64;</span>chromium<span>&#46;</span>org</a>&gt;</p>
+<p>Updated: 10 Feb 2021</p>
+<section id="introduction">
+<h2>Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>Ramoops is an oops/panic logger that writes its logs to RAM before the system
+crashes. It works by logging oopses and panics in a circular buffer. Ramoops
+needs a system with persistent RAM so that the content of that area can
+survive after a restart.</p>
+</section>
+<section id="ramoops-concepts">
+<h2>Ramoops concepts<a class="headerlink" href="#ramoops-concepts" title="Permalink to this headline">¶</a></h2>
+<p>Ramoops uses a predefined memory area to store the dump. The start and size
+and type of the memory area are set using three variables:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">mem_address</span></code> for the start</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">mem_size</span></code> for the size. The memory size will be rounded down to a
+power of two.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">mem_type</span></code> to specify if the memory type (default is pgprot_writecombine).</p></li>
+</ul>
+</div></blockquote>
+<p>Typically the default value of <code class="docutils literal notranslate"><span class="pre">mem_type=0</span></code> should be used as that sets the pstore
+mapping to pgprot_writecombine. Setting <code class="docutils literal notranslate"><span class="pre">mem_type=1</span></code> attempts to use
+<code class="docutils literal notranslate"><span class="pre">pgprot_noncached</span></code>, which only works on some platforms. This is because pstore
+depends on atomic operations. At least on ARM, pgprot_noncached causes the
+memory to be mapped strongly ordered, and atomic operations on strongly ordered
+memory are implementation defined, and won’t work on many ARMs such as omaps.
+Setting <code class="docutils literal notranslate"><span class="pre">mem_type=2</span></code> attempts to treat the memory region as normal memory,
+which enables full cache on it. This can improve the performance.</p>
+<p>The memory area is divided into <code class="docutils literal notranslate"><span class="pre">record_size</span></code> chunks (also rounded down to
+power of two) and each kmesg dump writes a <code class="docutils literal notranslate"><span class="pre">record_size</span></code> chunk of
+information.</p>
+<p>Limiting which kinds of kmsg dumps are stored can be controlled via
+the <code class="docutils literal notranslate"><span class="pre">max_reason</span></code> value, as defined in include/linux/kmsg_dump.h’s
+<code class="docutils literal notranslate"><span class="pre">enum</span> <span class="pre">kmsg_dump_reason</span></code>. For example, to store both Oopses and Panics,
+<code class="docutils literal notranslate"><span class="pre">max_reason</span></code> should be set to 2 (KMSG_DUMP_OOPS), to store only Panics
+<code class="docutils literal notranslate"><span class="pre">max_reason</span></code> should be set to 1 (KMSG_DUMP_PANIC). Setting this to 0
+(KMSG_DUMP_UNDEF), means the reason filtering will be controlled by the
+<code class="docutils literal notranslate"><span class="pre">printk.always_kmsg_dump</span></code> boot param: if unset, it’ll be KMSG_DUMP_OOPS,
+otherwise KMSG_DUMP_MAX.</p>
+<p>The module uses a counter to record multiple dumps but the counter gets reset
+on restart (i.e. new dumps after the restart will overwrite old ones).</p>
+<p>Ramoops also supports software ECC protection of persistent memory regions.
+This might be useful when a hardware reset was used to bring the machine back
+to life (i.e. a watchdog triggered). In such cases, RAM may be somewhat
+corrupt, but usually it is restorable.</p>
+</section>
+<section id="setting-the-parameters">
+<h2>Setting the parameters<a class="headerlink" href="#setting-the-parameters" title="Permalink to this headline">¶</a></h2>
+<p>Setting the ramoops parameters can be done in several different manners:</p>
+<blockquote>
+<div><p>A. Use the module parameters (which have the names of the variables described
+as before). For quick debugging, you can also reserve parts of memory during
+boot and then use the reserved memory for ramoops. For example, assuming a
+machine with &gt; 128 MB of memory, the following kernel command line will tell
+the kernel to use only the first 128 MB of memory, and place ECC-protected
+ramoops region at 128 MB boundary:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>mem=128M ramoops.mem_address=0x8000000 ramoops.ecc=1
+</pre></div>
+</div>
+<p>B. Use Device Tree bindings, as described in
+<code class="docutils literal notranslate"><span class="pre">Documentation/devicetree/bindings/reserved-memory/ramoops.yaml</span></code>.
+For example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>reserved-memory {
+        #address-cells = &lt;2&gt;;
+        #size-cells = &lt;2&gt;;
+        ranges;
+
+        ramoops@8f000000 {
+                compatible = &quot;ramoops&quot;;
+                reg = &lt;0 0x8f000000 0 0x100000&gt;;
+                record-size = &lt;0x4000&gt;;
+                console-size = &lt;0x4000&gt;;
+        };
+};
+</pre></div>
+</div>
+<p>C. Use a platform device and set the platform data. The parameters can then
+be set through that platform data. An example of doing that is:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;linux/pstore_ram.h&gt;</span><span class="cp"></span>
+<span class="p">[...]</span><span class="w"></span>
+
+<span class="k">static</span><span class="w"> </span><span class="k">struct</span> <span class="nc">ramoops_platform_data</span><span class="w"> </span><span class="n">ramoops_data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">      </span><span class="p">.</span><span class="n">mem_size</span><span class="w">               </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;</span><span class="p">...</span><span class="o">&gt;</span><span class="p">,</span><span class="w"></span>
+<span class="w">      </span><span class="p">.</span><span class="n">mem_address</span><span class="w">            </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;</span><span class="p">...</span><span class="o">&gt;</span><span class="p">,</span><span class="w"></span>
+<span class="w">      </span><span class="p">.</span><span class="n">mem_type</span><span class="w">               </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;</span><span class="p">...</span><span class="o">&gt;</span><span class="p">,</span><span class="w"></span>
+<span class="w">      </span><span class="p">.</span><span class="n">record_size</span><span class="w">            </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;</span><span class="p">...</span><span class="o">&gt;</span><span class="p">,</span><span class="w"></span>
+<span class="w">      </span><span class="p">.</span><span class="n">max_reason</span><span class="w">             </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;</span><span class="p">...</span><span class="o">&gt;</span><span class="p">,</span><span class="w"></span>
+<span class="w">      </span><span class="p">.</span><span class="n">ecc</span><span class="w">                    </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;</span><span class="p">...</span><span class="o">&gt;</span><span class="p">,</span><span class="w"></span>
+<span class="p">};</span><span class="w"></span>
+
+<span class="k">static</span><span class="w"> </span><span class="k">struct</span> <span class="nc">platform_device</span><span class="w"> </span><span class="n">ramoops_dev</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">      </span><span class="p">.</span><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;ramoops&quot;</span><span class="p">,</span><span class="w"></span>
+<span class="w">      </span><span class="p">.</span><span class="n">dev</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">              </span><span class="p">.</span><span class="n">platform_data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">ramoops_data</span><span class="p">,</span><span class="w"></span>
+<span class="w">      </span><span class="p">},</span><span class="w"></span>
+<span class="p">};</span><span class="w"></span>
+
+<span class="p">[...</span><span class="w"> </span><span class="n">inside</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="n">function</span><span class="w"> </span><span class="p">...]</span><span class="w"></span>
+<span class="kt">int</span><span class="w"> </span><span class="n">ret</span><span class="p">;</span><span class="w"></span>
+
+<span class="n">ret</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">platform_device_register</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ramoops_dev</span><span class="p">);</span><span class="w"></span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">ret</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">      </span><span class="n">printk</span><span class="p">(</span><span class="n">KERN_ERR</span><span class="w"> </span><span class="s">&quot;unable to register platform device</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">);</span><span class="w"></span>
+<span class="w">      </span><span class="k">return</span><span class="w"> </span><span class="n">ret</span><span class="p">;</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+</div></blockquote>
+<p>You can specify either RAM memory or peripheral devices’ memory. However, when
+specifying RAM, be sure to reserve the memory by issuing memblock_reserve()
+very early in the architecture code, e.g.:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#include &lt;linux/memblock.h&gt;
+
+memblock_reserve(ramoops_data.mem_address, ramoops_data.mem_size);
+</pre></div>
+</div>
+</section>
+<section id="dump-format">
+<h2>Dump format<a class="headerlink" href="#dump-format" title="Permalink to this headline">¶</a></h2>
+<p>The data dump begins with a header, currently defined as <code class="docutils literal notranslate"><span class="pre">====</span></code> followed by a
+timestamp and a new line. The dump then continues with the actual data.</p>
+</section>
+<section id="reading-the-data">
+<h2>Reading the data<a class="headerlink" href="#reading-the-data" title="Permalink to this headline">¶</a></h2>
+<p>The dump data can be read from the pstore filesystem. The format for these
+files is <code class="docutils literal notranslate"><span class="pre">dmesg-ramoops-N</span></code>, where N is the record number in memory. To delete
+a stored record from RAM, simply unlink the respective pstore file.</p>
+</section>
+<section id="persistent-function-tracing">
+<h2>Persistent function tracing<a class="headerlink" href="#persistent-function-tracing" title="Permalink to this headline">¶</a></h2>
+<p>Persistent function tracing might be useful for debugging software or hardware
+related hangs. The functions call chain log is stored in a <code class="docutils literal notranslate"><span class="pre">ftrace-ramoops</span></code>
+file. Here is an example of usage:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># mount -t debugfs debugfs /sys/kernel/debug/
+# echo 1 &gt; /sys/kernel/debug/pstore/record_ftrace
+# reboot -f
+[...]
+# mount -t pstore pstore /mnt/
+# tail /mnt/ftrace-ramoops
+0 ffffffff8101ea64  ffffffff8101bcda  native_apic_mem_read &lt;- disconnect_bsp_APIC+0x6a/0xc0
+0 ffffffff8101ea44  ffffffff8101bcf6  native_apic_mem_write &lt;- disconnect_bsp_APIC+0x86/0xc0
+0 ffffffff81020084  ffffffff8101a4b5  hpet_disable &lt;- native_machine_shutdown+0x75/0x90
+0 ffffffff81005f94  ffffffff8101a4bb  iommu_shutdown_noop &lt;- native_machine_shutdown+0x7b/0x90
+0 ffffffff8101a6a1  ffffffff8101a437  native_machine_emergency_restart &lt;- native_machine_restart+0x37/0x40
+0 ffffffff811f9876  ffffffff8101a73a  acpi_reboot &lt;- native_machine_emergency_restart+0xaa/0x1e0
+0 ffffffff8101a514  ffffffff8101a772  mach_reboot_fixups &lt;- native_machine_emergency_restart+0xe2/0x1e0
+0 ffffffff811d9c54  ffffffff8101a7a0  __const_udelay &lt;- native_machine_emergency_restart+0x110/0x1e0
+0 ffffffff811d9c34  ffffffff811d9c80  __delay &lt;- __const_udelay+0x30/0x40
+0 ffffffff811d9d14  ffffffff811d9c3f  delay_tsc &lt;- __delay+0xf/0x20
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Ramoops oops/panic logger</a><ul>
+<li><a class="reference internal" href="#introduction">Introduction</a></li>
+<li><a class="reference internal" href="#ramoops-concepts">Ramoops concepts</a></li>
+<li><a class="reference internal" href="#setting-the-parameters">Setting the parameters</a></li>
+<li><a class="reference internal" href="#dump-format">Dump format</a></li>
+<li><a class="reference internal" href="#reading-the-data">Reading the data</a></li>
+<li><a class="reference internal" href="#persistent-function-tracing">Persistent function tracing</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/admin-guide/ramoops.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/admin-guide/ramoops.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

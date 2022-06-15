@@ -1,0 +1,263 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Driver for PXA25x LCD controller &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="s3fb - fbdev driver for S3 Trio/Virge chips" href="s3fb.html" />
+    <link rel="prev" title="What is pvr2fb?" href="pvr2fb.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="driver-for-pxa25x-lcd-controller">
+<h1>Driver for PXA25x LCD controller<a class="headerlink" href="#driver-for-pxa25x-lcd-controller" title="Permalink to this headline">¶</a></h1>
+<p>The driver supports the following options, either via
+options=&lt;OPTIONS&gt; when modular or video=pxafb:&lt;OPTIONS&gt; when built in.</p>
+<p>For example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>modprobe pxafb options=vmem:2M,mode:640x480-8,passive
+</pre></div>
+</div>
+<p>or on the kernel command line:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>video=pxafb:vmem:2M,mode:640x480-8,passive
+</pre></div>
+</div>
+<p>vmem: VIDEO_MEM_SIZE</p>
+<blockquote>
+<div><p>Amount of video memory to allocate (can be suffixed with K or M
+for kilobytes or megabytes)</p>
+</div></blockquote>
+<p>mode:XRESxYRES[-BPP]</p>
+<blockquote>
+<div><p>XRES == LCCR1_PPL + 1</p>
+<p>YRES == LLCR2_LPP + 1</p>
+<blockquote>
+<div><p>The resolution of the display in pixels</p>
+</div></blockquote>
+<p>BPP == The bit depth. Valid values are 1, 2, 4, 8 and 16.</p>
+</div></blockquote>
+<p>pixclock:PIXCLOCK</p>
+<blockquote>
+<div><p>Pixel clock in picoseconds</p>
+</div></blockquote>
+<p>left:LEFT == LCCR1_BLW + 1</p>
+<p>right:RIGHT == LCCR1_ELW + 1</p>
+<p>hsynclen:HSYNC == LCCR1_HSW + 1</p>
+<p>upper:UPPER == LCCR2_BFW</p>
+<p>lower:LOWER == LCCR2_EFR</p>
+<p>vsynclen:VSYNC == LCCR2_VSW + 1</p>
+<blockquote>
+<div><p>Display margins and sync times</p>
+</div></blockquote>
+<p>color | mono =&gt; LCCR0_CMS</p>
+<blockquote>
+<div><p>umm…</p>
+</div></blockquote>
+<p>active | passive =&gt; LCCR0_PAS</p>
+<blockquote>
+<div><p>Active (TFT) or Passive (STN) display</p>
+</div></blockquote>
+<p>single | dual =&gt; LCCR0_SDS</p>
+<blockquote>
+<div><p>Single or dual panel passive display</p>
+</div></blockquote>
+<p>4pix | 8pix =&gt; LCCR0_DPD</p>
+<blockquote>
+<div><p>4 or 8 pixel monochrome single panel data</p>
+</div></blockquote>
+<p>hsync:HSYNC, vsync:VSYNC</p>
+<blockquote>
+<div><p>Horizontal and vertical sync. 0 =&gt; active low, 1 =&gt; active
+high.</p>
+</div></blockquote>
+<p>dpc:DPC</p>
+<blockquote>
+<div><p>Double pixel clock. 1=&gt;true, 0=&gt;false</p>
+</div></blockquote>
+<p>outputen:POLARITY</p>
+<blockquote>
+<div><p>Output Enable Polarity. 0 =&gt; active low, 1 =&gt; active high</p>
+</div></blockquote>
+<p>pixclockpol:POLARITY</p>
+<blockquote>
+<div><p>pixel clock polarity
+0 =&gt; falling edge, 1 =&gt; rising edge</p>
+</div></blockquote>
+<section id="overlay-support-for-pxa27x-and-later-lcd-controllers">
+<h2>Overlay Support for PXA27x and later LCD controllers<a class="headerlink" href="#overlay-support-for-pxa27x-and-later-lcd-controllers" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>PXA27x and later processors support overlay1 and overlay2 on-top of the
+base framebuffer (although under-neath the base is also possible). They
+support palette and no-palette RGB formats, as well as YUV formats (only
+available on overlay2). These overlays have dedicated DMA channels and
+behave in a similar way as a framebuffer.</p>
+<p>However, there are some differences between these overlay framebuffers
+and normal framebuffers, as listed below:</p>
+<ol class="arabic">
+<li><p>overlay can start at a 32-bit word aligned position within the base
+framebuffer, which means they have a start (x, y). This information
+is encoded into var-&gt;nonstd (no, var-&gt;xoffset and var-&gt;yoffset are
+not for such purpose).</p></li>
+<li><p>overlay framebuffer is allocated dynamically according to specified
+‘struct fb_var_screeninfo’, the amount is decided by:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>var-&gt;xres_virtual * var-&gt;yres_virtual * bpp
+</pre></div>
+</div>
+<p>bpp = 16 – for RGB565 or RGBT555</p>
+<p>bpp = 24 – for YUV444 packed</p>
+<p>bpp = 24 – for YUV444 planar</p>
+<p>bpp = 16 – for YUV422 planar (1 pixel = 1 Y + 1/2 Cb + 1/2 Cr)</p>
+<p>bpp = 12 – for YUV420 planar (1 pixel = 1 Y + 1/4 Cb + 1/4 Cr)</p>
+<p>NOTE:</p>
+<ol class="loweralpha simple">
+<li><p>overlay does not support panning in x-direction, thus
+var-&gt;xres_virtual will always be equal to var-&gt;xres</p></li>
+<li><p>line length of overlay(s) must be on a 32-bit word boundary,
+for YUV planar modes, it is a requirement for the component
+with minimum bits per pixel,  e.g. for YUV420, Cr component
+for one pixel is actually 2-bits, it means the line length
+should be a multiple of 16-pixels</p></li>
+<li><p>starting horizontal position (XPOS) should start on a 32-bit
+word boundary, otherwise the fb_check_var() will just fail.</p></li>
+<li><p>the rectangle of the overlay should be within the base plane,
+otherwise fail</p></li>
+</ol>
+<p>Applications should follow the sequence below to operate an overlay
+framebuffer:</p>
+<blockquote>
+<div><ol class="loweralpha simple">
+<li><p>open(“/dev/fb[1-2]”, …)</p></li>
+<li><p>ioctl(fd, FBIOGET_VSCREENINFO, …)</p></li>
+<li><p>modify ‘var’ with desired parameters:</p>
+<ol class="arabic simple">
+<li><p>var-&gt;xres and var-&gt;yres</p></li>
+<li><p>larger var-&gt;yres_virtual if more memory is required,
+usually for double-buffering</p></li>
+<li><p>var-&gt;nonstd for starting (x, y) and color format</p></li>
+<li><p>var-&gt;{red, green, blue, transp} if RGB mode is to be used</p></li>
+</ol>
+</li>
+<li><p>ioctl(fd, FBIOPUT_VSCREENINFO, …)</p></li>
+<li><p>ioctl(fd, FBIOGET_FSCREENINFO, …)</p></li>
+<li><p>mmap</p></li>
+<li><p>…</p></li>
+</ol>
+</div></blockquote>
+</li>
+<li><p>for YUV planar formats, these are actually not supported within the
+framebuffer framework, application has to take care of the offsets
+and lengths of each component within the framebuffer.</p></li>
+<li><p>var-&gt;nonstd is used to pass starting (x, y) position and color format,
+the detailed bit fields are shown below:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>31                23  20         10          0
+ +-----------------+---+----------+----------+
+ |  ... unused ... |FOR|   XPOS   |   YPOS   |
+ +-----------------+---+----------+----------+
+</pre></div>
+</div>
+<p>FOR  - color format, as defined by OVERLAY_FORMAT_* in pxafb.h</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>0 - RGB</p></li>
+<li><p>1 - YUV444 PACKED</p></li>
+<li><p>2 - YUV444 PLANAR</p></li>
+<li><p>3 - YUV422 PLANAR</p></li>
+<li><p>4 - YUR420 PLANAR</p></li>
+</ul>
+</div></blockquote>
+<p>XPOS - starting horizontal position</p>
+<p>YPOS - starting vertical position</p>
+</li>
+</ol>
+</div></blockquote>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Driver for PXA25x LCD controller</a><ul>
+<li><a class="reference internal" href="#overlay-support-for-pxa27x-and-later-lcd-controllers">Overlay Support for PXA27x and later LCD controllers</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/fb/pxafb.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/fb/pxafb.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

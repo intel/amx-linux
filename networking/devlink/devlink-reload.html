@@ -1,0 +1,193 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Devlink Reload &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Devlink Selftests" href="devlink-selftests.html" />
+    <link rel="prev" title="Devlink Resource" href="devlink-resource.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="devlink-reload">
+<h1>Devlink Reload<a class="headerlink" href="#devlink-reload" title="Permalink to this headline">¶</a></h1>
+<p><code class="docutils literal notranslate"><span class="pre">devlink-reload</span></code> provides mechanism to reinit driver entities, applying
+<code class="docutils literal notranslate"><span class="pre">devlink-params</span></code> and <code class="docutils literal notranslate"><span class="pre">devlink-resources</span></code> new values. It also provides
+mechanism to activate firmware.</p>
+<section id="reload-actions">
+<h2>Reload Actions<a class="headerlink" href="#reload-actions" title="Permalink to this headline">¶</a></h2>
+<p>User may select a reload action.
+By default <code class="docutils literal notranslate"><span class="pre">driver_reinit</span></code> action is selected.</p>
+<table class="colwidths-given docutils align-default" id="id1">
+<caption><span class="caption-text">Possible reload actions</span><a class="headerlink" href="#id1" title="Permalink to this table">¶</a></caption>
+<colgroup>
+<col style="width: 5%" />
+<col style="width: 95%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>Name</p></td>
+<td><p>Description</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">driver-reinit</span></code></p></td>
+<td><p>Devlink driver entities re-initialization, including applying
+new values to devlink entities which are used during driver
+load such as <code class="docutils literal notranslate"><span class="pre">devlink-params</span></code> in configuration mode
+<code class="docutils literal notranslate"><span class="pre">driverinit</span></code> or <code class="docutils literal notranslate"><span class="pre">devlink-resources</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">fw_activate</span></code></p></td>
+<td><p>Firmware activate. Activates new firmware if such image is stored and
+pending activation. If no limitation specified this action may involve
+firmware reset. If no new image pending this action will reload current
+firmware image.</p></td>
+</tr>
+</tbody>
+</table>
+<p>Note that even though user asks for a specific action, the driver
+implementation might require to perform another action alongside with
+it. For example, some driver do not support driver reinitialization
+being performed without fw activation. Therefore, the devlink reload
+command returns the list of actions which were actrually performed.</p>
+</section>
+<section id="reload-limits">
+<h2>Reload Limits<a class="headerlink" href="#reload-limits" title="Permalink to this headline">¶</a></h2>
+<p>By default reload actions are not limited and driver implementation may
+include reset or downtime as needed to perform the actions.</p>
+<p>However, some drivers support action limits, which limit the action
+implementation to specific constraints.</p>
+<table class="colwidths-given docutils align-default" id="id2">
+<caption><span class="caption-text">Possible reload limits</span><a class="headerlink" href="#id2" title="Permalink to this table">¶</a></caption>
+<colgroup>
+<col style="width: 5%" />
+<col style="width: 95%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>Name</p></td>
+<td><p>Description</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">no_reset</span></code></p></td>
+<td><p>No reset allowed, no down time allowed, no link flap and no
+configuration is lost.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="change-namespace">
+<h2>Change Namespace<a class="headerlink" href="#change-namespace" title="Permalink to this headline">¶</a></h2>
+<p>The netns option allows user to be able to move devlink instances into
+namespaces during devlink reload operation.
+By default all devlink instances are created in init_net and stay there.</p>
+<section id="example-usage">
+<h3>example usage<a class="headerlink" href="#example-usage" title="Permalink to this headline">¶</a></h3>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$ devlink dev reload <span class="nb">help</span>
+$ devlink dev reload DEV <span class="o">[</span> netns <span class="o">{</span> PID <span class="p">|</span> NAME <span class="p">|</span> ID <span class="o">}</span> <span class="o">]</span> <span class="o">[</span> action <span class="o">{</span> driver_reinit <span class="p">|</span> fw_activate <span class="o">}</span> <span class="o">]</span> <span class="o">[</span> limit no_reset <span class="o">]</span>
+
+<span class="c1"># Run reload command for devlink driver entities re-initialization:</span>
+$ devlink dev reload pci/0000:82:00.0 action driver_reinit
+reload_actions_performed:
+  driver_reinit
+
+<span class="c1"># Run reload command to activate firmware:</span>
+<span class="c1"># Note that mlx5 driver reloads the driver while activating firmware</span>
+$ devlink dev reload pci/0000:82:00.0 action fw_activate
+reload_actions_performed:
+  driver_reinit fw_activate
+</pre></div>
+</div>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Devlink Reload</a><ul>
+<li><a class="reference internal" href="#reload-actions">Reload Actions</a></li>
+<li><a class="reference internal" href="#reload-limits">Reload Limits</a></li>
+<li><a class="reference internal" href="#change-namespace">Change Namespace</a><ul>
+<li><a class="reference internal" href="#example-usage">example usage</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/networking/devlink/devlink-reload.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/networking/devlink/devlink-reload.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

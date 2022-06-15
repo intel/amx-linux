@@ -1,0 +1,214 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>FPGA Bridge &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="FPGA Region" href="fpga-region.html" />
+    <link rel="prev" title="FPGA Manager" href="fpga-mgr.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="fpga-bridge">
+<h1>FPGA Bridge<a class="headerlink" href="#fpga-bridge" title="Permalink to this headline">¶</a></h1>
+<section id="api-to-implement-a-new-fpga-bridge">
+<h2>API to implement a new FPGA bridge<a class="headerlink" href="#api-to-implement-a-new-fpga-bridge" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p><a class="reference internal" href="#c.fpga_bridge" title="fpga_bridge"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">fpga_bridge</span></code></a> - The FPGA Bridge structure</p></li>
+<li><p><a class="reference internal" href="#c.fpga_bridge_ops" title="fpga_bridge_ops"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">fpga_bridge_ops</span></code></a> - Low level Bridge driver ops</p></li>
+<li><p><a class="reference internal" href="#c.fpga_bridge_register" title="fpga_bridge_register"><code class="xref c c-func docutils literal notranslate"><span class="pre">fpga_bridge_register()</span></code></a> - Create and register a bridge</p></li>
+<li><p><a class="reference internal" href="#c.fpga_bridge_unregister" title="fpga_bridge_unregister"><code class="xref c c-func docutils literal notranslate"><span class="pre">fpga_bridge_unregister()</span></code></a> - Unregister a bridge</p></li>
+</ul>
+<dl class="type">
+<dt id="c.fpga_bridge">
+struct <code class="sig-name descname">fpga_bridge</code><a class="headerlink" href="#c.fpga_bridge" title="Permalink to this definition">¶</a></dt>
+<dd><p>FPGA bridge structure</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct fpga_bridge {
+    const char *name;
+    struct device dev;
+    struct mutex mutex;
+    const struct fpga_bridge_ops *br_ops;
+    struct fpga_image_info *info;
+    struct list_head node;
+    void *priv;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">name</span></code></dt><dd><p>name of low level FPGA bridge</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dev</span></code></dt><dd><p>FPGA bridge device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">mutex</span></code></dt><dd><p>enforces exclusive reference to bridge</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">br_ops</span></code></dt><dd><p>pointer to struct of FPGA bridge ops</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">info</span></code></dt><dd><p>fpga image specific information</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">node</span></code></dt><dd><p>FPGA bridge list node</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">priv</span></code></dt><dd><p>low level driver private date</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.fpga_bridge_ops">
+struct <code class="sig-name descname">fpga_bridge_ops</code><a class="headerlink" href="#c.fpga_bridge_ops" title="Permalink to this definition">¶</a></dt>
+<dd><p>ops for low level FPGA bridge drivers</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct fpga_bridge_ops {
+    int (*enable_show)(struct fpga_bridge *bridge);
+    int (*enable_set)(struct fpga_bridge *bridge, bool enable);
+    void (*fpga_bridge_remove)(struct fpga_bridge *bridge);
+    const struct attribute_group **groups;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">enable_show</span></code></dt><dd><p>returns the FPGA bridge’s status</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">enable_set</span></code></dt><dd><p>set an FPGA bridge as enabled or disabled</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">fpga_bridge_remove</span></code></dt><dd><p>set FPGA into a specific state during driver remove</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">groups</span></code></dt><dd><p>optional attribute groups.</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.fpga_bridge_register">
+struct <a class="reference internal" href="#c.fpga_bridge" title="fpga_bridge">fpga_bridge</a> * <code class="sig-name descname">fpga_bridge_register</code><span class="sig-paren">(</span>struct <a class="reference internal" href="../infrastructure.html#c.device" title="device">device</a><em> *parent</em>, const char<em> *name</em>, const struct <a class="reference internal" href="#c.fpga_bridge_ops" title="fpga_bridge_ops">fpga_bridge_ops</a><em> *br_ops</em>, void<em> *priv</em><span class="sig-paren">)</span><a class="headerlink" href="#c.fpga_bridge_register" title="Permalink to this definition">¶</a></dt>
+<dd><p>create and register an FPGA Bridge device</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*parent</span></code></dt><dd><p>FPGA bridge device from pdev</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*name</span></code></dt><dd><p>FPGA bridge name</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">struct</span> <span class="pre">fpga_bridge_ops</span> <span class="pre">*br_ops</span></code></dt><dd><p>pointer to structure of fpga bridge ops</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*priv</span></code></dt><dd><p>FPGA bridge private data</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p><a class="reference internal" href="#c.fpga_bridge" title="fpga_bridge"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">fpga_bridge</span></code></a> pointer or ERR_PTR()</p>
+</div>
+<dl class="function">
+<dt id="c.fpga_bridge_unregister">
+void <code class="sig-name descname">fpga_bridge_unregister</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.fpga_bridge" title="fpga_bridge">fpga_bridge</a><em> *bridge</em><span class="sig-paren">)</span><a class="headerlink" href="#c.fpga_bridge_unregister" title="Permalink to this definition">¶</a></dt>
+<dd><p>unregister an FPGA bridge</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">fpga_bridge</span> <span class="pre">*bridge</span></code></dt><dd><p>FPGA bridge struct</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This function is intended for use in an FPGA bridge driver’s remove function.</p>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">FPGA Bridge</a><ul>
+<li><a class="reference internal" href="#api-to-implement-a-new-fpga-bridge">API to implement a new FPGA bridge</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/fpga/fpga-bridge.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/fpga/fpga-bridge.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

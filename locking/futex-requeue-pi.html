@@ -1,0 +1,224 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Futex Requeue PI &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Hardware Spinlock Framework" href="hwspinlock.html" />
+    <link rel="prev" title="Lightweight PI-futexes" href="pi-futex.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="futex-requeue-pi">
+<h1>Futex Requeue PI<a class="headerlink" href="#futex-requeue-pi" title="Permalink to this headline">¶</a></h1>
+<p>Requeueing of tasks from a non-PI futex to a PI futex requires
+special handling in order to ensure the underlying rt_mutex is never
+left without an owner if it has waiters; doing so would break the PI
+boosting logic [see <a class="reference internal" href="rt-mutex-design.html"><span class="doc">RT-mutex implementation design</span></a>] For the purposes of
+brevity, this action will be referred to as “requeue_pi” throughout
+this document.  Priority inheritance is abbreviated throughout as
+“PI”.</p>
+<section id="motivation">
+<h2>Motivation<a class="headerlink" href="#motivation" title="Permalink to this headline">¶</a></h2>
+<p>Without requeue_pi, the glibc implementation of
+pthread_cond_broadcast() must resort to waking all the tasks waiting
+on a pthread_condvar and letting them try to sort out which task
+gets to run first in classic thundering-herd formation.  An ideal
+implementation would wake the highest-priority waiter, and leave the
+rest to the natural wakeup inherent in unlocking the mutex
+associated with the condvar.</p>
+<p>Consider the simplified glibc calls:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/* caller must lock mutex */
+pthread_cond_wait(cond, mutex)
+{
+        lock(cond-&gt;__data.__lock);
+        unlock(mutex);
+        do {
+        unlock(cond-&gt;__data.__lock);
+        futex_wait(cond-&gt;__data.__futex);
+        lock(cond-&gt;__data.__lock);
+        } while(...)
+        unlock(cond-&gt;__data.__lock);
+        lock(mutex);
+}
+
+pthread_cond_broadcast(cond)
+{
+        lock(cond-&gt;__data.__lock);
+        unlock(cond-&gt;__data.__lock);
+        futex_requeue(cond-&gt;data.__futex, cond-&gt;mutex);
+}
+</pre></div>
+</div>
+<p>Once pthread_cond_broadcast() requeues the tasks, the cond-&gt;mutex
+has waiters. Note that pthread_cond_wait() attempts to lock the
+mutex only after it has returned to user space.  This will leave the
+underlying rt_mutex with waiters, and no owner, breaking the
+previously mentioned PI-boosting algorithms.</p>
+<p>In order to support PI-aware pthread_condvar’s, the kernel needs to
+be able to requeue tasks to PI futexes.  This support implies that
+upon a successful futex_wait system call, the caller would return to
+user space already holding the PI futex.  The glibc implementation
+would be modified as follows:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/* caller must lock mutex */
+pthread_cond_wait_pi(cond, mutex)
+{
+        lock(cond-&gt;__data.__lock);
+        unlock(mutex);
+        do {
+        unlock(cond-&gt;__data.__lock);
+        futex_wait_requeue_pi(cond-&gt;__data.__futex);
+        lock(cond-&gt;__data.__lock);
+        } while(...)
+        unlock(cond-&gt;__data.__lock);
+        /* the kernel acquired the mutex for us */
+}
+
+pthread_cond_broadcast_pi(cond)
+{
+        lock(cond-&gt;__data.__lock);
+        unlock(cond-&gt;__data.__lock);
+        futex_requeue_pi(cond-&gt;data.__futex, cond-&gt;mutex);
+}
+</pre></div>
+</div>
+<p>The actual glibc implementation will likely test for PI and make the
+necessary changes inside the existing calls rather than creating new
+calls for the PI cases.  Similar changes are needed for
+pthread_cond_timedwait() and pthread_cond_signal().</p>
+</section>
+<section id="implementation">
+<h2>Implementation<a class="headerlink" href="#implementation" title="Permalink to this headline">¶</a></h2>
+<p>In order to ensure the rt_mutex has an owner if it has waiters, it
+is necessary for both the requeue code, as well as the waiting code,
+to be able to acquire the rt_mutex before returning to user space.
+The requeue code cannot simply wake the waiter and leave it to
+acquire the rt_mutex as it would open a race window between the
+requeue call returning to user space and the waiter waking and
+starting to run.  This is especially true in the uncontended case.</p>
+<p>The solution involves two new rt_mutex helper routines,
+rt_mutex_start_proxy_lock() and rt_mutex_finish_proxy_lock(), which
+allow the requeue code to acquire an uncontended rt_mutex on behalf
+of the waiter and to enqueue the waiter on a contended rt_mutex.
+Two new system calls provide the kernel&lt;-&gt;user interface to
+requeue_pi: FUTEX_WAIT_REQUEUE_PI and FUTEX_CMP_REQUEUE_PI.</p>
+<p>FUTEX_WAIT_REQUEUE_PI is called by the waiter (pthread_cond_wait()
+and pthread_cond_timedwait()) to block on the initial futex and wait
+to be requeued to a PI-aware futex.  The implementation is the
+result of a high-speed collision between futex_wait() and
+futex_lock_pi(), with some extra logic to check for the additional
+wake-up scenarios.</p>
+<p>FUTEX_CMP_REQUEUE_PI is called by the waker
+(pthread_cond_broadcast() and pthread_cond_signal()) to requeue and
+possibly wake the waiting tasks. Internally, this system call is
+still handled by futex_requeue (by passing requeue_pi=1).  Before
+requeueing, <a class="reference internal" href="../kernel-hacking/locking.html#c.futex_requeue" title="futex_requeue"><code class="xref c c-func docutils literal notranslate"><span class="pre">futex_requeue()</span></code></a> attempts to acquire the requeue target
+PI futex on behalf of the top waiter.  If it can, this waiter is
+woken.  <a class="reference internal" href="../kernel-hacking/locking.html#c.futex_requeue" title="futex_requeue"><code class="xref c c-func docutils literal notranslate"><span class="pre">futex_requeue()</span></code></a> then proceeds to requeue the remaining
+nr_wake+nr_requeue tasks to the PI futex, calling
+rt_mutex_start_proxy_lock() prior to each requeue to prepare the
+task as a waiter on the underlying rt_mutex.  It is possible that
+the lock can be acquired at this stage as well, if so, the next
+waiter is woken to finish the acquisition of the lock.</p>
+<p>FUTEX_CMP_REQUEUE_PI accepts nr_wake and nr_requeue as arguments, but
+their sum is all that really matters.  <a class="reference internal" href="../kernel-hacking/locking.html#c.futex_requeue" title="futex_requeue"><code class="xref c c-func docutils literal notranslate"><span class="pre">futex_requeue()</span></code></a> will wake or
+requeue up to nr_wake + nr_requeue tasks.  It will wake only as many
+tasks as it can acquire the lock for, which in the majority of cases
+should be 0 as good programming practice dictates that the caller of
+either pthread_cond_broadcast() or pthread_cond_signal() acquire the
+mutex prior to making the call. FUTEX_CMP_REQUEUE_PI requires that
+nr_wake=1.  nr_requeue should be INT_MAX for broadcast and 0 for
+signal.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Futex Requeue PI</a><ul>
+<li><a class="reference internal" href="#motivation">Motivation</a></li>
+<li><a class="reference internal" href="#implementation">Implementation</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/locking/futex-requeue-pi.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/locking/futex-requeue-pi.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,397 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Fprobe - Function entry/exit probe &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Kernel Probes (Kprobes)" href="kprobes.html" />
+    <link rel="prev" title="Using ftrace to hook to functions" href="ftrace-uses.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="fprobe-function-entry-exit-probe">
+<h1>Fprobe - Function entry/exit probe<a class="headerlink" href="#fprobe-function-entry-exit-probe" title="Permalink to this headline">¶</a></h1>
+<section id="introduction">
+<h2>Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>Fprobe is a function entry/exit probe mechanism based on ftrace.
+Instead of using ftrace full feature, if you only want to attach callbacks
+on function entry and exit, similar to the kprobes and kretprobes, you can
+use fprobe. Compared with kprobes and kretprobes, fprobe gives faster
+instrumentation for multiple functions with single handler. This document
+describes how to use fprobe.</p>
+</section>
+<section id="the-usage-of-fprobe">
+<h2>The usage of fprobe<a class="headerlink" href="#the-usage-of-fprobe" title="Permalink to this headline">¶</a></h2>
+<p>The fprobe is a wrapper of ftrace (+ kretprobe-like return callback) to
+attach callbacks to multiple function entry and exit. User needs to set up
+the <cite><a class="reference internal" href="#c.fprobe" title="fprobe"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">fprobe</span></code></a></cite> and pass it to <cite><a class="reference internal" href="#c.register_fprobe" title="register_fprobe"><code class="xref c c-func docutils literal notranslate"><span class="pre">register_fprobe()</span></code></a></cite>.</p>
+<p>Typically, <cite>fprobe</cite> data structure is initialized with the <cite>entry_handler</cite>
+and/or <cite>exit_handler</cite> as below.</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="k">struct</span> <span class="nc">fprobe</span><span class="w"> </span><span class="n">fp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">       </span><span class="p">.</span><span class="n">entry_handler</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">my_entry_callback</span><span class="p">,</span><span class="w"></span>
+<span class="w">       </span><span class="p">.</span><span class="n">exit_handler</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="n">my_exit_callback</span><span class="p">,</span><span class="w"></span>
+<span class="p">};</span><span class="w"></span>
+</pre></div>
+</div>
+<p>To enable the fprobe, call one of <a class="reference internal" href="#c.register_fprobe" title="register_fprobe"><code class="xref c c-func docutils literal notranslate"><span class="pre">register_fprobe()</span></code></a>, <a class="reference internal" href="#c.register_fprobe_ips" title="register_fprobe_ips"><code class="xref c c-func docutils literal notranslate"><span class="pre">register_fprobe_ips()</span></code></a>, and
+<a class="reference internal" href="#c.register_fprobe_syms" title="register_fprobe_syms"><code class="xref c c-func docutils literal notranslate"><span class="pre">register_fprobe_syms()</span></code></a>. These functions register the fprobe with different types
+of parameters.</p>
+<p>The <a class="reference internal" href="#c.register_fprobe" title="register_fprobe"><code class="xref c c-func docutils literal notranslate"><span class="pre">register_fprobe()</span></code></a> enables a fprobe by function-name filters.
+E.g. this enables &#64;fp on “func*()” function except “func2()”.:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>register_fprobe(&amp;fp, &quot;func*&quot;, &quot;func2&quot;);
+</pre></div>
+</div>
+<p>The <a class="reference internal" href="#c.register_fprobe_ips" title="register_fprobe_ips"><code class="xref c c-func docutils literal notranslate"><span class="pre">register_fprobe_ips()</span></code></a> enables a fprobe by ftrace-location addresses.
+E.g.</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">unsigned</span><span class="w"> </span><span class="kt">long</span><span class="w"> </span><span class="n">ips</span><span class="p">[]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="mi">0</span><span class="n">x</span><span class="p">....</span><span class="w"> </span><span class="p">};</span><span class="w"></span>
+
+<span class="n">register_fprobe_ips</span><span class="p">(</span><span class="o">&amp;</span><span class="n">fp</span><span class="p">,</span><span class="w"> </span><span class="n">ips</span><span class="p">,</span><span class="w"> </span><span class="n">ARRAY_SIZE</span><span class="p">(</span><span class="n">ips</span><span class="p">));</span><span class="w"></span>
+</pre></div>
+</div>
+<p>And the <a class="reference internal" href="#c.register_fprobe_syms" title="register_fprobe_syms"><code class="xref c c-func docutils literal notranslate"><span class="pre">register_fprobe_syms()</span></code></a> enables a fprobe by symbol names.
+E.g.</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">char</span><span class="w"> </span><span class="n">syms</span><span class="p">[]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="s">&quot;func1&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;func2&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;func3&quot;</span><span class="p">};</span><span class="w"></span>
+
+<span class="n">register_fprobe_syms</span><span class="p">(</span><span class="o">&amp;</span><span class="n">fp</span><span class="p">,</span><span class="w"> </span><span class="n">syms</span><span class="p">,</span><span class="w"> </span><span class="n">ARRAY_SIZE</span><span class="p">(</span><span class="n">syms</span><span class="p">));</span><span class="w"></span>
+</pre></div>
+</div>
+<p>To disable (remove from functions) this fprobe, call:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>unregister_fprobe(&amp;fp);
+</pre></div>
+</div>
+<p>You can temporally (soft) disable the fprobe by:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>disable_fprobe(&amp;fp);
+</pre></div>
+</div>
+<p>and resume by:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>enable_fprobe(&amp;fp);
+</pre></div>
+</div>
+<p>The above is defined by including the header:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#include &lt;linux/fprobe.h&gt;
+</pre></div>
+</div>
+<p>Same as ftrace, the registered callbacks will start being called some time
+after the <a class="reference internal" href="#c.register_fprobe" title="register_fprobe"><code class="xref c c-func docutils literal notranslate"><span class="pre">register_fprobe()</span></code></a> is called and before it returns. See
+<code class="file docutils literal notranslate"><span class="pre">Documentation/trace/ftrace.rst</span></code>.</p>
+<p>Also, the <a class="reference internal" href="#c.unregister_fprobe" title="unregister_fprobe"><code class="xref c c-func docutils literal notranslate"><span class="pre">unregister_fprobe()</span></code></a> will guarantee that the both enter and exit
+handlers are no longer being called by functions after <a class="reference internal" href="#c.unregister_fprobe" title="unregister_fprobe"><code class="xref c c-func docutils literal notranslate"><span class="pre">unregister_fprobe()</span></code></a>
+returns as same as unregister_ftrace_function().</p>
+</section>
+<section id="the-fprobe-entry-exit-handler">
+<h2>The fprobe entry/exit handler<a class="headerlink" href="#the-fprobe-entry-exit-handler" title="Permalink to this headline">¶</a></h2>
+<p>The prototype of the entry/exit callback function is as follows:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">void</span><span class="w"> </span><span class="nf">callback_func</span><span class="p">(</span><span class="k">struct</span> <span class="nc">fprobe</span><span class="w"> </span><span class="o">*</span><span class="n">fp</span><span class="p">,</span><span class="w"> </span><span class="kt">unsigned</span><span class="w"> </span><span class="kt">long</span><span class="w"> </span><span class="n">entry_ip</span><span class="p">,</span><span class="w"> </span><span class="k">struct</span> <span class="nc">pt_regs</span><span class="w"> </span><span class="o">*</span><span class="n">regs</span><span class="p">);</span><span class="w"></span>
+</pre></div>
+</div>
+<p>Note that both entry and exit callbacks have same ptototype. The &#64;entry_ip is
+saved at function entry and passed to exit handler.</p>
+<dl class="simple">
+<dt>&#64;fp</dt><dd><p>This is the address of <cite>fprobe</cite> data structure related to this handler.
+You can embed the <cite>fprobe</cite> to your data structure and get it by
+container_of() macro from &#64;fp. The &#64;fp must not be NULL.</p>
+</dd>
+<dt>&#64;entry_ip</dt><dd><p>This is the ftrace address of the traced function (both entry and exit).
+Note that this may not be the actual entry address of the function but
+the address where the ftrace is instrumented.</p>
+</dd>
+<dt>&#64;regs</dt><dd><p>This is the <cite>pt_regs</cite> data structure at the entry and exit. Note that
+the instruction pointer of &#64;regs may be different from the &#64;entry_ip
+in the entry_handler. If you need traced instruction pointer, you need
+to use &#64;entry_ip. On the other hand, in the exit_handler, the instruction
+pointer of &#64;regs is set to the currect return address.</p>
+</dd>
+</dl>
+</section>
+<section id="share-the-callbacks-with-kprobes">
+<h2>Share the callbacks with kprobes<a class="headerlink" href="#share-the-callbacks-with-kprobes" title="Permalink to this headline">¶</a></h2>
+<p>Since the recursion safeness of the fprobe (and ftrace) is a bit different
+from the kprobes, this may cause an issue if user wants to run the same
+code from the fprobe and the kprobes.</p>
+<p>Kprobes has per-cpu ‘current_kprobe’ variable which protects the kprobe
+handler from recursion in all cases. On the other hand, fprobe uses
+only ftrace_test_recursion_trylock(). This allows interrupt context to
+call another (or same) fprobe while the fprobe user handler is running.</p>
+<p>This is not a matter if the common callback code has its own recursion
+detection, or it can handle the recursion in the different contexts
+(normal/interrupt/NMI.)
+But if it relies on the ‘current_kprobe’ recursion lock, it has to check
+kprobe_running() and use kprobe_busy_*() APIs.</p>
+<p>Fprobe has FPROBE_FL_KPROBE_SHARED flag to do this. If your common callback
+code will be shared with kprobes, please set FPROBE_FL_KPROBE_SHARED
+<em>before</em> registering the fprobe, like:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">fprobe</span><span class="p">.</span><span class="n">flags</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">FPROBE_FL_KPROBE_SHARED</span><span class="p">;</span><span class="w"></span>
+
+<span class="n">register_fprobe</span><span class="p">(</span><span class="o">&amp;</span><span class="n">fprobe</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;func*&quot;</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="p">);</span><span class="w"></span>
+</pre></div>
+</div>
+<p>This will protect your common callback from the nested call.</p>
+</section>
+<section id="the-missed-counter">
+<h2>The missed counter<a class="headerlink" href="#the-missed-counter" title="Permalink to this headline">¶</a></h2>
+<p>The <cite>fprobe</cite> data structure has <cite>fprobe::nmissed</cite> counter field as same as
+kprobes.
+This counter counts up when;</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>fprobe fails to take ftrace_recursion lock. This usually means that a function
+which is traced by other ftrace users is called from the entry_handler.</p></li>
+<li><p>fprobe fails to setup the function exit because of the shortage of rethook
+(the shadow stack for hooking the function return.)</p></li>
+</ul>
+</div></blockquote>
+<p>The <cite>fprobe::nmissed</cite> field counts up in both cases. Therefore, the former
+skips both of entry and exit callback and the latter skips the exit
+callback, but in both case the counter will increase by 1.</p>
+<p>Note that if you set the FTRACE_OPS_FL_RECURSION and/or FTRACE_OPS_FL_RCU to
+<cite>fprobe::ops::flags</cite> (ftrace_ops::flags) when registering the fprobe, this
+counter may not work correctly, because ftrace skips the fprobe function which
+increase the counter.</p>
+</section>
+<section id="functions-and-structures">
+<h2>Functions and structures<a class="headerlink" href="#functions-and-structures" title="Permalink to this headline">¶</a></h2>
+<dl class="type">
+<dt id="c.fprobe">
+struct <code class="sig-name descname">fprobe</code><a class="headerlink" href="#c.fprobe" title="Permalink to this definition">¶</a></dt>
+<dd><p>ftrace based probe.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct fprobe {
+#ifdef CONFIG_FUNCTION_TRACER;
+    struct ftrace_ops       ops;
+#endif;
+    unsigned long           nmissed;
+    unsigned int            flags;
+    struct rethook          *rethook;
+    void (*entry_handler)(struct fprobe *fp, unsigned long entry_ip, struct pt_regs *regs);
+    void (*exit_handler)(struct fprobe *fp, unsigned long entry_ip, struct pt_regs *regs);
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">ops</span></code></dt><dd><p>The ftrace_ops.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">nmissed</span></code></dt><dd><p>The counter for missing events.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">flags</span></code></dt><dd><p>The status flag.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">rethook</span></code></dt><dd><p>The rethook data structure. (internal data)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">entry_handler</span></code></dt><dd><p>The callback function for function entry.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">exit_handler</span></code></dt><dd><p>The callback function for function exit.</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.disable_fprobe">
+void <code class="sig-name descname">disable_fprobe</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.fprobe" title="fprobe">fprobe</a><em> *fp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.disable_fprobe" title="Permalink to this definition">¶</a></dt>
+<dd><p>Disable fprobe</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">fprobe</span> <span class="pre">*fp</span></code></dt><dd><p>The fprobe to be disabled.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This will soft-disable <strong>fp</strong>. Note that this doesn’t remove the ftrace
+hooks from the function entry.</p>
+</div>
+<dl class="function">
+<dt id="c.enable_fprobe">
+void <code class="sig-name descname">enable_fprobe</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.fprobe" title="fprobe">fprobe</a><em> *fp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.enable_fprobe" title="Permalink to this definition">¶</a></dt>
+<dd><p>Enable fprobe</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">fprobe</span> <span class="pre">*fp</span></code></dt><dd><p>The fprobe to be enabled.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This will soft-enable <strong>fp</strong>.</p>
+</div>
+<dl class="function">
+<dt id="c.register_fprobe">
+int <code class="sig-name descname">register_fprobe</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.fprobe" title="fprobe">fprobe</a><em> *fp</em>, const char<em> *filter</em>, const char<em> *notfilter</em><span class="sig-paren">)</span><a class="headerlink" href="#c.register_fprobe" title="Permalink to this definition">¶</a></dt>
+<dd><p>Register fprobe to ftrace by pattern.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">fprobe</span> <span class="pre">*fp</span></code></dt><dd><p>A fprobe data structure to be registered.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*filter</span></code></dt><dd><p>A wildcard pattern of probed symbols.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*notfilter</span></code></dt><dd><p>A wildcard pattern of NOT probed symbols.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Register <strong>fp</strong> to ftrace for enabling the probe on the symbols matched to <strong>filter</strong>.
+If <strong>notfilter</strong> is not NULL, the symbols matched the <strong>notfilter</strong> are not probed.</p>
+<p>Return 0 if <strong>fp</strong> is registered successfully, -errno if not.</p>
+</div>
+<dl class="function">
+<dt id="c.register_fprobe_ips">
+int <code class="sig-name descname">register_fprobe_ips</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.fprobe" title="fprobe">fprobe</a><em> *fp</em>, unsigned long<em> *addrs</em>, int<em> num</em><span class="sig-paren">)</span><a class="headerlink" href="#c.register_fprobe_ips" title="Permalink to this definition">¶</a></dt>
+<dd><p>Register fprobe to ftrace by address.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">fprobe</span> <span class="pre">*fp</span></code></dt><dd><p>A fprobe data structure to be registered.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">*addrs</span></code></dt><dd><p>An array of target ftrace location addresses.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">num</span></code></dt><dd><p>The number of entries of <strong>addrs</strong>.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Register <strong>fp</strong> to ftrace for enabling the probe on the address given by <strong>addrs</strong>.
+The <strong>addrs</strong> must be the addresses of ftrace location address, which may be
+the symbol address + arch-dependent offset.
+If you unsure what this mean, please use other registration functions.</p>
+<p>Return 0 if <strong>fp</strong> is registered successfully, -errno if not.</p>
+</div>
+<dl class="function">
+<dt id="c.register_fprobe_syms">
+int <code class="sig-name descname">register_fprobe_syms</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.fprobe" title="fprobe">fprobe</a><em> *fp</em>, const char<em> **syms</em>, int<em> num</em><span class="sig-paren">)</span><a class="headerlink" href="#c.register_fprobe_syms" title="Permalink to this definition">¶</a></dt>
+<dd><p>Register fprobe to ftrace by symbols.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">fprobe</span> <span class="pre">*fp</span></code></dt><dd><p>A fprobe data structure to be registered.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">**syms</span></code></dt><dd><p>An array of target symbols.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">num</span></code></dt><dd><p>The number of entries of <strong>syms</strong>.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Register <strong>fp</strong> to the symbols given by <strong>syms</strong> array. This will be useful if
+you are sure the symbols exist in the kernel.</p>
+<p>Return 0 if <strong>fp</strong> is registered successfully, -errno if not.</p>
+</div>
+<dl class="function">
+<dt id="c.unregister_fprobe">
+int <code class="sig-name descname">unregister_fprobe</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.fprobe" title="fprobe">fprobe</a><em> *fp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.unregister_fprobe" title="Permalink to this definition">¶</a></dt>
+<dd><p>Unregister fprobe from ftrace</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">fprobe</span> <span class="pre">*fp</span></code></dt><dd><p>A fprobe data structure to be unregistered.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Unregister fprobe (and remove ftrace hooks from the function entries).</p>
+<p>Return 0 if <strong>fp</strong> is unregistered successfully, -errno if not.</p>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Fprobe - Function entry/exit probe</a><ul>
+<li><a class="reference internal" href="#introduction">Introduction</a></li>
+<li><a class="reference internal" href="#the-usage-of-fprobe">The usage of fprobe</a></li>
+<li><a class="reference internal" href="#the-fprobe-entry-exit-handler">The fprobe entry/exit handler</a></li>
+<li><a class="reference internal" href="#share-the-callbacks-with-kprobes">Share the callbacks with kprobes</a></li>
+<li><a class="reference internal" href="#the-missed-counter">The missed counter</a></li>
+<li><a class="reference internal" href="#functions-and-structures">Functions and structures</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/trace/fprobe.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/trace/fprobe.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

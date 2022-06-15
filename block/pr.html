@@ -1,0 +1,232 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Block layer support for Persistent Reservations &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="struct request documentation" href="request.html" />
+    <link rel="prev" title="Null block device driver" href="null_blk.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="block-layer-support-for-persistent-reservations">
+<h1>Block layer support for Persistent Reservations<a class="headerlink" href="#block-layer-support-for-persistent-reservations" title="Permalink to this headline">¶</a></h1>
+<p>The Linux kernel supports a user space interface for simplified
+Persistent Reservations which map to block devices that support
+these (like SCSI). Persistent Reservations allow restricting
+access to block devices to specific initiators in a shared storage
+setup.</p>
+<p>This document gives a general overview of the support ioctl commands.
+For a more detailed reference please refer to the SCSI Primary
+Commands standard, specifically the section on Reservations and the
+“PERSISTENT RESERVE IN” and “PERSISTENT RESERVE OUT” commands.</p>
+<p>All implementations are expected to ensure the reservations survive
+a power loss and cover all connections in a multi path environment.
+These behaviors are optional in SPC but will be automatically applied
+by Linux.</p>
+<section id="the-following-types-of-reservations-are-supported">
+<h2>The following types of reservations are supported:<a class="headerlink" href="#the-following-types-of-reservations-are-supported" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><ul>
+<li><dl class="simple">
+<dt>PR_WRITE_EXCLUSIVE</dt><dd><p>Only the initiator that owns the reservation can write to the
+device.  Any initiator can read from the device.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>PR_EXCLUSIVE_ACCESS</dt><dd><p>Only the initiator that owns the reservation can access the
+device.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>PR_WRITE_EXCLUSIVE_REG_ONLY</dt><dd><p>Only initiators with a registered key can write to the device,
+Any initiator can read from the device.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>PR_EXCLUSIVE_ACCESS_REG_ONLY</dt><dd><p>Only initiators with a registered key can access the device.</p>
+</dd>
+</dl>
+</li>
+<li><p>PR_WRITE_EXCLUSIVE_ALL_REGS</p>
+<blockquote>
+<div><p>Only initiators with a registered key can write to the device,
+Any initiator can read from the device.
+All initiators with a registered key are considered reservation
+holders.
+Please reference the SPC spec on the meaning of a reservation
+holder if you want to use this type.</p>
+</div></blockquote>
+</li>
+<li><dl class="simple">
+<dt>PR_EXCLUSIVE_ACCESS_ALL_REGS</dt><dd><p>Only initiators with a registered key can access the device.
+All initiators with a registered key are considered reservation
+holders.
+Please reference the SPC spec on the meaning of a reservation
+holder if you want to use this type.</p>
+</dd>
+</dl>
+</li>
+</ul>
+</div></blockquote>
+</section>
+<section id="the-following-ioctl-are-supported">
+<h2>The following ioctl are supported:<a class="headerlink" href="#the-following-ioctl-are-supported" title="Permalink to this headline">¶</a></h2>
+<section id="ioc-pr-register">
+<h3>1. IOC_PR_REGISTER<a class="headerlink" href="#ioc-pr-register" title="Permalink to this headline">¶</a></h3>
+<p>This ioctl command registers a new reservation if the new_key argument
+is non-null.  If no existing reservation exists old_key must be zero,
+if an existing reservation should be replaced old_key must contain
+the old reservation key.</p>
+<p>If the new_key argument is 0 it unregisters the existing reservation passed
+in old_key.</p>
+</section>
+<section id="ioc-pr-reserve">
+<h3>2. IOC_PR_RESERVE<a class="headerlink" href="#ioc-pr-reserve" title="Permalink to this headline">¶</a></h3>
+<p>This ioctl command reserves the device and thus restricts access for other
+devices based on the type argument.  The key argument must be the existing
+reservation key for the device as acquired by the IOC_PR_REGISTER,
+IOC_PR_REGISTER_IGNORE, IOC_PR_PREEMPT or IOC_PR_PREEMPT_ABORT commands.</p>
+</section>
+<section id="ioc-pr-release">
+<h3>3. IOC_PR_RELEASE<a class="headerlink" href="#ioc-pr-release" title="Permalink to this headline">¶</a></h3>
+<p>This ioctl command releases the reservation specified by key and flags
+and thus removes any access restriction implied by it.</p>
+</section>
+<section id="ioc-pr-preempt">
+<h3>4. IOC_PR_PREEMPT<a class="headerlink" href="#ioc-pr-preempt" title="Permalink to this headline">¶</a></h3>
+<p>This ioctl command releases the existing reservation referred to by
+old_key and replaces it with a new reservation of type for the
+reservation key new_key.</p>
+</section>
+<section id="ioc-pr-preempt-abort">
+<h3>5. IOC_PR_PREEMPT_ABORT<a class="headerlink" href="#ioc-pr-preempt-abort" title="Permalink to this headline">¶</a></h3>
+<p>This ioctl command works like IOC_PR_PREEMPT except that it also aborts
+any outstanding command sent over a connection identified by old_key.</p>
+</section>
+<section id="ioc-pr-clear">
+<h3>6. IOC_PR_CLEAR<a class="headerlink" href="#ioc-pr-clear" title="Permalink to this headline">¶</a></h3>
+<p>This ioctl command unregisters both key and any other reservation key
+registered with the device and drops any existing reservation.</p>
+</section>
+</section>
+<section id="flags">
+<h2>Flags<a class="headerlink" href="#flags" title="Permalink to this headline">¶</a></h2>
+<p>All the ioctls have a flag field.  Currently only one flag is supported:</p>
+<blockquote>
+<div><ul class="simple">
+<li><dl class="simple">
+<dt>PR_FL_IGNORE_KEY</dt><dd><p>Ignore the existing reservation key.  This is commonly supported for
+IOC_PR_REGISTER, and some implementation may support the flag for
+IOC_PR_RESERVE.</p>
+</dd>
+</dl>
+</li>
+</ul>
+</div></blockquote>
+<p>For all unknown flags the kernel will return -EOPNOTSUPP.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Block layer support for Persistent Reservations</a><ul>
+<li><a class="reference internal" href="#the-following-types-of-reservations-are-supported">The following types of reservations are supported:</a></li>
+<li><a class="reference internal" href="#the-following-ioctl-are-supported">The following ioctl are supported:</a><ul>
+<li><a class="reference internal" href="#ioc-pr-register">1. IOC_PR_REGISTER</a></li>
+<li><a class="reference internal" href="#ioc-pr-reserve">2. IOC_PR_RESERVE</a></li>
+<li><a class="reference internal" href="#ioc-pr-release">3. IOC_PR_RELEASE</a></li>
+<li><a class="reference internal" href="#ioc-pr-preempt">4. IOC_PR_PREEMPT</a></li>
+<li><a class="reference internal" href="#ioc-pr-preempt-abort">5. IOC_PR_PREEMPT_ABORT</a></li>
+<li><a class="reference internal" href="#ioc-pr-clear">6. IOC_PR_CLEAR</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#flags">Flags</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/block/pr.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/block/pr.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

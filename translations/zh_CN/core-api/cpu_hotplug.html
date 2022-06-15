@@ -1,0 +1,770 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>内核中的CPU热拔插 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="Linux通用IRQ处理" href="genericirq.html" />
+    <link rel="prev" title="Linux下的缓存和TLB刷新" href="cachetlb.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../core-api/cpu_hotplug.html"><span class="doc">CPU hotplug in the Kernel</span></a></p>
+</dd>
+<dt class="field-even">翻译</dt>
+<dd class="field-even"><p>司延腾 Yanteng Si &lt;<a class="reference external" href="mailto:siyanteng&#37;&#52;&#48;loongson&#46;cn">siyanteng<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;
+周彬彬 Binbin Zhou &lt;<a class="reference external" href="mailto:zhoubinbin&#37;&#52;&#48;loongson&#46;cn">zhoubinbin<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+<dt class="field-odd">校译</dt>
+<dd class="field-odd"><p>吴想成 Wu XiangCheng &lt;<a class="reference external" href="mailto:bobwxc&#37;&#52;&#48;email&#46;cn">bobwxc<span>&#64;</span>email<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+</dl>
+<section id="cpu">
+<span id="cn-core-api-cpu-hotplug"></span><h1>内核中的CPU热拔插<a class="headerlink" href="#cpu" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">时间</dt>
+<dd class="field-odd"><p>2021年9月</p>
+</dd>
+<dt class="field-even">作者</dt>
+<dd class="field-even"><p>Sebastian Andrzej Siewior &lt;<a class="reference external" href="mailto:bigeasy&#37;&#52;&#48;linutronix&#46;de">bigeasy<span>&#64;</span>linutronix<span>&#46;</span>de</a>&gt;,
+Rusty Russell &lt;<a class="reference external" href="mailto:rusty&#37;&#52;&#48;rustcorp&#46;com&#46;au">rusty<span>&#64;</span>rustcorp<span>&#46;</span>com<span>&#46;</span>au</a>&gt;,
+Srivatsa Vaddagiri &lt;<a class="reference external" href="mailto:vatsa&#37;&#52;&#48;in&#46;ibm&#46;com">vatsa<span>&#64;</span>in<span>&#46;</span>ibm<span>&#46;</span>com</a>&gt;,
+Ashok Raj &lt;<a class="reference external" href="mailto:ashok&#46;raj&#37;&#52;&#48;intel&#46;com">ashok<span>&#46;</span>raj<span>&#64;</span>intel<span>&#46;</span>com</a>&gt;,
+Joel Schopp &lt;<a class="reference external" href="mailto:jschopp&#37;&#52;&#48;austin&#46;ibm&#46;com">jschopp<span>&#64;</span>austin<span>&#46;</span>ibm<span>&#46;</span>com</a>&gt;,
+Thomas Gleixner &lt;<a class="reference external" href="mailto:tglx&#37;&#52;&#48;linutronix&#46;de">tglx<span>&#64;</span>linutronix<span>&#46;</span>de</a>&gt;</p>
+</dd>
+</dl>
+<section id="id1">
+<h2>简介<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>现代系统架构的演进已经在处理器中引入了先进的错误报告和纠正能力。有一些OEM也支
+持可热拔插的NUMA（Non Uniform Memory Access，非统一内存访问）硬件,其中物理
+节点的插入和移除需要支持CPU热插拔。</p>
+<p>这样的进步要求内核可用的CPU被移除，要么是出于配置的原因，要么是出于RAS的目的，
+以保持一个不需要的CPU不在系统执行路径。因此需要在Linux内核中支持CPU热拔插。</p>
+<p>CPU热拔插支持的一个更新颖的用途是它在SMP的暂停恢复支持中的应用。双核和超线程支
+持使得即使是笔记本电脑也能运行不支持这些方法的SMP内核。</p>
+</section>
+<section id="id2">
+<h2>命令行开关<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<dl>
+<dt><code class="docutils literal notranslate"><span class="pre">maxcpus=n</span></code></dt><dd><p>限制启动时的CPU为 <em>n</em> 个。例如，如果你有四个CPU，使用 <code class="docutils literal notranslate"><span class="pre">maxcpus=2</span></code> 将只能启
+动两个。你可以选择稍后让其他CPU上线。</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">nr_cpus=n</span></code></dt><dd><p>限制内核将支持的CPU总量。如果这里提供的数量低于实际可用的CPU数量，那么其他CPU
+以后就不能上线了。</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">additional_cpus=n</span></code></dt><dd><p>使用它来限制可热插拔的CPU。该选项设置
+<code class="docutils literal notranslate"><span class="pre">cpu_possible_mask</span> <span class="pre">=</span> <span class="pre">cpu_present_mask</span> <span class="pre">+</span> <span class="pre">additional_cpus</span></code></p>
+<p>这个选项只限于IA64架构。</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">possible_cpus=n</span></code></dt><dd><p>这个选项设置 <code class="docutils literal notranslate"><span class="pre">cpu_possible_mask</span></code> 中的 <code class="docutils literal notranslate"><span class="pre">possible_cpus</span></code> 位。</p>
+<p>这个选项只限于X86和S390架构。</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">cpu0_hotplug</span></code></dt><dd><p>允许关闭CPU0。</p>
+<p>这个选项只限于X86架构。</p>
+</dd>
+</dl>
+</section>
+<section id="id3">
+<h2>CPU位图<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h2>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">cpu_possible_mask</span></code></dt><dd><p>系统中可能可用CPU的位图。这是用来为per_cpu变量分配一些启动时的内存，这些变量
+不会随着CPU的可用或移除而增加/减少。一旦在启动时的发现阶段被设置，该映射就是静态
+的，也就是说，任何时候都不会增加或删除任何位。根据你的系统需求提前准确地调整它
+可以节省一些启动时的内存。</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">cpu_online_mask</span></code></dt><dd><p>当前在线的所有CPU的位图。在一个CPU可用于内核调度并准备接收设备的中断后，它被
+设置在 <code class="docutils literal notranslate"><span class="pre">__cpu_up()</span></code> 中。当使用 <code class="docutils literal notranslate"><span class="pre">__cpu_disable()</span></code> 关闭一个CPU时，它被清
+空，在此之前，所有的操作系统服务包括中断都被迁移到另一个目标CPU。</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">cpu_present_mask</span></code></dt><dd><p>系统中当前存在的CPU的位图。它们并非全部在线。当物理热拔插被相关的子系统
+（如ACPI）处理时，可以改变和添加新的位或从位图中删除，这取决于事件是
+hot-add/hot-remove。目前还没有定死规定。典型的用法是在启动时启动拓扑结构，这时
+热插拔被禁用。</p>
+</dd>
+</dl>
+<p>你真的不需要操作任何系统的CPU映射。在大多数情况下，它们应该是只读的。当设置每个
+CPU资源时，几乎总是使用 <code class="docutils literal notranslate"><span class="pre">cpu_possible_mask</span></code> 或 <code class="docutils literal notranslate"><span class="pre">for_each_possible_cpu()</span></code>
+来进行迭代。宏 <code class="docutils literal notranslate"><span class="pre">for_each_cpu()</span></code> 可以用来迭代一个自定义的CPU掩码。</p>
+<p>不要使用 <code class="docutils literal notranslate"><span class="pre">cpumask_t</span></code> 以外的任何东西来表示CPU的位图。</p>
+</section>
+<section id="id4">
+<h2>使用CPU热拔插<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h2>
+<p>内核选项 <em>CONFIG_HOTPLUG_CPU</em> 需要被启用。它目前可用于多种架构，包括ARM、MIPS、
+PowerPC和X86。配置是通过sysfs接口完成的:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ ls -lh /sys/devices/system/cpu
+total 0
+drwxr-xr-x  9 root root    0 Dec 21 16:33 cpu0
+drwxr-xr-x  9 root root    0 Dec 21 16:33 cpu1
+drwxr-xr-x  9 root root    0 Dec 21 16:33 cpu2
+drwxr-xr-x  9 root root    0 Dec 21 16:33 cpu3
+drwxr-xr-x  9 root root    0 Dec 21 16:33 cpu4
+drwxr-xr-x  9 root root    0 Dec 21 16:33 cpu5
+drwxr-xr-x  9 root root    0 Dec 21 16:33 cpu6
+drwxr-xr-x  9 root root    0 Dec 21 16:33 cpu7
+drwxr-xr-x  2 root root    0 Dec 21 16:33 hotplug
+-r--r--r--  1 root root 4.0K Dec 21 16:33 offline
+-r--r--r--  1 root root 4.0K Dec 21 16:33 online
+-r--r--r--  1 root root 4.0K Dec 21 16:33 possible
+-r--r--r--  1 root root 4.0K Dec 21 16:33 present
+</pre></div>
+</div>
+<p>文件 <em>offline</em> 、 <em>online</em> 、<em>possible</em> 、<em>present</em> 代表CPU掩码。每个CPU文件
+夹包含一个 <em>online</em> 文件，控制逻辑上的开（1）和关（0）状态。要在逻辑上关闭CPU4:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo 0 &gt; /sys/devices/system/cpu/cpu4/online
+ smpboot: CPU 4 is now offline
+</pre></div>
+</div>
+<p>一旦CPU被关闭，它将从 <em>/proc/interrupts</em> 、<em>/proc/cpuinfo</em> 中被删除，也不应该
+被 <em>top</em> 命令显示出来。要让CPU4重新上线:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo 1 &gt; /sys/devices/system/cpu/cpu4/online
+smpboot: Booting Node 0 Processor 4 APIC 0x1
+</pre></div>
+</div>
+<p>CPU又可以使用了。这应该对所有的CPU都有效。CPU0通常比较特殊，被排除在CPU热拔插之外。
+在X86上，内核选项 <em>CONFIG_BOOTPARAM_HOTPLUG_CPU0</em> 必须被启用，以便能够关闭CPU0。
+或者，可以使用内核命令选项 <em>cpu0_hotplug</em> 。CPU0的一些已知的依赖性:</p>
+<ul class="simple">
+<li><p>从休眠/暂停中恢复。如果CPU0处于离线状态，休眠/暂停将失败。</p></li>
+<li><p>PIC中断。如果检测到PIC中断，CPU0就不能被移除。</p></li>
+</ul>
+<p>如果你发现CPU0上有任何依赖性，请告知Fenghua Yu &lt;<a class="reference external" href="mailto:fenghua&#46;yu&#37;&#52;&#48;intel&#46;com">fenghua<span>&#46;</span>yu<span>&#64;</span>intel<span>&#46;</span>com</a>&gt;。</p>
+</section>
+<section id="id5">
+<h2>CPU的热拔插协作<a class="headerlink" href="#id5" title="Permalink to this headline">¶</a></h2>
+<section id="id6">
+<h3>下线情况<a class="headerlink" href="#id6" title="Permalink to this headline">¶</a></h3>
+<p>一旦CPU被逻辑关闭，注册的热插拔状态的清除回调将被调用，从 <code class="docutils literal notranslate"><span class="pre">CPUHP_ONLINE</span></code> 开始，到
+<code class="docutils literal notranslate"><span class="pre">CPUHP_OFFLINE</span></code> 状态结束。这包括:</p>
+<ul class="simple">
+<li><p>如果任务因暂停操作而被冻结，那么 <em>cpuhp_tasks_frozen</em> 将被设置为true。</p></li>
+<li><p>所有进程都会从这个将要离线的CPU迁移到新的CPU上。新的CPU是从每个进程的当前cpuset中
+选择的，它可能是所有在线CPU的一个子集。</p></li>
+<li><p>所有针对这个CPU的中断都被迁移到新的CPU上。</p></li>
+<li><p>计时器也会被迁移到新的CPU上。</p></li>
+<li><p>一旦所有的服务被迁移，内核会调用一个特定的例程 <code class="docutils literal notranslate"><span class="pre">__cpu_disable()</span></code> 来进行特定的清
+理。</p></li>
+</ul>
+</section>
+</section>
+<section id="cpuapi">
+<h2>CPU热插拔API<a class="headerlink" href="#cpuapi" title="Permalink to this headline">¶</a></h2>
+<section id="id7">
+<h3>CPU热拔插状态机<a class="headerlink" href="#id7" title="Permalink to this headline">¶</a></h3>
+<p>CPU热插拔使用一个从CPUHP_OFFLINE到CPUHP_ONLINE的线性状态空间的普通状态机。每个状态都
+有一个startup和teardown的回调。</p>
+<p>当一个CPU上线时，将按顺序调用startup回调，直到达到CPUHP_ONLINE状态。当设置状态的回调
+或将实例添加到多实例状态时，也可以调用它们。</p>
+<p>当一个CPU下线时，将按相反的顺序依次调用teardown回调，直到达到CPUHP_OFFLINE状态。当删
+除状态的回调或从多实例状态中删除实例时，也可以调用它们。</p>
+<p>如果某个使用场景只需要一个方向的热插拔操作回调（CPU上线或CPU下线），则在设置状态时，
+可以将另一个不需要的回调设置为NULL。</p>
+<p>状态空间被划分成三个阶段:</p>
+<ul>
+<li><p>PREPARE阶段</p>
+<p>PREPARE阶段涵盖了从CPUHP_OFFLINE到CPUHP_BRINGUP_CPU之间的状态空间。</p>
+<p>在该阶段中，startup回调在CPU上线操作启动CPU之前被调用，teardown回调在CPU下线操作使
+CPU功能失效之后被调用。</p>
+<p>这些回调是在控制CPU上调用的，因为它们显然不能在热插拔的CPU上运行，此时热插拔的CPU要
+么还没有启动，要么已经功能失效。</p>
+<p>startup回调用于设置CPU成功上线所需要的资源。teardown回调用于释放资源或在热插拔的CPU
+功能失效后，将待处理的工作转移到在线的CPU上。</p>
+<p>允许startup回调失败。如果回调失败，CPU上线操作被中止，CPU将再次被降到之前的状态（通
+常是CPUHP_OFFLINE）。</p>
+<p>本阶段中的teardown回调不允许失败。</p>
+</li>
+<li><p>STARTING阶段</p>
+<p>STARTING阶段涵盖了CPUHP_BRINGUP_CPU + 1到CPUHP_AP_ONLINE之间的状态空间。</p>
+<p>该阶段中的startup回调是在早期CPU设置代码中的CPU上线操作期间，禁用中断的情况下在热拔
+插的CPU上被调用。teardown回调是在CPU完全关闭前不久的CPU下线操作期间，禁用中断的情况
+下在热拔插的CPU上被调用。</p>
+<p>该阶段中的回调不允许失败。</p>
+<p>回调用于低级别的硬件初始化/关机和核心子系统。</p>
+</li>
+<li><p>ONLINE阶段</p>
+<p>ONLINE阶段涵盖了CPUHP_AP_ONLINE + 1到CPUHP_ONLINE之间的状态空间。</p>
+<p>该阶段中的startup回调是在CPU上线时在热插拔的CPU上调用的。teardown回调是在CPU下线操
+作时在热插拔CPU上调用的。</p>
+<p>回调是在每个CPU热插拔线程的上下文中调用的，该线程绑定在热插拔的CPU上。回调是在启用
+中断和抢占的情况下调用的。</p>
+<p>允许回调失败。如果回调失败，CPU热插拔操作被中止，CPU将恢复到之前的状态。</p>
+</li>
+</ul>
+</section>
+<section id="id8">
+<h3>CPU 上线/下线操作<a class="headerlink" href="#id8" title="Permalink to this headline">¶</a></h3>
+<p>一个成功的上线操作如下:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[CPUHP_OFFLINE]
+[CPUHP_OFFLINE + 1]-&gt;startup()       -&gt; 成功
+[CPUHP_OFFLINE + 2]-&gt;startup()       -&gt; 成功
+[CPUHP_OFFLINE + 3]                  -&gt; 略过，因为startup == NULL
+...
+[CPUHP_BRINGUP_CPU]-&gt;startup()       -&gt; 成功
+=== PREPARE阶段结束
+[CPUHP_BRINGUP_CPU + 1]-&gt;startup()   -&gt; 成功
+...
+[CPUHP_AP_ONLINE]-&gt;startup()         -&gt; 成功
+=== STARTUP阶段结束
+[CPUHP_AP_ONLINE + 1]-&gt;startup()     -&gt; 成功
+...
+[CPUHP_ONLINE - 1]-&gt;startup()        -&gt; 成功
+[CPUHP_ONLINE]
+</pre></div>
+</div>
+<p>一个成功的下线操作如下:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[CPUHP_ONLINE]
+[CPUHP_ONLINE - 1]-&gt;teardown()       -&gt; 成功
+...
+[CPUHP_AP_ONLINE + 1]-&gt;teardown()    -&gt; 成功
+=== STARTUP阶段开始
+[CPUHP_AP_ONLINE]-&gt;teardown()        -&gt; 成功
+...
+[CPUHP_BRINGUP_ONLINE - 1]-&gt;teardown()
+...
+=== PREPARE阶段开始
+[CPUHP_BRINGUP_CPU]-&gt;teardown()
+[CPUHP_OFFLINE + 3]-&gt;teardown()
+[CPUHP_OFFLINE + 2]                  -&gt; 略过，因为teardown == NULL
+[CPUHP_OFFLINE + 1]-&gt;teardown()
+[CPUHP_OFFLINE]
+</pre></div>
+</div>
+<p>一个失败的上线操作如下:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[CPUHP_OFFLINE]
+[CPUHP_OFFLINE + 1]-&gt;startup()       -&gt; 成功
+[CPUHP_OFFLINE + 2]-&gt;startup()       -&gt; 成功
+[CPUHP_OFFLINE + 3]                  -&gt; 略过，因为startup == NULL
+...
+[CPUHP_BRINGUP_CPU]-&gt;startup()       -&gt; 成功
+=== PREPARE阶段结束
+[CPUHP_BRINGUP_CPU + 1]-&gt;startup()   -&gt; 成功
+...
+[CPUHP_AP_ONLINE]-&gt;startup()         -&gt; 成功
+=== STARTUP阶段结束
+[CPUHP_AP_ONLINE + 1]-&gt;startup()     -&gt; 成功
+---
+[CPUHP_AP_ONLINE + N]-&gt;startup()     -&gt; 失败
+[CPUHP_AP_ONLINE + (N - 1)]-&gt;teardown()
+...
+[CPUHP_AP_ONLINE + 1]-&gt;teardown()
+=== STARTUP阶段开始
+[CPUHP_AP_ONLINE]-&gt;teardown()
+...
+[CPUHP_BRINGUP_ONLINE - 1]-&gt;teardown()
+...
+=== PREPARE阶段开始
+[CPUHP_BRINGUP_CPU]-&gt;teardown()
+[CPUHP_OFFLINE + 3]-&gt;teardown()
+[CPUHP_OFFLINE + 2]                  -&gt; 略过，因为teardown == NULL
+[CPUHP_OFFLINE + 1]-&gt;teardown()
+[CPUHP_OFFLINE]
+</pre></div>
+</div>
+<p>一个失败的下线操作如下:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[CPUHP_ONLINE]
+[CPUHP_ONLINE - 1]-&gt;teardown()       -&gt; 成功
+...
+[CPUHP_ONLINE - N]-&gt;teardown()       -&gt; 失败
+[CPUHP_ONLINE - (N - 1)]-&gt;startup()
+...
+[CPUHP_ONLINE - 1]-&gt;startup()
+[CPUHP_ONLINE]
+</pre></div>
+</div>
+<p>递归失败不能被合理地处理。
+请看下面的例子，由于下线操作失败而导致的递归失败:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[CPUHP_ONLINE]
+[CPUHP_ONLINE - 1]-&gt;teardown()       -&gt; 成功
+...
+[CPUHP_ONLINE - N]-&gt;teardown()       -&gt; 失败
+[CPUHP_ONLINE - (N - 1)]-&gt;startup()  -&gt; 成功
+[CPUHP_ONLINE - (N - 2)]-&gt;startup()  -&gt; 失败
+</pre></div>
+</div>
+<p>CPU热插拔状态机在此停止，且不再尝试回滚，因为这可能会导致死循环:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[CPUHP_ONLINE - (N - 1)]-&gt;teardown() -&gt; 成功
+[CPUHP_ONLINE - N]-&gt;teardown()       -&gt; 失败
+[CPUHP_ONLINE - (N - 1)]-&gt;startup()  -&gt; 成功
+[CPUHP_ONLINE - (N - 2)]-&gt;startup()  -&gt; 失败
+[CPUHP_ONLINE - (N - 1)]-&gt;teardown() -&gt; 成功
+[CPUHP_ONLINE - N]-&gt;teardown()       -&gt; 失败
+</pre></div>
+</div>
+<p>周而复始，不断重复。在这种情况下，CPU留在该状态中:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[CPUHP_ONLINE - (N - 1)]
+</pre></div>
+</div>
+<p>这至少可以让系统取得进展，让用户有机会进行调试，甚至解决这个问题。</p>
+</section>
+<section id="id9">
+<h3>分配一个状态<a class="headerlink" href="#id9" title="Permalink to this headline">¶</a></h3>
+<p>有两种方式分配一个CPU热插拔状态:</p>
+<ul>
+<li><p>静态分配</p>
+<p>当子系统或驱动程序有相对于其他CPU热插拔状态的排序要求时，必须使用静态分配。例如，
+在CPU上线操作期间，PERF核心startup回调必须在PERF驱动startup回调之前被调用。在CPU
+下线操作中，驱动teardown回调必须在核心teardown回调之前调用。静态分配的状态由
+cpuhp_state枚举中的常量描述，可以在include/linux/cpuhotplug.h中找到。</p>
+<p>在适当的位置将状态插入枚举中，这样就满足了排序要求。状态常量必须被用于状态的设置
+和移除。</p>
+<p>当状态回调不是在运行时设置的，并且是kernel/cpu.c中CPU热插拔状态数组初始化的一部分
+时，也需要静态分配。</p>
+</li>
+<li><p>动态分配</p>
+<p>当对状态回调没有排序要求时，动态分配是首选方法。状态编号由setup函数分配，并在成功
+后返回给调用者。</p>
+<p>只有PREPARE和ONLINE阶段提供了一个动态分配范围。STARTING阶段则没有，因为该部分的大多
+数回调都有明确的排序要求。</p>
+</li>
+</ul>
+</section>
+<section id="id10">
+<h3>CPU热插拔状态的设置<a class="headerlink" href="#id10" title="Permalink to this headline">¶</a></h3>
+<p>核心代码提供了以下函数用来设置状态：</p>
+<ul class="simple">
+<li><p>cpuhp_setup_state(state, name, startup, teardown)</p></li>
+<li><p>cpuhp_setup_state_nocalls(state, name, startup, teardown)</p></li>
+<li><p>cpuhp_setup_state_cpuslocked(state, name, startup, teardown)</p></li>
+<li><p>cpuhp_setup_state_nocalls_cpuslocked(state, name, startup, teardown)</p></li>
+</ul>
+<p>对于一个驱动程序或子系统有多个实例，并且每个实例都需要调用相同的CPU hotplug状态回
+调的情况，CPU hotplug核心提供多实例支持。与驱动程序特定的实例列表相比，其优势在于
+与实例相关的函数完全针对CPU hotplug操作进行序列化，并在添加和删除时提供状态回调的
+自动调用。要设置这样一个多实例状态，可以使用以下函数：</p>
+<ul class="simple">
+<li><p>cpuhp_setup_state_multi(state, name, startup, teardown)</p></li>
+</ul>
+<p>&#64;state参数要么是静态分配的状态，要么是动态分配状态（PUHP_PREPARE_DYN，CPUHP_ONLINE_DYN）
+的常量之一， 具体取决于应该分配动态状态的状态阶段（PREPARE，ONLINE）。</p>
+<p>&#64;name参数用于sysfs输出和检测。命名惯例是”subsys:mode”或”subsys/driver:mode”，
+例如 “perf:mode”或”perf/x86:mode”。常见的mode名称有：</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 15%" />
+<col style="width: 85%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>prepare</p></td>
+<td><p>对应PREPARE阶段中的状态</p></td>
+</tr>
+<tr class="row-even"><td><p>dead</p></td>
+<td><p>对应PREPARE阶段中不提供startup回调的状态</p></td>
+</tr>
+<tr class="row-odd"><td><p>starting</p></td>
+<td><p>对应STARTING阶段中的状态</p></td>
+</tr>
+<tr class="row-even"><td><p>dying</p></td>
+<td><p>对应STARTING阶段中不提供startup回调的状态</p></td>
+</tr>
+<tr class="row-odd"><td><p>online</p></td>
+<td><p>对应ONLINE阶段中的状态</p></td>
+</tr>
+<tr class="row-even"><td><p>offline</p></td>
+<td><p>对应ONLINE阶段中不提供startup回调的状态</p></td>
+</tr>
+</tbody>
+</table>
+<p>由于&#64;name参数只用于sysfs和检测，如果其他mode描述符比常见的描述符更好地描述状态的性质，
+也可以使用。</p>
+<p>&#64;name参数的示例：”perf/online”, “perf/x86:prepare”, “RCU/tree:dying”, “sched/waitempty”</p>
+<p>&#64;startup参数是一个指向回调的函数指针，在CPU上线操作时被调用。若应用不需要startup
+回调，则将该指针设为NULL。</p>
+<p>&#64;teardown参数是一个指向回调的函数指针，在CPU下线操作时调用。若应用不需要teardown
+回调，则将该指针设为NULL。</p>
+<p>这些函数在处理已注册回调的方式上有所不同:</p>
+<blockquote>
+<div><ul>
+<li><p><a class="reference internal" href="../../../core-api/cpu_hotplug.html#c.cpuhp_setup_state_nocalls" title="cpuhp_setup_state_nocalls"><code class="xref c c-func docutils literal notranslate"><span class="pre">cpuhp_setup_state_nocalls()</span></code></a>, <a class="reference internal" href="../../../core-api/cpu_hotplug.html#c.cpuhp_setup_state_nocalls_cpuslocked" title="cpuhp_setup_state_nocalls_cpuslocked"><code class="xref c c-func docutils literal notranslate"><span class="pre">cpuhp_setup_state_nocalls_cpuslocked()</span></code></a>和
+<a class="reference internal" href="../../../core-api/cpu_hotplug.html#c.cpuhp_setup_state_multi" title="cpuhp_setup_state_multi"><code class="xref c c-func docutils literal notranslate"><span class="pre">cpuhp_setup_state_multi()</span></code></a>只注册回调。</p></li>
+<li><p><a class="reference internal" href="../../../core-api/cpu_hotplug.html#c.cpuhp_setup_state" title="cpuhp_setup_state"><code class="xref c c-func docutils literal notranslate"><span class="pre">cpuhp_setup_state()</span></code></a>和<a class="reference internal" href="../../../core-api/cpu_hotplug.html#c.cpuhp_setup_state_cpuslocked" title="cpuhp_setup_state_cpuslocked"><code class="xref c c-func docutils literal notranslate"><span class="pre">cpuhp_setup_state_cpuslocked()</span></code></a>注册回调，并对当前状态大于新
+安装状态的所有在线CPU调用&#64;startup回调（如果不是NULL）。根据状态阶段，回调要么在
+当前的CPU上调用（PREPARE阶段），要么在CPU的热插拔线程中调用每个在线CPU（ONLINE阶段）。</p>
+<p>如果CPU N的回调失败，那么CPU 0…N-1的teardown回调被调用以回滚操作。状态设置失败，
+状态的回调没有被注册，在动态分配的情况下，分配的状态被释放。</p>
+</li>
+</ul>
+</div></blockquote>
+<p>状态设置和回调调用是针对CPU热拔插操作进行序列化的。如果设置函数必须从CPU热插拔的读
+锁定区域调用，那么必须使用_cpuslocked()变体。这些函数不能在CPU热拔插回调中使用。</p>
+<dl>
+<dt>函数返回值：</dt><dd><table class="docutils align-default">
+<colgroup>
+<col style="width: 12%" />
+<col style="width: 88%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>0</p></td>
+<td><p>静态分配的状态设置成功</p></td>
+</tr>
+<tr class="row-even"><td><p>&gt;0</p></td>
+<td><p>动态分配的状态设置成功</p>
+<p>返回的数值是被分配的状态编号。如果状态回调后来必须被移除，
+例如模块移除，那么这个数值必须由调用者保存，并作为状态移
+除函数的&#64;state参数。对于多实例状态，动态分配的状态编号也
+需要作为实例添加/删除操作的&#64;state参数。</p>
+</td>
+</tr>
+<tr class="row-odd"><td><p>&lt;0</p></td>
+<td><p>操作失败</p></td>
+</tr>
+</tbody>
+</table>
+</dd>
+</dl>
+</section>
+<section id="id11">
+<h3>移除CPU热拔插状态<a class="headerlink" href="#id11" title="Permalink to this headline">¶</a></h3>
+<p>为了移除一个之前设置好的状态，提供了如下函数：</p>
+<ul class="simple">
+<li><p>cpuhp_remove_state(state)</p></li>
+<li><p>cpuhp_remove_state_nocalls(state)</p></li>
+<li><p>cpuhp_remove_state_nocalls_cpuslocked(state)</p></li>
+<li><p>cpuhp_remove_multi_state(state)</p></li>
+</ul>
+<p>&#64;state参数要么是静态分配的状态，要么是由cpuhp_setup_state*()在动态范围内分配
+的状态编号。如果状态在动态范围内，则状态编号被释放，可再次进行动态分配。</p>
+<p>这些函数在处理已注册回调的方式上有所不同:</p>
+<blockquote>
+<div><ul>
+<li><p><a class="reference internal" href="../../../core-api/cpu_hotplug.html#c.cpuhp_remove_state_nocalls" title="cpuhp_remove_state_nocalls"><code class="xref c c-func docutils literal notranslate"><span class="pre">cpuhp_remove_state_nocalls()</span></code></a>, <a class="reference internal" href="../../../core-api/cpu_hotplug.html#c.cpuhp_remove_state_nocalls_cpuslocked" title="cpuhp_remove_state_nocalls_cpuslocked"><code class="xref c c-func docutils literal notranslate"><span class="pre">cpuhp_remove_state_nocalls_cpuslocked()</span></code></a>
+和 <a class="reference internal" href="../../../core-api/cpu_hotplug.html#c.cpuhp_remove_multi_state" title="cpuhp_remove_multi_state"><code class="xref c c-func docutils literal notranslate"><span class="pre">cpuhp_remove_multi_state()</span></code></a>只删除回调。</p></li>
+<li><p><a class="reference internal" href="../../../core-api/cpu_hotplug.html#c.cpuhp_remove_state" title="cpuhp_remove_state"><code class="xref c c-func docutils literal notranslate"><span class="pre">cpuhp_remove_state()</span></code></a>删除回调，并调用所有当前状态大于被删除状态的在线CPU的
+teardown回调（如果不是NULL）。根据状态阶段，回调要么在当前的CPU上调用
+（PREPARE阶段），要么在CPU的热插拔线程中调用每个在线CPU（ONLINE阶段）。</p>
+<p>为了完成移除工作，teardown回调不能失败。</p>
+</li>
+</ul>
+</div></blockquote>
+<p>状态移除和回调调用是针对CPU热拔插操作进行序列化的。如果移除函数必须从CPU hotplug
+读取锁定区域调用，那么必须使用_cpuslocked()变体。这些函数不能从CPU热插拔的回调中使用。</p>
+<p>如果一个多实例的状态被移除，那么调用者必须先移除所有的实例。</p>
+</section>
+<section id="id12">
+<h3>多实例状态实例管理<a class="headerlink" href="#id12" title="Permalink to this headline">¶</a></h3>
+<p>一旦多实例状态被建立，实例就可以被添加到状态中：</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>cpuhp_state_add_instance(state, node)</p></li>
+<li><p>cpuhp_state_add_instance_nocalls(state, node)</p></li>
+</ul>
+</div></blockquote>
+<p>&#64;state参数是一个静态分配的状态或由<a class="reference internal" href="../../../core-api/cpu_hotplug.html#c.cpuhp_setup_state_multi" title="cpuhp_setup_state_multi"><code class="xref c c-func docutils literal notranslate"><span class="pre">cpuhp_setup_state_multi()</span></code></a>在动态范围内分配的状
+态编号。</p>
+<p>&#64;node参数是一个指向hlist_node的指针，它被嵌入到实例的数据结构中。这个指针被交给
+多实例状态的回调，可以被回调用来通过container_of()检索到实例。</p>
+<p>这些函数在处理已注册回调的方式上有所不同:</p>
+<blockquote>
+<div><ul>
+<li><p><a class="reference internal" href="../../../core-api/cpu_hotplug.html#c.cpuhp_state_add_instance_nocalls" title="cpuhp_state_add_instance_nocalls"><code class="xref c c-func docutils literal notranslate"><span class="pre">cpuhp_state_add_instance_nocalls()</span></code></a>只将实例添加到多实例状态的节点列表中。</p></li>
+<li><p><a class="reference internal" href="../../../core-api/cpu_hotplug.html#c.cpuhp_state_add_instance" title="cpuhp_state_add_instance"><code class="xref c c-func docutils literal notranslate"><span class="pre">cpuhp_state_add_instance()</span></code></a>为所有当前状态大于&#64;state的在线CPU添加实例并调用与
+&#64;state相关的startup回调（如果不是NULL）。该回调只对将要添加的实例进行调用。
+根据状态阶段，回调要么在当前的CPU上调用（PREPARE阶段），要么在CPU的热插拔线
+程中调用每个在线CPU（ONLINE阶段）。</p>
+<p>如果CPU N的回调失败，那么CPU 0 … N-1的teardown回调被调用以回滚操作，该函数
+失败，实例不会被添加到多实例状态的节点列表中。</p>
+</li>
+</ul>
+</div></blockquote>
+<p>要从状态的节点列表中删除一个实例，可以使用这些函数:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>cpuhp_state_remove_instance(state, node)</p></li>
+<li><p>cpuhp_state_remove_instance_nocalls(state, node)</p></li>
+</ul>
+</div></blockquote>
+<p>参数与上述cpuhp_state_add_instance*()变体相同。</p>
+<p>这些函数在处理已注册回调的方式上有所不同:</p>
+<blockquote>
+<div><ul>
+<li><p><a class="reference internal" href="../../../core-api/cpu_hotplug.html#c.cpuhp_state_remove_instance_nocalls" title="cpuhp_state_remove_instance_nocalls"><code class="xref c c-func docutils literal notranslate"><span class="pre">cpuhp_state_remove_instance_nocalls()</span></code></a>只从状态的节点列表中删除实例。</p></li>
+<li><p><a class="reference internal" href="../../../core-api/cpu_hotplug.html#c.cpuhp_state_remove_instance" title="cpuhp_state_remove_instance"><code class="xref c c-func docutils literal notranslate"><span class="pre">cpuhp_state_remove_instance()</span></code></a>删除实例并调用与&#64;state相关的回调（如果不是NULL），
+用于所有当前状态大于&#64;state的在线CPU。 该回调只对将要被移除的实例进行调用。
+根据状态阶段，回调要么在当前的CPU上调用（PREPARE阶段），要么在CPU的热插拔
+线程中调用每个在线CPU（ONLINE阶段）。</p>
+<p>为了完成移除工作，teardown回调不能失败。</p>
+</li>
+</ul>
+</div></blockquote>
+<p>节点列表的添加/删除操作和回调调用是针对CPU热拔插操作进行序列化。这些函数不能在
+CPU hotplug回调和CPU hotplug读取锁定区域内使用。</p>
+</section>
+<section id="id13">
+<h3>样例<a class="headerlink" href="#id13" title="Permalink to this headline">¶</a></h3>
+<p>在STARTING阶段设置和取消静态分配的状态，以获取上线和下线操作的通知:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ret = cpuhp_setup_state(CPUHP_SUBSYS_STARTING, &quot;subsys:starting&quot;, subsys_cpu_starting, subsys_cpu_dying);
+if (ret &lt; 0)
+     return ret;
+....
+cpuhp_remove_state(CPUHP_SUBSYS_STARTING);
+</pre></div>
+</div>
+<p>在ONLINE阶段设置和取消动态分配的状态，以获取下线操作的通知:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>state = cpuhp_setup_state(CPUHP_ONLINE_DYN, &quot;subsys:offline&quot;, NULL, subsys_cpu_offline);
+if (state &lt; 0)
+    return state;
+....
+cpuhp_remove_state(state);
+</pre></div>
+</div>
+<p>在ONLINE阶段设置和取消动态分配的状态，以获取有关上线操作的通知，而无需调用回调:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>state = cpuhp_setup_state_nocalls(CPUHP_ONLINE_DYN, &quot;subsys:online&quot;, subsys_cpu_online, NULL);
+if (state &lt; 0)
+    return state;
+....
+cpuhp_remove_state_nocalls(state);
+</pre></div>
+</div>
+<p>在ONLINE阶段设置、使用和取消动态分配的多实例状态，以获得上线和下线操作的通知:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>state = cpuhp_setup_state_multi(CPUHP_ONLINE_DYN, &quot;subsys:online&quot;, subsys_cpu_online, subsys_cpu_offline);
+if (state &lt; 0)
+    return state;
+....
+ret = cpuhp_state_add_instance(state, &amp;inst1-&gt;node);
+if (ret)
+     return ret;
+....
+ret = cpuhp_state_add_instance(state, &amp;inst2-&gt;node);
+if (ret)
+     return ret;
+....
+cpuhp_remove_instance(state, &amp;inst1-&gt;node);
+....
+cpuhp_remove_instance(state, &amp;inst2-&gt;node);
+....
+remove_multi_state(state);
+</pre></div>
+</div>
+</section>
+</section>
+<section id="id14">
+<h2>测试热拔插状态<a class="headerlink" href="#id14" title="Permalink to this headline">¶</a></h2>
+<p>验证自定义状态是否按预期工作的一个方法是关闭一个CPU，然后再把它上线。也可以把CPU放到某
+些状态（例如 <code class="docutils literal notranslate"><span class="pre">CPUHP_AP_ONLINE</span></code> ），然后再回到 <code class="docutils literal notranslate"><span class="pre">CPUHP_ONLINE</span></code> 。这将模拟在
+<code class="docutils literal notranslate"><span class="pre">CPUHP_AP_ONLINE</span></code> 之后的一个状态出现错误，从而导致回滚到在线状态。</p>
+<p>所有注册的状态都被列举在 <code class="docutils literal notranslate"><span class="pre">/sys/devices/system/cpu/hotplug/states</span></code></p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ tail /sys/devices/system/cpu/hotplug/states
+138: mm/vmscan:online
+139: mm/vmstat:online
+140: lib/percpu_cnt:online
+141: acpi/cpu-drv:online
+142: base/cacheinfo:online
+143: virtio/net:online
+144: x86/mce:online
+145: printk:online
+168: sched:active
+169: online
+</pre></div>
+</div>
+<p>要将CPU4回滚到 <code class="docutils literal notranslate"><span class="pre">lib/percpu_cnt:online</span></code> ，再回到在线状态，只需发出:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ cat /sys/devices/system/cpu/cpu4/hotplug/state
+169
+$ echo 140 &gt; /sys/devices/system/cpu/cpu4/hotplug/target
+$ cat /sys/devices/system/cpu/cpu4/hotplug/state
+140
+</pre></div>
+</div>
+<p>需要注意的是，状态140的清除回调已经被调用。现在重新上线:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo 169 &gt; /sys/devices/system/cpu/cpu4/hotplug/target
+$ cat /sys/devices/system/cpu/cpu4/hotplug/state
+169
+</pre></div>
+</div>
+<p>启用追踪事件后，单个步骤也是可见的:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#  TASK-PID   CPU#    TIMESTAMP  FUNCTION
+#     | |       |        |         |
+    bash-394  [001]  22.976: cpuhp_enter: cpu: 0004 target: 140 step: 169 (cpuhp_kick_ap_work)
+ cpuhp/4-31   [004]  22.977: cpuhp_enter: cpu: 0004 target: 140 step: 168 (sched_cpu_deactivate)
+ cpuhp/4-31   [004]  22.990: cpuhp_exit:  cpu: 0004  state: 168 step: 168 ret: 0
+ cpuhp/4-31   [004]  22.991: cpuhp_enter: cpu: 0004 target: 140 step: 144 (mce_cpu_pre_down)
+ cpuhp/4-31   [004]  22.992: cpuhp_exit:  cpu: 0004  state: 144 step: 144 ret: 0
+ cpuhp/4-31   [004]  22.993: cpuhp_multi_enter: cpu: 0004 target: 140 step: 143 (virtnet_cpu_down_prep)
+ cpuhp/4-31   [004]  22.994: cpuhp_exit:  cpu: 0004  state: 143 step: 143 ret: 0
+ cpuhp/4-31   [004]  22.995: cpuhp_enter: cpu: 0004 target: 140 step: 142 (cacheinfo_cpu_pre_down)
+ cpuhp/4-31   [004]  22.996: cpuhp_exit:  cpu: 0004  state: 142 step: 142 ret: 0
+    bash-394  [001]  22.997: cpuhp_exit:  cpu: 0004  state: 140 step: 169 ret: 0
+    bash-394  [005]  95.540: cpuhp_enter: cpu: 0004 target: 169 step: 140 (cpuhp_kick_ap_work)
+ cpuhp/4-31   [004]  95.541: cpuhp_enter: cpu: 0004 target: 169 step: 141 (acpi_soft_cpu_online)
+ cpuhp/4-31   [004]  95.542: cpuhp_exit:  cpu: 0004  state: 141 step: 141 ret: 0
+ cpuhp/4-31   [004]  95.543: cpuhp_enter: cpu: 0004 target: 169 step: 142 (cacheinfo_cpu_online)
+ cpuhp/4-31   [004]  95.544: cpuhp_exit:  cpu: 0004  state: 142 step: 142 ret: 0
+ cpuhp/4-31   [004]  95.545: cpuhp_multi_enter: cpu: 0004 target: 169 step: 143 (virtnet_cpu_online)
+ cpuhp/4-31   [004]  95.546: cpuhp_exit:  cpu: 0004  state: 143 step: 143 ret: 0
+ cpuhp/4-31   [004]  95.547: cpuhp_enter: cpu: 0004 target: 169 step: 144 (mce_cpu_online)
+ cpuhp/4-31   [004]  95.548: cpuhp_exit:  cpu: 0004  state: 144 step: 144 ret: 0
+ cpuhp/4-31   [004]  95.549: cpuhp_enter: cpu: 0004 target: 169 step: 145 (console_cpu_notify)
+ cpuhp/4-31   [004]  95.550: cpuhp_exit:  cpu: 0004  state: 145 step: 145 ret: 0
+ cpuhp/4-31   [004]  95.551: cpuhp_enter: cpu: 0004 target: 169 step: 168 (sched_cpu_activate)
+ cpuhp/4-31   [004]  95.552: cpuhp_exit:  cpu: 0004  state: 168 step: 168 ret: 0
+    bash-394  [005]  95.553: cpuhp_exit:  cpu: 0004  state: 169 step: 140 ret: 0
+</pre></div>
+</div>
+<p>可以看到，CPU4一直下降到时间戳22.996，然后又上升到95.552。所有被调用的回调，
+包括它们的返回代码都可以在跟踪中看到。</p>
+</section>
+<section id="id15">
+<h2>架构的要求<a class="headerlink" href="#id15" title="Permalink to this headline">¶</a></h2>
+<p>需要具备以下功能和配置：</p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">CONFIG_HOTPLUG_CPU</span></code></dt><dd><p>这个配置项需要在Kconfig中启用</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">__cpu_up()</span></code></dt><dd><p>调出一个cpu的架构接口</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">__cpu_disable()</span></code></dt><dd><p>关闭CPU的架构接口，在此程序返回后，内核不能再处理任何中断。这包括定时器的关闭。</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">__cpu_die()</span></code></dt><dd><p>这实际上是为了确保CPU的死亡。实际上，看看其他架构中实现CPU热拔插的一些示例代
+码。对于那个特定的架构，处理器被从 <code class="docutils literal notranslate"><span class="pre">idle()</span></code> 循环中拿下来。 <code class="docutils literal notranslate"><span class="pre">__cpu_die()</span></code>
+通常会等待一些per_cpu状态的设置，以确保处理器的死亡例程被调用来保持活跃。</p>
+</dd>
+</dl>
+</section>
+<section id="id16">
+<h2>用户空间通知<a class="headerlink" href="#id16" title="Permalink to this headline">¶</a></h2>
+<p>在CPU成功上线或下线后，udev事件被发送。一个udev规则，比如:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>SUBSYSTEM==&quot;cpu&quot;, DRIVERS==&quot;processor&quot;, DEVPATH==&quot;/devices/system/cpu/*&quot;, RUN+=&quot;the_hotplug_receiver.sh&quot;
+</pre></div>
+</div>
+<p>将接收所有事件。一个像这样的脚本:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#!/bin/sh
+
+if [ &quot;${ACTION}&quot; = &quot;offline&quot; ]
+then
+    echo &quot;CPU ${DEVPATH##*/} offline&quot;
+
+elif [ &quot;${ACTION}&quot; = &quot;online&quot; ]
+then
+    echo &quot;CPU ${DEVPATH##*/} online&quot;
+
+fi
+</pre></div>
+</div>
+<p>可以进一步处理该事件。</p>
+</section>
+<section id="id17">
+<h2>内核内联文档参考<a class="headerlink" href="#id17" title="Permalink to this headline">¶</a></h2>
+<p>该API在以下内核代码中:</p>
+<p>include/linux/cpuhotplug.h</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">内核中的CPU热拔插</a><ul>
+<li><a class="reference internal" href="#id1">简介</a></li>
+<li><a class="reference internal" href="#id2">命令行开关</a></li>
+<li><a class="reference internal" href="#id3">CPU位图</a></li>
+<li><a class="reference internal" href="#id4">使用CPU热拔插</a></li>
+<li><a class="reference internal" href="#id5">CPU的热拔插协作</a><ul>
+<li><a class="reference internal" href="#id6">下线情况</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#cpuapi">CPU热插拔API</a><ul>
+<li><a class="reference internal" href="#id7">CPU热拔插状态机</a></li>
+<li><a class="reference internal" href="#id8">CPU 上线/下线操作</a></li>
+<li><a class="reference internal" href="#id9">分配一个状态</a></li>
+<li><a class="reference internal" href="#id10">CPU热插拔状态的设置</a></li>
+<li><a class="reference internal" href="#id11">移除CPU热拔插状态</a></li>
+<li><a class="reference internal" href="#id12">多实例状态实例管理</a></li>
+<li><a class="reference internal" href="#id13">样例</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id14">测试热拔插状态</a></li>
+<li><a class="reference internal" href="#id15">架构的要求</a></li>
+<li><a class="reference internal" href="#id16">用户空间通知</a></li>
+<li><a class="reference internal" href="#id17">内核内联文档参考</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/core-api/cpu_hotplug.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/core-api/cpu_hotplug.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

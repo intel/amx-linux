@@ -1,0 +1,249 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>25. Bus lock detection and handling &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="26. USB Legacy support" href="usb-legacy-support.html" />
+    <link rel="prev" title="24. TSX Async Abort (TAA) mitigation" href="tsx_async_abort.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="bus-lock-detection-and-handling">
+<h1><span class="section-number">25. </span>Bus lock detection and handling<a class="headerlink" href="#bus-lock-detection-and-handling" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">Copyright</dt>
+<dd class="field-odd"><p>© 2021 Intel Corporation</p>
+</dd>
+<dt class="field-even">Authors</dt>
+<dd class="field-even"><ul class="simple">
+<li><p>Fenghua Yu &lt;<a class="reference external" href="mailto:fenghua&#46;yu&#37;&#52;&#48;intel&#46;com">fenghua<span>&#46;</span>yu<span>&#64;</span>intel<span>&#46;</span>com</a>&gt;</p></li>
+<li><p>Tony Luck &lt;<a class="reference external" href="mailto:tony&#46;luck&#37;&#52;&#48;intel&#46;com">tony<span>&#46;</span>luck<span>&#64;</span>intel<span>&#46;</span>com</a>&gt;</p></li>
+</ul>
+</dd>
+</dl>
+<section id="problem">
+<h2><span class="section-number">25.1. </span>Problem<a class="headerlink" href="#problem" title="Permalink to this headline">¶</a></h2>
+<p>A split lock is any atomic operation whose operand crosses two cache lines.
+Since the operand spans two cache lines and the operation must be atomic,
+the system locks the bus while the CPU accesses the two cache lines.</p>
+<p>A bus lock is acquired through either split locked access to writeback (WB)
+memory or any locked access to non-WB memory. This is typically thousands of
+cycles slower than an atomic operation within a cache line. It also disrupts
+performance on other cores and brings the whole system to its knees.</p>
+</section>
+<section id="detection">
+<h2><span class="section-number">25.2. </span>Detection<a class="headerlink" href="#detection" title="Permalink to this headline">¶</a></h2>
+<p>Intel processors may support either or both of the following hardware
+mechanisms to detect split locks and bus locks.</p>
+<section id="ac-exception-for-split-lock-detection">
+<h3><span class="section-number">25.2.1. </span>#AC exception for split lock detection<a class="headerlink" href="#ac-exception-for-split-lock-detection" title="Permalink to this headline">¶</a></h3>
+<p>Beginning with the Tremont Atom CPU split lock operations may raise an
+Alignment Check (#AC) exception when a split lock operation is attemped.</p>
+</section>
+<section id="db-exception-for-bus-lock-detection">
+<h3><span class="section-number">25.2.2. </span>#DB exception for bus lock detection<a class="headerlink" href="#db-exception-for-bus-lock-detection" title="Permalink to this headline">¶</a></h3>
+<p>Some CPUs have the ability to notify the kernel by an #DB trap after a user
+instruction acquires a bus lock and is executed. This allows the kernel to
+terminate the application or to enforce throttling.</p>
+</section>
+</section>
+<section id="software-handling">
+<h2><span class="section-number">25.3. </span>Software handling<a class="headerlink" href="#software-handling" title="Permalink to this headline">¶</a></h2>
+<p>The kernel #AC and #DB handlers handle bus lock based on the kernel
+parameter “split_lock_detect”. Here is a summary of different options:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 26%" />
+<col style="width: 41%" />
+<col style="width: 33%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>split_lock_detect=</p></td>
+<td><p>#AC for split lock</p></td>
+<td><p>#DB for bus lock</p></td>
+</tr>
+<tr class="row-even"><td><p>off</p></td>
+<td><p>Do nothing</p></td>
+<td><p>Do nothing</p></td>
+</tr>
+<tr class="row-odd"><td><p>warn
+(default)</p></td>
+<td><p>Kernel OOPs
+Warn once per task and
+disable future checking
+When both features are
+supported, warn in #AC</p></td>
+<td><p>Warn once per task and
+and continues to run.</p></td>
+</tr>
+<tr class="row-even"><td><p>fatal</p></td>
+<td><p>Kernel OOPs
+Send SIGBUS to user
+When both features are
+supported, fatal in #AC</p></td>
+<td><p>Send SIGBUS to user.</p></td>
+</tr>
+<tr class="row-odd"><td><p>ratelimit:N
+(0 &lt; N &lt;= 1000)</p></td>
+<td><p>Do nothing</p></td>
+<td><p>Limit bus lock rate to
+N bus locks per second
+system wide and warn on
+bus locks.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="usages">
+<h2><span class="section-number">25.4. </span>Usages<a class="headerlink" href="#usages" title="Permalink to this headline">¶</a></h2>
+<p>Detecting and handling bus lock may find usages in various areas:</p>
+<p>It is critical for real time system designers who build consolidated real
+time systems. These systems run hard real time code on some cores and run
+“untrusted” user processes on other cores. The hard real time cannot afford
+to have any bus lock from the untrusted processes to hurt real time
+performance. To date the designers have been unable to deploy these
+solutions as they have no way to prevent the “untrusted” user code from
+generating split lock and bus lock to block the hard real time code to
+access memory during bus locking.</p>
+<p>It’s also useful for general computing to prevent guests or user
+applications from slowing down the overall system by executing instructions
+with bus lock.</p>
+</section>
+<section id="guidance">
+<h2><span class="section-number">25.5. </span>Guidance<a class="headerlink" href="#guidance" title="Permalink to this headline">¶</a></h2>
+<section id="off">
+<h3><span class="section-number">25.5.1. </span>off<a class="headerlink" href="#off" title="Permalink to this headline">¶</a></h3>
+<p>Disable checking for split lock and bus lock. This option can be useful if
+there are legacy applications that trigger these events at a low rate so
+that mitigation is not needed.</p>
+</section>
+<section id="warn">
+<h3><span class="section-number">25.5.2. </span>warn<a class="headerlink" href="#warn" title="Permalink to this headline">¶</a></h3>
+<p>A warning is emitted when a bus lock is detected which allows to identify
+the offending application. This is the default behavior.</p>
+</section>
+<section id="fatal">
+<h3><span class="section-number">25.5.3. </span>fatal<a class="headerlink" href="#fatal" title="Permalink to this headline">¶</a></h3>
+<p>In this case, the bus lock is not tolerated and the process is killed.</p>
+</section>
+<section id="ratelimit">
+<h3><span class="section-number">25.5.4. </span>ratelimit<a class="headerlink" href="#ratelimit" title="Permalink to this headline">¶</a></h3>
+<p>A system wide bus lock rate limit N is specified where 0 &lt; N &lt;= 1000. This
+allows a bus lock rate up to N bus locks per second. When the bus lock rate
+is exceeded then any task which is caught via the buslock #DB exception is
+throttled by enforced sleeps until the rate goes under the limit again.</p>
+<p>This is an effective mitigation in cases where a minimal impact can be
+tolerated, but an eventual Denial of Service attack has to be prevented. It
+allows to identify the offending processes and analyze whether they are
+malicious or just badly written.</p>
+<p>Selecting a rate limit of 1000 allows the bus to be locked for up to about
+seven million cycles each second (assuming 7000 cycles for each bus
+lock). On a 2 GHz processor that would be about 0.35% system slowdown.</p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">25. Bus lock detection and handling</a><ul>
+<li><a class="reference internal" href="#problem">25.1. Problem</a></li>
+<li><a class="reference internal" href="#detection">25.2. Detection</a><ul>
+<li><a class="reference internal" href="#ac-exception-for-split-lock-detection">25.2.1. #AC exception for split lock detection</a></li>
+<li><a class="reference internal" href="#db-exception-for-bus-lock-detection">25.2.2. #DB exception for bus lock detection</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#software-handling">25.3. Software handling</a></li>
+<li><a class="reference internal" href="#usages">25.4. Usages</a></li>
+<li><a class="reference internal" href="#guidance">25.5. Guidance</a><ul>
+<li><a class="reference internal" href="#off">25.5.1. off</a></li>
+<li><a class="reference internal" href="#warn">25.5.2. warn</a></li>
+<li><a class="reference internal" href="#fatal">25.5.3. fatal</a></li>
+<li><a class="reference internal" href="#ratelimit">25.5.4. ratelimit</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/x86/buslock.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/x86/buslock.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

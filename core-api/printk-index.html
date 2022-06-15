@@ -1,0 +1,245 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Printk Index &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Symbol Namespaces" href="symbol-namespaces.html" />
+    <link rel="prev" title="How to get printk format specifiers right" href="printk-formats.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="printk-index">
+<h1>Printk Index<a class="headerlink" href="#printk-index" title="Permalink to this headline">¶</a></h1>
+<p>There are many ways how to monitor the state of the system. One important
+source of information is the system log. It provides a lot of information,
+including more or less important warnings and error messages.</p>
+<p>There are monitoring tools that filter and take action based on messages
+logged.</p>
+<p>The kernel messages are evolving together with the code. As a result,
+particular kernel messages are not KABI and never will be!</p>
+<p>It is a huge challenge for maintaining the system log monitors. It requires
+knowing what messages were updated in a particular kernel version and why.
+Finding these changes in the sources would require non-trivial parsers.
+Also it would require matching the sources with the binary kernel which
+is not always trivial. Various changes might be backported. Various kernel
+versions might be used on different monitored systems.</p>
+<p>This is where the printk index feature might become useful. It provides
+a dump of printk formats used all over the source code used for the kernel
+and modules on the running system. It is accessible at runtime via debugfs.</p>
+<p>The printk index helps to find changes in the message formats. Also it helps
+to track the strings back to the kernel sources and the related commit.</p>
+<section id="user-interface">
+<h2>User Interface<a class="headerlink" href="#user-interface" title="Permalink to this headline">¶</a></h2>
+<p>The index of printk formats are split in into separate files. The files are
+named according to the binaries where the printk formats are built-in. There
+is always “vmlinux” and optionally also modules, for example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/sys/kernel/debug/printk/index/vmlinux
+/sys/kernel/debug/printk/index/ext4
+/sys/kernel/debug/printk/index/scsi_mod
+</pre></div>
+</div>
+<p>Note that only loaded modules are shown. Also printk formats from a module
+might appear in “vmlinux” when the module is built-in.</p>
+<p>The content is inspired by the dynamic debug interface and looks like:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$&gt; head -1 /sys/kernel/debug/printk/index/vmlinux; shuf -n 5 vmlinux
+# &lt;level[,flags]&gt; filename:line function &quot;format&quot;
+&lt;5&gt; block/blk-settings.c:661 disk_stack_limits &quot;%s: Warning: Device %s is misaligned\n&quot;
+&lt;4&gt; kernel/trace/trace.c:8296 trace_create_file &quot;Could not create tracefs &#39;%s&#39; entry\n&quot;
+&lt;6&gt; arch/x86/kernel/hpet.c:144 _hpet_print_config &quot;hpet: %s(%d):\n&quot;
+&lt;6&gt; init/do_mounts.c:605 prepare_namespace &quot;Waiting for root device %s...\n&quot;
+&lt;6&gt; drivers/acpi/osl.c:1410 acpi_no_auto_serialize_setup &quot;ACPI: auto-serialization disabled\n&quot;
+</pre></div>
+</div>
+<p>, where the meaning is:</p>
+<blockquote>
+<div><ul class="simple">
+<li><dl class="field-list simple">
+<dt class="field-odd">level</dt>
+<dd class="field-odd"><p>log level value: 0-7 for particular severity, -1 as default,
+‘c’ as continuous line without an explicit log level</p>
+</dd>
+</dl>
+</li>
+<li><dl class="field-list simple">
+<dt class="field-odd">flags</dt>
+<dd class="field-odd"><p>optional flags: currently only ‘c’ for KERN_CONT</p>
+</dd>
+</dl>
+</li>
+<li><dl class="field-list simple">
+<dt class="field-odd">filename:line</dt>
+<dd class="field-odd"><p>source filename and line number of the related
+<a class="reference internal" href="printk-basics.html#c.printk" title="printk"><code class="xref c c-func docutils literal notranslate"><span class="pre">printk()</span></code></a> call. Note that there are many wrappers, for example,
+<a class="reference internal" href="printk-basics.html#c.pr_warn" title="pr_warn"><code class="xref c c-func docutils literal notranslate"><span class="pre">pr_warn()</span></code></a>, pr_warn_once(), dev_warn().</p>
+</dd>
+</dl>
+</li>
+<li><dl class="field-list simple">
+<dt class="field-odd">function</dt>
+<dd class="field-odd"><p>function name where the <a class="reference internal" href="printk-basics.html#c.printk" title="printk"><code class="xref c c-func docutils literal notranslate"><span class="pre">printk()</span></code></a> call is used.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="field-list simple">
+<dt class="field-odd">format</dt>
+<dd class="field-odd"><p>format string</p>
+</dd>
+</dl>
+</li>
+</ul>
+</div></blockquote>
+<p>The extra information makes it a bit harder to find differences
+between various kernels. Especially the line number might change
+very often. On the other hand, it helps a lot to confirm that
+it is the same string or find the commit that is responsible
+for eventual changes.</p>
+</section>
+<section id="printk-is-not-a-stable-kabi">
+<h2>printk() Is Not a Stable KABI<a class="headerlink" href="#printk-is-not-a-stable-kabi" title="Permalink to this headline">¶</a></h2>
+<p>Several developers are afraid that exporting all these implementation
+details into the user space will transform particular <a class="reference internal" href="printk-basics.html#c.printk" title="printk"><code class="xref c c-func docutils literal notranslate"><span class="pre">printk()</span></code></a> calls
+into KABI.</p>
+<p>But it is exactly the opposite. <a class="reference internal" href="printk-basics.html#c.printk" title="printk"><code class="xref c c-func docutils literal notranslate"><span class="pre">printk()</span></code></a> calls must _not_ be KABI.
+And the printk index helps user space tools to deal with this.</p>
+</section>
+<section id="subsystem-specific-printk-wrappers">
+<h2>Subsystem specific printk wrappers<a class="headerlink" href="#subsystem-specific-printk-wrappers" title="Permalink to this headline">¶</a></h2>
+<p>The printk index is generated using extra metadata that are stored in
+a dedicated .elf section “.printk_index”. It is achieved using macro
+wrappers doing __printk_index_emit() together with the real <a class="reference internal" href="printk-basics.html#c.printk" title="printk"><code class="xref c c-func docutils literal notranslate"><span class="pre">printk()</span></code></a>
+call. The same technique is used also for the metadata used by
+the dynamic debug feature.</p>
+<p>The metadata are stored for a particular message only when it is printed
+using these special wrappers. It is implemented for the commonly
+used <a class="reference internal" href="printk-basics.html#c.printk" title="printk"><code class="xref c c-func docutils literal notranslate"><span class="pre">printk()</span></code></a> calls, including, for example, <a class="reference internal" href="printk-basics.html#c.pr_warn" title="pr_warn"><code class="xref c c-func docutils literal notranslate"><span class="pre">pr_warn()</span></code></a>, or pr_once().</p>
+<p>Additional changes are necessary for various subsystem specific wrappers
+that call the original <a class="reference internal" href="printk-basics.html#c.printk" title="printk"><code class="xref c c-func docutils literal notranslate"><span class="pre">printk()</span></code></a> via a common helper function. These needs
+their own wrappers adding __printk_index_emit().</p>
+<p>Only few subsystem specific wrappers have been updated so far,
+for example, dev_printk(). As a result, the printk formats from
+some subsystes can be missing in the printk index.</p>
+</section>
+<section id="subsystem-specific-prefix">
+<h2>Subsystem specific prefix<a class="headerlink" href="#subsystem-specific-prefix" title="Permalink to this headline">¶</a></h2>
+<p>The macro <a class="reference internal" href="printk-basics.html#c.pr_fmt" title="pr_fmt"><code class="xref c c-func docutils literal notranslate"><span class="pre">pr_fmt()</span></code></a> macro allows to define a prefix that is printed
+before the string generated by the related <a class="reference internal" href="printk-basics.html#c.printk" title="printk"><code class="xref c c-func docutils literal notranslate"><span class="pre">printk()</span></code></a> calls.</p>
+<p>Subsystem specific wrappers usually add even more complicated
+prefixes.</p>
+<p>These prefixes can be stored into the printk index metadata
+by an optional parameter of __printk_index_emit(). The debugfs
+interface might then show the printk formats including these prefixes.
+For example, drivers/acpi/osl.c contains:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#define pr_fmt(fmt) &quot;ACPI: OSL: &quot; fmt
+
+static int __init acpi_no_auto_serialize_setup(char *str)
+{
+      acpi_gbl_auto_serialize_methods = FALSE;
+      pr_info(&quot;Auto-serialization disabled\n&quot;);
+
+      return 1;
+}
+</pre></div>
+</div>
+<p>This results in the following printk index entry:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>&lt;6&gt; drivers/acpi/osl.c:1410 acpi_no_auto_serialize_setup &quot;ACPI: auto-serialization disabled\n&quot;
+</pre></div>
+</div>
+<p>It helps matching messages from the real log with printk index.
+Then the source file name, line number, and function name can
+be used to match the string with the source code.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Printk Index</a><ul>
+<li><a class="reference internal" href="#user-interface">User Interface</a></li>
+<li><a class="reference internal" href="#printk-is-not-a-stable-kabi">printk() Is Not a Stable KABI</a></li>
+<li><a class="reference internal" href="#subsystem-specific-printk-wrappers">Subsystem specific printk wrappers</a></li>
+<li><a class="reference internal" href="#subsystem-specific-prefix">Subsystem specific prefix</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/core-api/printk-index.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/core-api/printk-index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

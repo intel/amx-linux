@@ -1,0 +1,350 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Devlink DPIPE &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Devlink Health" href="devlink-health.html" />
+    <link rel="prev" title="Linux Devlink Documentation" href="index.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="devlink-dpipe">
+<h1>Devlink DPIPE<a class="headerlink" href="#devlink-dpipe" title="Permalink to this headline">¶</a></h1>
+<section id="background">
+<h2>Background<a class="headerlink" href="#background" title="Permalink to this headline">¶</a></h2>
+<p>While performing the hardware offloading process, much of the hardware
+specifics cannot be presented. These details are useful for debugging, and
+<code class="docutils literal notranslate"><span class="pre">devlink-dpipe</span></code> provides a standardized way to provide visibility into the
+offloading process.</p>
+<p>For example, the routing longest prefix match (LPM) algorithm used by the
+Linux kernel may differ from the hardware implementation. The pipeline debug
+API (DPIPE) is aimed at providing the user visibility into the ASIC’s
+pipeline in a generic way.</p>
+<p>The hardware offload process is expected to be done in a way that the user
+should not be able to distinguish between the hardware vs. software
+implementation. In this process, hardware specifics are neglected. In
+reality those details can have lots of meaning and should be exposed in some
+standard way.</p>
+<p>This problem is made even more complex when one wishes to offload the
+control path of the whole networking stack to a switch ASIC. Due to
+differences in the hardware and software models some processes cannot be
+represented correctly.</p>
+<p>One example is the kernel’s LPM algorithm which in many cases differs
+greatly to the hardware implementation. The configuration API is the same,
+but one cannot rely on the Forward Information Base (FIB) to look like the
+Level Path Compression trie (LPC-trie) in hardware.</p>
+<p>In many situations trying to analyze systems failure solely based on the
+kernel’s dump may not be enough. By combining this data with complementary
+information about the underlying hardware, this debugging can be made
+easier; additionally, the information can be useful when debugging
+performance issues.</p>
+</section>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Permalink to this headline">¶</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">devlink-dpipe</span></code> interface closes this gap. The hardware’s pipeline is
+modeled as a graph of match/action tables. Each table represents a specific
+hardware block. This model is not new, first being used by the P4 language.</p>
+<p>Traditionally it has been used as an alternative model for hardware
+configuration, but the <code class="docutils literal notranslate"><span class="pre">devlink-dpipe</span></code> interface uses it for visibility
+purposes as a standard complementary tool. The system’s view from
+<code class="docutils literal notranslate"><span class="pre">devlink-dpipe</span></code> should change according to the changes done by the
+standard configuration tools.</p>
+<p>For example, it’s quite common to  implement Access Control Lists (ACL)
+using Ternary Content Addressable Memory (TCAM). The TCAM memory can be
+divided into TCAM regions. Complex TC filters can have multiple rules with
+different priorities and different lookup keys. On the other hand hardware
+TCAM regions have a predefined lookup key. Offloading the TC filter rules
+using TCAM engine can result in multiple TCAM regions being interconnected
+in a chain (which may affect the data path latency). In response to a new TC
+filter new tables should be created describing those regions.</p>
+</section>
+<section id="model">
+<h2>Model<a class="headerlink" href="#model" title="Permalink to this headline">¶</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">DPIPE</span></code> model introduces several objects:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>headers</p></li>
+<li><p>tables</p></li>
+<li><p>entries</p></li>
+</ul>
+</div></blockquote>
+<p>A <code class="docutils literal notranslate"><span class="pre">header</span></code> describes packet formats and provides names for fields within
+the packet. A <code class="docutils literal notranslate"><span class="pre">table</span></code> describes hardware blocks. An <code class="docutils literal notranslate"><span class="pre">entry</span></code> describes
+the actual content of a specific table.</p>
+<p>The hardware pipeline is not port specific, but rather describes the whole
+ASIC. Thus it is tied to the top of the <code class="docutils literal notranslate"><span class="pre">devlink</span></code> infrastructure.</p>
+<p>Drivers can register and unregister tables at run time, in order to support
+dynamic behavior. This dynamic behavior is mandatory for describing hardware
+blocks like TCAM regions which can be allocated and freed dynamically.</p>
+<p><code class="docutils literal notranslate"><span class="pre">devlink-dpipe</span></code> generally is not intended for configuration. The exception
+is hardware counting for a specific table.</p>
+<p>The following commands are used to obtain the <code class="docutils literal notranslate"><span class="pre">dpipe</span></code> objects from
+userspace:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">table_get</span></code>: Receive a table’s description.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">headers_get</span></code>: Receive a device’s supported headers.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">entries_get</span></code>: Receive a table’s current entries.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">counters_set</span></code>: Enable or disable counters on a table.</p></li>
+</ul>
+</div></blockquote>
+<section id="table">
+<h3>Table<a class="headerlink" href="#table" title="Permalink to this headline">¶</a></h3>
+<p>The driver should implement the following operations for each table:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">matches_dump</span></code>: Dump the supported matches.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">actions_dump</span></code>: Dump the supported actions.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">entries_dump</span></code>: Dump the actual content of the table.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">counters_set_update</span></code>: Synchronize hardware with counters enabled or
+disabled.</p></li>
+</ul>
+</div></blockquote>
+</section>
+<section id="header-field">
+<h3>Header/Field<a class="headerlink" href="#header-field" title="Permalink to this headline">¶</a></h3>
+<p>In a similar way to P4 headers and fields are used to describe a table’s
+behavior. There is a slight difference between the standard protocol headers
+and specific ASIC metadata. The protocol headers should be declared in the
+<code class="docutils literal notranslate"><span class="pre">devlink</span></code> core API. On the other hand ASIC meta data is driver specific
+and should be defined in the driver. Additionally, each driver-specific
+devlink documentation file should document the driver-specific <code class="docutils literal notranslate"><span class="pre">dpipe</span></code>
+headers it implements. The headers and fields are identified by enumeration.</p>
+<p>In order to provide further visibility some ASIC metadata fields could be
+mapped to kernel objects. For example, internal router interface indexes can
+be directly mapped to the net device ifindex. FIB table indexes used by
+different Virtual Routing and Forwarding (VRF) tables can be mapped to
+internal routing table indexes.</p>
+</section>
+<section id="match">
+<h3>Match<a class="headerlink" href="#match" title="Permalink to this headline">¶</a></h3>
+<p>Matches are kept primitive and close to hardware operation. Match types like
+LPM are not supported due to the fact that this is exactly a process we wish
+to describe in full detail. Example of matches:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">field_exact</span></code>: Exact match on a specific field.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">field_exact_mask</span></code>: Exact match on a specific field after masking.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">field_range</span></code>: Match on a specific range.</p></li>
+</ul>
+</div></blockquote>
+<p>The id’s of the header and the field should be specified in order to
+identify the specific field. Furthermore, the header index should be
+specified in order to distinguish multiple headers of the same type in a
+packet (tunneling).</p>
+</section>
+<section id="action">
+<h3>Action<a class="headerlink" href="#action" title="Permalink to this headline">¶</a></h3>
+<p>Similar to match, the actions are kept primitive and close to hardware
+operation. For example:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">field_modify</span></code>: Modify the field value.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">field_inc</span></code>: Increment the field value.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">push_header</span></code>: Add a header.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">pop_header</span></code>: Remove a header.</p></li>
+</ul>
+</div></blockquote>
+</section>
+<section id="entry">
+<h3>Entry<a class="headerlink" href="#entry" title="Permalink to this headline">¶</a></h3>
+<p>Entries of a specific table can be dumped on demand. Each eentry is
+identified with an index and its properties are described by a list of
+match/action values and specific counter. By dumping the tables content the
+interactions between tables can be resolved.</p>
+</section>
+</section>
+<section id="abstraction-example">
+<h2>Abstraction Example<a class="headerlink" href="#abstraction-example" title="Permalink to this headline">¶</a></h2>
+<p>The following is an example of the abstraction model of the L3 part of
+Mellanox Spectrum ASIC. The blocks are described in the order they appear in
+the pipeline. The table sizes in the following examples are not real
+hardware sizes and are provided for demonstration purposes.</p>
+<section id="lpm">
+<h3>LPM<a class="headerlink" href="#lpm" title="Permalink to this headline">¶</a></h3>
+<p>The LPM algorithm can be implemented as a list of hash tables. Each hash
+table contains routes with the same prefix length. The root of the list is
+/32, and in case of a miss the hardware will continue to the next hash
+table. The depth of the search will affect the data path latency.</p>
+<p>In case of a hit the entry contains information about the next stage of the
+pipeline which resolves the MAC address. The next stage can be either local
+host table for directly connected routes, or adjacency table for next-hops.
+The <code class="docutils literal notranslate"><span class="pre">meta.lpm_prefix</span></code> field is used to connect two LPM tables.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>table lpm_prefix_16 {
+  size: 4096,
+  counters_enabled: true,
+  match: { meta.vr_id: exact,
+           ipv4.dst_addr: exact_mask,
+           ipv6.dst_addr: exact_mask,
+           meta.lpm_prefix: exact },
+  action: { meta.adj_index: set,
+            meta.adj_group_size: set,
+            meta.rif_port: set,
+            meta.lpm_prefix: set },
+}
+</pre></div>
+</div>
+</section>
+<section id="local-host">
+<h3>Local Host<a class="headerlink" href="#local-host" title="Permalink to this headline">¶</a></h3>
+<p>In the case of local routes the LPM lookup already resolves the egress
+router interface (RIF), yet the exact MAC address is not known. The local
+host table is a hash table combining the output interface id with
+destination IP address as a key. The result is the MAC address.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>table local_host {
+  size: 4096,
+  counters_enabled: true,
+  match: { meta.rif_port: exact,
+           ipv4.dst_addr: exact},
+  action: { ethernet.daddr: set }
+}
+</pre></div>
+</div>
+</section>
+<section id="adjacency">
+<h3>Adjacency<a class="headerlink" href="#adjacency" title="Permalink to this headline">¶</a></h3>
+<p>In case of remote routes this table does the ECMP. The LPM lookup results in
+ECMP group size and index that serves as a global offset into this table.
+Concurrently a hash of the packet is generated. Based on the ECMP group size
+and the packet’s hash a local offset is generated. Multiple LPM entries can
+point to the same adjacency group.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>table adjacency {
+  size: 4096,
+  counters_enabled: true,
+  match: { meta.adj_index: exact,
+           meta.adj_group_size: exact,
+           meta.packet_hash_index: exact },
+  action: { ethernet.daddr: set,
+            meta.erif: set }
+}
+</pre></div>
+</div>
+</section>
+<section id="erif">
+<h3>ERIF<a class="headerlink" href="#erif" title="Permalink to this headline">¶</a></h3>
+<p>In case the egress RIF and destination MAC have been resolved by previous
+tables this table does multiple operations like TTL decrease and MTU check.
+Then the decision of forward/drop is taken and the port L3 statistics are
+updated based on the packet’s type (broadcast, unicast, multicast).</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>table erif {
+  size: 800,
+  counters_enabled: true,
+  match: { meta.rif_port: exact,
+           meta.is_l3_unicast: exact,
+           meta.is_l3_broadcast: exact,
+           meta.is_l3_multicast, exact },
+  action: { meta.l3_drop: set,
+            meta.l3_forward: set }
+}
+</pre></div>
+</div>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Devlink DPIPE</a><ul>
+<li><a class="reference internal" href="#background">Background</a></li>
+<li><a class="reference internal" href="#overview">Overview</a></li>
+<li><a class="reference internal" href="#model">Model</a><ul>
+<li><a class="reference internal" href="#table">Table</a></li>
+<li><a class="reference internal" href="#header-field">Header/Field</a></li>
+<li><a class="reference internal" href="#match">Match</a></li>
+<li><a class="reference internal" href="#action">Action</a></li>
+<li><a class="reference internal" href="#entry">Entry</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#abstraction-example">Abstraction Example</a><ul>
+<li><a class="reference internal" href="#lpm">LPM</a></li>
+<li><a class="reference internal" href="#local-host">Local Host</a></li>
+<li><a class="reference internal" href="#adjacency">Adjacency</a></li>
+<li><a class="reference internal" href="#erif">ERIF</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/networking/devlink/devlink-dpipe.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/networking/devlink/devlink-dpipe.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,279 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>RapidIO subsystem Channelized Messaging character device driver (rio_cm.c) &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Writing s390 channel device drivers" href="../s390-drivers.html" />
+    <link rel="prev" title="RapidIO subsystem mport character device driver (rio_mport_cdev.c)" href="mport_cdev.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="rapidio-subsystem-channelized-messaging-character-device-driver-rio-cm-c">
+<h1>RapidIO subsystem Channelized Messaging character device driver (rio_cm.c)<a class="headerlink" href="#rapidio-subsystem-channelized-messaging-character-device-driver-rio-cm-c" title="Permalink to this headline">¶</a></h1>
+<section id="overview">
+<h2>1. Overview<a class="headerlink" href="#overview" title="Permalink to this headline">¶</a></h2>
+<p>This device driver is the result of collaboration within the RapidIO.org
+Software Task Group (STG) between Texas Instruments, Prodrive Technologies,
+Nokia Networks, BAE and IDT.  Additional input was received from other members
+of RapidIO.org.</p>
+<p>The objective was to create a character mode driver interface which exposes
+messaging capabilities of RapidIO endpoint devices (mports) directly
+to applications, in a manner that allows the numerous and varied RapidIO
+implementations to interoperate.</p>
+<p>This driver (RIO_CM) provides to user-space applications shared access to
+RapidIO mailbox messaging resources.</p>
+<p>RapidIO specification (Part 2) defines that endpoint devices may have up to four
+messaging mailboxes in case of multi-packet message (up to 4KB) and
+up to 64 mailboxes if single-packet messages (up to 256 B) are used. In addition
+to protocol definition limitations, a particular hardware implementation can
+have reduced number of messaging mailboxes.  RapidIO aware applications must
+therefore share the messaging resources of a RapidIO endpoint.</p>
+<p>Main purpose of this device driver is to provide RapidIO mailbox messaging
+capability to large number of user-space processes by introducing socket-like
+operations using a single messaging mailbox.  This allows applications to
+use the limited RapidIO messaging hardware resources efficiently.</p>
+<p>Most of device driver’s operations are supported through ‘ioctl’ system calls.</p>
+<p>When loaded this device driver creates a single file system node named rio_cm
+in /dev directory common for all registered RapidIO mport devices.</p>
+<p>Following ioctl commands are available to user-space applications:</p>
+<ul class="simple">
+<li><dl class="simple">
+<dt>RIO_CM_MPORT_GET_LIST:</dt><dd><p>Returns to caller list of local mport devices that
+support messaging operations (number of entries up to RIO_MAX_MPORTS).
+Each list entry is combination of mport’s index in the system and RapidIO
+destination ID assigned to the port.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>RIO_CM_EP_GET_LIST_SIZE:</dt><dd><p>Returns number of messaging capable remote endpoints
+in a RapidIO network associated with the specified mport device.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>RIO_CM_EP_GET_LIST:</dt><dd><p>Returns list of RapidIO destination IDs for messaging
+capable remote endpoints (peers) available in a RapidIO network associated
+with the specified mport device.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>RIO_CM_CHAN_CREATE:</dt><dd><p>Creates RapidIO message exchange channel data structure
+with channel ID assigned automatically or as requested by a caller.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>RIO_CM_CHAN_BIND:</dt><dd><p>Binds the specified channel data structure to the specified
+mport device.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>RIO_CM_CHAN_LISTEN:</dt><dd><p>Enables listening for connection requests on the specified
+channel.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>RIO_CM_CHAN_ACCEPT:</dt><dd><p>Accepts a connection request from peer on the specified
+channel. If wait timeout for this request is specified by a caller it is
+a blocking call. If timeout set to 0 this is non-blocking call - ioctl
+handler checks for a pending connection request and if one is not available
+exits with -EGAIN error status immediately.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>RIO_CM_CHAN_CONNECT:</dt><dd><p>Sends a connection request to a remote peer/channel.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>RIO_CM_CHAN_SEND:</dt><dd><p>Sends a data message through the specified channel.
+The handler for this request assumes that message buffer specified by
+a caller includes the reserved space for a packet header required by
+this driver.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>RIO_CM_CHAN_RECEIVE:</dt><dd><p>Receives a data message through a connected channel.
+If the channel does not have an incoming message ready to return this ioctl
+handler will wait for new message until timeout specified by a caller
+expires. If timeout value is set to 0, ioctl handler uses a default value
+defined by MAX_SCHEDULE_TIMEOUT.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>RIO_CM_CHAN_CLOSE:</dt><dd><p>Closes a specified channel and frees associated buffers.
+If the specified channel is in the CONNECTED state, sends close notification
+to the remote peer.</p>
+</dd>
+</dl>
+</li>
+</ul>
+<p>The ioctl command codes and corresponding data structures intended for use by
+user-space applications are defined in ‘include/uapi/linux/rio_cm_cdev.h’.</p>
+</section>
+<section id="hardware-compatibility">
+<h2>2. Hardware Compatibility<a class="headerlink" href="#hardware-compatibility" title="Permalink to this headline">¶</a></h2>
+<p>This device driver uses standard interfaces defined by kernel RapidIO subsystem
+and therefore it can be used with any mport device driver registered by RapidIO
+subsystem with limitations set by available mport HW implementation of messaging
+mailboxes.</p>
+</section>
+<section id="module-parameters">
+<h2>3. Module parameters<a class="headerlink" href="#module-parameters" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><dl class="simple">
+<dt>‘dbg_level’</dt><dd><ul>
+<li><p>This parameter allows to control amount of debug information
+generated by this device driver. This parameter is formed by set of
+bit masks that correspond to the specific functional block.
+For mask definitions see ‘drivers/rapidio/devices/rio_cm.c’
+This parameter can be changed dynamically.
+Use CONFIG_RAPIDIO_DEBUG=y to enable debug output at the top level.</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>‘cmbox’</dt><dd><ul>
+<li><p>Number of RapidIO mailbox to use (default value is 1).
+This parameter allows to set messaging mailbox number that will be used
+within entire RapidIO network. It can be used when default mailbox is
+used by other device drivers or is not supported by some nodes in the
+RapidIO network.</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>‘chstart’</dt><dd><ul>
+<li><p>Start channel number for dynamic assignment. Default value - 256.
+Allows to exclude channel numbers below this parameter from dynamic
+allocation to avoid conflicts with software components that use
+reserved predefined channel numbers.</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+</ul>
+</section>
+<section id="known-problems">
+<h2>4. Known problems<a class="headerlink" href="#known-problems" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>None.</p>
+</div></blockquote>
+</section>
+<section id="user-space-applications-and-api-library">
+<h2>5. User-space Applications and API Library<a class="headerlink" href="#user-space-applications-and-api-library" title="Permalink to this headline">¶</a></h2>
+<p>Messaging API library and applications that use this device driver are available
+from RapidIO.org.</p>
+</section>
+<section id="todo-list">
+<h2>6. TODO List<a class="headerlink" href="#todo-list" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p>Add support for system notification messages (reserved channel 0).</p></li>
+</ul>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">RapidIO subsystem Channelized Messaging character device driver (rio_cm.c)</a><ul>
+<li><a class="reference internal" href="#overview">1. Overview</a></li>
+<li><a class="reference internal" href="#hardware-compatibility">2. Hardware Compatibility</a></li>
+<li><a class="reference internal" href="#module-parameters">3. Module parameters</a></li>
+<li><a class="reference internal" href="#known-problems">4. Known problems</a></li>
+<li><a class="reference internal" href="#user-space-applications-and-api-library">5. User-space Applications and API Library</a></li>
+<li><a class="reference internal" href="#todo-list">6. TODO List</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/rapidio/rio_cm.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/rapidio/rio_cm.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

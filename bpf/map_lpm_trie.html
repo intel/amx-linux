@@ -1,0 +1,295 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>BPF_MAP_TYPE_LPM_TRIE &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="BPF_MAP_TYPE_ARRAY_OF_MAPS and BPF_MAP_TYPE_HASH_OF_MAPS" href="map_of_maps.html" />
+    <link rel="prev" title="BPF_MAP_TYPE_HASH, with PERCPU and LRU Variants" href="map_hash.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="bpf-map-type-lpm-trie">
+<h1>BPF_MAP_TYPE_LPM_TRIE<a class="headerlink" href="#bpf-map-type-lpm-trie" title="Permalink to this headline">¶</a></h1>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_LPM_TRIE</span></code> was introduced in kernel version 4.11</p></li>
+</ul>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_LPM_TRIE</span></code> provides a longest prefix match algorithm that
+can be used to match IP addresses to a stored set of prefixes.
+Internally, data is stored in an unbalanced trie of nodes that uses
+<code class="docutils literal notranslate"><span class="pre">prefixlen,data</span></code> pairs as its keys. The <code class="docutils literal notranslate"><span class="pre">data</span></code> is interpreted in
+network byte order, i.e. big endian, so <code class="docutils literal notranslate"><span class="pre">data[0]</span></code> stores the most
+significant byte.</p>
+<p>LPM tries may be created with a maximum prefix length that is a multiple
+of 8, in the range from 8 to 2048. The key used for lookup and update
+operations is a <code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">bpf_lpm_trie_key</span></code>, extended by
+<code class="docutils literal notranslate"><span class="pre">max_prefixlen/8</span></code> bytes.</p>
+<ul class="simple">
+<li><p>For IPv4 addresses the data length is 4 bytes</p></li>
+<li><p>For IPv6 addresses the data length is 16 bytes</p></li>
+</ul>
+<p>The value type stored in the LPM trie can be any user defined type.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>When creating a map of type <code class="docutils literal notranslate"><span class="pre">BPF_MAP_TYPE_LPM_TRIE</span></code> you must set the
+<code class="docutils literal notranslate"><span class="pre">BPF_F_NO_PREALLOC</span></code> flag.</p>
+</div>
+<section id="usage">
+<h2>Usage<a class="headerlink" href="#usage" title="Permalink to this headline">¶</a></h2>
+<section id="kernel-bpf">
+<h3>Kernel BPF<a class="headerlink" href="#kernel-bpf" title="Permalink to this headline">¶</a></h3>
+<section id="bpf-map-lookup-elem">
+<h4>bpf_map_lookup_elem()<a class="headerlink" href="#bpf-map-lookup-elem" title="Permalink to this headline">¶</a></h4>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">bpf_map_lookup_elem</span><span class="p">(</span><span class="k">struct</span> <span class="nc">bpf_map</span><span class="w"> </span><span class="o">*</span><span class="n">map</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">key</span><span class="p">)</span><span class="w"></span>
+</pre></div>
+</div>
+<p>The longest prefix entry for a given data value can be found using the
+<code class="docutils literal notranslate"><span class="pre">bpf_map_lookup_elem()</span></code> helper. This helper returns a pointer to the
+value associated with the longest matching <code class="docutils literal notranslate"><span class="pre">key</span></code>, or <code class="docutils literal notranslate"><span class="pre">NULL</span></code> if no
+entry was found.</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">key</span></code> should have <code class="docutils literal notranslate"><span class="pre">prefixlen</span></code> set to <code class="docutils literal notranslate"><span class="pre">max_prefixlen</span></code> when
+performing longest prefix lookups. For example, when searching for the
+longest prefix match for an IPv4 address, <code class="docutils literal notranslate"><span class="pre">prefixlen</span></code> should be set to
+<code class="docutils literal notranslate"><span class="pre">32</span></code>.</p>
+</section>
+<section id="bpf-map-update-elem">
+<h4>bpf_map_update_elem()<a class="headerlink" href="#bpf-map-update-elem" title="Permalink to this headline">¶</a></h4>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">long</span><span class="w"> </span><span class="n">bpf_map_update_elem</span><span class="p">(</span><span class="k">struct</span> <span class="nc">bpf_map</span><span class="w"> </span><span class="o">*</span><span class="n">map</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">key</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">value</span><span class="p">,</span><span class="w"> </span><span class="n">u64</span><span class="w"> </span><span class="n">flags</span><span class="p">)</span><span class="w"></span>
+</pre></div>
+</div>
+<p>Prefix entries can be added or updated using the <code class="docutils literal notranslate"><span class="pre">bpf_map_update_elem()</span></code>
+helper. This helper replaces existing elements atomically.</p>
+<p><code class="docutils literal notranslate"><span class="pre">bpf_map_update_elem()</span></code> returns <code class="docutils literal notranslate"><span class="pre">0</span></code> on success, or negative error in
+case of failure.</p>
+<blockquote>
+<div><div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The flags parameter must be one of BPF_ANY, BPF_NOEXIST or BPF_EXIST,
+but the value is ignored, giving BPF_ANY semantics.</p>
+</div>
+</div></blockquote>
+</section>
+<section id="bpf-map-delete-elem">
+<h4>bpf_map_delete_elem()<a class="headerlink" href="#bpf-map-delete-elem" title="Permalink to this headline">¶</a></h4>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">long</span><span class="w"> </span><span class="n">bpf_map_delete_elem</span><span class="p">(</span><span class="k">struct</span> <span class="nc">bpf_map</span><span class="w"> </span><span class="o">*</span><span class="n">map</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">key</span><span class="p">)</span><span class="w"></span>
+</pre></div>
+</div>
+<p>Prefix entries can be deleted using the <code class="docutils literal notranslate"><span class="pre">bpf_map_delete_elem()</span></code>
+helper. This helper will return 0 on success, or negative error in case
+of failure.</p>
+</section>
+</section>
+<section id="userspace">
+<h3>Userspace<a class="headerlink" href="#userspace" title="Permalink to this headline">¶</a></h3>
+<p>Access from userspace uses libbpf APIs with the same names as above, with
+the map identified by <code class="docutils literal notranslate"><span class="pre">fd</span></code>.</p>
+<section id="bpf-map-get-next-key">
+<h4>bpf_map_get_next_key()<a class="headerlink" href="#bpf-map-get-next-key" title="Permalink to this headline">¶</a></h4>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">int</span><span class="w"> </span><span class="n">bpf_map_get_next_key</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">fd</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">cur_key</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="n">next_key</span><span class="p">)</span><span class="w"></span>
+</pre></div>
+</div>
+<p>A userspace program can iterate through the entries in an LPM trie using
+libbpf’s <code class="docutils literal notranslate"><span class="pre">bpf_map_get_next_key()</span></code> function. The first key can be
+fetched by calling <code class="docutils literal notranslate"><span class="pre">bpf_map_get_next_key()</span></code> with <code class="docutils literal notranslate"><span class="pre">cur_key</span></code> set to
+<code class="docutils literal notranslate"><span class="pre">NULL</span></code>. Subsequent calls will fetch the next key that follows the
+current key. <code class="docutils literal notranslate"><span class="pre">bpf_map_get_next_key()</span></code> returns <code class="docutils literal notranslate"><span class="pre">0</span></code> on success,
+<code class="docutils literal notranslate"><span class="pre">-ENOENT</span></code> if <code class="docutils literal notranslate"><span class="pre">cur_key</span></code> is the last key in the trie, or negative
+error in case of failure.</p>
+<p><code class="docutils literal notranslate"><span class="pre">bpf_map_get_next_key()</span></code> will iterate through the LPM trie elements
+from leftmost leaf first. This means that iteration will return more
+specific keys before less specific ones.</p>
+</section>
+</section>
+</section>
+<section id="examples">
+<h2>Examples<a class="headerlink" href="#examples" title="Permalink to this headline">¶</a></h2>
+<p>Please see <code class="docutils literal notranslate"><span class="pre">tools/testing/selftests/bpf/test_lpm_map.c</span></code> for examples
+of LPM trie usage from userspace. The code snippets below demonstrate
+API usage.</p>
+<section id="id1">
+<h3>Kernel BPF<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h3>
+<p>The following BPF code snippet shows how to declare a new LPM trie for IPv4
+address prefixes:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;linux/bpf.h&gt;</span><span class="cp"></span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;bpf/bpf_helpers.h&gt;</span><span class="cp"></span>
+
+<span class="k">struct</span> <span class="nc">ipv4_lpm_key</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="n">__u32</span><span class="w"> </span><span class="n">prefixlen</span><span class="p">;</span><span class="w"></span>
+<span class="w">        </span><span class="n">__u32</span><span class="w"> </span><span class="n">data</span><span class="p">;</span><span class="w"></span>
+<span class="p">};</span><span class="w"></span>
+
+<span class="k">struct</span> <span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="n">__uint</span><span class="p">(</span><span class="n">type</span><span class="p">,</span><span class="w"> </span><span class="n">BPF_MAP_TYPE_LPM_TRIE</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="n">__type</span><span class="p">(</span><span class="n">key</span><span class="p">,</span><span class="w"> </span><span class="k">struct</span> <span class="nc">ipv4_lpm_key</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="n">__type</span><span class="p">(</span><span class="n">value</span><span class="p">,</span><span class="w"> </span><span class="n">__u32</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="n">__uint</span><span class="p">(</span><span class="n">map_flags</span><span class="p">,</span><span class="w"> </span><span class="n">BPF_F_NO_PREALLOC</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="n">__uint</span><span class="p">(</span><span class="n">max_entries</span><span class="p">,</span><span class="w"> </span><span class="mi">255</span><span class="p">);</span><span class="w"></span>
+<span class="p">}</span><span class="w"> </span><span class="n">ipv4_lpm_map</span><span class="w"> </span><span class="n">SEC</span><span class="p">(</span><span class="s">&quot;.maps&quot;</span><span class="p">);</span><span class="w"></span>
+</pre></div>
+</div>
+<p>The following BPF code snippet shows how to lookup by IPv4 address:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">void</span><span class="w"> </span><span class="o">*</span><span class="nf">lookup</span><span class="p">(</span><span class="n">__u32</span><span class="w"> </span><span class="n">ipaddr</span><span class="p">)</span><span class="w"></span>
+<span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="k">struct</span> <span class="nc">ipv4_lpm_key</span><span class="w"> </span><span class="n">key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">                </span><span class="p">.</span><span class="n">prefixlen</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">32</span><span class="p">,</span><span class="w"></span>
+<span class="w">                </span><span class="p">.</span><span class="n">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ipaddr</span><span class="w"></span>
+<span class="w">        </span><span class="p">};</span><span class="w"></span>
+
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">bpf_map_lookup_elem</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ipv4_lpm_map</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">key</span><span class="p">);</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+</section>
+<section id="id2">
+<h3>Userspace<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h3>
+<p>The following snippet shows how to insert an IPv4 prefix entry into an
+LPM trie:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">int</span><span class="w"> </span><span class="nf">add_prefix_entry</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">lpm_fd</span><span class="p">,</span><span class="w"> </span><span class="n">__u32</span><span class="w"> </span><span class="n">addr</span><span class="p">,</span><span class="w"> </span><span class="n">__u32</span><span class="w"> </span><span class="n">prefixlen</span><span class="p">,</span><span class="w"> </span><span class="k">struct</span> <span class="nc">value</span><span class="w"> </span><span class="o">*</span><span class="n">value</span><span class="p">)</span><span class="w"></span>
+<span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="k">struct</span> <span class="nc">ipv4_lpm_key</span><span class="w"> </span><span class="n">ipv4_key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">                </span><span class="p">.</span><span class="n">prefixlen</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">prefixlen</span><span class="p">,</span><span class="w"></span>
+<span class="w">                </span><span class="p">.</span><span class="n">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">addr</span><span class="w"></span>
+<span class="w">        </span><span class="p">};</span><span class="w"></span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">bpf_map_update_elem</span><span class="p">(</span><span class="n">lpm_fd</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">ipv4_key</span><span class="p">,</span><span class="w"> </span><span class="n">value</span><span class="p">,</span><span class="w"> </span><span class="n">BPF_ANY</span><span class="p">);</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+<p>The following snippet shows a userspace program walking through the entries
+of an LPM trie:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;bpf/libbpf.h&gt;</span><span class="cp"></span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;bpf/bpf.h&gt;</span><span class="cp"></span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">iterate_lpm_trie</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">map_fd</span><span class="p">)</span><span class="w"></span>
+<span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="k">struct</span> <span class="nc">ipv4_lpm_key</span><span class="w"> </span><span class="o">*</span><span class="n">cur_key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">NULL</span><span class="p">;</span><span class="w"></span>
+<span class="w">        </span><span class="k">struct</span> <span class="nc">ipv4_lpm_key</span><span class="w"> </span><span class="n">next_key</span><span class="p">;</span><span class="w"></span>
+<span class="w">        </span><span class="k">struct</span> <span class="nc">value</span><span class="w"> </span><span class="n">value</span><span class="p">;</span><span class="w"></span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">err</span><span class="p">;</span><span class="w"></span>
+
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="p">(;;)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">                </span><span class="n">err</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">bpf_map_get_next_key</span><span class="p">(</span><span class="n">map_fd</span><span class="p">,</span><span class="w"> </span><span class="n">cur_key</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">next_key</span><span class="p">);</span><span class="w"></span>
+<span class="w">                </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">err</span><span class="p">)</span><span class="w"></span>
+<span class="w">                        </span><span class="k">break</span><span class="p">;</span><span class="w"></span>
+
+<span class="w">                </span><span class="n">bpf_map_lookup_elem</span><span class="p">(</span><span class="n">map_fd</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">next_key</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">value</span><span class="p">);</span><span class="w"></span>
+
+<span class="w">                </span><span class="cm">/* Use key and value here */</span><span class="w"></span>
+
+<span class="w">                </span><span class="n">cur_key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">next_key</span><span class="p">;</span><span class="w"></span>
+<span class="w">        </span><span class="p">}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">BPF_MAP_TYPE_LPM_TRIE</a><ul>
+<li><a class="reference internal" href="#usage">Usage</a><ul>
+<li><a class="reference internal" href="#kernel-bpf">Kernel BPF</a><ul>
+<li><a class="reference internal" href="#bpf-map-lookup-elem">bpf_map_lookup_elem()</a></li>
+<li><a class="reference internal" href="#bpf-map-update-elem">bpf_map_update_elem()</a></li>
+<li><a class="reference internal" href="#bpf-map-delete-elem">bpf_map_delete_elem()</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#userspace">Userspace</a><ul>
+<li><a class="reference internal" href="#bpf-map-get-next-key">bpf_map_get_next_key()</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#examples">Examples</a><ul>
+<li><a class="reference internal" href="#id1">Kernel BPF</a></li>
+<li><a class="reference internal" href="#id2">Userspace</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/bpf/map_lpm_trie.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/bpf/map_lpm_trie.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

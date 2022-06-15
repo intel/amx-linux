@@ -1,0 +1,181 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Speculation &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Static Keys" href="static-keys.html" />
+    <link rel="prev" title="Remote Processor Messaging (rpmsg) Framework" href="rpmsg.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="speculation">
+<h1>Speculation<a class="headerlink" href="#speculation" title="Permalink to this headline">¶</a></h1>
+<p>This document explains potential effects of speculation, and how undesirable
+effects can be mitigated portably using common APIs.</p>
+<hr class="docutils" />
+<p>To improve performance and minimize average latencies, many contemporary CPUs
+employ speculative execution techniques such as branch prediction, performing
+work which may be discarded at a later stage.</p>
+<p>Typically speculative execution cannot be observed from architectural state,
+such as the contents of registers. However, in some cases it is possible to
+observe its impact on microarchitectural state, such as the presence or
+absence of data in caches. Such state may form side-channels which can be
+observed to extract secret information.</p>
+<p>For example, in the presence of branch prediction, it is possible for bounds
+checks to be ignored by code which is speculatively executed. Consider the
+following code:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int load_array(int *array, unsigned int index)
+{
+        if (index &gt;= MAX_ARRAY_ELEMS)
+                return 0;
+        else
+                return array[index];
+}
+</pre></div>
+</div>
+<p>Which, on arm64, may be compiled to an assembly sequence such as:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>      CMP     &lt;index&gt;, #MAX_ARRAY_ELEMS
+      B.LT    less
+      MOV     &lt;returnval&gt;, #0
+      RET
+less:
+      LDR     &lt;returnval&gt;, [&lt;array&gt;, &lt;index&gt;]
+      RET
+</pre></div>
+</div>
+<p>It is possible that a CPU mis-predicts the conditional branch, and
+speculatively loads array[index], even if index &gt;= MAX_ARRAY_ELEMS. This
+value will subsequently be discarded, but the speculated load may affect
+microarchitectural state which can be subsequently measured.</p>
+<p>More complex sequences involving multiple dependent memory accesses may
+result in sensitive information being leaked. Consider the following
+code, building on the prior example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int load_dependent_arrays(int *arr1, int *arr2, int index)
+{
+        int val1, val2,
+
+        val1 = load_array(arr1, index);
+        val2 = load_array(arr2, val1);
+
+        return val2;
+}
+</pre></div>
+</div>
+<p>Under speculation, the first call to load_array() may return the value
+of an out-of-bounds address, while the second call will influence
+microarchitectural state dependent on this value. This may provide an
+arbitrary read primitive.</p>
+</section>
+<section id="mitigating-speculation-side-channels">
+<h1>Mitigating speculation side-channels<a class="headerlink" href="#mitigating-speculation-side-channels" title="Permalink to this headline">¶</a></h1>
+<p>The kernel provides a generic API to ensure that bounds checks are
+respected even under speculation. Architectures which are affected by
+speculation-based side-channels are expected to implement these
+primitives.</p>
+<p>The array_index_nospec() helper in &lt;linux/nospec.h&gt; can be used to
+prevent information from being leaked via side-channels.</p>
+<p>A call to array_index_nospec(index, size) returns a sanitized index
+value that is bounded to [0, size) even under cpu speculation
+conditions.</p>
+<p>This can be used to protect the earlier load_array() example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int load_array(int *array, unsigned int index)
+{
+        if (index &gt;= MAX_ARRAY_ELEMS)
+                return 0;
+        else {
+                index = array_index_nospec(index, MAX_ARRAY_ELEMS);
+                return array[index];
+        }
+}
+</pre></div>
+</div>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Speculation</a></li>
+<li><a class="reference internal" href="#mitigating-speculation-side-channels">Mitigating speculation side-channels</a></li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/staging/speculation.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/staging/speculation.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

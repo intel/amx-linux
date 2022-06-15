@@ -1,0 +1,212 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Writing Device Drivers for Zorro Devices &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="The Linux Hardware Timestamping Engine (HTE)" href="hte/index.html" />
+    <link rel="prev" title="Xillybus driver for generic FPGA interface" href="xillybus.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="writing-device-drivers-for-zorro-devices">
+<h1>Writing Device Drivers for Zorro Devices<a class="headerlink" href="#writing-device-drivers-for-zorro-devices" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">Author</dt>
+<dd class="field-odd"><p>Written by Geert Uytterhoeven &lt;<a class="reference external" href="mailto:geert&#37;&#52;&#48;linux-m68k&#46;org">geert<span>&#64;</span>linux-m68k<span>&#46;</span>org</a>&gt;</p>
+</dd>
+<dt class="field-even">Last revised</dt>
+<dd class="field-even"><p>September 5, 2003</p>
+</dd>
+</dl>
+<section id="introduction">
+<h2>Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>The Zorro bus is the bus used in the Amiga family of computers. Thanks to
+AutoConfig(tm), it’s 100% Plug-and-Play.</p>
+<p>There are two types of Zorro buses, Zorro II and Zorro III:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>The Zorro II address space is 24-bit and lies within the first 16 MB of the
+Amiga’s address map.</p></li>
+<li><p>Zorro III is a 32-bit extension of Zorro II, which is backwards compatible
+with Zorro II. The Zorro III address space lies outside the first 16 MB.</p></li>
+</ul>
+</div></blockquote>
+</section>
+<section id="probing-for-zorro-devices">
+<h2>Probing for Zorro Devices<a class="headerlink" href="#probing-for-zorro-devices" title="Permalink to this headline">¶</a></h2>
+<p>Zorro devices are found by calling <code class="docutils literal notranslate"><span class="pre">zorro_find_device()</span></code>, which returns a
+pointer to the <code class="docutils literal notranslate"><span class="pre">next</span></code> Zorro device with the specified Zorro ID. A probe loop
+for the board with Zorro ID <code class="docutils literal notranslate"><span class="pre">ZORRO_PROD_xxx</span></code> looks like:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct zorro_dev *z = NULL;
+
+while ((z = zorro_find_device(ZORRO_PROD_xxx, z))) {
+    if (!zorro_request_region(z-&gt;resource.start+MY_START, MY_SIZE,
+                              &quot;My explanation&quot;))
+    ...
+}
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">ZORRO_WILDCARD</span></code> acts as a wildcard and finds any Zorro device. If your driver
+supports different types of boards, you can use a construct like:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct zorro_dev *z = NULL;
+
+while ((z = zorro_find_device(ZORRO_WILDCARD, z))) {
+    if (z-&gt;id != ZORRO_PROD_xxx1 &amp;&amp; z-&gt;id != ZORRO_PROD_xxx2 &amp;&amp; ...)
+        continue;
+    if (!zorro_request_region(z-&gt;resource.start+MY_START, MY_SIZE,
+                              &quot;My explanation&quot;))
+    ...
+}
+</pre></div>
+</div>
+</section>
+<section id="zorro-resources">
+<h2>Zorro Resources<a class="headerlink" href="#zorro-resources" title="Permalink to this headline">¶</a></h2>
+<p>Before you can access a Zorro device’s registers, you have to make sure it’s
+not yet in use. This is done using the I/O memory space resource management
+functions:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>request_mem_region()
+release_mem_region()
+</pre></div>
+</div>
+<p>Shortcuts to claim the whole device’s address space are provided as well:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>zorro_request_device
+zorro_release_device
+</pre></div>
+</div>
+</section>
+<section id="accessing-the-zorro-address-space">
+<h2>Accessing the Zorro Address Space<a class="headerlink" href="#accessing-the-zorro-address-space" title="Permalink to this headline">¶</a></h2>
+<p>The address regions in the Zorro device resources are Zorro bus address
+regions. Due to the identity bus-physical address mapping on the Zorro bus,
+they are CPU physical addresses as well.</p>
+<p>The treatment of these regions depends on the type of Zorro space:</p>
+<blockquote>
+<div><ul>
+<li><p>Zorro II address space is always mapped and does not have to be mapped
+explicitly using z_ioremap().</p>
+<p>Conversion from bus/physical Zorro II addresses to kernel virtual addresses
+and vice versa is done using:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>virt_addr = ZTWO_VADDR(bus_addr);
+bus_addr = ZTWO_PADDR(virt_addr);
+</pre></div>
+</div>
+</li>
+<li><p>Zorro III address space must be mapped explicitly using z_ioremap() first
+before it can be accessed:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>virt_addr = z_ioremap(bus_addr, size);
+...
+z_iounmap(virt_addr);
+</pre></div>
+</div>
+</li>
+</ul>
+</div></blockquote>
+</section>
+<section id="references">
+<h2>References<a class="headerlink" href="#references" title="Permalink to this headline">¶</a></h2>
+<ol class="arabic simple">
+<li><p>linux/include/linux/zorro.h</p></li>
+<li><p>linux/include/uapi/linux/zorro.h</p></li>
+<li><p>linux/include/uapi/linux/zorro_ids.h</p></li>
+<li><p>linux/arch/m68k/include/asm/zorro.h</p></li>
+<li><p>linux/drivers/zorro</p></li>
+<li><p>/proc/bus/zorro</p></li>
+</ol>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Writing Device Drivers for Zorro Devices</a><ul>
+<li><a class="reference internal" href="#introduction">Introduction</a></li>
+<li><a class="reference internal" href="#probing-for-zorro-devices">Probing for Zorro Devices</a></li>
+<li><a class="reference internal" href="#zorro-resources">Zorro Resources</a></li>
+<li><a class="reference internal" href="#accessing-the-zorro-address-space">Accessing the Zorro Address Space</a></li>
+<li><a class="reference internal" href="#references">References</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/driver-api/zorro.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/driver-api/zorro.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

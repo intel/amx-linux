@@ -1,0 +1,218 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>sysfs CPUFreq Stats的一般說明 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="Linux Kernel中的文件系統" href="../filesystems/index.html" />
+    <link rel="prev" title="如何實現一個新的CPUFreq處理器驅動程序？" href="cpu-drivers.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是爲讓中文讀者更容易閱讀和理解，而不是作爲一個分支。因此，
+如果您對此文件有任何意見或改動，請先嘗試更新原始英文文件。如果要更改或
+修正某處翻譯文件，請將意見或補丁發送給維護者（聯繫方式見下）。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您發現本文檔與原始文件有任何不同或者有翻譯問題，請聯繫該文件的譯者，
+或者發送電子郵件給胡皓文以獲取幫助：&lt;<a class="reference external" href="mailto:src&#46;res&#37;&#52;&#48;email&#46;cn">src<span>&#46;</span>res<span>&#64;</span>email<span>&#46;</span>cn</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../cpu-freq/cpufreq-stats.html"><span class="doc">General Description of sysfs CPUFreq Stats</span></a></p>
+</dd>
+<dt class="field-even">Translator</dt>
+<dd class="field-even"><p>Yanteng Si &lt;<a class="reference external" href="mailto:siyanteng&#37;&#52;&#48;loongson&#46;cn">siyanteng<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;
+Hu Haowen &lt;<a class="reference external" href="mailto:src&#46;res&#37;&#52;&#48;email&#46;cn">src<span>&#46;</span>res<span>&#64;</span>email<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+</dl>
+<section id="sysfs-cpufreq-stats">
+<span id="tw-cpufreq-stats-rst"></span><h1>sysfs CPUFreq Stats的一般說明<a class="headerlink" href="#sysfs-cpufreq-stats" title="Permalink to this headline">¶</a></h1>
+<p>用戶信息</p>
+<p>作者: Venkatesh Pallipadi &lt;<a class="reference external" href="mailto:venkatesh&#46;pallipadi&#37;&#52;&#48;intel&#46;com">venkatesh<span>&#46;</span>pallipadi<span>&#64;</span>intel<span>&#46;</span>com</a>&gt;</p>
+<section id="id1">
+<h2>1. 簡介<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>cpufreq-stats是一個爲每個CPU提供CPU頻率統計的驅動。
+這些統計數據在/sysfs中以一堆只讀接口的形式提供。這個接口（在配置好後）將出現在
+/sysfs（&lt;sysfs root&gt;/devices/system/cpu/cpuX/cpufreq/stats/）中cpufreq下的一個單
+獨的目錄中，提供給每個CPU。
+各種統計數據將在此目錄下形成只讀文件。</p>
+<p>此驅動是獨立於任何可能運行在你所用CPU上的特定cpufreq_driver而設計的。因此，它將與所有
+cpufreq_driver一起工作。</p>
+</section>
+<section id="id2">
+<h2>2. 提供的統計數據(舉例說明)<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>cpufreq stats提供了以下統計數據（在下面詳細解釋）。</p>
+<ul class="simple">
+<li><p>time_in_state</p></li>
+<li><p>total_trans</p></li>
+<li><p>trans_table</p></li>
+</ul>
+<p>所有的統計數據將從統計驅動被載入的時間（或統計被重置的時間）開始，到某一統計數據被讀取的時間爲止。
+顯然，統計驅動不會有任何關於統計驅動載入之前的頻率轉換信息。</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>&lt;mysystem&gt;:/sys/devices/system/cpu/cpu0/cpufreq/stats # ls -l
+total 0
+drwxr-xr-x  2 root root    0 May 14 16:06 .
+drwxr-xr-x  3 root root    0 May 14 15:58 ..
+--w-------  1 root root 4096 May 14 16:06 reset
+-r--r--r--  1 root root 4096 May 14 16:06 time_in_state
+-r--r--r--  1 root root 4096 May 14 16:06 total_trans
+-r--r--r--  1 root root 4096 May 14 16:06 trans_table
+</pre></div>
+</div>
+<ul class="simple">
+<li><p><strong>reset</strong></p></li>
+</ul>
+<p>只寫屬性，可用於重置統計計數器。這對於評估不同調節器下的系統行爲非常有用，且無需重啓。</p>
+<ul class="simple">
+<li><p><strong>time_in_state</strong></p></li>
+</ul>
+<p>此項給出了這個CPU所支持的每個頻率所花費的時間。cat輸出的每一行都會有”&lt;frequency&gt;
+&lt;time&gt;”對，表示這個CPU在&lt;frequency&gt;上花費了&lt;time&gt;個usertime單位的時間。這裡的
+usertime單位是10mS（類似於/proc中輸出的其他時間）。</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>&lt;mysystem&gt;:/sys/devices/system/cpu/cpu0/cpufreq/stats # cat time_in_state
+3600000 2089
+3400000 136
+3200000 34
+3000000 67
+2800000 172488
+</pre></div>
+</div>
+<ul class="simple">
+<li><p><strong>total_trans</strong></p></li>
+</ul>
+<p>給出了這個CPU上頻率轉換的總次數。cat的輸出將有一個單一的計數，這就是頻率轉換的總數。</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>&lt;mysystem&gt;:/sys/devices/system/cpu/cpu0/cpufreq/stats # cat total_trans
+20
+</pre></div>
+</div>
+<ul class="simple">
+<li><p><strong>trans_table</strong></p></li>
+</ul>
+<p>這將提供所有CPU頻率轉換的細粒度信息。這裡的cat輸出是一個二維矩陣，其中一個條目&lt;i, j&gt;（第
+i行，第j列）代表從Freq_i到Freq_j的轉換次數。Freq_i行和Freq_j列遵循驅動最初提供給cpufreq
+核的頻率表的排序順序，因此可以排序（升序或降序）或不排序。 這裡的輸出也包含了每行每列的實際
+頻率值，以便更好地閱讀。</p>
+<p>如果轉換表大於PAGE_SIZE，讀取時將返回一個-EFBIG錯誤。</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>&lt;mysystem&gt;:/sys/devices/system/cpu/cpu0/cpufreq/stats # cat trans_table
+From  :    To
+        :   3600000   3400000   3200000   3000000   2800000
+3600000:         0         5         0         0         0
+3400000:         4         0         2         0         0
+3200000:         0         1         0         2         0
+3000000:         0         0         1         0         3
+2800000:         0         0         0         2         0
+</pre></div>
+</div>
+</section>
+<section id="cpufreq-stats">
+<h2>3. 配置cpufreq-stats<a class="headerlink" href="#cpufreq-stats" title="Permalink to this headline">¶</a></h2>
+<p>要在你的內核中配置cpufreq-stats:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Config Main Menu
+        Power management options (ACPI, APM)  ---&gt;
+                CPU Frequency scaling  ---&gt;
+                        [*] CPU Frequency scaling
+                        [*]   CPU frequency translation statistics
+</pre></div>
+</div>
+<p>“CPU Frequency scaling” (CONFIG_CPU_FREQ) 應該被啓用以配置cpufreq-stats。</p>
+<p>“CPU frequency translation statistics” (CONFIG_CPU_FREQ_STAT)提供了包括
+time_in_state、total_trans和trans_table的統計數據。</p>
+<p>一旦啓用了這個選項，並且你的CPU支持cpufrequency，你就可以在/sysfs中看到CPU頻率統計。</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">sysfs CPUFreq Stats的一般說明</a><ul>
+<li><a class="reference internal" href="#id1">1. 簡介</a></li>
+<li><a class="reference internal" href="#id2">2. 提供的統計數據(舉例說明)</a></li>
+<li><a class="reference internal" href="#cpufreq-stats">3. 配置cpufreq-stats</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_TW/cpu-freq/cpufreq-stats.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_TW/cpu-freq/cpufreq-stats.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,214 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Devlink Flash &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Devlink Params" href="devlink-params.html" />
+    <link rel="prev" title="Devlink Info" href="devlink-info.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="devlink-flash">
+<span id="id1"></span><h1>Devlink Flash<a class="headerlink" href="#devlink-flash" title="Permalink to this headline">¶</a></h1>
+<p>The <code class="docutils literal notranslate"><span class="pre">devlink-flash</span></code> API allows updating device firmware. It replaces the
+older <code class="docutils literal notranslate"><span class="pre">ethtool-flash</span></code> mechanism, and doesn’t require taking any
+networking locks in the kernel to perform the flash update. Example use:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ devlink dev flash pci/0000:05:00.0 file flash-boot.bin
+</pre></div>
+</div>
+<p>Note that the file name is a path relative to the firmware loading path
+(usually <code class="docutils literal notranslate"><span class="pre">/lib/firmware/</span></code>). Drivers may send status updates to inform
+user space about the progress of the update operation.</p>
+<section id="overwrite-mask">
+<h2>Overwrite Mask<a class="headerlink" href="#overwrite-mask" title="Permalink to this headline">¶</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">devlink-flash</span></code> command allows optionally specifying a mask indicating
+how the device should handle subsections of flash components when updating.
+This mask indicates the set of sections which are allowed to be overwritten.</p>
+<table class="colwidths-given docutils align-default" id="id2">
+<caption><span class="caption-text">List of overwrite mask bits</span><a class="headerlink" href="#id2" title="Permalink to this table">¶</a></caption>
+<colgroup>
+<col style="width: 5%" />
+<col style="width: 95%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>Name</p></td>
+<td><p>Description</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">DEVLINK_FLASH_OVERWRITE_SETTINGS</span></code></p></td>
+<td><p>Indicates that the device should overwrite settings in the components
+being updated with the settings found in the provided image.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">DEVLINK_FLASH_OVERWRITE_IDENTIFIERS</span></code></p></td>
+<td><p>Indicates that the device should overwrite identifiers in the
+components being updated with the identifiers found in the provided
+image. This includes MAC addresses, serial IDs, and similar device
+identifiers.</p></td>
+</tr>
+</tbody>
+</table>
+<p>Multiple overwrite bits may be combined and requested together. If no bits
+are provided, it is expected that the device only update firmware binaries
+in the components being updated. Settings and identifiers are expected to be
+preserved across the update. A device may not support every combination and
+the driver for such a device must reject any combination which cannot be
+faithfully implemented.</p>
+</section>
+<section id="firmware-loading">
+<h2>Firmware Loading<a class="headerlink" href="#firmware-loading" title="Permalink to this headline">¶</a></h2>
+<p>Devices which require firmware to operate usually store it in non-volatile
+memory on the board, e.g. flash. Some devices store only basic firmware on
+the board, and the driver loads the rest from disk during probing.
+<code class="docutils literal notranslate"><span class="pre">devlink-info</span></code> allows users to query firmware information (loaded
+components and versions).</p>
+<p>In other cases the device can both store the image on the board, load from
+disk, or automatically flash a new image from disk. The <code class="docutils literal notranslate"><span class="pre">fw_load_policy</span></code>
+devlink parameter can be used to control this behavior
+(<a class="reference internal" href="devlink-params.html#devlink-params-generic"><span class="std std-ref">Documentation/networking/devlink/devlink-params.rst</span></a>).</p>
+<p>On-disk firmware files are usually stored in <code class="docutils literal notranslate"><span class="pre">/lib/firmware/</span></code>.</p>
+</section>
+<section id="firmware-version-management">
+<h2>Firmware Version Management<a class="headerlink" href="#firmware-version-management" title="Permalink to this headline">¶</a></h2>
+<p>Drivers are expected to implement <code class="docutils literal notranslate"><span class="pre">devlink-flash</span></code> and <code class="docutils literal notranslate"><span class="pre">devlink-info</span></code>
+functionality, which together allow for implementing vendor-independent
+automated firmware update facilities.</p>
+<p><code class="docutils literal notranslate"><span class="pre">devlink-info</span></code> exposes the <code class="docutils literal notranslate"><span class="pre">driver</span></code> name and three version groups
+(<code class="docutils literal notranslate"><span class="pre">fixed</span></code>, <code class="docutils literal notranslate"><span class="pre">running</span></code>, <code class="docutils literal notranslate"><span class="pre">stored</span></code>).</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">driver</span></code> attribute and <code class="docutils literal notranslate"><span class="pre">fixed</span></code> group identify the specific device
+design, e.g. for looking up applicable firmware updates. This is why
+<code class="docutils literal notranslate"><span class="pre">serial_number</span></code> is not part of the <code class="docutils literal notranslate"><span class="pre">fixed</span></code> versions (even though it
+is fixed) - <code class="docutils literal notranslate"><span class="pre">fixed</span></code> versions should identify the design, not a single
+device.</p>
+<p><code class="docutils literal notranslate"><span class="pre">running</span></code> and <code class="docutils literal notranslate"><span class="pre">stored</span></code> firmware versions identify the firmware running
+on the device, and firmware which will be activated after reboot or device
+reset.</p>
+<p>The firmware update agent is supposed to be able to follow this simple
+algorithm to update firmware contents, regardless of the device vendor:</p>
+<div class="highlight-sh notranslate"><div class="highlight"><pre><span></span><span class="c1"># Get unique HW design identifier</span>
+<span class="nv">$hw_id</span> <span class="o">=</span> devlink-dev-info<span class="o">[</span><span class="s1">&#39;fixed&#39;</span><span class="o">]</span>
+
+<span class="c1"># Find out which FW flash we want to use for this NIC</span>
+<span class="nv">$want_flash_vers</span> <span class="o">=</span> some-db-backed.lookup<span class="o">(</span><span class="nv">$hw_id</span>, <span class="s1">&#39;flash&#39;</span><span class="o">)</span>
+
+<span class="c1"># Update flash if necessary</span>
+<span class="k">if</span> <span class="nv">$want_flash_vers</span> !<span class="o">=</span> devlink-dev-info<span class="o">[</span><span class="s1">&#39;stored&#39;</span><span class="o">]</span>:
+    <span class="nv">$file</span> <span class="o">=</span> some-db-backed.download<span class="o">(</span><span class="nv">$hw_id</span>, <span class="s1">&#39;flash&#39;</span><span class="o">)</span>
+    devlink-dev-flash<span class="o">(</span><span class="nv">$file</span><span class="o">)</span>
+
+<span class="c1"># Find out the expected overall firmware versions</span>
+<span class="nv">$want_fw_vers</span> <span class="o">=</span> some-db-backed.lookup<span class="o">(</span><span class="nv">$hw_id</span>, <span class="s1">&#39;all&#39;</span><span class="o">)</span>
+
+<span class="c1"># Update on-disk file if necessary</span>
+<span class="k">if</span> <span class="nv">$want_fw_vers</span> !<span class="o">=</span> devlink-dev-info<span class="o">[</span><span class="s1">&#39;running&#39;</span><span class="o">]</span>:
+    <span class="nv">$file</span> <span class="o">=</span> some-db-backed.download<span class="o">(</span><span class="nv">$hw_id</span>, <span class="s1">&#39;disk&#39;</span><span class="o">)</span>
+    write<span class="o">(</span><span class="nv">$file</span>, <span class="s1">&#39;/lib/firmware/&#39;</span><span class="o">)</span>
+
+<span class="c1"># Try device reset, if available</span>
+<span class="k">if</span> <span class="nv">$want_fw_vers</span> !<span class="o">=</span> devlink-dev-info<span class="o">[</span><span class="s1">&#39;running&#39;</span><span class="o">]</span>:
+   devlink-reset<span class="o">()</span>
+
+<span class="c1"># Reboot, if reset wasn&#39;t enough</span>
+<span class="k">if</span> <span class="nv">$want_fw_vers</span> !<span class="o">=</span> devlink-dev-info<span class="o">[</span><span class="s1">&#39;running&#39;</span><span class="o">]</span>:
+   reboot<span class="o">()</span>
+</pre></div>
+</div>
+<p>Note that each reference to <code class="docutils literal notranslate"><span class="pre">devlink-dev-info</span></code> in this pseudo-code
+is expected to fetch up-to-date information from the kernel.</p>
+<p>For the convenience of identifying firmware files some vendors add
+<code class="docutils literal notranslate"><span class="pre">bundle_id</span></code> information to the firmware versions. This meta-version covers
+multiple per-component versions and can be used e.g. in firmware file names
+(all component versions could get rather long.)</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Devlink Flash</a><ul>
+<li><a class="reference internal" href="#overwrite-mask">Overwrite Mask</a></li>
+<li><a class="reference internal" href="#firmware-loading">Firmware Loading</a></li>
+<li><a class="reference internal" href="#firmware-version-management">Firmware Version Management</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/networking/devlink/devlink-flash.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/networking/devlink/devlink-flash.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

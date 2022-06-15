@@ -1,0 +1,288 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>POWERPC ELF HWCAPs &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="ELF Note PowerPC Namespace" href="elfnote.html" />
+    <link rel="prev" title="PCI Bus EEH Error Recovery" href="eeh-pci-error-recovery.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="powerpc-elf-hwcaps">
+<span id="elf-hwcaps-powerpc"></span><h1>POWERPC ELF HWCAPs<a class="headerlink" href="#powerpc-elf-hwcaps" title="Permalink to this headline">¶</a></h1>
+<p>This document describes the usage and semantics of the powerpc ELF HWCAPs.</p>
+<section id="introduction">
+<h2>1. Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>Some hardware or software features are only available on some CPU
+implementations, and/or with certain kernel configurations, but have no other
+discovery mechanism available to userspace code. The kernel exposes the
+presence of these features to userspace through a set of flags called HWCAPs,
+exposed in the auxiliary vector.</p>
+<p>Userspace software can test for features by acquiring the AT_HWCAP or
+AT_HWCAP2 entry of the auxiliary vector, and testing whether the relevant
+flags are set, e.g.:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>bool floating_point_is_present(void)
+{
+        unsigned long HWCAPs = getauxval(AT_HWCAP);
+        if (HWCAPs &amp; PPC_FEATURE_HAS_FPU)
+                return true;
+
+        return false;
+}
+</pre></div>
+</div>
+<p>Where software relies on a feature described by a HWCAP, it should check the
+relevant HWCAP flag to verify that the feature is present before attempting to
+make use of the feature.</p>
+<p>HWCAP is the preferred method to test for the presence of a feature rather
+than probing through other means, which may not be reliable or may cause
+unpredictable behaviour.</p>
+<p>Software that targets a particular platform does not necessarily have to
+test for required or implied features. For example if the program requires
+FPU, VMX, VSX, it is not necessary to test those HWCAPs, and it may be
+impossible to do so if the compiler generates code requiring those features.</p>
+</section>
+<section id="facilities">
+<h2>2. Facilities<a class="headerlink" href="#facilities" title="Permalink to this headline">¶</a></h2>
+<p>The Power ISA uses the term “facility” to describe a class of instructions,
+registers, interrupts, etc. The presence or absence of a facility indicates
+whether this class is available to be used, but the specifics depend on the
+ISA version. For example, if the VSX facility is available, the VSX
+instructions that can be used differ between the v3.0B and v3.1B ISA
+versions.</p>
+</section>
+<section id="categories">
+<h2>3. Categories<a class="headerlink" href="#categories" title="Permalink to this headline">¶</a></h2>
+<p>The Power ISA before v3.0 uses the term “category” to describe certain
+classes of instructions and operating modes which may be optional or
+mutually exclusive, the exact meaning of the HWCAP flag may depend on
+context, e.g., the presence of the BOOKE feature implies that the server
+category is not implemented.</p>
+</section>
+<section id="hwcap-allocation">
+<h2>4. HWCAP allocation<a class="headerlink" href="#hwcap-allocation" title="Permalink to this headline">¶</a></h2>
+<p>HWCAPs are allocated as described in Power Architecture 64-Bit ELF V2 ABI
+Specification (which will be reflected in the kernel’s uapi headers).</p>
+</section>
+<section id="the-hwcaps-exposed-in-at-hwcap">
+<h2>5. The HWCAPs exposed in AT_HWCAP<a class="headerlink" href="#the-hwcaps-exposed-in-at-hwcap" title="Permalink to this headline">¶</a></h2>
+<dl>
+<dt>PPC_FEATURE_32</dt><dd><p>32-bit CPU</p>
+</dd>
+<dt>PPC_FEATURE_64</dt><dd><p>64-bit CPU (userspace may be running in 32-bit mode).</p>
+</dd>
+<dt>PPC_FEATURE_601_INSTR</dt><dd><p>The processor is PowerPC 601.
+Unused in the kernel since f0ed73f3fa2c (“powerpc: Remove PowerPC 601”)</p>
+</dd>
+<dt>PPC_FEATURE_HAS_ALTIVEC</dt><dd><p>Vector (aka Altivec, VMX) facility is available.</p>
+</dd>
+<dt>PPC_FEATURE_HAS_FPU</dt><dd><p>Floating point facility is available.</p>
+</dd>
+<dt>PPC_FEATURE_HAS_MMU</dt><dd><p>Memory management unit is present and enabled.</p>
+</dd>
+<dt>PPC_FEATURE_HAS_4xxMAC</dt><dd><p>The processor is 40x or 44x family.</p>
+</dd>
+<dt>PPC_FEATURE_UNIFIED_CACHE</dt><dd><p>The processor has a unified L1 cache for instructions and data, as
+found in NXP e200.
+Unused in the kernel since 39c8bf2b3cc1 (“powerpc: Retire e200 core (mpc555x processor)”)</p>
+</dd>
+<dt>PPC_FEATURE_HAS_SPE</dt><dd><p>Signal Processing Engine facility is available.</p>
+</dd>
+<dt>PPC_FEATURE_HAS_EFP_SINGLE</dt><dd><p>Embedded Floating Point single precision operations are available.</p>
+</dd>
+<dt>PPC_FEATURE_HAS_EFP_DOUBLE</dt><dd><p>Embedded Floating Point double precision operations are available.</p>
+</dd>
+<dt>PPC_FEATURE_NO_TB</dt><dd><p>The timebase facility (mftb instruction) is not available.
+This is a 601 specific HWCAP, so if it is known that the processor
+running is not a 601, via other HWCAPs or other means, it is not
+required to test this bit before using the timebase.
+Unused in the kernel since f0ed73f3fa2c (“powerpc: Remove PowerPC 601”)</p>
+</dd>
+<dt>PPC_FEATURE_POWER4</dt><dd><p>The processor is POWER4 or PPC970/FX/MP.
+POWER4 support dropped from the kernel since 471d7ff8b51b (“powerpc/64s: Remove POWER4 support”)</p>
+</dd>
+<dt>PPC_FEATURE_POWER5</dt><dd><p>The processor is POWER5.</p>
+</dd>
+<dt>PPC_FEATURE_POWER5_PLUS</dt><dd><p>The processor is POWER5+.</p>
+</dd>
+<dt>PPC_FEATURE_CELL</dt><dd><p>The processor is Cell.</p>
+</dd>
+<dt>PPC_FEATURE_BOOKE</dt><dd><p>The processor implements the embedded category (“BookE”) architecture.</p>
+</dd>
+<dt>PPC_FEATURE_SMT</dt><dd><p>The processor implements SMT.</p>
+</dd>
+<dt>PPC_FEATURE_ICACHE_SNOOP</dt><dd><p>The processor icache is coherent with the dcache, and instruction storage
+can be made consistent with data storage for the purpose of executing
+instructions with the sequence (as described in, e.g., POWER9 Processor
+User’s Manual, 4.6.2.2 Instruction Cache Block Invalidate (icbi)):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>sync
+icbi (to any address)
+isync
+</pre></div>
+</div>
+</dd>
+<dt>PPC_FEATURE_ARCH_2_05</dt><dd><p>The processor supports the v2.05 userlevel architecture. Processors
+supporting later architectures DO NOT set this feature.</p>
+</dd>
+<dt>PPC_FEATURE_PA6T</dt><dd><p>The processor is PA6T.</p>
+</dd>
+<dt>PPC_FEATURE_HAS_DFP</dt><dd><p>DFP facility is available.</p>
+</dd>
+<dt>PPC_FEATURE_POWER6_EXT</dt><dd><p>The processor is POWER6.</p>
+</dd>
+<dt>PPC_FEATURE_ARCH_2_06</dt><dd><p>The processor supports the v2.06 userlevel architecture. Processors
+supporting later architectures also set this feature.</p>
+</dd>
+<dt>PPC_FEATURE_HAS_VSX</dt><dd><p>VSX facility is available.</p>
+</dd>
+<dt>PPC_FEATURE_PSERIES_PERFMON_COMPAT</dt><dd><p>The processor supports architected PMU events in the range 0xE0-0xFF.</p>
+</dd>
+<dt>PPC_FEATURE_TRUE_LE</dt><dd><p>The processor supports true little-endian mode.</p>
+</dd>
+<dt>PPC_FEATURE_PPC_LE</dt><dd><p>The processor supports “PowerPC Little-Endian”, that uses address
+munging to make storage access appear to be little-endian, but the
+data is stored in a different format that is unsuitable to be
+accessed by other agents not running in this mode.</p>
+</dd>
+</dl>
+</section>
+<section id="the-hwcaps-exposed-in-at-hwcap2">
+<h2>6. The HWCAPs exposed in AT_HWCAP2<a class="headerlink" href="#the-hwcaps-exposed-in-at-hwcap2" title="Permalink to this headline">¶</a></h2>
+<dl class="simple">
+<dt>PPC_FEATURE2_ARCH_2_07</dt><dd><p>The processor supports the v2.07 userlevel architecture. Processors
+supporting later architectures also set this feature.</p>
+</dd>
+<dt>PPC_FEATURE2_HTM</dt><dd><p>Transactional Memory feature is available.</p>
+</dd>
+<dt>PPC_FEATURE2_DSCR</dt><dd><p>DSCR facility is available.</p>
+</dd>
+<dt>PPC_FEATURE2_EBB</dt><dd><p>EBB facility is available.</p>
+</dd>
+<dt>PPC_FEATURE2_ISEL</dt><dd><p>isel instruction is available. This is superseded by ARCH_2_07 and
+later.</p>
+</dd>
+<dt>PPC_FEATURE2_TAR</dt><dd><p>TAR facility is available.</p>
+</dd>
+<dt>PPC_FEATURE2_VEC_CRYPTO</dt><dd><p>v2.07 crypto instructions are available.</p>
+</dd>
+<dt>PPC_FEATURE2_HTM_NOSC</dt><dd><p>System calls fail if called in a transactional state, see
+<a class="reference internal" href="syscall64-abi.html"><span class="doc">Power Architecture 64-bit Linux system call ABI</span></a></p>
+</dd>
+<dt>PPC_FEATURE2_ARCH_3_00</dt><dd><p>The processor supports the v3.0B / v3.0C userlevel architecture. Processors
+supporting later architectures also set this feature.</p>
+</dd>
+<dt>PPC_FEATURE2_HAS_IEEE128</dt><dd><p>IEEE 128-bit binary floating point is supported with VSX
+quad-precision instructions and data types.</p>
+</dd>
+<dt>PPC_FEATURE2_DARN</dt><dd><p>darn instruction is available.</p>
+</dd>
+<dt>PPC_FEATURE2_SCV</dt><dd><p>The scv 0 instruction may be used for system calls, see
+<a class="reference internal" href="syscall64-abi.html"><span class="doc">Power Architecture 64-bit Linux system call ABI</span></a>.</p>
+</dd>
+<dt>PPC_FEATURE2_HTM_NO_SUSPEND</dt><dd><p>A limited Transactional Memory facility that does not support suspend is
+available, see <a class="reference internal" href="transactional_memory.html"><span class="doc">Transactional Memory support</span></a>.</p>
+</dd>
+<dt>PPC_FEATURE2_ARCH_3_1</dt><dd><p>The processor supports the v3.1 userlevel architecture. Processors
+supporting later architectures also set this feature.</p>
+</dd>
+<dt>PPC_FEATURE2_MMA</dt><dd><p>MMA facility is available.</p>
+</dd>
+</dl>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">POWERPC ELF HWCAPs</a><ul>
+<li><a class="reference internal" href="#introduction">1. Introduction</a></li>
+<li><a class="reference internal" href="#facilities">2. Facilities</a></li>
+<li><a class="reference internal" href="#categories">3. Categories</a></li>
+<li><a class="reference internal" href="#hwcap-allocation">4. HWCAP allocation</a></li>
+<li><a class="reference internal" href="#the-hwcaps-exposed-in-at-hwcap">5. The HWCAPs exposed in AT_HWCAP</a></li>
+<li><a class="reference internal" href="#the-hwcaps-exposed-in-at-hwcap2">6. The HWCAPs exposed in AT_HWCAP2</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/powerpc/elf_hwcaps.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/powerpc/elf_hwcaps.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

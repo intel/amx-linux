@@ -1,0 +1,311 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>与atomic_t相比，refcount_t的API是这样的 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="本地原子操作的语义和行为" href="local_ops.html" />
+    <link rel="prev" title="IRQ-flags状态追踪" href="irq/irqflags-tracing.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../core-api/refcount-vs-atomic.html"><span class="doc">refcount_t API compared to atomic_t</span></a></p>
+</dd>
+<dt class="field-even">翻译</dt>
+<dd class="field-even"><p>司延腾 Yanteng Si &lt;<a class="reference external" href="mailto:siyanteng&#37;&#52;&#48;loongson&#46;cn">siyanteng<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+</dl>
+<section id="atomic-t-refcount-tapi">
+<span id="cn-refcount-vs-atomic"></span><h1>与atomic_t相比，refcount_t的API是这样的<a class="headerlink" href="#atomic-t-refcount-tapi" title="Permalink to this headline">¶</a></h1>
+<div class="contents local topic" id="contents">
+<ul class="simple">
+<li><p><a class="reference internal" href="#id1" id="id9">简介</a></p></li>
+<li><p><a class="reference internal" href="#id2" id="id10">内存顺序的相关类型</a></p></li>
+<li><p><a class="reference internal" href="#id3" id="id11">函数的比较</a></p>
+<ul>
+<li><p><a class="reference internal" href="#rmw" id="id12">情况1） - 非 “读/修改/写”（RMW）操作</a></p></li>
+<li><p><a class="reference internal" href="#id4" id="id13">情况2） - 基于增量的操作，不返回任何值</a></p></li>
+<li><p><a class="reference internal" href="#id5" id="id14">情况3） - 基于递减的RMW操作，没有返回值</a></p></li>
+<li><p><a class="reference internal" href="#id6" id="id15">情况4） - 基于增量的RMW操作，返回一个值</a></p></li>
+<li><p><a class="reference internal" href="#dec-subrmw" id="id16">情况 5） - 基于Dec/Sub递减的通用RMW操作，返回一个值</a></p></li>
+<li><p><a class="reference internal" href="#id7" id="id17">情况6）其他基于递减的RMW操作，返回一个值</a></p></li>
+<li><p><a class="reference internal" href="#id8" id="id18">情况7）–基于锁的RMW</a></p></li>
+</ul>
+</li>
+</ul>
+</div>
+<section id="id1">
+<h2><a class="toc-backref" href="#id9">简介</a><a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>refcount_t API的目标是为实现对象的引用计数器提供一个最小的API。虽然来自
+lib/refcount.c的独立于架构的通用实现在下面使用了原子操作，但一些 <code class="docutils literal notranslate"><span class="pre">refcount_*()</span></code>
+和 <code class="docutils literal notranslate"><span class="pre">atomic_*()</span></code> 函数在内存顺序保证方面有很多不同。本文档概述了这些差异，并
+提供了相应的例子，以帮助开发者根据这些内存顺序保证的变化来验证他们的代码。</p>
+<p>本文档中使用的术语尽量遵循tools/memory-model/Documentation/explanation.txt
+中定义的正式LKMM。</p>
+<p>memory-barriers.txt和atomic_t.txt提供了更多关于内存顺序的背景，包括通用的
+和针对原子操作的。</p>
+</section>
+<section id="id2">
+<h2><a class="toc-backref" href="#id10">内存顺序的相关类型</a><a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>下面的部分只涵盖了本文使用的与原子操作和引用计数器有关的一些内存顺
+序类型。如果想了解更广泛的情况，请查阅memory-barriers.txt文件。</p>
+</div>
+<p>在没有任何内存顺序保证的情况下（即完全无序），atomics和refcounters只提供原
+子性和程序顺序（program order, po）关系（在同一个CPU上）。它保证每个
+<code class="docutils literal notranslate"><span class="pre">atomic_*</span> <span class="pre">()</span></code> 和 <code class="docutils literal notranslate"><span class="pre">refcount_*()</span></code> 操作都是原子性的，指令在单个CPU上按程序
+顺序执行。这是用READ_ONCE()/WRITE_ONCE()和比较并交换原语实现的。</p>
+<p>强（完全）内存顺序保证在同一CPU上的所有较早加载和存储的指令（所有程序顺序较早
+[po-earlier]指令）在执行任何程序顺序较后指令（po-later）之前完成。它还保证
+同一CPU上储存的程序优先较早的指令和来自其他CPU传播的指令必须在该CPU执行任何
+程序顺序较后指令之前传播到其他CPU（A-累积属性）。这是用smp_mb()实现的。</p>
+<p>RELEASE内存顺序保证了在同一CPU上所有较早加载和存储的指令（所有程序顺序较早
+指令）在此操作前完成。它还保证同一CPU上储存的程序优先较早的指令和来自其他CPU
+传播的指令必须在释放（release）操作之前传播到所有其他CPU（A-累积属性）。这是用
+smp_store_release()实现的。</p>
+<p>ACQUIRE内存顺序保证了同一CPU上的所有后加载和存储的指令（所有程序顺序较后
+指令）在获取（acquire）操作之后完成。它还保证在获取操作执行后，同一CPU上
+储存的所有程序顺序较后指令必须传播到所有其他CPU。这是用
+smp_acquire__after_ctrl_dep()实现的。</p>
+<p>对Refcounters的控制依赖（取决于成功）保证了如果一个对象的引用被成功获得（引用计数
+器的增量或增加行为发生了，函数返回true），那么进一步的存储是针对这个操作的命令。对存
+储的控制依赖没有使用任何明确的屏障来实现，而是依赖于CPU不对存储进行猜测。这只是
+一个单一的CPU关系，对其他CPU不提供任何保证。</p>
+</section>
+<section id="id3">
+<h2><a class="toc-backref" href="#id11">函数的比较</a><a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h2>
+<section id="rmw">
+<h3><a class="toc-backref" href="#id12">情况1） - 非 “读/修改/写”（RMW）操作</a><a class="headerlink" href="#rmw" title="Permalink to this headline">¶</a></h3>
+<p>函数变化:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>atomic_set() –&gt; <a class="reference internal" href="../../../driver-api/basics.html#c.refcount_set" title="refcount_set"><code class="xref c c-func docutils literal notranslate"><span class="pre">refcount_set()</span></code></a></p></li>
+<li><p>atomic_read() –&gt; <a class="reference internal" href="../../../driver-api/basics.html#c.refcount_read" title="refcount_read"><code class="xref c c-func docutils literal notranslate"><span class="pre">refcount_read()</span></code></a></p></li>
+</ul>
+</div></blockquote>
+<p>内存顺序保证变化:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>none (两者都是完全无序的)</p></li>
+</ul>
+</div></blockquote>
+</section>
+<section id="id4">
+<h3><a class="toc-backref" href="#id13">情况2） - 基于增量的操作，不返回任何值</a><a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h3>
+<p>函数变化:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>atomic_inc() –&gt; <a class="reference internal" href="../../../driver-api/basics.html#c.refcount_inc" title="refcount_inc"><code class="xref c c-func docutils literal notranslate"><span class="pre">refcount_inc()</span></code></a></p></li>
+<li><p>atomic_add() –&gt; <a class="reference internal" href="../../../driver-api/basics.html#c.refcount_add" title="refcount_add"><code class="xref c c-func docutils literal notranslate"><span class="pre">refcount_add()</span></code></a></p></li>
+</ul>
+</div></blockquote>
+<p>内存顺序保证变化:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>none (两者都是完全无序的)</p></li>
+</ul>
+</div></blockquote>
+</section>
+<section id="id5">
+<h3><a class="toc-backref" href="#id14">情况3） - 基于递减的RMW操作，没有返回值</a><a class="headerlink" href="#id5" title="Permalink to this headline">¶</a></h3>
+<p>函数变化:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>atomic_dec() –&gt; <a class="reference internal" href="../../../driver-api/basics.html#c.refcount_dec" title="refcount_dec"><code class="xref c c-func docutils literal notranslate"><span class="pre">refcount_dec()</span></code></a></p></li>
+</ul>
+</div></blockquote>
+<p>内存顺序保证变化:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>完全无序的 –&gt; RELEASE顺序</p></li>
+</ul>
+</div></blockquote>
+</section>
+<section id="id6">
+<h3><a class="toc-backref" href="#id15">情况4） - 基于增量的RMW操作，返回一个值</a><a class="headerlink" href="#id6" title="Permalink to this headline">¶</a></h3>
+<p>函数变化:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>atomic_inc_not_zero() –&gt; <a class="reference internal" href="../../../driver-api/basics.html#c.refcount_inc_not_zero" title="refcount_inc_not_zero"><code class="xref c c-func docutils literal notranslate"><span class="pre">refcount_inc_not_zero()</span></code></a></p></li>
+<li><p>无原子性对应函数 –&gt; <a class="reference internal" href="../../../driver-api/basics.html#c.refcount_add_not_zero" title="refcount_add_not_zero"><code class="xref c c-func docutils literal notranslate"><span class="pre">refcount_add_not_zero()</span></code></a></p></li>
+</ul>
+</div></blockquote>
+<p>内存顺序保证变化:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>完全有序的 –&gt; 控制依赖于存储的成功</p></li>
+</ul>
+</div></blockquote>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>此处 <strong>假设</strong> 了，必要的顺序是作为获得对象指针的结果而提供的。</p>
+</div>
+</section>
+<section id="dec-subrmw">
+<h3><a class="toc-backref" href="#id16">情况 5） - 基于Dec/Sub递减的通用RMW操作，返回一个值</a><a class="headerlink" href="#dec-subrmw" title="Permalink to this headline">¶</a></h3>
+<p>函数变化:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>atomic_dec_and_test() –&gt; <a class="reference internal" href="../../../driver-api/basics.html#c.refcount_dec_and_test" title="refcount_dec_and_test"><code class="xref c c-func docutils literal notranslate"><span class="pre">refcount_dec_and_test()</span></code></a></p></li>
+<li><p>atomic_sub_and_test() –&gt; <a class="reference internal" href="../../../driver-api/basics.html#c.refcount_sub_and_test" title="refcount_sub_and_test"><code class="xref c c-func docutils literal notranslate"><span class="pre">refcount_sub_and_test()</span></code></a></p></li>
+</ul>
+</div></blockquote>
+<p>内存顺序保证变化:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>完全有序的 –&gt; RELEASE顺序 + 成功后ACQUIRE顺序</p></li>
+</ul>
+</div></blockquote>
+</section>
+<section id="id7">
+<h3><a class="toc-backref" href="#id17">情况6）其他基于递减的RMW操作，返回一个值</a><a class="headerlink" href="#id7" title="Permalink to this headline">¶</a></h3>
+<p>函数变化:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>无原子性对应函数 –&gt; <a class="reference internal" href="../../../driver-api/basics.html#c.refcount_dec_if_one" title="refcount_dec_if_one"><code class="xref c c-func docutils literal notranslate"><span class="pre">refcount_dec_if_one()</span></code></a></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">atomic_add_unless(&amp;var,</span> <span class="pre">-1,</span> <span class="pre">1)</span></code> –&gt; <code class="docutils literal notranslate"><span class="pre">refcount_dec_not_one(&amp;var)</span></code></p></li>
+</ul>
+</div></blockquote>
+<p>内存顺序保证变化:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>完全有序的 –&gt; RELEASE顺序 + 控制依赖</p></li>
+</ul>
+</div></blockquote>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>atomic_add_unless()只在执行成功时提供完整的顺序。</p>
+</div>
+</section>
+<section id="id8">
+<h3><a class="toc-backref" href="#id18">情况7）–基于锁的RMW</a><a class="headerlink" href="#id8" title="Permalink to this headline">¶</a></h3>
+<p>函数变化:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>atomic_dec_and_lock() –&gt; <a class="reference internal" href="../../../driver-api/basics.html#c.refcount_dec_and_lock" title="refcount_dec_and_lock"><code class="xref c c-func docutils literal notranslate"><span class="pre">refcount_dec_and_lock()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../kernel-hacking/locking.html#c.atomic_dec_and_mutex_lock" title="atomic_dec_and_mutex_lock"><code class="xref c c-func docutils literal notranslate"><span class="pre">atomic_dec_and_mutex_lock()</span></code></a> –&gt; <a class="reference internal" href="../../../driver-api/basics.html#c.refcount_dec_and_mutex_lock" title="refcount_dec_and_mutex_lock"><code class="xref c c-func docutils literal notranslate"><span class="pre">refcount_dec_and_mutex_lock()</span></code></a></p></li>
+</ul>
+</div></blockquote>
+<p>内存顺序保证变化:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>完全有序 –&gt; RELEASE顺序 + 控制依赖 + 持有</p></li>
+</ul>
+</div></blockquote>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">与atomic_t相比，refcount_t的API是这样的</a><ul>
+<li><a class="reference internal" href="#id1">简介</a></li>
+<li><a class="reference internal" href="#id2">内存顺序的相关类型</a></li>
+<li><a class="reference internal" href="#id3">函数的比较</a><ul>
+<li><a class="reference internal" href="#rmw">情况1） - 非 “读/修改/写”（RMW）操作</a></li>
+<li><a class="reference internal" href="#id4">情况2） - 基于增量的操作，不返回任何值</a></li>
+<li><a class="reference internal" href="#id5">情况3） - 基于递减的RMW操作，没有返回值</a></li>
+<li><a class="reference internal" href="#id6">情况4） - 基于增量的RMW操作，返回一个值</a></li>
+<li><a class="reference internal" href="#dec-subrmw">情况 5） - 基于Dec/Sub递减的通用RMW操作，返回一个值</a></li>
+<li><a class="reference internal" href="#id7">情况6）其他基于递减的RMW操作，返回一个值</a></li>
+<li><a class="reference internal" href="#id8">情况7）–基于锁的RMW</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/core-api/refcount-vs-atomic.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/core-api/refcount-vs-atomic.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

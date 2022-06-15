@@ -1,0 +1,180 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Explicit volatile write back cache control &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Userspace block device driver (ublk driver)" href="ublk.html" />
+    <link rel="prev" title="Switching Scheduler" href="switching-sched.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="explicit-volatile-write-back-cache-control">
+<h1>Explicit volatile write back cache control<a class="headerlink" href="#explicit-volatile-write-back-cache-control" title="Permalink to this headline">¶</a></h1>
+<section id="introduction">
+<h2>Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>Many storage devices, especially in the consumer market, come with volatile
+write back caches.  That means the devices signal I/O completion to the
+operating system before data actually has hit the non-volatile storage.  This
+behavior obviously speeds up various workloads, but it means the operating
+system needs to force data out to the non-volatile storage when it performs
+a data integrity operation like fsync, sync or an unmount.</p>
+<p>The Linux block layer provides two simple mechanisms that let filesystems
+control the caching behavior of the storage device.  These mechanisms are
+a forced cache flush, and the Force Unit Access (FUA) flag for requests.</p>
+</section>
+<section id="explicit-cache-flushes">
+<h2>Explicit cache flushes<a class="headerlink" href="#explicit-cache-flushes" title="Permalink to this headline">¶</a></h2>
+<p>The REQ_PREFLUSH flag can be OR ed into the r/w flags of a bio submitted from
+the filesystem and will make sure the volatile cache of the storage device
+has been flushed before the actual I/O operation is started.  This explicitly
+guarantees that previously completed write requests are on non-volatile
+storage before the flagged bio starts. In addition the REQ_PREFLUSH flag can be
+set on an otherwise empty bio structure, which causes only an explicit cache
+flush without any dependent I/O.  It is recommend to use
+the <a class="reference internal" href="../core-api/kernel-api.html#c.blkdev_issue_flush" title="blkdev_issue_flush"><code class="xref c c-func docutils literal notranslate"><span class="pre">blkdev_issue_flush()</span></code></a> helper for a pure cache flush.</p>
+</section>
+<section id="forced-unit-access">
+<h2>Forced Unit Access<a class="headerlink" href="#forced-unit-access" title="Permalink to this headline">¶</a></h2>
+<p>The REQ_FUA flag can be OR ed into the r/w flags of a bio submitted from the
+filesystem and will make sure that I/O completion for this request is only
+signaled after the data has been committed to non-volatile storage.</p>
+</section>
+<section id="implementation-details-for-filesystems">
+<h2>Implementation details for filesystems<a class="headerlink" href="#implementation-details-for-filesystems" title="Permalink to this headline">¶</a></h2>
+<p>Filesystems can simply set the REQ_PREFLUSH and REQ_FUA bits and do not have to
+worry if the underlying devices need any explicit cache flushing and how
+the Forced Unit Access is implemented.  The REQ_PREFLUSH and REQ_FUA flags
+may both be set on a single bio.</p>
+</section>
+<section id="implementation-details-for-bio-based-block-drivers">
+<h2>Implementation details for bio based block drivers<a class="headerlink" href="#implementation-details-for-bio-based-block-drivers" title="Permalink to this headline">¶</a></h2>
+<p>These drivers will always see the REQ_PREFLUSH and REQ_FUA bits as they sit
+directly below the submit_bio interface.  For remapping drivers the REQ_FUA
+bits need to be propagated to underlying devices, and a global flush needs
+to be implemented for bios with the REQ_PREFLUSH bit set.  For real device
+drivers that do not have a volatile cache the REQ_PREFLUSH and REQ_FUA bits
+on non-empty bios can simply be ignored, and REQ_PREFLUSH requests without
+data can be completed successfully without doing any work.  Drivers for
+devices with volatile caches need to implement the support for these
+flags themselves without any help from the block layer.</p>
+</section>
+<section id="implementation-details-for-request-fn-based-block-drivers">
+<h2>Implementation details for request_fn based block drivers<a class="headerlink" href="#implementation-details-for-request-fn-based-block-drivers" title="Permalink to this headline">¶</a></h2>
+<p>For devices that do not support volatile write caches there is no driver
+support required, the block layer completes empty REQ_PREFLUSH requests before
+entering the driver and strips off the REQ_PREFLUSH and REQ_FUA bits from
+requests that have a payload.  For devices with volatile write caches the
+driver needs to tell the block layer that it supports flushing caches by
+doing:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>blk_queue_write_cache(sdkp-&gt;disk-&gt;queue, true, false);
+</pre></div>
+</div>
+<p>and handle empty REQ_OP_FLUSH requests in its prep_fn/request_fn.  Note that
+REQ_PREFLUSH requests with a payload are automatically turned into a sequence
+of an empty REQ_OP_FLUSH request followed by the actual write by the block
+layer.  For devices that also support the FUA bit the block layer needs
+to be told to pass through the REQ_FUA bit using:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>blk_queue_write_cache(sdkp-&gt;disk-&gt;queue, true, true);
+</pre></div>
+</div>
+<p>and the driver must handle write requests that have the REQ_FUA bit set
+in prep_fn/request_fn.  If the FUA bit is not natively supported the block
+layer turns it into an empty REQ_OP_FLUSH request after the actual write.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Explicit volatile write back cache control</a><ul>
+<li><a class="reference internal" href="#introduction">Introduction</a></li>
+<li><a class="reference internal" href="#explicit-cache-flushes">Explicit cache flushes</a></li>
+<li><a class="reference internal" href="#forced-unit-access">Forced Unit Access</a></li>
+<li><a class="reference internal" href="#implementation-details-for-filesystems">Implementation details for filesystems</a></li>
+<li><a class="reference internal" href="#implementation-details-for-bio-based-block-drivers">Implementation details for bio based block drivers</a></li>
+<li><a class="reference internal" href="#implementation-details-for-request-fn-based-block-drivers">Implementation details for request_fn based block drivers</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/block/writeback_cache_control.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/block/writeback_cache_control.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

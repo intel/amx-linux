@@ -1,0 +1,817 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Landlock: unprivileged access control &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="unshare system call" href="unshare.html" />
+    <link rel="prev" title="Seccomp BPF (SECure COMPuting with filters)" href="seccomp_filter.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="landlock-unprivileged-access-control">
+<h1>Landlock: unprivileged access control<a class="headerlink" href="#landlock-unprivileged-access-control" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">Author</dt>
+<dd class="field-odd"><p>Mickaël Salaün</p>
+</dd>
+<dt class="field-even">Date</dt>
+<dd class="field-even"><p>October 2022</p>
+</dd>
+</dl>
+<p>The goal of Landlock is to enable to restrict ambient rights (e.g. global
+filesystem access) for a set of processes.  Because Landlock is a stackable
+LSM, it makes possible to create safe security sandboxes as new security layers
+in addition to the existing system-wide access-controls. This kind of sandbox
+is expected to help mitigate the security impact of bugs or
+unexpected/malicious behaviors in user space applications.  Landlock empowers
+any process, including unprivileged ones, to securely restrict themselves.</p>
+<p>We can quickly make sure that Landlock is enabled in the running system by
+looking for “landlock: Up and running” in kernel logs (as root): <code class="docutils literal notranslate"><span class="pre">dmesg</span> <span class="pre">|</span> <span class="pre">grep</span>
+<span class="pre">landlock</span> <span class="pre">||</span> <span class="pre">journalctl</span> <span class="pre">-kg</span> <span class="pre">landlock</span></code> .  Developers can also easily check for
+Landlock support with a <a class="reference internal" href="#landlock-abi-versions"><span class="std std-ref">related system call</span></a>.  If
+Landlock is not currently supported, we need to <a class="reference internal" href="#kernel-support"><span class="std std-ref">configure the kernel
+appropriately</span></a>.</p>
+<section id="landlock-rules">
+<h2>Landlock rules<a class="headerlink" href="#landlock-rules" title="Permalink to this headline">¶</a></h2>
+<p>A Landlock rule describes an action on an object.  An object is currently a
+file hierarchy, and the related filesystem actions are defined with <a class="reference internal" href="#access-rights">access
+rights</a>.  A set of rules is aggregated in a ruleset, which can then restrict
+the thread enforcing it, and its future children.</p>
+<section id="defining-and-enforcing-a-security-policy">
+<h3>Defining and enforcing a security policy<a class="headerlink" href="#defining-and-enforcing-a-security-policy" title="Permalink to this headline">¶</a></h3>
+<p>We first need to define the ruleset that will contain our rules.  For this
+example, the ruleset will contain rules that only allow read actions, but write
+actions will be denied.  The ruleset then needs to handle both of these kind of
+actions.  This is required for backward and forward compatibility (i.e. the
+kernel and user space may not know each other’s supported restrictions), hence
+the need to be explicit about the denied-by-default access rights.</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="k">struct</span> <span class="nc">landlock_ruleset_attr</span><span class="w"> </span><span class="n">ruleset_attr</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="p">.</span><span class="n">handled_access_fs</span><span class="w"> </span><span class="o">=</span><span class="w"></span>
+<span class="w">        </span><span class="n">LANDLOCK_ACCESS_FS_EXECUTE</span><span class="w"> </span><span class="o">|</span><span class="w"></span>
+<span class="w">        </span><span class="n">LANDLOCK_ACCESS_FS_WRITE_FILE</span><span class="w"> </span><span class="o">|</span><span class="w"></span>
+<span class="w">        </span><span class="n">LANDLOCK_ACCESS_FS_READ_FILE</span><span class="w"> </span><span class="o">|</span><span class="w"></span>
+<span class="w">        </span><span class="n">LANDLOCK_ACCESS_FS_READ_DIR</span><span class="w"> </span><span class="o">|</span><span class="w"></span>
+<span class="w">        </span><span class="n">LANDLOCK_ACCESS_FS_REMOVE_DIR</span><span class="w"> </span><span class="o">|</span><span class="w"></span>
+<span class="w">        </span><span class="n">LANDLOCK_ACCESS_FS_REMOVE_FILE</span><span class="w"> </span><span class="o">|</span><span class="w"></span>
+<span class="w">        </span><span class="n">LANDLOCK_ACCESS_FS_MAKE_CHAR</span><span class="w"> </span><span class="o">|</span><span class="w"></span>
+<span class="w">        </span><span class="n">LANDLOCK_ACCESS_FS_MAKE_DIR</span><span class="w"> </span><span class="o">|</span><span class="w"></span>
+<span class="w">        </span><span class="n">LANDLOCK_ACCESS_FS_MAKE_REG</span><span class="w"> </span><span class="o">|</span><span class="w"></span>
+<span class="w">        </span><span class="n">LANDLOCK_ACCESS_FS_MAKE_SOCK</span><span class="w"> </span><span class="o">|</span><span class="w"></span>
+<span class="w">        </span><span class="n">LANDLOCK_ACCESS_FS_MAKE_FIFO</span><span class="w"> </span><span class="o">|</span><span class="w"></span>
+<span class="w">        </span><span class="n">LANDLOCK_ACCESS_FS_MAKE_BLOCK</span><span class="w"> </span><span class="o">|</span><span class="w"></span>
+<span class="w">        </span><span class="n">LANDLOCK_ACCESS_FS_MAKE_SYM</span><span class="w"> </span><span class="o">|</span><span class="w"></span>
+<span class="w">        </span><span class="n">LANDLOCK_ACCESS_FS_REFER</span><span class="w"> </span><span class="o">|</span><span class="w"></span>
+<span class="w">        </span><span class="n">LANDLOCK_ACCESS_FS_TRUNCATE</span><span class="p">,</span><span class="w"></span>
+<span class="p">};</span><span class="w"></span>
+</pre></div>
+</div>
+<p>Because we may not know on which kernel version an application will be
+executed, it is safer to follow a best-effort security approach.  Indeed, we
+should try to protect users as much as possible whatever the kernel they are
+using.  To avoid binary enforcement (i.e. either all security features or
+none), we can leverage a dedicated Landlock command to get the current version
+of the Landlock ABI and adapt the handled accesses.  Let’s check if we should
+remove the <code class="docutils literal notranslate"><span class="pre">LANDLOCK_ACCESS_FS_REFER</span></code> or <code class="docutils literal notranslate"><span class="pre">LANDLOCK_ACCESS_FS_TRUNCATE</span></code>
+access rights, which are only supported starting with the second and third
+version of the ABI.</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">int</span><span class="w"> </span><span class="n">abi</span><span class="p">;</span><span class="w"></span>
+
+<span class="n">abi</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">landlock_create_ruleset</span><span class="p">(</span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">LANDLOCK_CREATE_RULESET_VERSION</span><span class="p">);</span><span class="w"></span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">abi</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="cm">/* Degrades gracefully if Landlock is not handled. */</span><span class="w"></span>
+<span class="w">    </span><span class="n">perror</span><span class="p">(</span><span class="s">&quot;The running kernel does not enable to use Landlock&quot;</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+<span class="k">switch</span><span class="w"> </span><span class="p">(</span><span class="n">abi</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="k">case</span><span class="w"> </span><span class="mi">1</span><span class="o">:</span><span class="w"></span>
+<span class="w">    </span><span class="cm">/* Removes LANDLOCK_ACCESS_FS_REFER for ABI &lt; 2 */</span><span class="w"></span>
+<span class="w">    </span><span class="n">ruleset_attr</span><span class="p">.</span><span class="n">handled_access_fs</span><span class="w"> </span><span class="o">&amp;=</span><span class="w"> </span><span class="o">~</span><span class="n">LANDLOCK_ACCESS_FS_REFER</span><span class="p">;</span><span class="w"></span>
+<span class="w">    </span><span class="n">__attribute__</span><span class="p">((</span><span class="n">fallthrough</span><span class="p">));</span><span class="w"></span>
+<span class="k">case</span><span class="w"> </span><span class="mi">2</span><span class="o">:</span><span class="w"></span>
+<span class="w">    </span><span class="cm">/* Removes LANDLOCK_ACCESS_FS_TRUNCATE for ABI &lt; 3 */</span><span class="w"></span>
+<span class="w">    </span><span class="n">ruleset_attr</span><span class="p">.</span><span class="n">handled_access_fs</span><span class="w"> </span><span class="o">&amp;=</span><span class="w"> </span><span class="o">~</span><span class="n">LANDLOCK_ACCESS_FS_TRUNCATE</span><span class="p">;</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+<p>This enables to create an inclusive ruleset that will contain our rules.</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">int</span><span class="w"> </span><span class="n">ruleset_fd</span><span class="p">;</span><span class="w"></span>
+
+<span class="n">ruleset_fd</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">landlock_create_ruleset</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ruleset_attr</span><span class="p">,</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">ruleset_attr</span><span class="p">),</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span><span class="w"></span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">ruleset_fd</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="n">perror</span><span class="p">(</span><span class="s">&quot;Failed to create a ruleset&quot;</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+<p>We can now add a new rule to this ruleset thanks to the returned file
+descriptor referring to this ruleset.  The rule will only allow reading the
+file hierarchy <code class="docutils literal notranslate"><span class="pre">/usr</span></code>.  Without another rule, write actions would then be
+denied by the ruleset.  To add <code class="docutils literal notranslate"><span class="pre">/usr</span></code> to the ruleset, we open it with the
+<code class="docutils literal notranslate"><span class="pre">O_PATH</span></code> flag and fill the &amp;<a class="reference internal" href="#c.landlock_path_beneath_attr" title="landlock_path_beneath_attr"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">landlock_path_beneath_attr</span></code></a> with this file
+descriptor.</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">int</span><span class="w"> </span><span class="n">err</span><span class="p">;</span><span class="w"></span>
+<span class="k">struct</span> <span class="nc">landlock_path_beneath_attr</span><span class="w"> </span><span class="n">path_beneath</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="p">.</span><span class="n">allowed_access</span><span class="w"> </span><span class="o">=</span><span class="w"></span>
+<span class="w">        </span><span class="n">LANDLOCK_ACCESS_FS_EXECUTE</span><span class="w"> </span><span class="o">|</span><span class="w"></span>
+<span class="w">        </span><span class="n">LANDLOCK_ACCESS_FS_READ_FILE</span><span class="w"> </span><span class="o">|</span><span class="w"></span>
+<span class="w">        </span><span class="n">LANDLOCK_ACCESS_FS_READ_DIR</span><span class="p">,</span><span class="w"></span>
+<span class="p">};</span><span class="w"></span>
+
+<span class="n">path_beneath</span><span class="p">.</span><span class="n">parent_fd</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">open</span><span class="p">(</span><span class="s">&quot;/usr&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">O_PATH</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">O_CLOEXEC</span><span class="p">);</span><span class="w"></span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">path_beneath</span><span class="p">.</span><span class="n">parent_fd</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="n">perror</span><span class="p">(</span><span class="s">&quot;Failed to open file&quot;</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="n">close</span><span class="p">(</span><span class="n">ruleset_fd</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+<span class="n">err</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">landlock_add_rule</span><span class="p">(</span><span class="n">ruleset_fd</span><span class="p">,</span><span class="w"> </span><span class="n">LANDLOCK_RULE_PATH_BENEATH</span><span class="p">,</span><span class="w"></span>
+<span class="w">                        </span><span class="o">&amp;</span><span class="n">path_beneath</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span><span class="w"></span>
+<span class="n">close</span><span class="p">(</span><span class="n">path_beneath</span><span class="p">.</span><span class="n">parent_fd</span><span class="p">);</span><span class="w"></span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">err</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="n">perror</span><span class="p">(</span><span class="s">&quot;Failed to update ruleset&quot;</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="n">close</span><span class="p">(</span><span class="n">ruleset_fd</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+<p>It may also be required to create rules following the same logic as explained
+for the ruleset creation, by filtering access rights according to the Landlock
+ABI version.  In this example, this is not required because all of the requested
+<code class="docutils literal notranslate"><span class="pre">allowed_access</span></code> rights are already available in ABI 1.</p>
+<p>We now have a ruleset with one rule allowing read access to <code class="docutils literal notranslate"><span class="pre">/usr</span></code> while
+denying all other handled accesses for the filesystem.  The next step is to
+restrict the current thread from gaining more privileges (e.g. thanks to a SUID
+binary).</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">prctl</span><span class="p">(</span><span class="n">PR_SET_NO_NEW_PRIVS</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">))</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="n">perror</span><span class="p">(</span><span class="s">&quot;Failed to restrict privileges&quot;</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="n">close</span><span class="p">(</span><span class="n">ruleset_fd</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+<p>The current thread is now ready to sandbox itself with the ruleset.</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">landlock_restrict_self</span><span class="p">(</span><span class="n">ruleset_fd</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">))</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="n">perror</span><span class="p">(</span><span class="s">&quot;Failed to enforce ruleset&quot;</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="n">close</span><span class="p">(</span><span class="n">ruleset_fd</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+<span class="n">close</span><span class="p">(</span><span class="n">ruleset_fd</span><span class="p">);</span><span class="w"></span>
+</pre></div>
+</div>
+<p>If the <code class="docutils literal notranslate"><span class="pre">landlock_restrict_self</span></code> system call succeeds, the current thread is
+now restricted and this policy will be enforced on all its subsequently created
+children as well.  Once a thread is landlocked, there is no way to remove its
+security policy; only adding more restrictions is allowed.  These threads are
+now in a new Landlock domain, merge of their parent one (if any) with the new
+ruleset.</p>
+<p>Full working code can be found in <a class="reference external" href="https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/tree/samples/landlock/sandboxer.c">samples/landlock/sandboxer.c</a>.</p>
+</section>
+<section id="good-practices">
+<h3>Good practices<a class="headerlink" href="#good-practices" title="Permalink to this headline">¶</a></h3>
+<p>It is recommended setting access rights to file hierarchy leaves as much as
+possible.  For instance, it is better to be able to have <code class="docutils literal notranslate"><span class="pre">~/doc/</span></code> as a
+read-only hierarchy and <code class="docutils literal notranslate"><span class="pre">~/tmp/</span></code> as a read-write hierarchy, compared to
+<code class="docutils literal notranslate"><span class="pre">~/</span></code> as a read-only hierarchy and <code class="docutils literal notranslate"><span class="pre">~/tmp/</span></code> as a read-write hierarchy.
+Following this good practice leads to self-sufficient hierarchies that do not
+depend on their location (i.e. parent directories).  This is particularly
+relevant when we want to allow linking or renaming.  Indeed, having consistent
+access rights per directory enables to change the location of such directory
+without relying on the destination directory access rights (except those that
+are required for this operation, see <code class="docutils literal notranslate"><span class="pre">LANDLOCK_ACCESS_FS_REFER</span></code>
+documentation).
+Having self-sufficient hierarchies also helps to tighten the required access
+rights to the minimal set of data.  This also helps avoid sinkhole directories,
+i.e.  directories where data can be linked to but not linked from.  However,
+this depends on data organization, which might not be controlled by developers.
+In this case, granting read-write access to <code class="docutils literal notranslate"><span class="pre">~/tmp/</span></code>, instead of write-only
+access, would potentially allow to move <code class="docutils literal notranslate"><span class="pre">~/tmp/</span></code> to a non-readable directory
+and still keep the ability to list the content of <code class="docutils literal notranslate"><span class="pre">~/tmp/</span></code>.</p>
+</section>
+<section id="layers-of-file-path-access-rights">
+<h3>Layers of file path access rights<a class="headerlink" href="#layers-of-file-path-access-rights" title="Permalink to this headline">¶</a></h3>
+<p>Each time a thread enforces a ruleset on itself, it updates its Landlock domain
+with a new layer of policy.  Indeed, this complementary policy is stacked with
+the potentially other rulesets already restricting this thread.  A sandboxed
+thread can then safely add more constraints to itself with a new enforced
+ruleset.</p>
+<p>One policy layer grants access to a file path if at least one of its rules
+encountered on the path grants the access.  A sandboxed thread can only access
+a file path if all its enforced policy layers grant the access as well as all
+the other system access controls (e.g. filesystem DAC, other LSM policies,
+etc.).</p>
+</section>
+<section id="bind-mounts-and-overlayfs">
+<h3>Bind mounts and OverlayFS<a class="headerlink" href="#bind-mounts-and-overlayfs" title="Permalink to this headline">¶</a></h3>
+<p>Landlock enables to restrict access to file hierarchies, which means that these
+access rights can be propagated with bind mounts (cf.
+<a class="reference internal" href="../filesystems/sharedsubtree.html"><span class="doc">Shared Subtrees</span></a>) but not with
+<a class="reference internal" href="../filesystems/overlayfs.html"><span class="doc">Overlay Filesystem</span></a>.</p>
+<p>A bind mount mirrors a source file hierarchy to a destination.  The destination
+hierarchy is then composed of the exact same files, on which Landlock rules can
+be tied, either via the source or the destination path.  These rules restrict
+access when they are encountered on a path, which means that they can restrict
+access to multiple file hierarchies at the same time, whether these hierarchies
+are the result of bind mounts or not.</p>
+<p>An OverlayFS mount point consists of upper and lower layers.  These layers are
+combined in a merge directory, result of the mount point.  This merge hierarchy
+may include files from the upper and lower layers, but modifications performed
+on the merge hierarchy only reflects on the upper layer.  From a Landlock
+policy point of view, each OverlayFS layers and merge hierarchies are
+standalone and contains their own set of files and directories, which is
+different from bind mounts.  A policy restricting an OverlayFS layer will not
+restrict the resulted merged hierarchy, and vice versa.  Landlock users should
+then only think about file hierarchies they want to allow access to, regardless
+of the underlying filesystem.</p>
+</section>
+<section id="inheritance">
+<h3>Inheritance<a class="headerlink" href="#inheritance" title="Permalink to this headline">¶</a></h3>
+<p>Every new thread resulting from a <em class="manpage">clone(2)</em> inherits Landlock domain
+restrictions from its parent.  This is similar to the seccomp inheritance (cf.
+<a class="reference internal" href="seccomp_filter.html"><span class="doc">Seccomp BPF (SECure COMPuting with filters)</span></a>) or any other LSM dealing with
+task’s <em class="manpage">credentials(7)</em>.  For instance, one process’s thread may apply
+Landlock rules to itself, but they will not be automatically applied to other
+sibling threads (unlike POSIX thread credential changes, cf.
+<em class="manpage">nptl(7)</em>).</p>
+<p>When a thread sandboxes itself, we have the guarantee that the related security
+policy will stay enforced on all this thread’s descendants.  This allows
+creating standalone and modular security policies per application, which will
+automatically be composed between themselves according to their runtime parent
+policies.</p>
+</section>
+<section id="ptrace-restrictions">
+<h3>Ptrace restrictions<a class="headerlink" href="#ptrace-restrictions" title="Permalink to this headline">¶</a></h3>
+<p>A sandboxed process has less privileges than a non-sandboxed process and must
+then be subject to additional restrictions when manipulating another process.
+To be allowed to use <em class="manpage">ptrace(2)</em> and related syscalls on a target
+process, a sandboxed process should have a subset of the target process rules,
+which means the tracee must be in a sub-domain of the tracer.</p>
+</section>
+<section id="truncating-files">
+<h3>Truncating files<a class="headerlink" href="#truncating-files" title="Permalink to this headline">¶</a></h3>
+<p>The operations covered by <code class="docutils literal notranslate"><span class="pre">LANDLOCK_ACCESS_FS_WRITE_FILE</span></code> and
+<code class="docutils literal notranslate"><span class="pre">LANDLOCK_ACCESS_FS_TRUNCATE</span></code> both change the contents of a file and sometimes
+overlap in non-intuitive ways.  It is recommended to always specify both of
+these together.</p>
+<p>A particularly surprising example is <em class="manpage">creat(2)</em>.  The name suggests
+that this system call requires the rights to create and write files.  However,
+it also requires the truncate right if an existing file under the same name is
+already present.</p>
+<p>It should also be noted that truncating files does not require the
+<code class="docutils literal notranslate"><span class="pre">LANDLOCK_ACCESS_FS_WRITE_FILE</span></code> right.  Apart from the <em class="manpage">truncate(2)</em>
+system call, this can also be done through <em class="manpage">open(2)</em> with the flags
+<code class="docutils literal notranslate"><span class="pre">O_RDONLY</span> <span class="pre">|</span> <span class="pre">O_TRUNC</span></code>.</p>
+<p>When opening a file, the availability of the <code class="docutils literal notranslate"><span class="pre">LANDLOCK_ACCESS_FS_TRUNCATE</span></code>
+right is associated with the newly created file descriptor and will be used for
+subsequent truncation attempts using <em class="manpage">ftruncate(2)</em>.  The behavior is
+similar to opening a file for reading or writing, where permissions are checked
+during <em class="manpage">open(2)</em>, but not during the subsequent <em class="manpage">read(2)</em> and
+<em class="manpage">write(2)</em> calls.</p>
+<p>As a consequence, it is possible to have multiple open file descriptors for the
+same file, where one grants the right to truncate the file and the other does
+not.  It is also possible to pass such file descriptors between processes,
+keeping their Landlock properties, even when these processes do not have an
+enforced Landlock ruleset.</p>
+</section>
+</section>
+<section id="compatibility">
+<h2>Compatibility<a class="headerlink" href="#compatibility" title="Permalink to this headline">¶</a></h2>
+<section id="backward-and-forward-compatibility">
+<h3>Backward and forward compatibility<a class="headerlink" href="#backward-and-forward-compatibility" title="Permalink to this headline">¶</a></h3>
+<p>Landlock is designed to be compatible with past and future versions of the
+kernel.  This is achieved thanks to the system call attributes and the
+associated bitflags, particularly the ruleset’s <code class="docutils literal notranslate"><span class="pre">handled_access_fs</span></code>.  Making
+handled access right explicit enables the kernel and user space to have a clear
+contract with each other.  This is required to make sure sandboxing will not
+get stricter with a system update, which could break applications.</p>
+<p>Developers can subscribe to the <a class="reference external" href="https://subspace.kernel.org/lists.linux.dev.html">Landlock mailing list</a> to knowingly update and
+test their applications with the latest available features.  In the interest of
+users, and because they may use different kernel versions, it is strongly
+encouraged to follow a best-effort security approach by checking the Landlock
+ABI version at runtime and only enforcing the supported features.</p>
+</section>
+<section id="landlock-abi-versions">
+<span id="id1"></span><h3>Landlock ABI versions<a class="headerlink" href="#landlock-abi-versions" title="Permalink to this headline">¶</a></h3>
+<p>The Landlock ABI version can be read with the <a class="reference internal" href="#c.sys_landlock_create_ruleset" title="sys_landlock_create_ruleset"><code class="xref c c-func docutils literal notranslate"><span class="pre">sys_landlock_create_ruleset()</span></code></a>
+system call:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">int</span><span class="w"> </span><span class="n">abi</span><span class="p">;</span><span class="w"></span>
+
+<span class="n">abi</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">landlock_create_ruleset</span><span class="p">(</span><span class="nb">NULL</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">LANDLOCK_CREATE_RULESET_VERSION</span><span class="p">);</span><span class="w"></span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">abi</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">switch</span><span class="w"> </span><span class="p">(</span><span class="n">errno</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">case</span><span class="w"> </span><span class="nl">ENOSYS</span><span class="p">:</span><span class="w"></span>
+<span class="w">        </span><span class="n">printf</span><span class="p">(</span><span class="s">&quot;Landlock is not supported by the current kernel.</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="k">break</span><span class="p">;</span><span class="w"></span>
+<span class="w">    </span><span class="k">case</span><span class="w"> </span><span class="nl">EOPNOTSUPP</span><span class="p">:</span><span class="w"></span>
+<span class="w">        </span><span class="n">printf</span><span class="p">(</span><span class="s">&quot;Landlock is currently disabled.</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="k">break</span><span class="p">;</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">abi</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="mi">2</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="n">printf</span><span class="p">(</span><span class="s">&quot;Landlock supports LANDLOCK_ACCESS_FS_REFER.</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">);</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+<p>The following kernel interfaces are implicitly supported by the first ABI
+version.  Features only supported from a specific version are explicitly marked
+as such.</p>
+</section>
+</section>
+<section id="kernel-interface">
+<h2>Kernel interface<a class="headerlink" href="#kernel-interface" title="Permalink to this headline">¶</a></h2>
+<section id="access-rights">
+<h3>Access rights<a class="headerlink" href="#access-rights" title="Permalink to this headline">¶</a></h3>
+<p>A set of actions on kernel objects may be defined by an attribute (e.g.
+<a class="reference internal" href="#c.landlock_path_beneath_attr" title="landlock_path_beneath_attr"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">landlock_path_beneath_attr</span></code></a>) including a bitmask of access.</p>
+<section id="filesystem-flags">
+<h4>Filesystem flags<a class="headerlink" href="#filesystem-flags" title="Permalink to this headline">¶</a></h4>
+<p>These flags enable to restrict a sandboxed process to a set of actions on
+files and directories.  Files or directories opened before the sandboxing
+are not subject to these restrictions.</p>
+<p>A file can only receive these access rights:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">LANDLOCK_ACCESS_FS_EXECUTE</span></code>: Execute a file.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">LANDLOCK_ACCESS_FS_WRITE_FILE</span></code>: Open a file with write access. Note that
+you might additionally need the <code class="docutils literal notranslate"><span class="pre">LANDLOCK_ACCESS_FS_TRUNCATE</span></code> right in order
+to overwrite files with <em class="manpage">open(2)</em> using <code class="docutils literal notranslate"><span class="pre">O_TRUNC</span></code> or
+<em class="manpage">creat(2)</em>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">LANDLOCK_ACCESS_FS_READ_FILE</span></code>: Open a file with read access.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">LANDLOCK_ACCESS_FS_TRUNCATE</span></code>: Truncate a file with <em class="manpage">truncate(2)</em>,
+<em class="manpage">ftruncate(2)</em>, <em class="manpage">creat(2)</em>, or <em class="manpage">open(2)</em> with
+<code class="docutils literal notranslate"><span class="pre">O_TRUNC</span></code>. Whether an opened file can be truncated with
+<em class="manpage">ftruncate(2)</em> is determined during <em class="manpage">open(2)</em>, in the
+same way as read and write permissions are checked during
+<em class="manpage">open(2)</em> using <code class="docutils literal notranslate"><span class="pre">LANDLOCK_ACCESS_FS_READ_FILE</span></code> and
+<code class="docutils literal notranslate"><span class="pre">LANDLOCK_ACCESS_FS_WRITE_FILE</span></code>. This access right is available since the
+third version of the Landlock ABI.</p></li>
+</ul>
+<p>A directory can receive access rights related to files or directories.  The
+following access right is applied to the directory itself, and the
+directories beneath it:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">LANDLOCK_ACCESS_FS_READ_DIR</span></code>: Open a directory or list its content.</p></li>
+</ul>
+<p>However, the following access rights only apply to the content of a
+directory, not the directory itself:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">LANDLOCK_ACCESS_FS_REMOVE_DIR</span></code>: Remove an empty directory or rename one.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">LANDLOCK_ACCESS_FS_REMOVE_FILE</span></code>: Unlink (or rename) a file.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">LANDLOCK_ACCESS_FS_MAKE_CHAR</span></code>: Create (or rename or link) a character
+device.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">LANDLOCK_ACCESS_FS_MAKE_DIR</span></code>: Create (or rename) a directory.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">LANDLOCK_ACCESS_FS_MAKE_REG</span></code>: Create (or rename or link) a regular file.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">LANDLOCK_ACCESS_FS_MAKE_SOCK</span></code>: Create (or rename or link) a UNIX domain
+socket.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">LANDLOCK_ACCESS_FS_MAKE_FIFO</span></code>: Create (or rename or link) a named pipe.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">LANDLOCK_ACCESS_FS_MAKE_BLOCK</span></code>: Create (or rename or link) a block device.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">LANDLOCK_ACCESS_FS_MAKE_SYM</span></code>: Create (or rename or link) a symbolic link.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">LANDLOCK_ACCESS_FS_REFER</span></code>: Link or rename a file from or to a different
+directory (i.e. reparent a file hierarchy).  This access right is
+available since the second version of the Landlock ABI.  This is also the
+only access right which is always considered handled by any ruleset in
+such a way that reparenting a file hierarchy is always denied by default.
+To avoid privilege escalation, it is not enough to add a rule with this
+access right.  When linking or renaming a file, the destination directory
+hierarchy must also always have the same or a superset of restrictions of
+the source hierarchy.  If it is not the case, or if the domain doesn’t
+handle this access right, such actions are denied by default with errno
+set to <code class="docutils literal notranslate"><span class="pre">EXDEV</span></code>.  Linking also requires a <code class="docutils literal notranslate"><span class="pre">LANDLOCK_ACCESS_FS_MAKE_*</span></code>
+access right on the destination directory, and renaming also requires a
+<code class="docutils literal notranslate"><span class="pre">LANDLOCK_ACCESS_FS_REMOVE_*</span></code> access right on the source’s (file or
+directory) parent.  Otherwise, such actions are denied with errno set to
+<code class="docutils literal notranslate"><span class="pre">EACCES</span></code>.  The <code class="docutils literal notranslate"><span class="pre">EACCES</span></code> errno prevails over <code class="docutils literal notranslate"><span class="pre">EXDEV</span></code> to let user space
+efficiently deal with an unrecoverable error.</p></li>
+</ul>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>It is currently not possible to restrict some file-related actions
+accessible through these syscall families: <em class="manpage">chdir(2)</em>,
+<em class="manpage">stat(2)</em>, <em class="manpage">flock(2)</em>, <em class="manpage">chmod(2)</em>,
+<em class="manpage">chown(2)</em>, <em class="manpage">setxattr(2)</em>, <em class="manpage">utime(2)</em>,
+<em class="manpage">ioctl(2)</em>, <em class="manpage">fcntl(2)</em>, <em class="manpage">access(2)</em>.
+Future Landlock evolutions will enable to restrict them.</p>
+</div>
+</section>
+</section>
+<section id="creating-a-new-ruleset">
+<h3>Creating a new ruleset<a class="headerlink" href="#creating-a-new-ruleset" title="Permalink to this headline">¶</a></h3>
+<dl class="function">
+<dt id="c.sys_landlock_create_ruleset">
+long <code class="sig-name descname">sys_landlock_create_ruleset</code><span class="sig-paren">(</span>const struct <a class="reference internal" href="#c.landlock_ruleset_attr" title="landlock_ruleset_attr">landlock_ruleset_attr</a> __user *const<em> attr</em>, const size_t<em> size</em>, const __u32<em> flags</em><span class="sig-paren">)</span><a class="headerlink" href="#c.sys_landlock_create_ruleset" title="Permalink to this definition">¶</a></dt>
+<dd><p>Create a new ruleset</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">struct</span> <span class="pre">landlock_ruleset_attr</span> <span class="pre">__user</span> <span class="pre">*const</span> <span class="pre">attr</span></code></dt><dd><p>Pointer to a <a class="reference internal" href="#c.landlock_ruleset_attr" title="landlock_ruleset_attr"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">landlock_ruleset_attr</span></code></a> identifying the scope of
+the new ruleset.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">size_t</span> <span class="pre">size</span></code></dt><dd><p>Size of the pointed <a class="reference internal" href="#c.landlock_ruleset_attr" title="landlock_ruleset_attr"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">landlock_ruleset_attr</span></code></a> (needed for
+backward and forward compatibility).</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">__u32</span> <span class="pre">flags</span></code></dt><dd><p>Supported value: <code class="docutils literal notranslate"><span class="pre">LANDLOCK_CREATE_RULESET_VERSION</span></code>.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This system call enables to create a new Landlock ruleset, and returns the
+related file descriptor on success.</p>
+<p>If <strong>flags</strong> is <code class="docutils literal notranslate"><span class="pre">LANDLOCK_CREATE_RULESET_VERSION</span></code> and <strong>attr</strong> is NULL and <strong>size</strong> is
+0, then the returned value is the highest supported Landlock ABI version
+(starting at 1).</p>
+<p>Possible returned errors are:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">EOPNOTSUPP</span></code>: Landlock is supported by the kernel but disabled at boot time;</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">EINVAL</span></code>: unknown <strong>flags</strong>, or unknown access, or too small <strong>size</strong>;</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">E2BIG</span></code> or <code class="docutils literal notranslate"><span class="pre">EFAULT</span></code>: <strong>attr</strong> or <strong>size</strong> inconsistencies;</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ENOMSG</span></code>: empty <a class="reference internal" href="#c.landlock_ruleset_attr" title="landlock_ruleset_attr"><code class="xref c c-type docutils literal notranslate"><span class="pre">landlock_ruleset_attr.handled_access_fs</span></code></a>.</p></li>
+</ul>
+</div>
+<dl class="type">
+<dt id="c.landlock_ruleset_attr">
+struct <code class="sig-name descname">landlock_ruleset_attr</code><a class="headerlink" href="#c.landlock_ruleset_attr" title="Permalink to this definition">¶</a></dt>
+<dd><p>Ruleset definition</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct landlock_ruleset_attr {
+    __u64 handled_access_fs;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">handled_access_fs</span></code></dt><dd><p>Bitmask of actions (cf. <a class="reference internal" href="#filesystem-flags">Filesystem flags</a>)
+that is handled by this ruleset and should then be forbidden if no
+rule explicitly allow them: it is a deny-by-default list that should
+contain as much Landlock access rights as possible. Indeed, all
+Landlock filesystem access rights that are not part of
+handled_access_fs are allowed.  This is needed for backward
+compatibility reasons.  One exception is the
+<code class="docutils literal notranslate"><span class="pre">LANDLOCK_ACCESS_FS_REFER</span></code> access right, which is always implicitly
+handled, but must still be explicitly handled to add new rules with
+this access right.</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>Argument of <a class="reference internal" href="#c.sys_landlock_create_ruleset" title="sys_landlock_create_ruleset"><code class="xref c c-func docutils literal notranslate"><span class="pre">sys_landlock_create_ruleset()</span></code></a>.  This structure can grow in
+future versions.</p>
+</section>
+<section id="extending-a-ruleset">
+<h3>Extending a ruleset<a class="headerlink" href="#extending-a-ruleset" title="Permalink to this headline">¶</a></h3>
+<dl class="function">
+<dt id="c.sys_landlock_add_rule">
+long <code class="sig-name descname">sys_landlock_add_rule</code><span class="sig-paren">(</span>const int<em> ruleset_fd</em>, const enum <a class="reference internal" href="#c.landlock_rule_type" title="landlock_rule_type">landlock_rule_type</a><em> rule_type</em>, const void __user *const<em> rule_attr</em>, const __u32<em> flags</em><span class="sig-paren">)</span><a class="headerlink" href="#c.sys_landlock_add_rule" title="Permalink to this definition">¶</a></dt>
+<dd><p>Add a new rule to a ruleset</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">int</span> <span class="pre">ruleset_fd</span></code></dt><dd><p>File descriptor tied to the ruleset that should be extended
+with the new rule.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">enum</span> <span class="pre">landlock_rule_type</span> <span class="pre">rule_type</span></code></dt><dd><p>Identify the structure type pointed to by <strong>rule_attr</strong> (only
+<code class="docutils literal notranslate"><span class="pre">LANDLOCK_RULE_PATH_BENEATH</span></code> for now).</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">void</span> <span class="pre">__user</span> <span class="pre">*const</span> <span class="pre">rule_attr</span></code></dt><dd><p>Pointer to a rule (only of type <a class="reference internal" href="#c.landlock_path_beneath_attr" title="landlock_path_beneath_attr"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span>
+<span class="pre">landlock_path_beneath_attr</span></code></a> for now).</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">__u32</span> <span class="pre">flags</span></code></dt><dd><p>Must be 0.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This system call enables to define a new rule and add it to an existing
+ruleset.</p>
+<p>Possible returned errors are:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">EOPNOTSUPP</span></code>: Landlock is supported by the kernel but disabled at boot time;</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">EINVAL</span></code>: <strong>flags</strong> is not 0, or inconsistent access in the rule (i.e.
+<a class="reference internal" href="#c.landlock_path_beneath_attr" title="landlock_path_beneath_attr"><code class="xref c c-type docutils literal notranslate"><span class="pre">landlock_path_beneath_attr.allowed_access</span></code></a> is not a subset of the
+ruleset handled accesses);</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ENOMSG</span></code>: Empty accesses (e.g. <a class="reference internal" href="#c.landlock_path_beneath_attr" title="landlock_path_beneath_attr"><code class="xref c c-type docutils literal notranslate"><span class="pre">landlock_path_beneath_attr.allowed_access</span></code></a>);</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">EBADF</span></code>: <strong>ruleset_fd</strong> is not a file descriptor for the current thread, or a
+member of <strong>rule_attr</strong> is not a file descriptor as expected;</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">EBADFD</span></code>: <strong>ruleset_fd</strong> is not a ruleset file descriptor, or a member of
+<strong>rule_attr</strong> is not the expected file descriptor type;</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">EPERM</span></code>: <strong>ruleset_fd</strong> has no write access to the underlying ruleset;</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">EFAULT</span></code>: <strong>rule_attr</strong> inconsistency.</p></li>
+</ul>
+</div>
+<dl class="type">
+<dt id="c.landlock_rule_type">
+enum <code class="sig-name descname">landlock_rule_type</code><a class="headerlink" href="#c.landlock_rule_type" title="Permalink to this definition">¶</a></dt>
+<dd><p>Landlock rule type</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Constants</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">LANDLOCK_RULE_PATH_BENEATH</span></code></dt><dd><p>Type of a <a class="reference internal" href="#c.landlock_path_beneath_attr" title="landlock_path_beneath_attr"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span>
+<span class="pre">landlock_path_beneath_attr</span></code></a> .</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>Argument of <a class="reference internal" href="#c.sys_landlock_add_rule" title="sys_landlock_add_rule"><code class="xref c c-func docutils literal notranslate"><span class="pre">sys_landlock_add_rule()</span></code></a>.</p>
+<dl class="type">
+<dt id="c.landlock_path_beneath_attr">
+struct <code class="sig-name descname">landlock_path_beneath_attr</code><a class="headerlink" href="#c.landlock_path_beneath_attr" title="Permalink to this definition">¶</a></dt>
+<dd><p>Path hierarchy definition</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct landlock_path_beneath_attr {
+    __u64 allowed_access;
+    __s32 parent_fd;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">allowed_access</span></code></dt><dd><p>Bitmask of allowed actions for this file hierarchy
+(cf. <a class="reference internal" href="#filesystem-flags">Filesystem flags</a>).</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">parent_fd</span></code></dt><dd><p>File descriptor, preferably opened with <code class="docutils literal notranslate"><span class="pre">O_PATH</span></code>,
+which identifies the parent directory of a file hierarchy, or just a
+file.</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>Argument of <a class="reference internal" href="#c.sys_landlock_add_rule" title="sys_landlock_add_rule"><code class="xref c c-func docutils literal notranslate"><span class="pre">sys_landlock_add_rule()</span></code></a>.</p>
+</section>
+<section id="enforcing-a-ruleset">
+<h3>Enforcing a ruleset<a class="headerlink" href="#enforcing-a-ruleset" title="Permalink to this headline">¶</a></h3>
+<dl class="function">
+<dt id="c.sys_landlock_restrict_self">
+long <code class="sig-name descname">sys_landlock_restrict_self</code><span class="sig-paren">(</span>const int<em> ruleset_fd</em>, const __u32<em> flags</em><span class="sig-paren">)</span><a class="headerlink" href="#c.sys_landlock_restrict_self" title="Permalink to this definition">¶</a></dt>
+<dd><p>Enforce a ruleset on the calling thread</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">int</span> <span class="pre">ruleset_fd</span></code></dt><dd><p>File descriptor tied to the ruleset to merge with the target.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">__u32</span> <span class="pre">flags</span></code></dt><dd><p>Must be 0.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This system call enables to enforce a Landlock ruleset on the current
+thread.  Enforcing a ruleset requires that the task has <code class="docutils literal notranslate"><span class="pre">CAP_SYS_ADMIN</span></code> in its
+namespace or is running with no_new_privs.  This avoids scenarios where
+unprivileged tasks can affect the behavior of privileged children.</p>
+<p>Possible returned errors are:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">EOPNOTSUPP</span></code>: Landlock is supported by the kernel but disabled at boot time;</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">EINVAL</span></code>: <strong>flags</strong> is not 0.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">EBADF</span></code>: <strong>ruleset_fd</strong> is not a file descriptor for the current thread;</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">EBADFD</span></code>: <strong>ruleset_fd</strong> is not a ruleset file descriptor;</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">EPERM</span></code>: <strong>ruleset_fd</strong> has no read access to the underlying ruleset, or the
+current thread is not running with no_new_privs, or it doesn’t have
+<code class="docutils literal notranslate"><span class="pre">CAP_SYS_ADMIN</span></code> in its namespace.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">E2BIG</span></code>: The maximum number of stacked rulesets is reached for the current
+thread.</p></li>
+</ul>
+</div>
+</section>
+</section>
+<section id="current-limitations">
+<h2>Current limitations<a class="headerlink" href="#current-limitations" title="Permalink to this headline">¶</a></h2>
+<section id="filesystem-topology-modification">
+<h3>Filesystem topology modification<a class="headerlink" href="#filesystem-topology-modification" title="Permalink to this headline">¶</a></h3>
+<p>As for file renaming and linking, a sandboxed thread cannot modify its
+filesystem topology, whether via <em class="manpage">mount(2)</em> or
+<em class="manpage">pivot_root(2)</em>.  However, <em class="manpage">chroot(2)</em> calls are not denied.</p>
+</section>
+<section id="special-filesystems">
+<h3>Special filesystems<a class="headerlink" href="#special-filesystems" title="Permalink to this headline">¶</a></h3>
+<p>Access to regular files and directories can be restricted by Landlock,
+according to the handled accesses of a ruleset.  However, files that do not
+come from a user-visible filesystem (e.g. pipe, socket), but can still be
+accessed through <code class="docutils literal notranslate"><span class="pre">/proc/&lt;pid&gt;/fd/*</span></code>, cannot currently be explicitly
+restricted.  Likewise, some special kernel filesystems such as nsfs, which can
+be accessed through <code class="docutils literal notranslate"><span class="pre">/proc/&lt;pid&gt;/ns/*</span></code>, cannot currently be explicitly
+restricted.  However, thanks to the <a class="reference internal" href="#ptrace-restrictions">ptrace restrictions</a>, access to such
+sensitive <code class="docutils literal notranslate"><span class="pre">/proc</span></code> files are automatically restricted according to domain
+hierarchies.  Future Landlock evolutions could still enable to explicitly
+restrict such paths with dedicated ruleset flags.</p>
+</section>
+<section id="ruleset-layers">
+<h3>Ruleset layers<a class="headerlink" href="#ruleset-layers" title="Permalink to this headline">¶</a></h3>
+<p>There is a limit of 16 layers of stacked rulesets.  This can be an issue for a
+task willing to enforce a new ruleset in complement to its 16 inherited
+rulesets.  Once this limit is reached, <a class="reference internal" href="#c.sys_landlock_restrict_self" title="sys_landlock_restrict_self"><code class="xref c c-func docutils literal notranslate"><span class="pre">sys_landlock_restrict_self()</span></code></a> returns
+E2BIG.  It is then strongly suggested to carefully build rulesets once in the
+life of a thread, especially for applications able to launch other applications
+that may also want to sandbox themselves (e.g. shells, container managers,
+etc.).</p>
+</section>
+<section id="memory-usage">
+<h3>Memory usage<a class="headerlink" href="#memory-usage" title="Permalink to this headline">¶</a></h3>
+<p>Kernel memory allocated to create rulesets is accounted and can be restricted
+by the <a class="reference internal" href="../admin-guide/cgroup-v1/memory.html"><span class="doc">Memory Resource Controller</span></a>.</p>
+</section>
+</section>
+<section id="previous-limitations">
+<h2>Previous limitations<a class="headerlink" href="#previous-limitations" title="Permalink to this headline">¶</a></h2>
+<section id="file-renaming-and-linking-abi-2">
+<h3>File renaming and linking (ABI &lt; 2)<a class="headerlink" href="#file-renaming-and-linking-abi-2" title="Permalink to this headline">¶</a></h3>
+<p>Because Landlock targets unprivileged access controls, it needs to properly
+handle composition of rules.  Such property also implies rules nesting.
+Properly handling multiple layers of rulesets, each one of them able to
+restrict access to files, also implies inheritance of the ruleset restrictions
+from a parent to its hierarchy.  Because files are identified and restricted by
+their hierarchy, moving or linking a file from one directory to another implies
+propagation of the hierarchy constraints, or restriction of these actions
+according to the potentially lost constraints.  To protect against privilege
+escalations through renaming or linking, and for the sake of simplicity,
+Landlock previously limited linking and renaming to the same directory.
+Starting with the Landlock ABI version 2, it is now possible to securely
+control renaming and linking thanks to the new <code class="docutils literal notranslate"><span class="pre">LANDLOCK_ACCESS_FS_REFER</span></code>
+access right.</p>
+</section>
+<section id="file-truncation-abi-3">
+<h3>File truncation (ABI &lt; 3)<a class="headerlink" href="#file-truncation-abi-3" title="Permalink to this headline">¶</a></h3>
+<p>File truncation could not be denied before the third Landlock ABI, so it is
+always allowed when using a kernel that only supports the first or second ABI.</p>
+<p>Starting with the Landlock ABI version 3, it is now possible to securely control
+truncation thanks to the new <code class="docutils literal notranslate"><span class="pre">LANDLOCK_ACCESS_FS_TRUNCATE</span></code> access right.</p>
+</section>
+</section>
+<section id="kernel-support">
+<span id="id2"></span><h2>Kernel support<a class="headerlink" href="#kernel-support" title="Permalink to this headline">¶</a></h2>
+<p>Landlock was first introduced in Linux 5.13 but it must be configured at build
+time with <code class="docutils literal notranslate"><span class="pre">CONFIG_SECURITY_LANDLOCK=y</span></code>.  Landlock must also be enabled at boot
+time as the other security modules.  The list of security modules enabled by
+default is set with <code class="docutils literal notranslate"><span class="pre">CONFIG_LSM</span></code>.  The kernel configuration should then
+contains <code class="docutils literal notranslate"><span class="pre">CONFIG_LSM=landlock,[...]</span></code> with <code class="docutils literal notranslate"><span class="pre">[...]</span></code>  as the list of other
+potentially useful security modules for the running system (see the
+<code class="docutils literal notranslate"><span class="pre">CONFIG_LSM</span></code> help).</p>
+<p>If the running kernel does not have <code class="docutils literal notranslate"><span class="pre">landlock</span></code> in <code class="docutils literal notranslate"><span class="pre">CONFIG_LSM</span></code>, then we can
+still enable it by adding <code class="docutils literal notranslate"><span class="pre">lsm=landlock,[...]</span></code> to
+<a class="reference internal" href="../admin-guide/kernel-parameters.html"><span class="doc">The kernel’s command-line parameters</span></a> thanks to the bootloader
+configuration.</p>
+</section>
+<section id="questions-and-answers">
+<h2>Questions and answers<a class="headerlink" href="#questions-and-answers" title="Permalink to this headline">¶</a></h2>
+<section id="what-about-user-space-sandbox-managers">
+<h3>What about user space sandbox managers?<a class="headerlink" href="#what-about-user-space-sandbox-managers" title="Permalink to this headline">¶</a></h3>
+<p>Using user space process to enforce restrictions on kernel resources can lead
+to race conditions or inconsistent evaluations (i.e. <a class="reference external" href="https://www.ndss-symposium.org/ndss2003/traps-and-pitfalls-practical-problems-system-call-interposition-based-security-tools/">Incorrect mirroring of
+the OS code and state</a>).</p>
+</section>
+<section id="what-about-namespaces-and-containers">
+<h3>What about namespaces and containers?<a class="headerlink" href="#what-about-namespaces-and-containers" title="Permalink to this headline">¶</a></h3>
+<p>Namespaces can help create sandboxes but they are not designed for
+access-control and then miss useful features for such use case (e.g. no
+fine-grained restrictions).  Moreover, their complexity can lead to security
+issues, especially when untrusted processes can manipulate them (cf.
+<a class="reference external" href="https://lwn.net/Articles/673597/">Controlling access to user namespaces</a>).</p>
+</section>
+</section>
+<section id="additional-documentation">
+<h2>Additional documentation<a class="headerlink" href="#additional-documentation" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p><a class="reference internal" href="../security/landlock.html"><span class="doc">Landlock LSM: kernel documentation</span></a></p></li>
+<li><p><a class="reference external" href="https://landlock.io">https://landlock.io</a></p></li>
+</ul>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Landlock: unprivileged access control</a><ul>
+<li><a class="reference internal" href="#landlock-rules">Landlock rules</a><ul>
+<li><a class="reference internal" href="#defining-and-enforcing-a-security-policy">Defining and enforcing a security policy</a></li>
+<li><a class="reference internal" href="#good-practices">Good practices</a></li>
+<li><a class="reference internal" href="#layers-of-file-path-access-rights">Layers of file path access rights</a></li>
+<li><a class="reference internal" href="#bind-mounts-and-overlayfs">Bind mounts and OverlayFS</a></li>
+<li><a class="reference internal" href="#inheritance">Inheritance</a></li>
+<li><a class="reference internal" href="#ptrace-restrictions">Ptrace restrictions</a></li>
+<li><a class="reference internal" href="#truncating-files">Truncating files</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#compatibility">Compatibility</a><ul>
+<li><a class="reference internal" href="#backward-and-forward-compatibility">Backward and forward compatibility</a></li>
+<li><a class="reference internal" href="#landlock-abi-versions">Landlock ABI versions</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#kernel-interface">Kernel interface</a><ul>
+<li><a class="reference internal" href="#access-rights">Access rights</a><ul>
+<li><a class="reference internal" href="#filesystem-flags">Filesystem flags</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#creating-a-new-ruleset">Creating a new ruleset</a></li>
+<li><a class="reference internal" href="#extending-a-ruleset">Extending a ruleset</a></li>
+<li><a class="reference internal" href="#enforcing-a-ruleset">Enforcing a ruleset</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#current-limitations">Current limitations</a><ul>
+<li><a class="reference internal" href="#filesystem-topology-modification">Filesystem topology modification</a></li>
+<li><a class="reference internal" href="#special-filesystems">Special filesystems</a></li>
+<li><a class="reference internal" href="#ruleset-layers">Ruleset layers</a></li>
+<li><a class="reference internal" href="#memory-usage">Memory usage</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#previous-limitations">Previous limitations</a><ul>
+<li><a class="reference internal" href="#file-renaming-and-linking-abi-2">File renaming and linking (ABI &lt; 2)</a></li>
+<li><a class="reference internal" href="#file-truncation-abi-3">File truncation (ABI &lt; 3)</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#kernel-support">Kernel support</a></li>
+<li><a class="reference internal" href="#questions-and-answers">Questions and answers</a><ul>
+<li><a class="reference internal" href="#what-about-user-space-sandbox-managers">What about user space sandbox managers?</a></li>
+<li><a class="reference internal" href="#what-about-namespaces-and-containers">What about namespaces and containers?</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#additional-documentation">Additional documentation</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/userspace-api/landlock.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/userspace-api/landlock.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

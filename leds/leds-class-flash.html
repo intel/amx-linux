@@ -1,0 +1,226 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Flash LED handling under Linux &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Multicolor LED handling under Linux" href="leds-class-multicolor.html" />
+    <link rel="prev" title="LED handling under Linux" href="leds-class.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="flash-led-handling-under-linux">
+<h1>Flash LED handling under Linux<a class="headerlink" href="#flash-led-handling-under-linux" title="Permalink to this headline">¶</a></h1>
+<p>Some LED devices provide two modes - torch and flash. In the LED subsystem
+those modes are supported by LED class (see <a class="reference internal" href="leds-class.html"><span class="doc">LED handling under Linux</span></a>)
+and LED Flash class respectively. The torch mode related features are enabled
+by default and the flash ones only if a driver declares it by setting
+LED_DEV_CAP_FLASH flag.</p>
+<p>In order to enable the support for flash LEDs CONFIG_LEDS_CLASS_FLASH symbol
+must be defined in the kernel config. A LED Flash class driver must be
+registered in the LED subsystem with led_classdev_flash_register function.</p>
+<p>Following sysfs attributes are exposed for controlling flash LED devices:
+(see Documentation/ABI/testing/sysfs-class-led-flash)</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>flash_brightness</p></li>
+<li><p>max_flash_brightness</p></li>
+<li><p>flash_timeout</p></li>
+<li><p>max_flash_timeout</p></li>
+<li><p>flash_strobe</p></li>
+<li><p>flash_fault</p></li>
+</ul>
+</div></blockquote>
+<section id="v4l2-flash-wrapper-for-flash-leds">
+<h2>V4L2 flash wrapper for flash LEDs<a class="headerlink" href="#v4l2-flash-wrapper-for-flash-leds" title="Permalink to this headline">¶</a></h2>
+<p>A LED subsystem driver can be controlled also from the level of VideoForLinux2
+subsystem. In order to enable this CONFIG_V4L2_FLASH_LED_CLASS symbol has to
+be defined in the kernel config.</p>
+<p>The driver must call the v4l2_flash_init function to get registered in the
+V4L2 subsystem. The function takes six arguments:</p>
+<ul class="simple">
+<li><dl class="simple">
+<dt>dev:</dt><dd><p>flash device, e.g. an I2C device</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>of_node:</dt><dd><p>of_node of the LED, may be NULL if the same as device’s</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>fled_cdev:</dt><dd><p>LED flash class device to wrap</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>iled_cdev:</dt><dd><p>LED flash class device representing indicator LED associated with
+fled_cdev, may be NULL</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>ops:</dt><dd><p>V4L2 specific ops</p>
+<ul>
+<li><dl class="simple">
+<dt>external_strobe_set</dt><dd><p>defines the source of the flash LED strobe -
+V4L2_CID_FLASH_STROBE control or external source, typically
+a sensor, which makes it possible to synchronise the flash
+strobe start with exposure start,</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>intensity_to_led_brightness and led_brightness_to_intensity</dt><dd><p>perform
+enum led_brightness &lt;-&gt; V4L2 intensity conversion in a device
+specific manner - they can be used for devices with non-linear
+LED current scale.</p>
+</dd>
+</dl>
+</li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>config:</dt><dd><p>configuration for V4L2 Flash sub-device</p>
+<ul>
+<li><dl class="simple">
+<dt>dev_name</dt><dd><p>the name of the media entity, unique in the system,</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>flash_faults</dt><dd><p>bitmask of flash faults that the LED flash class
+device can report; corresponding LED_FAULT* bit definitions are
+available in &lt;linux/led-class-flash.h&gt;,</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>torch_intensity</dt><dd><p>constraints for the LED in TORCH mode
+in microamperes,</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>indicator_intensity</dt><dd><p>constraints for the indicator LED
+in microamperes,</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>has_external_strobe</dt><dd><p>determines whether the flash strobe source
+can be switched to external,</p>
+</dd>
+</dl>
+</li>
+</ul>
+</dd>
+</dl>
+</li>
+</ul>
+<p>On remove the v4l2_flash_release function has to be called, which takes one
+argument - <a class="reference internal" href="../driver-api/media/v4l2-flash-led-class.html#c.v4l2_flash" title="v4l2_flash"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">v4l2_flash</span></code></a> pointer returned previously by v4l2_flash_init.
+This function can be safely called with NULL or error pointer argument.</p>
+<p>Please refer to drivers/leds/leds-max77693.c for an exemplary usage of the
+v4l2 flash wrapper.</p>
+<p>Once the V4L2 sub-device is registered by the driver which created the Media
+controller device, the sub-device node acts just as a node of a native V4L2
+flash API device would. The calls are simply routed to the LED flash API.</p>
+<p>Opening the V4L2 flash sub-device makes the LED subsystem sysfs interface
+unavailable. The interface is re-enabled after the V4L2 flash sub-device
+is closed.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Flash LED handling under Linux</a><ul>
+<li><a class="reference internal" href="#v4l2-flash-wrapper-for-flash-leds">V4L2 flash wrapper for flash LEDs</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/leds/leds-class-flash.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/leds/leds-class-flash.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

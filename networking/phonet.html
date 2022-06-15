@@ -1,0 +1,301 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Linux Phonet protocol family &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="HOWTO for the linux packet generator" href="pktgen.html" />
+    <link rel="prev" title="Packet MMAP" href="packet_mmap.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="linux-phonet-protocol-family">
+<h1>Linux Phonet protocol family<a class="headerlink" href="#linux-phonet-protocol-family" title="Permalink to this headline">¶</a></h1>
+<section id="introduction">
+<h2>Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>Phonet is a packet protocol used by Nokia cellular modems for both IPC
+and RPC. With the Linux Phonet socket family, Linux host processes can
+receive and send messages from/to the modem, or any other external
+device attached to the modem. The modem takes care of routing.</p>
+<p>Phonet packets can be exchanged through various hardware connections
+depending on the device, such as:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>USB with the CDC Phonet interface,</p></li>
+<li><p>infrared,</p></li>
+<li><p>Bluetooth,</p></li>
+<li><p>an RS232 serial port (with a dedicated “FBUS” line discipline),</p></li>
+<li><p>the SSI bus with some TI OMAP processors.</p></li>
+</ul>
+</div></blockquote>
+</section>
+<section id="packets-format">
+<h2>Packets format<a class="headerlink" href="#packets-format" title="Permalink to this headline">¶</a></h2>
+<p>Phonet packets have a common header as follows:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct phonethdr {
+  uint8_t  pn_media;  /* Media type (link-layer identifier) */
+  uint8_t  pn_rdev;   /* Receiver device ID */
+  uint8_t  pn_sdev;   /* Sender device ID */
+  uint8_t  pn_res;    /* Resource ID or function */
+  uint16_t pn_length; /* Big-endian message byte length (minus 6) */
+  uint8_t  pn_robj;   /* Receiver object ID */
+  uint8_t  pn_sobj;   /* Sender object ID */
+};
+</pre></div>
+</div>
+<p>On Linux, the link-layer header includes the pn_media byte (see below).
+The next 7 bytes are part of the network-layer header.</p>
+<p>The device ID is split: the 6 higher-order bits constitute the device
+address, while the 2 lower-order bits are used for multiplexing, as are
+the 8-bit object identifiers. As such, Phonet can be considered as a
+network layer with 6 bits of address space and 10 bits for transport
+protocol (much like port numbers in IP world).</p>
+<p>The modem always has address number zero. All other device have a their
+own 6-bit address.</p>
+</section>
+<section id="link-layer">
+<h2>Link layer<a class="headerlink" href="#link-layer" title="Permalink to this headline">¶</a></h2>
+<p>Phonet links are always point-to-point links. The link layer header
+consists of a single Phonet media type byte. It uniquely identifies the
+link through which the packet is transmitted, from the modem’s
+perspective. Each Phonet network device shall prepend and set the media
+type byte as appropriate. For convenience, a common phonet_header_ops
+link-layer header operations structure is provided. It sets the
+media type according to the network device hardware address.</p>
+<p>Linux Phonet network interfaces support a dedicated link layer packets
+type (ETH_P_PHONET) which is out of the Ethernet type range. They can
+only send and receive Phonet packets.</p>
+<p>The virtual TUN tunnel device driver can also be used for Phonet. This
+requires IFF_TUN mode, _without_ the IFF_NO_PI flag. In this case,
+there is no link-layer header, so there is no Phonet media type byte.</p>
+<p>Note that Phonet interfaces are not allowed to re-order packets, so
+only the (default) Linux FIFO qdisc should be used with them.</p>
+</section>
+<section id="network-layer">
+<h2>Network layer<a class="headerlink" href="#network-layer" title="Permalink to this headline">¶</a></h2>
+<p>The Phonet socket address family maps the Phonet packet header:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct sockaddr_pn {
+  sa_family_t spn_family;    /* AF_PHONET */
+  uint8_t     spn_obj;       /* Object ID */
+  uint8_t     spn_dev;       /* Device ID */
+  uint8_t     spn_resource;  /* Resource or function */
+  uint8_t     spn_zero[...]; /* Padding */
+};
+</pre></div>
+</div>
+<p>The resource field is only used when sending and receiving;
+It is ignored by bind() and getsockname().</p>
+</section>
+<section id="low-level-datagram-protocol">
+<h2>Low-level datagram protocol<a class="headerlink" href="#low-level-datagram-protocol" title="Permalink to this headline">¶</a></h2>
+<p>Applications can send Phonet messages using the Phonet datagram socket
+protocol from the PF_PHONET family. Each socket is bound to one of the
+2^10 object IDs available, and can send and receive packets with any
+other peer.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct sockaddr_pn addr = { .spn_family = AF_PHONET, };
+ssize_t len;
+socklen_t addrlen = sizeof(addr);
+int fd;
+
+fd = socket(PF_PHONET, SOCK_DGRAM, 0);
+bind(fd, (struct sockaddr *)&amp;addr, sizeof(addr));
+/* ... */
+
+sendto(fd, msg, msglen, 0, (struct sockaddr *)&amp;addr, sizeof(addr));
+len = recvfrom(fd, buf, sizeof(buf), 0,
+               (struct sockaddr *)&amp;addr, &amp;addrlen);
+</pre></div>
+</div>
+<p>This protocol follows the SOCK_DGRAM connection-less semantics.
+However, connect() and getpeername() are not supported, as they did
+not seem useful with Phonet usages (could be added easily).</p>
+</section>
+<section id="resource-subscription">
+<h2>Resource subscription<a class="headerlink" href="#resource-subscription" title="Permalink to this headline">¶</a></h2>
+<p>A Phonet datagram socket can be subscribed to any number of 8-bits
+Phonet resources, as follow:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>uint32_t res = 0xXX;
+ioctl(fd, SIOCPNADDRESOURCE, &amp;res);
+</pre></div>
+</div>
+<p>Subscription is similarly cancelled using the SIOCPNDELRESOURCE I/O
+control request, or when the socket is closed.</p>
+<p>Note that no more than one socket can be subcribed to any given
+resource at a time. If not, ioctl() will return EBUSY.</p>
+</section>
+<section id="phonet-pipe-protocol">
+<h2>Phonet Pipe protocol<a class="headerlink" href="#phonet-pipe-protocol" title="Permalink to this headline">¶</a></h2>
+<p>The Phonet Pipe protocol is a simple sequenced packets protocol
+with end-to-end congestion control. It uses the passive listening
+socket paradigm. The listening socket is bound to an unique free object
+ID. Each listening socket can handle up to 255 simultaneous
+connections, one per accept()’d socket.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int lfd, cfd;
+
+lfd = socket(PF_PHONET, SOCK_SEQPACKET, PN_PROTO_PIPE);
+listen (lfd, INT_MAX);
+
+/* ... */
+cfd = accept(lfd, NULL, NULL);
+for (;;)
+{
+  char buf[...];
+  ssize_t len = read(cfd, buf, sizeof(buf));
+
+  /* ... */
+
+  write(cfd, msg, msglen);
+}
+</pre></div>
+</div>
+<p>Connections are traditionally established between two endpoints by a
+“third party” application. This means that both endpoints are passive.</p>
+<p>As of Linux kernel version 2.6.39, it is also possible to connect
+two endpoints directly, using connect() on the active side. This is
+intended to support the newer Nokia Wireless Modem API, as found in
+e.g. the Nokia Slim Modem in the ST-Ericsson U8500 platform:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct sockaddr_spn spn;
+int fd;
+
+fd = socket(PF_PHONET, SOCK_SEQPACKET, PN_PROTO_PIPE);
+memset(&amp;spn, 0, sizeof(spn));
+spn.spn_family = AF_PHONET;
+spn.spn_obj = ...;
+spn.spn_dev = ...;
+spn.spn_resource = 0xD9;
+connect(fd, (struct sockaddr *)&amp;spn, sizeof(spn));
+/* normal I/O here ... */
+close(fd);
+</pre></div>
+</div>
+<p>The pipe protocol provides two socket options at the SOL_PNPIPE level:</p>
+<blockquote>
+<div><p>PNPIPE_ENCAP accepts one integer value (int) of:</p>
+<blockquote>
+<div><dl class="simple">
+<dt>PNPIPE_ENCAP_NONE:</dt><dd><p>The socket operates normally (default).</p>
+</dd>
+<dt>PNPIPE_ENCAP_IP:</dt><dd><p>The socket is used as a backend for a virtual IP
+interface. This requires CAP_NET_ADMIN capability. GPRS data
+support on Nokia modems can use this. Note that the socket cannot
+be reliably poll()’d or read() from while in this mode.</p>
+</dd>
+</dl>
+</div></blockquote>
+<dl class="simple">
+<dt>PNPIPE_IFINDEX</dt><dd><p>is a read-only integer value. It contains the
+interface index of the network interface created by PNPIPE_ENCAP,
+or zero if encapsulation is off.</p>
+</dd>
+<dt>PNPIPE_HANDLE</dt><dd><p>is a read-only integer value. It contains the underlying
+identifier (“pipe handle”) of the pipe. This is only defined for
+socket descriptors that are already connected or being connected.</p>
+</dd>
+</dl>
+</div></blockquote>
+</section>
+<section id="authors">
+<h2>Authors<a class="headerlink" href="#authors" title="Permalink to this headline">¶</a></h2>
+<p>Linux Phonet was initially written by Sakari Ailus.</p>
+<p>Other contributors include Mikä Liljeberg, Andras Domokos,
+Carlos Chinea and Rémi Denis-Courmont.</p>
+<p>Copyright © 2008 Nokia Corporation.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Linux Phonet protocol family</a><ul>
+<li><a class="reference internal" href="#introduction">Introduction</a></li>
+<li><a class="reference internal" href="#packets-format">Packets format</a></li>
+<li><a class="reference internal" href="#link-layer">Link layer</a></li>
+<li><a class="reference internal" href="#network-layer">Network layer</a></li>
+<li><a class="reference internal" href="#low-level-datagram-protocol">Low-level datagram protocol</a></li>
+<li><a class="reference internal" href="#resource-subscription">Resource subscription</a></li>
+<li><a class="reference internal" href="#phonet-pipe-protocol">Phonet Pipe protocol</a></li>
+<li><a class="reference internal" href="#authors">Authors</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/networking/phonet.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/networking/phonet.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

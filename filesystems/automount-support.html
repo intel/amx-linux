@@ -1,0 +1,185 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Automount Support &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Filesystem Caching" href="caching/index.html" />
+    <link rel="prev" title="Idmappings" href="idmappings.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="automount-support">
+<h1>Automount Support<a class="headerlink" href="#automount-support" title="Permalink to this headline">¶</a></h1>
+<p>Support is available for filesystems that wish to do automounting
+support (such as kAFS which can be found in fs/afs/ and NFS in
+fs/nfs/). This facility includes allowing in-kernel mounts to be
+performed and mountpoint degradation to be requested. The latter can
+also be requested by userspace.</p>
+<section id="in-kernel-automounting">
+<h2>In-Kernel Automounting<a class="headerlink" href="#in-kernel-automounting" title="Permalink to this headline">¶</a></h2>
+<p>See section “Mount Traps” of  <a class="reference internal" href="autofs.html"><span class="doc">autofs - how it works</span></a></p>
+<p>Then from userspace, you can just do something like:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[root@andromeda root]# mount -t afs \#root.afs. /afs
+[root@andromeda root]# ls /afs
+asd  cambridge  cambridge.redhat.com  grand.central.org
+[root@andromeda root]# ls /afs/cambridge
+afsdoc
+[root@andromeda root]# ls /afs/cambridge/afsdoc/
+ChangeLog  html  LICENSE  pdf  RELNOTES-1.2.2
+</pre></div>
+</div>
+<p>And then if you look in the mountpoint catalogue, you’ll see something like:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[root@andromeda root]# cat /proc/mounts
+...
+#root.afs. /afs afs rw 0 0
+#root.cell. /afs/cambridge.redhat.com afs rw 0 0
+#afsdoc. /afs/cambridge.redhat.com/afsdoc afs rw 0 0
+</pre></div>
+</div>
+</section>
+<section id="automatic-mountpoint-expiry">
+<h2>Automatic Mountpoint Expiry<a class="headerlink" href="#automatic-mountpoint-expiry" title="Permalink to this headline">¶</a></h2>
+<p>Automatic expiration of mountpoints is easy, provided you’ve mounted the
+mountpoint to be expired in the automounting procedure outlined separately.</p>
+<p>To do expiration, you need to follow these steps:</p>
+<blockquote>
+<div><ol class="arabic">
+<li><p>Create at least one list off which the vfsmounts to be expired can be
+hung.</p></li>
+<li><p>When a new mountpoint is created in the -&gt;d_automount method, add
+the mnt to the list using <a class="reference internal" href="api-summary.html#c.mnt_set_expiry" title="mnt_set_expiry"><code class="xref c c-func docutils literal notranslate"><span class="pre">mnt_set_expiry()</span></code></a>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>mnt_set_expiry(newmnt, &amp;afs_vfsmounts);
+</pre></div>
+</div>
+</li>
+<li><p>When you want mountpoints to be expired, call mark_mounts_for_expiry()
+with a pointer to this list. This will process the list, marking every
+vfsmount thereon for potential expiry on the next call.</p>
+<p>If a vfsmount was already flagged for expiry, and if its usage count is 1
+(it’s only referenced by its parent vfsmount), then it will be deleted
+from the namespace and thrown away (effectively unmounted).</p>
+<p>It may prove simplest to simply call this at regular intervals, using
+some sort of timed event to drive it.</p>
+</li>
+</ol>
+</div></blockquote>
+<p>The expiration flag is cleared by calls to mntput. This means that expiration
+will only happen on the second expiration request after the last time the
+mountpoint was accessed.</p>
+<p>If a mountpoint is moved, it gets removed from the expiration list. If a bind
+mount is made on an expirable mount, the new vfsmount will not be on the
+expiration list and will not expire.</p>
+<p>If a namespace is copied, all mountpoints contained therein will be copied,
+and the copies of those that are on an expiration list will be added to the
+same expiration list.</p>
+</section>
+<section id="userspace-driven-expiry">
+<h2>Userspace Driven Expiry<a class="headerlink" href="#userspace-driven-expiry" title="Permalink to this headline">¶</a></h2>
+<p>As an alternative, it is possible for userspace to request expiry of any
+mountpoint (though some will be rejected - the current process’s idea of the
+rootfs for example). It does this by passing the MNT_EXPIRE flag to
+umount(). This flag is considered incompatible with MNT_FORCE and MNT_DETACH.</p>
+<p>If the mountpoint in question is in referenced by something other than
+umount() or its parent mountpoint, an EBUSY error will be returned and the
+mountpoint will not be marked for expiration or unmounted.</p>
+<p>If the mountpoint was not already marked for expiry at that time, an EAGAIN
+error will be given and it won’t be unmounted.</p>
+<p>Otherwise if it was already marked and it wasn’t referenced, unmounting will
+take place as usual.</p>
+<p>Again, the expiration flag is cleared every time anything other than umount()
+looks at a mountpoint.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Automount Support</a><ul>
+<li><a class="reference internal" href="#in-kernel-automounting">In-Kernel Automounting</a></li>
+<li><a class="reference internal" href="#automatic-mountpoint-expiry">Automatic Mountpoint Expiry</a></li>
+<li><a class="reference internal" href="#userspace-driven-expiry">Userspace Driven Expiry</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/filesystems/automount-support.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/filesystems/automount-support.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

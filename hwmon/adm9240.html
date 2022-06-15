@@ -1,0 +1,397 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Kernel driver adm9240 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Kernel driver ads7828" href="ads7828.html" />
+    <link rel="prev" title="Kernel driver adm1275" href="adm1275.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="kernel-driver-adm9240">
+<h1>Kernel driver adm9240<a class="headerlink" href="#kernel-driver-adm9240" title="Permalink to this headline">¶</a></h1>
+<p>Supported chips:</p>
+<blockquote>
+<div><ul>
+<li><p>Analog Devices ADM9240</p>
+<p>Prefix: ‘adm9240’</p>
+<p>Addresses scanned: I2C 0x2c - 0x2f</p>
+<p>Datasheet: Publicly available at the Analog Devices website</p>
+<blockquote>
+<div><p><a class="reference external" href="http://www.analog.com/UploadedFiles/Data_Sheets/79857778ADM9240_0.pdf">http://www.analog.com/UploadedFiles/Data_Sheets/79857778ADM9240_0.pdf</a></p>
+</div></blockquote>
+</li>
+<li><p>Dallas Semiconductor DS1780</p>
+<p>Prefix: ‘ds1780’</p>
+<p>Addresses scanned: I2C 0x2c - 0x2f</p>
+<p>Datasheet: Publicly available at the Dallas Semiconductor (Maxim) website</p>
+<blockquote>
+<div><p><a class="reference external" href="http://pdfserv.maxim-ic.com/en/ds/DS1780.pdf">http://pdfserv.maxim-ic.com/en/ds/DS1780.pdf</a></p>
+</div></blockquote>
+</li>
+<li><p>National Semiconductor LM81</p>
+<p>Prefix: ‘lm81’</p>
+<p>Addresses scanned: I2C 0x2c - 0x2f</p>
+<p>Datasheet: Publicly available at the National Semiconductor website</p>
+<blockquote>
+<div><p><a class="reference external" href="http://www.national.com/ds.cgi/LM/LM81.pdf">http://www.national.com/ds.cgi/LM/LM81.pdf</a></p>
+</div></blockquote>
+</li>
+</ul>
+</div></blockquote>
+<dl class="simple">
+<dt>Authors:</dt><dd><ul class="simple">
+<li><p>Frodo Looijaard &lt;<a class="reference external" href="mailto:frodol&#37;&#52;&#48;dds&#46;nl">frodol<span>&#64;</span>dds<span>&#46;</span>nl</a>&gt;,</p></li>
+<li><p>Philip Edelbrock &lt;<a class="reference external" href="mailto:phil&#37;&#52;&#48;netroedge&#46;com">phil<span>&#64;</span>netroedge<span>&#46;</span>com</a>&gt;,</p></li>
+<li><p>Michiel Rook &lt;<a class="reference external" href="mailto:michiel&#37;&#52;&#48;grendelproject&#46;nl">michiel<span>&#64;</span>grendelproject<span>&#46;</span>nl</a>&gt;,</p></li>
+<li><p>Grant Coady &lt;<a class="reference external" href="mailto:gcoady&#46;lk&#37;&#52;&#48;gmail&#46;com">gcoady<span>&#46;</span>lk<span>&#64;</span>gmail<span>&#46;</span>com</a>&gt; with guidance
+from Jean Delvare &lt;<a class="reference external" href="mailto:jdelvare&#37;&#52;&#48;suse&#46;de">jdelvare<span>&#64;</span>suse<span>&#46;</span>de</a>&gt;</p></li>
+</ul>
+</dd>
+</dl>
+<section id="interface">
+<h2>Interface<a class="headerlink" href="#interface" title="Permalink to this headline">¶</a></h2>
+<p>The I2C addresses listed above assume BIOS has not changed the
+chip MSB 5-bit address. Each chip reports a unique manufacturer
+identification code as well as the chip revision/stepping level.</p>
+</section>
+<section id="description">
+<h2>Description<a class="headerlink" href="#description" title="Permalink to this headline">¶</a></h2>
+<p>[From ADM9240] The ADM9240 is a complete system hardware monitor for
+microprocessor-based systems, providing measurement and limit comparison
+of up to four power supplies and two processor core voltages, plus
+temperature, two fan speeds and chassis intrusion. Measured values can
+be read out via an I2C-compatible serial System Management Bus, and values
+for limit comparisons can be programmed in over the same serial bus. The
+high speed successive approximation ADC allows frequent sampling of all
+analog channels to ensure a fast interrupt response to any out-of-limit
+measurement.</p>
+<p>The ADM9240, DS1780 and LM81 are register compatible, the following
+details are common to the three chips. Chip differences are described
+after this section.</p>
+</section>
+<section id="measurements">
+<h2>Measurements<a class="headerlink" href="#measurements" title="Permalink to this headline">¶</a></h2>
+<p>The measurement cycle</p>
+<p>The adm9240 driver will take a measurement reading no faster than once
+each two seconds. User-space may read sysfs interface faster than the
+measurement update rate and will receive cached data from the most
+recent measurement.</p>
+<p>ADM9240 has a very fast 320us temperature and voltage measurement cycle
+with independent fan speed measurement cycles counting alternating rising
+edges of the fan tacho inputs.</p>
+<p>DS1780 measurement cycle is about once per second including fan speed.</p>
+<p>LM81 measurement cycle is about once per 400ms including fan speed.
+The LM81 12-bit extended temperature measurement mode is not supported.</p>
+</section>
+<section id="temperature">
+<h2>Temperature<a class="headerlink" href="#temperature" title="Permalink to this headline">¶</a></h2>
+<p>On chip temperature is reported as degrees Celsius as 9-bit signed data
+with resolution of 0.5 degrees Celsius. High and low temperature limits
+are 8-bit signed data with resolution of one degree Celsius.</p>
+<p>Temperature alarm is asserted once the temperature exceeds the high limit,
+and is cleared when the temperature falls below the temp1_max_hyst value.</p>
+</section>
+<section id="fan-speed">
+<h2>Fan Speed<a class="headerlink" href="#fan-speed" title="Permalink to this headline">¶</a></h2>
+<p>Two fan tacho inputs are provided, the ADM9240 gates an internal 22.5kHz
+clock via a divider to an 8-bit counter. Fan speed (rpm) is calculated by:</p>
+<p>rpm = (22500 * 60) / (count * divider)</p>
+<p>Automatic fan clock divider</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>User sets 0 to fan_min limit</p>
+<ul>
+<li><p>low speed alarm is disabled</p></li>
+<li><p>fan clock divider not changed</p></li>
+<li><p>auto fan clock adjuster enabled for valid fan speed reading</p></li>
+</ul>
+</li>
+<li><p>User sets fan_min limit too low</p>
+<ul>
+<li><p>low speed alarm is enabled</p></li>
+<li><p>fan clock divider set to max</p></li>
+<li><p>fan_min set to register value 254 which corresponds
+to 664 rpm on adm9240</p></li>
+<li><p>low speed alarm will be asserted if fan speed is
+less than minimum measurable speed</p></li>
+<li><p>auto fan clock adjuster disabled</p></li>
+</ul>
+</li>
+<li><p>User sets reasonable fan speed</p>
+<ul>
+<li><p>low speed alarm is enabled</p></li>
+<li><p>fan clock divider set to suit fan_min</p></li>
+<li><p>auto fan clock adjuster enabled: adjusts fan_min</p></li>
+</ul>
+</li>
+<li><p>User sets unreasonably high low fan speed limit</p>
+<ul>
+<li><p>resolution of the low speed limit may be reduced</p></li>
+<li><p>alarm will be asserted</p></li>
+<li><p>auto fan clock adjuster enabled: adjusts fan_min</p></li>
+</ul>
+</li>
+<li><p>fan speed may be displayed as zero until the auto fan clock divider
+adjuster brings fan speed clock divider back into chip measurement
+range, this will occur within a few measurement cycles.</p></li>
+</ul>
+</div></blockquote>
+</section>
+<section id="analog-output">
+<h2>Analog Output<a class="headerlink" href="#analog-output" title="Permalink to this headline">¶</a></h2>
+<p>An analog output provides a 0 to 1.25 volt signal intended for an external
+fan speed amplifier circuit. The analog output is set to maximum value on
+power up or reset. This doesn’t do much on the test Intel SE440BX-2.</p>
+<p>Voltage Monitor</p>
+<hr class="docutils" />
+<p>Voltage (IN) measurement is internally scaled:</p>
+<blockquote>
+<div><table class="docutils align-default">
+<colgroup>
+<col style="width: 7%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 20%" />
+<col style="width: 23%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>nr</p></th>
+<th class="head"><p>label</p></th>
+<th class="head"><dl class="simple">
+<dt>nominal</dt><dd><p>mV</p>
+</dd>
+</dl>
+</th>
+<th class="head"><dl class="simple">
+<dt>maximum</dt><dd><p>mV</p>
+</dd>
+</dl>
+</th>
+<th class="head"><dl class="simple">
+<dt>resolution</dt><dd><p>mV</p>
+</dd>
+</dl>
+</th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>0</p></td>
+<td><p>+2.5V</p></td>
+<td><p>2500</p></td>
+<td><p>3320</p></td>
+<td><p>13.0</p></td>
+</tr>
+<tr class="row-odd"><td><p>1</p></td>
+<td><p>Vccp1</p></td>
+<td><p>2700</p></td>
+<td><p>3600</p></td>
+<td><p>14.1</p></td>
+</tr>
+<tr class="row-even"><td><p>2</p></td>
+<td><p>+3.3V</p></td>
+<td><p>3300</p></td>
+<td><p>4380</p></td>
+<td><p>17.2</p></td>
+</tr>
+<tr class="row-odd"><td><p>3</p></td>
+<td><p>+5V</p></td>
+<td><p>5000</p></td>
+<td><p>6640</p></td>
+<td><p>26.0</p></td>
+</tr>
+<tr class="row-even"><td><p>4</p></td>
+<td><p>+12V</p></td>
+<td><p>12000</p></td>
+<td><p>15940</p></td>
+<td><p>62.5</p></td>
+</tr>
+<tr class="row-odd"><td><p>5</p></td>
+<td><p>Vccp2</p></td>
+<td><p>2700</p></td>
+<td><p>3600</p></td>
+<td><p>14.1</p></td>
+</tr>
+</tbody>
+</table>
+</div></blockquote>
+<p>The reading is an unsigned 8-bit value, nominal voltage measurement is
+represented by a reading of 192, being 3/4 of the measurement range.</p>
+<p>An alarm is asserted for any voltage going below or above the set limits.</p>
+<p>The driver reports and accepts voltage limits scaled to the above table.</p>
+</section>
+<section id="vid-monitor">
+<h2>VID Monitor<a class="headerlink" href="#vid-monitor" title="Permalink to this headline">¶</a></h2>
+<p>The chip has five inputs to read the 5-bit VID and reports the mV value
+based on detected CPU type.</p>
+</section>
+<section id="chassis-intrusion">
+<h2>Chassis Intrusion<a class="headerlink" href="#chassis-intrusion" title="Permalink to this headline">¶</a></h2>
+<p>An alarm is asserted when the CI pin goes active high. The ADM9240
+Datasheet has an example of an external temperature sensor driving
+this pin. On an Intel SE440BX-2 the Chassis Intrusion header is
+connected to a normally open switch.</p>
+<p>The ADM9240 provides an internal open drain on this line, and may output
+a 20 ms active low pulse to reset an external Chassis Intrusion latch.</p>
+<p>Clear the CI latch by writing value 0 to the sysfs intrusion0_alarm file.</p>
+<p>Alarm flags reported as 16-bit word</p>
+<blockquote>
+<div><table class="docutils align-default">
+<colgroup>
+<col style="width: 7%" />
+<col style="width: 31%" />
+<col style="width: 62%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>bit</p></th>
+<th class="head"><p>label</p></th>
+<th class="head"><p>comment</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>0</p></td>
+<td><p>+2.5 V_Error</p></td>
+<td><p>high or low limit exceeded</p></td>
+</tr>
+<tr class="row-odd"><td><p>1</p></td>
+<td><p>VCCP_Error</p></td>
+<td><p>high or low limit exceeded</p></td>
+</tr>
+<tr class="row-even"><td><p>2</p></td>
+<td><p>+3.3 V_Error</p></td>
+<td><p>high or low limit exceeded</p></td>
+</tr>
+<tr class="row-odd"><td><p>3</p></td>
+<td><p>+5 V_Error</p></td>
+<td><p>high or low limit exceeded</p></td>
+</tr>
+<tr class="row-even"><td><p>4</p></td>
+<td><p>Temp_Error</p></td>
+<td><p>temperature error</p></td>
+</tr>
+<tr class="row-odd"><td><p>6</p></td>
+<td><p>FAN1_Error</p></td>
+<td><p>fan low limit exceeded</p></td>
+</tr>
+<tr class="row-even"><td><p>7</p></td>
+<td><p>FAN2_Error</p></td>
+<td><p>fan low limit exceeded</p></td>
+</tr>
+<tr class="row-odd"><td><p>8</p></td>
+<td><p>+12 V_Error</p></td>
+<td><p>high or low limit exceeded</p></td>
+</tr>
+<tr class="row-even"><td><p>9</p></td>
+<td><p>VCCP2_Error</p></td>
+<td><p>high or low limit exceeded</p></td>
+</tr>
+<tr class="row-odd"><td><p>12</p></td>
+<td><p>Chassis_Error</p></td>
+<td><p>CI pin went high</p></td>
+</tr>
+</tbody>
+</table>
+</div></blockquote>
+<p>Remaining bits are reserved and thus undefined. It is important to note
+that alarm bits may be cleared on read, user-space may latch alarms and
+provide the end-user with a method to clear alarm memory.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Kernel driver adm9240</a><ul>
+<li><a class="reference internal" href="#interface">Interface</a></li>
+<li><a class="reference internal" href="#description">Description</a></li>
+<li><a class="reference internal" href="#measurements">Measurements</a></li>
+<li><a class="reference internal" href="#temperature">Temperature</a></li>
+<li><a class="reference internal" href="#fan-speed">Fan Speed</a></li>
+<li><a class="reference internal" href="#analog-output">Analog Output</a></li>
+<li><a class="reference internal" href="#vid-monitor">VID Monitor</a></li>
+<li><a class="reference internal" href="#chassis-intrusion">Chassis Intrusion</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/hwmon/adm9240.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/hwmon/adm9240.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

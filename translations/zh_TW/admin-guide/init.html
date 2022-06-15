@@ -1,0 +1,155 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>解釋「No working init found.」啓動掛起消息 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="清除 WARN_ONCE" href="clearing-warn-once.html" />
+    <link rel="prev" title="受汙染的內核" href="tainted-kernels.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是爲讓中文讀者更容易閱讀和理解，而不是作爲一個分支。因此，
+如果您對此文件有任何意見或改動，請先嘗試更新原始英文文件。如果要更改或
+修正某處翻譯文件，請將意見或補丁發送給維護者（聯繫方式見下）。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您發現本文檔與原始文件有任何不同或者有翻譯問題，請聯繫該文件的譯者，
+或者發送電子郵件給胡皓文以獲取幫助：&lt;<a class="reference external" href="mailto:src&#46;res&#37;&#52;&#48;email&#46;cn">src<span>&#46;</span>res<span>&#64;</span>email<span>&#46;</span>cn</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../admin-guide/init.html"><span class="doc">Explaining the “No working init found.” boot hang message</span></a></p>
+</dd>
+<dt class="field-even">譯者</dt>
+<dd class="field-even"><p>吳想成 Wu XiangCheng &lt;<a class="reference external" href="mailto:bobwxc&#37;&#52;&#48;email&#46;cn">bobwxc<span>&#64;</span>email<span>&#46;</span>cn</a>&gt;
+胡皓文 Hu Haowen &lt;<a class="reference external" href="mailto:src&#46;res&#37;&#52;&#48;email&#46;cn">src<span>&#46;</span>res<span>&#64;</span>email<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+</dl>
+<section id="no-working-init-found">
+<h1>解釋「No working init found.」啓動掛起消息<a class="headerlink" href="#no-working-init-found" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list">
+<dt class="field-odd">作者</dt>
+<dd class="field-odd"><p>Andreas Mohr &lt;andi at lisas period de&gt;</p>
+<p>Cristian Souza &lt;cristianmsbr at gmail period com&gt;</p>
+</dd>
+</dl>
+<p>本文檔提供了加載初始化二進位（init binary）失敗的一些高層級原因（大致按執行
+順序列出）。</p>
+<ol class="arabic simple">
+<li><p><strong>無法掛載根文件系統Unable to mount root FS</strong> ：請設置「debug」內核參數（在
+引導加載程序bootloader配置文件或CONFIG_CMDLINE）以獲取更詳細的內核消息。</p></li>
+<li><p><strong>初始化二進位不存在於根文件系統上init binary doesn’t exist on rootfs</strong> ：
+確保您的根文件系統類型正確（並且 <code class="docutils literal notranslate"><span class="pre">root=</span></code> 內核參數指向正確的分區）；擁有
+所需的驅動程序，例如SCSI或USB等存儲硬體；文件系統（ext3、jffs2等）是內建的
+（或者作爲模塊由initrd預加載）。</p></li>
+<li><p><strong>控制台設備損壞Broken console device</strong> ： <code class="docutils literal notranslate"><span class="pre">console=</span> <span class="pre">setup</span></code> 中可能存在
+衝突 –&gt; 初始控制台不可用（initial console unavailable）。例如，由於串行
+IRQ問題（如缺少基於中斷的配置）導致的某些串行控制台不可靠。嘗試使用不同的
+<code class="docutils literal notranslate"><span class="pre">console=</span> <span class="pre">device</span></code> 或像 <code class="docutils literal notranslate"><span class="pre">netconsole=</span></code> 。</p></li>
+<li><p><strong>二進位存在但依賴項不可用Binary exists but dependencies not available</strong> ：
+例如初始化二進位的必需庫依賴項，像 <code class="docutils literal notranslate"><span class="pre">/lib/ld-linux.so.2</span></code> 丟失或損壞。使用
+<code class="docutils literal notranslate"><span class="pre">readelf</span> <span class="pre">-d</span> <span class="pre">&lt;INIT&gt;|grep</span> <span class="pre">NEEDED</span></code> 找出需要哪些庫。</p></li>
+<li><p><strong>無法加載二進位Binary cannot be loaded</strong> ：請確保二進位的體系結構與您的
+硬體匹配。例如i386不匹配x86_64，或者嘗試在ARM硬體上加載x86。如果您嘗試在
+此處加載非二進位文件（shell腳本？），您應該確保腳本在其工作頭（shebang
+header）行 <code class="docutils literal notranslate"><span class="pre">#!/...</span></code> 中指定能正常工作的解釋器（包括其庫依賴項）。在處理
+腳本之前，最好先測試一個簡單的非腳本二進位文件，比如 <code class="docutils literal notranslate"><span class="pre">/bin/sh</span></code> ，並確認
+它能成功執行。要了解更多信息，請將代碼添加到 <code class="docutils literal notranslate"><span class="pre">init/main.c</span></code> 以顯示
+kernel_execve()的返回值。</p></li>
+</ol>
+<p>當您發現新的失敗原因時，請擴展本解釋（畢竟加載初始化二進位是一個 <strong>關鍵</strong> 且
+艱難的過渡步驟，需要儘可能無痛地進行），然後向LKML提交一個補丁。</p>
+<p>待辦事項：</p>
+<ul class="simple">
+<li><p>通過一個可以存儲 <code class="docutils literal notranslate"><span class="pre">kernel_execve()</span></code> 結果值的結構體數組實現各種
+<code class="docutils literal notranslate"><span class="pre">run_init_process()</span></code> 調用，並在失敗時通過疊代 <strong>所有</strong> 結果來記錄一切
+（非常重要的可用性修復）。</p></li>
+<li><p>試著使實現本身在一般情況下更有幫助，例如在受影響的地方提供額外的錯誤消息。</p></li>
+</ul>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_TW/admin-guide/init.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_TW/admin-guide/init.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

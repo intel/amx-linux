@@ -1,0 +1,170 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Reference counting in pnfs &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="RPC Cache" href="rpc-cache.html" />
+    <link rel="prev" title="Making Filesystems Exportable" href="exporting.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="reference-counting-in-pnfs">
+<h1>Reference counting in pnfs<a class="headerlink" href="#reference-counting-in-pnfs" title="Permalink to this headline">¶</a></h1>
+<p>The are several inter-related caches.  We have layouts which can
+reference multiple devices, each of which can reference multiple data servers.
+Each data server can be referenced by multiple devices.  Each device
+can be referenced by multiple layouts. To keep all of this straight,
+we need to reference count.</p>
+<section id="struct-pnfs-layout-hdr">
+<h2>struct pnfs_layout_hdr<a class="headerlink" href="#struct-pnfs-layout-hdr" title="Permalink to this headline">¶</a></h2>
+<p>The on-the-wire command LAYOUTGET corresponds to struct
+pnfs_layout_segment, usually referred to by the variable name lseg.
+Each nfs_inode may hold a pointer to a cache of these layout
+segments in nfsi-&gt;layout, of type struct pnfs_layout_hdr.</p>
+<p>We reference the header for the inode pointing to it, across each
+outstanding RPC call that references it (LAYOUTGET, LAYOUTRETURN,
+LAYOUTCOMMIT), and for each lseg held within.</p>
+<p>Each header is also (when non-empty) put on a list associated with
+struct nfs_client (cl_layouts).  Being put on this list does not bump
+the reference count, as the layout is kept around by the lseg that
+keeps it in the list.</p>
+</section>
+<section id="deviceid-cache">
+<h2>deviceid_cache<a class="headerlink" href="#deviceid-cache" title="Permalink to this headline">¶</a></h2>
+<p>lsegs reference device ids, which are resolved per nfs_client and
+layout driver type.  The device ids are held in a RCU cache (struct
+nfs4_deviceid_cache).  The cache itself is referenced across each
+mount.  The entries (struct nfs4_deviceid) themselves are held across
+the lifetime of each lseg referencing them.</p>
+<p>RCU is used because the deviceid is basically a write once, read many
+data structure.  The hlist size of 32 buckets needs better
+justification, but seems reasonable given that we can have multiple
+deviceid’s per filesystem, and multiple filesystems per nfs_client.</p>
+<p>The hash code is copied from the nfsd code base.  A discussion of
+hashing and variations of this algorithm can be found <a class="reference external" href="http://groups.google.com/group/comp.lang.c/browse_thread/thread/9522965e2b8d3809">here.</a></p>
+</section>
+<section id="data-server-cache">
+<h2>data server cache<a class="headerlink" href="#data-server-cache" title="Permalink to this headline">¶</a></h2>
+<p>file driver devices refer to data servers, which are kept in a module
+level cache.  Its reference is held over the lifetime of the deviceid
+pointing to it.</p>
+</section>
+<section id="lseg">
+<h2>lseg<a class="headerlink" href="#lseg" title="Permalink to this headline">¶</a></h2>
+<p>lseg maintains an extra reference corresponding to the NFS_LSEG_VALID
+bit which holds it in the pnfs_layout_hdr’s list.  When the final lseg
+is removed from the pnfs_layout_hdr’s list, the NFS_LAYOUT_DESTROYED
+bit is set, preventing any new lsegs from being added.</p>
+</section>
+<section id="layout-drivers">
+<h2>layout drivers<a class="headerlink" href="#layout-drivers" title="Permalink to this headline">¶</a></h2>
+<p>PNFS utilizes what is called layout drivers. The STD defines 4 basic
+layout types: “files”, “objects”, “blocks”, and “flexfiles”. For each
+of these types there is a layout-driver with a common function-vectors
+table which are called by the nfs-client pnfs-core to implement the
+different layout types.</p>
+<p>Files-layout-driver code is in: fs/nfs/filelayout/.. directory
+Blocks-layout-driver code is in: fs/nfs/blocklayout/.. directory
+Flexfiles-layout-driver code is in: fs/nfs/flexfilelayout/.. directory</p>
+</section>
+<section id="blocks-layout-setup">
+<h2>blocks-layout setup<a class="headerlink" href="#blocks-layout-setup" title="Permalink to this headline">¶</a></h2>
+<p>TODO: Document the setup needs of the blocks layout driver</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Reference counting in pnfs</a><ul>
+<li><a class="reference internal" href="#struct-pnfs-layout-hdr">struct pnfs_layout_hdr</a></li>
+<li><a class="reference internal" href="#deviceid-cache">deviceid_cache</a></li>
+<li><a class="reference internal" href="#data-server-cache">data server cache</a></li>
+<li><a class="reference internal" href="#lseg">lseg</a></li>
+<li><a class="reference internal" href="#layout-drivers">layout drivers</a></li>
+<li><a class="reference internal" href="#blocks-layout-setup">blocks-layout setup</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/filesystems/nfs/pnfs.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/filesystems/nfs/pnfs.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

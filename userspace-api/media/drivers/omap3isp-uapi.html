@@ -1,0 +1,285 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>8. OMAP 3 Image Signal Processor (ISP) driver &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="9. ST VGXY61 camera sensor driver" href="st-vgxy61.html" />
+    <link rel="prev" title="7. Vaio Picturebook Motion Eye Camera Driver" href="meye-uapi.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="omap-3-image-signal-processor-isp-driver">
+<h1><span class="section-number">8. </span>OMAP 3 Image Signal Processor (ISP) driver<a class="headerlink" href="#omap-3-image-signal-processor-isp-driver" title="Permalink to this headline">¶</a></h1>
+<p>Copyright © 2010 Nokia Corporation</p>
+<p>Copyright © 2009 Texas Instruments, Inc.</p>
+<p>Contacts: Laurent Pinchart &lt;<a class="reference external" href="mailto:laurent&#46;pinchart&#37;&#52;&#48;ideasonboard&#46;com">laurent<span>&#46;</span>pinchart<span>&#64;</span>ideasonboard<span>&#46;</span>com</a>&gt;,
+Sakari Ailus &lt;<a class="reference external" href="mailto:sakari&#46;ailus&#37;&#52;&#48;iki&#46;fi">sakari<span>&#46;</span>ailus<span>&#64;</span>iki<span>&#46;</span>fi</a>&gt;, David Cohen &lt;<a class="reference external" href="mailto:dacohen&#37;&#52;&#48;gmail&#46;com">dacohen<span>&#64;</span>gmail<span>&#46;</span>com</a>&gt;</p>
+<section id="events">
+<h2><span class="section-number">8.1. </span>Events<a class="headerlink" href="#events" title="Permalink to this headline">¶</a></h2>
+<p>The OMAP 3 ISP driver does support the V4L2 event interface on CCDC and
+statistics (AEWB, AF and histogram) subdevs.</p>
+<p>The CCDC subdev produces V4L2_EVENT_FRAME_SYNC type event on HS_VS
+interrupt which is used to signal frame start. Earlier version of this
+driver used V4L2_EVENT_OMAP3ISP_HS_VS for this purpose. The event is
+triggered exactly when the reception of the first line of the frame starts
+in the CCDC module. The event can be subscribed on the CCDC subdev.</p>
+<p>(When using parallel interface one must pay account to correct configuration
+of the VS signal polarity. This is automatically correct when using the serial
+receivers.)</p>
+<p>Each of the statistics subdevs is able to produce events. An event is
+generated whenever a statistics buffer can be dequeued by a user space
+application using the VIDIOC_OMAP3ISP_STAT_REQ IOCTL. The events available
+are:</p>
+<ul class="simple">
+<li><p>V4L2_EVENT_OMAP3ISP_AEWB</p></li>
+<li><p>V4L2_EVENT_OMAP3ISP_AF</p></li>
+<li><p>V4L2_EVENT_OMAP3ISP_HIST</p></li>
+</ul>
+<p>The type of the event data is struct omap3isp_stat_event_status for these
+ioctls. If there is an error calculating the statistics, there will be an
+event as usual, but no related statistics buffer. In this case
+omap3isp_stat_event_status.buf_err is set to non-zero.</p>
+</section>
+<section id="private-ioctls">
+<h2><span class="section-number">8.2. </span>Private IOCTLs<a class="headerlink" href="#private-ioctls" title="Permalink to this headline">¶</a></h2>
+<p>The OMAP 3 ISP driver supports standard V4L2 IOCTLs and controls where
+possible and practical. Much of the functions provided by the ISP, however,
+does not fall under the standard IOCTLs — gamma tables and configuration of
+statistics collection are examples of such.</p>
+<p>In general, there is a private ioctl for configuring each of the blocks
+containing hardware-dependent functions.</p>
+<p>The following private IOCTLs are supported:</p>
+<ul class="simple">
+<li><p>VIDIOC_OMAP3ISP_CCDC_CFG</p></li>
+<li><p>VIDIOC_OMAP3ISP_PRV_CFG</p></li>
+<li><p>VIDIOC_OMAP3ISP_AEWB_CFG</p></li>
+<li><p>VIDIOC_OMAP3ISP_HIST_CFG</p></li>
+<li><p>VIDIOC_OMAP3ISP_AF_CFG</p></li>
+<li><p>VIDIOC_OMAP3ISP_STAT_REQ</p></li>
+<li><p>VIDIOC_OMAP3ISP_STAT_EN</p></li>
+</ul>
+<p>The parameter structures used by these ioctls are described in
+include/linux/omap3isp.h. The detailed functions of the ISP itself related to
+a given ISP block is described in the Technical Reference Manuals (TRMs) —
+see the end of the document for those.</p>
+<p>While it is possible to use the ISP driver without any use of these private
+IOCTLs it is not possible to obtain optimal image quality this way. The AEWB,
+AF and histogram modules cannot be used without configuring them using the
+appropriate private IOCTLs.</p>
+</section>
+<section id="ccdc-and-preview-block-ioctls">
+<h2><span class="section-number">8.3. </span>CCDC and preview block IOCTLs<a class="headerlink" href="#ccdc-and-preview-block-ioctls" title="Permalink to this headline">¶</a></h2>
+<p>The VIDIOC_OMAP3ISP_CCDC_CFG and VIDIOC_OMAP3ISP_PRV_CFG IOCTLs are used to
+configure, enable and disable functions in the CCDC and preview blocks,
+respectively. Both IOCTLs control several functions in the blocks they
+control. VIDIOC_OMAP3ISP_CCDC_CFG IOCTL accepts a pointer to struct
+omap3isp_ccdc_update_config as its argument. Similarly VIDIOC_OMAP3ISP_PRV_CFG
+accepts a pointer to struct omap3isp_prev_update_config. The definition of
+both structures is available in <a class="footnote-reference brackets" href="#id2" id="id1">1</a>.</p>
+<p>The update field in the structures tells whether to update the configuration
+for the specific function and the flag tells whether to enable or disable the
+function.</p>
+<p>The update and flag bit masks accept the following values. Each separate
+functions in the CCDC and preview blocks is associated with a flag (either
+disable or enable; part of the flag field in the structure) and a pointer to
+configuration data for the function.</p>
+<p>Valid values for the update and flag fields are listed here for
+VIDIOC_OMAP3ISP_CCDC_CFG. Values may be or’ed to configure more than one
+function in the same IOCTL call.</p>
+<ul class="simple">
+<li><p>OMAP3ISP_CCDC_ALAW</p></li>
+<li><p>OMAP3ISP_CCDC_LPF</p></li>
+<li><p>OMAP3ISP_CCDC_BLCLAMP</p></li>
+<li><p>OMAP3ISP_CCDC_BCOMP</p></li>
+<li><p>OMAP3ISP_CCDC_FPC</p></li>
+<li><p>OMAP3ISP_CCDC_CULL</p></li>
+<li><p>OMAP3ISP_CCDC_CONFIG_LSC</p></li>
+<li><p>OMAP3ISP_CCDC_TBL_LSC</p></li>
+</ul>
+<p>The corresponding values for the VIDIOC_OMAP3ISP_PRV_CFG are here:</p>
+<ul class="simple">
+<li><p>OMAP3ISP_PREV_LUMAENH</p></li>
+<li><p>OMAP3ISP_PREV_INVALAW</p></li>
+<li><p>OMAP3ISP_PREV_HRZ_MED</p></li>
+<li><p>OMAP3ISP_PREV_CFA</p></li>
+<li><p>OMAP3ISP_PREV_CHROMA_SUPP</p></li>
+<li><p>OMAP3ISP_PREV_WB</p></li>
+<li><p>OMAP3ISP_PREV_BLKADJ</p></li>
+<li><p>OMAP3ISP_PREV_RGB2RGB</p></li>
+<li><p>OMAP3ISP_PREV_COLOR_CONV</p></li>
+<li><p>OMAP3ISP_PREV_YC_LIMIT</p></li>
+<li><p>OMAP3ISP_PREV_DEFECT_COR</p></li>
+<li><p>OMAP3ISP_PREV_GAMMABYPASS</p></li>
+<li><p>OMAP3ISP_PREV_DRK_FRM_CAPTURE</p></li>
+<li><p>OMAP3ISP_PREV_DRK_FRM_SUBTRACT</p></li>
+<li><p>OMAP3ISP_PREV_LENS_SHADING</p></li>
+<li><p>OMAP3ISP_PREV_NF</p></li>
+<li><p>OMAP3ISP_PREV_GAMMA</p></li>
+</ul>
+<p>The associated configuration pointer for the function may not be NULL when
+enabling the function. When disabling a function the configuration pointer is
+ignored.</p>
+</section>
+<section id="statistic-blocks-ioctls">
+<h2><span class="section-number">8.4. </span>Statistic blocks IOCTLs<a class="headerlink" href="#statistic-blocks-ioctls" title="Permalink to this headline">¶</a></h2>
+<p>The statistics subdevs do offer more dynamic configuration options than the
+other subdevs. They can be enabled, disable and reconfigured when the pipeline
+is in streaming state.</p>
+<p>The statistics blocks always get the input image data from the CCDC (as the
+histogram memory read isn’t implemented). The statistics are dequeueable by
+the user from the statistics subdev nodes using private IOCTLs.</p>
+<p>The private IOCTLs offered by the AEWB, AF and histogram subdevs are heavily
+reflected by the register level interface offered by the ISP hardware. There
+are aspects that are purely related to the driver implementation and these are
+discussed next.</p>
+</section>
+<section id="vidioc-omap3isp-stat-en">
+<h2><span class="section-number">8.5. </span>VIDIOC_OMAP3ISP_STAT_EN<a class="headerlink" href="#vidioc-omap3isp-stat-en" title="Permalink to this headline">¶</a></h2>
+<p>This private IOCTL enables/disables a statistic module. If this request is
+done before streaming, it will take effect as soon as the pipeline starts to
+stream.  If the pipeline is already streaming, it will take effect as soon as
+the CCDC becomes idle.</p>
+</section>
+<section id="vidioc-omap3isp-aewb-cfg-vidioc-omap3isp-hist-cfg-and-vidioc-omap3isp-af-cfg">
+<h2><span class="section-number">8.6. </span>VIDIOC_OMAP3ISP_AEWB_CFG, VIDIOC_OMAP3ISP_HIST_CFG and VIDIOC_OMAP3ISP_AF_CFG<a class="headerlink" href="#vidioc-omap3isp-aewb-cfg-vidioc-omap3isp-hist-cfg-and-vidioc-omap3isp-af-cfg" title="Permalink to this headline">¶</a></h2>
+<p>Those IOCTLs are used to configure the modules. They require user applications
+to have an in-depth knowledge of the hardware. Most of the fields explanation
+can be found on OMAP’s TRMs. The two following fields common to all the above
+configure private IOCTLs require explanation for better understanding as they
+are not part of the TRM.</p>
+<p>omap3isp_[h3a_af/h3a_aewb/hist]_config.buf_size:</p>
+<p>The modules handle their buffers internally. The necessary buffer size for the
+module’s data output depends on the requested configuration. Although the
+driver supports reconfiguration while streaming, it does not support a
+reconfiguration which requires bigger buffer size than what is already
+internally allocated if the module is enabled. It will return -EBUSY on this
+case. In order to avoid such condition, either disable/reconfigure/enable the
+module or request the necessary buffer size during the first configuration
+while the module is disabled.</p>
+<p>The internal buffer size allocation considers the requested configuration’s
+minimum buffer size and the value set on buf_size field. If buf_size field is
+out of [minimum, maximum] buffer size range, it’s clamped to fit in there.
+The driver then selects the biggest value. The corrected buf_size value is
+written back to user application.</p>
+<p>omap3isp_[h3a_af/h3a_aewb/hist]_config.config_counter:</p>
+<p>As the configuration doesn’t take effect synchronously to the request, the
+driver must provide a way to track this information to provide more accurate
+data. After a configuration is requested, the config_counter returned to user
+space application will be an unique value associated to that request. When
+user application receives an event for buffer availability or when a new
+buffer is requested, this config_counter is used to match a buffer data and a
+configuration.</p>
+</section>
+<section id="vidioc-omap3isp-stat-req">
+<h2><span class="section-number">8.7. </span>VIDIOC_OMAP3ISP_STAT_REQ<a class="headerlink" href="#vidioc-omap3isp-stat-req" title="Permalink to this headline">¶</a></h2>
+<p>Send to user space the oldest data available in the internal buffer queue and
+discards such buffer afterwards. The field omap3isp_stat_data.frame_number
+matches with the video buffer’s field_count.</p>
+</section>
+<section id="references">
+<h2><span class="section-number">8.8. </span>References<a class="headerlink" href="#references" title="Permalink to this headline">¶</a></h2>
+<dl class="footnote brackets">
+<dt class="label" id="id2"><span class="brackets"><a class="fn-backref" href="#id1">1</a></span></dt>
+<dd><p>include/linux/omap3isp.h</p>
+</dd>
+</dl>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">8. OMAP 3 Image Signal Processor (ISP) driver</a><ul>
+<li><a class="reference internal" href="#events">8.1. Events</a></li>
+<li><a class="reference internal" href="#private-ioctls">8.2. Private IOCTLs</a></li>
+<li><a class="reference internal" href="#ccdc-and-preview-block-ioctls">8.3. CCDC and preview block IOCTLs</a></li>
+<li><a class="reference internal" href="#statistic-blocks-ioctls">8.4. Statistic blocks IOCTLs</a></li>
+<li><a class="reference internal" href="#vidioc-omap3isp-stat-en">8.5. VIDIOC_OMAP3ISP_STAT_EN</a></li>
+<li><a class="reference internal" href="#vidioc-omap3isp-aewb-cfg-vidioc-omap3isp-hist-cfg-and-vidioc-omap3isp-af-cfg">8.6. VIDIOC_OMAP3ISP_AEWB_CFG, VIDIOC_OMAP3ISP_HIST_CFG and VIDIOC_OMAP3ISP_AF_CFG</a></li>
+<li><a class="reference internal" href="#vidioc-omap3isp-stat-req">8.7. VIDIOC_OMAP3ISP_STAT_REQ</a></li>
+<li><a class="reference internal" href="#references">8.8. References</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/userspace-api/media/drivers/omap3isp-uapi.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/userspace-api/media/drivers/omap3isp-uapi.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

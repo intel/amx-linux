@@ -1,0 +1,251 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Generic Mutex Subsystem &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="RT-mutex implementation design" href="rt-mutex-design.html" />
+    <link rel="prev" title="Kernel Lock Torture Test Operation" href="locktorture.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="generic-mutex-subsystem">
+<h1>Generic Mutex Subsystem<a class="headerlink" href="#generic-mutex-subsystem" title="Permalink to this headline">¶</a></h1>
+<p>started by Ingo Molnar &lt;<a class="reference external" href="mailto:mingo&#37;&#52;&#48;redhat&#46;com">mingo<span>&#64;</span>redhat<span>&#46;</span>com</a>&gt;</p>
+<p>updated by Davidlohr Bueso &lt;<a class="reference external" href="mailto:davidlohr&#37;&#52;&#48;hp&#46;com">davidlohr<span>&#64;</span>hp<span>&#46;</span>com</a>&gt;</p>
+<section id="what-are-mutexes">
+<h2>What are mutexes?<a class="headerlink" href="#what-are-mutexes" title="Permalink to this headline">¶</a></h2>
+<p>In the Linux kernel, mutexes refer to a particular locking primitive
+that enforces serialization on shared memory systems, and not only to
+the generic term referring to ‘mutual exclusion’ found in academia
+or similar theoretical text books. Mutexes are sleeping locks which
+behave similarly to binary semaphores, and were introduced in 2006[1]
+as an alternative to these. This new data structure provided a number
+of advantages, including simpler interfaces, and at that time smaller
+code (see Disadvantages).</p>
+<p>[1] <a class="reference external" href="https://lwn.net/Articles/164802/">https://lwn.net/Articles/164802/</a></p>
+</section>
+<section id="implementation">
+<h2>Implementation<a class="headerlink" href="#implementation" title="Permalink to this headline">¶</a></h2>
+<p>Mutexes are represented by ‘struct mutex’, defined in include/linux/mutex.h
+and implemented in kernel/locking/mutex.c. These locks use an atomic variable
+(-&gt;owner) to keep track of the lock state during its lifetime.  Field owner
+actually contains <cite>struct task_struct *</cite> to the current lock owner and it is
+therefore NULL if not currently owned. Since task_struct pointers are aligned
+to at least L1_CACHE_BYTES, low bits (3) are used to store extra state (e.g.,
+if waiter list is non-empty).  In its most basic form it also includes a
+wait-queue and a spinlock that serializes access to it. Furthermore,
+CONFIG_MUTEX_SPIN_ON_OWNER=y systems use a spinner MCS lock (-&gt;osq), described
+below in (ii).</p>
+<p>When acquiring a mutex, there are three possible paths that can be
+taken, depending on the state of the lock:</p>
+<ol class="lowerroman">
+<li><p>fastpath: tries to atomically acquire the lock by cmpxchg()ing the owner with
+the current task. This only works in the uncontended case (cmpxchg() checks
+against 0UL, so all 3 state bits above have to be 0). If the lock is
+contended it goes to the next possible path.</p></li>
+<li><p>midpath: aka optimistic spinning, tries to spin for acquisition
+while the lock owner is running and there are no other tasks ready
+to run that have higher priority (need_resched). The rationale is
+that if the lock owner is running, it is likely to release the lock
+soon. The mutex spinners are queued up using MCS lock so that only
+one spinner can compete for the mutex.</p>
+<p>The MCS lock (proposed by Mellor-Crummey and Scott) is a simple spinlock
+with the desirable properties of being fair and with each cpu trying
+to acquire the lock spinning on a local variable. It avoids expensive
+cacheline bouncing that common test-and-set spinlock implementations
+incur. An MCS-like lock is specially tailored for optimistic spinning
+for sleeping lock implementation. An important feature of the customized
+MCS lock is that it has the extra property that spinners are able to exit
+the MCS spinlock queue when they need to reschedule. This further helps
+avoid situations where MCS spinners that need to reschedule would continue
+waiting to spin on mutex owner, only to go directly to slowpath upon
+obtaining the MCS lock.</p>
+</li>
+<li><p>slowpath: last resort, if the lock is still unable to be acquired,
+the task is added to the wait-queue and sleeps until woken up by the
+unlock path. Under normal circumstances it blocks as TASK_UNINTERRUPTIBLE.</p></li>
+</ol>
+<p>While formally kernel mutexes are sleepable locks, it is path (ii) that
+makes them more practically a hybrid type. By simply not interrupting a
+task and busy-waiting for a few cycles instead of immediately sleeping,
+the performance of this lock has been seen to significantly improve a
+number of workloads. Note that this technique is also used for rw-semaphores.</p>
+</section>
+<section id="semantics">
+<h2>Semantics<a class="headerlink" href="#semantics" title="Permalink to this headline">¶</a></h2>
+<p>The mutex subsystem checks and enforces the following rules:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Only one task can hold the mutex at a time.</p></li>
+<li><p>Only the owner can unlock the mutex.</p></li>
+<li><p>Multiple unlocks are not permitted.</p></li>
+<li><p>Recursive locking/unlocking is not permitted.</p></li>
+<li><p>A mutex must only be initialized via the API (see below).</p></li>
+<li><p>A task may not exit with a mutex held.</p></li>
+<li><p>Memory areas where held locks reside must not be freed.</p></li>
+<li><p>Held mutexes must not be reinitialized.</p></li>
+<li><p>Mutexes may not be used in hardware or software interrupt
+contexts such as tasklets and timers.</p></li>
+</ul>
+</div></blockquote>
+<p>These semantics are fully enforced when CONFIG DEBUG_MUTEXES is enabled.
+In addition, the mutex debugging code also implements a number of other
+features that make lock debugging easier and faster:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Uses symbolic names of mutexes, whenever they are printed
+in debug output.</p></li>
+<li><p>Point-of-acquire tracking, symbolic lookup of function names,
+list of all locks held in the system, printout of them.</p></li>
+<li><p>Owner tracking.</p></li>
+<li><p>Detects self-recursing locks and prints out all relevant info.</p></li>
+<li><p>Detects multi-task circular deadlocks and prints out all affected
+locks and tasks (and only those tasks).</p></li>
+</ul>
+</div></blockquote>
+</section>
+<section id="interfaces">
+<h2>Interfaces<a class="headerlink" href="#interfaces" title="Permalink to this headline">¶</a></h2>
+<p>Statically define the mutex:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>DEFINE_MUTEX(name);
+</pre></div>
+</div>
+<p>Dynamically initialize the mutex:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>mutex_init(mutex);
+</pre></div>
+</div>
+<p>Acquire the mutex, uninterruptible:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void mutex_lock(struct mutex *lock);
+void mutex_lock_nested(struct mutex *lock, unsigned int subclass);
+int  mutex_trylock(struct mutex *lock);
+</pre></div>
+</div>
+<p>Acquire the mutex, interruptible:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int mutex_lock_interruptible_nested(struct mutex *lock,
+                                    unsigned int subclass);
+int mutex_lock_interruptible(struct mutex *lock);
+</pre></div>
+</div>
+<p>Acquire the mutex, interruptible, if dec to 0:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int atomic_dec_and_mutex_lock(atomic_t *cnt, struct mutex *lock);
+</pre></div>
+</div>
+<p>Unlock the mutex:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void mutex_unlock(struct mutex *lock);
+</pre></div>
+</div>
+<p>Test if the mutex is taken:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int mutex_is_locked(struct mutex *lock);
+</pre></div>
+</div>
+</section>
+<section id="disadvantages">
+<h2>Disadvantages<a class="headerlink" href="#disadvantages" title="Permalink to this headline">¶</a></h2>
+<p>Unlike its original design and purpose, ‘struct mutex’ is among the largest
+locks in the kernel. E.g: on x86-64 it is 32 bytes, where ‘struct semaphore’
+is 24 bytes and rw_semaphore is 40 bytes. Larger structure sizes mean more CPU
+cache and memory footprint.</p>
+</section>
+<section id="when-to-use-mutexes">
+<h2>When to use mutexes<a class="headerlink" href="#when-to-use-mutexes" title="Permalink to this headline">¶</a></h2>
+<p>Unless the strict semantics of mutexes are unsuitable and/or the critical
+region prevents the lock from being shared, always prefer them to any other
+locking primitive.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Generic Mutex Subsystem</a><ul>
+<li><a class="reference internal" href="#what-are-mutexes">What are mutexes?</a></li>
+<li><a class="reference internal" href="#implementation">Implementation</a></li>
+<li><a class="reference internal" href="#semantics">Semantics</a></li>
+<li><a class="reference internal" href="#interfaces">Interfaces</a></li>
+<li><a class="reference internal" href="#disadvantages">Disadvantages</a></li>
+<li><a class="reference internal" href="#when-to-use-mutexes">When to use mutexes</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/locking/mutex-design.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/locking/mutex-design.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

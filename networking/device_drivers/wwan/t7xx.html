@@ -1,0 +1,232 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>t7xx driver for MTK PCIe based T700 5G modem &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="Distributed Switch Architecture" href="../../dsa/index.html" />
+    <link rel="prev" title="IOSM Driver for Intel M.2 PCIe based Modems" href="iosm.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="t7xx-driver-for-mtk-pcie-based-t700-5g-modem">
+<span id="t7xx-driver-doc"></span><h1>t7xx driver for MTK PCIe based T700 5G modem<a class="headerlink" href="#t7xx-driver-for-mtk-pcie-based-t700-5g-modem" title="Permalink to this headline">¶</a></h1>
+<p>The t7xx driver is a WWAN PCIe host driver developed for linux or Chrome OS platforms
+for data exchange over PCIe interface between Host platform &amp; MediaTek’s T700 5G modem.
+The driver exposes an interface conforming to the MBIM protocol [1]. Any front end
+application (e.g. Modem Manager) could easily manage the MBIM interface to enable
+data communication towards WWAN. The driver also provides an interface to interact
+with the MediaTek’s modem via AT commands.</p>
+<section id="basic-usage">
+<h2>Basic usage<a class="headerlink" href="#basic-usage" title="Permalink to this headline">¶</a></h2>
+<p>MBIM &amp; AT functions are inactive when unmanaged. The t7xx driver provides
+WWAN port userspace interfaces representing MBIM &amp; AT control channels and does
+not play any role in managing their functionality. It is the job of a userspace
+application to detect port enumeration and enable MBIM &amp; AT functionalities.</p>
+<p>Examples of few such userspace applications are:</p>
+<ul class="simple">
+<li><p>mbimcli (included with the libmbim [2] library), and</p></li>
+<li><p>Modem Manager [3]</p></li>
+</ul>
+<p>Management Applications to carry out below required actions for establishing
+MBIM IP session:</p>
+<ul class="simple">
+<li><p>open the MBIM control channel</p></li>
+<li><p>configure network connection settings</p></li>
+<li><p>connect to network</p></li>
+<li><p>configure IP network interface</p></li>
+</ul>
+<p>Management Applications to carry out below required actions for send an AT
+command and receive response:</p>
+<ul class="simple">
+<li><p>open the AT control channel using a UART tool or a special user tool</p></li>
+</ul>
+</section>
+<section id="management-application-development">
+<h2>Management application development<a class="headerlink" href="#management-application-development" title="Permalink to this headline">¶</a></h2>
+<p>The driver and userspace interfaces are described below. The MBIM protocol is
+described in [1] Mobile Broadband Interface Model v1.0 Errata-1.</p>
+<section id="mbim-control-channel-userspace-abi">
+<h3>MBIM control channel userspace ABI<a class="headerlink" href="#mbim-control-channel-userspace-abi" title="Permalink to this headline">¶</a></h3>
+<section id="dev-wwan0mbim0-character-device">
+<h4>/dev/wwan0mbim0 character device<a class="headerlink" href="#dev-wwan0mbim0-character-device" title="Permalink to this headline">¶</a></h4>
+<p>The driver exposes an MBIM interface to the MBIM function by implementing
+MBIM WWAN Port. The userspace end of the control channel pipe is a
+/dev/wwan0mbim0 character device. Application shall use this interface for
+MBIM protocol communication.</p>
+</section>
+<section id="fragmentation">
+<h4>Fragmentation<a class="headerlink" href="#fragmentation" title="Permalink to this headline">¶</a></h4>
+<p>The userspace application is responsible for all control message fragmentation
+and defragmentation as per MBIM specification.</p>
+</section>
+<section id="dev-wwan0mbim0-write">
+<h4>/dev/wwan0mbim0 write()<a class="headerlink" href="#dev-wwan0mbim0-write" title="Permalink to this headline">¶</a></h4>
+<p>The MBIM control messages from the management application must not exceed the
+negotiated control message size.</p>
+</section>
+<section id="dev-wwan0mbim0-read">
+<h4>/dev/wwan0mbim0 read()<a class="headerlink" href="#dev-wwan0mbim0-read" title="Permalink to this headline">¶</a></h4>
+<p>The management application must accept control messages of up the negotiated
+control message size.</p>
+</section>
+</section>
+<section id="mbim-data-channel-userspace-abi">
+<h3>MBIM data channel userspace ABI<a class="headerlink" href="#mbim-data-channel-userspace-abi" title="Permalink to this headline">¶</a></h3>
+<section id="wwan0-x-network-device">
+<h4>wwan0-X network device<a class="headerlink" href="#wwan0-x-network-device" title="Permalink to this headline">¶</a></h4>
+<p>The t7xx driver exposes IP link interface “wwan0-X” of type “wwan” for IP
+traffic. Iproute network utility is used for creating “wwan0-X” network
+interface and for associating it with MBIM IP session.</p>
+<p>The userspace management application is responsible for creating new IP link
+prior to establishing MBIM IP session where the SessionId is greater than 0.</p>
+<p>For example, creating new IP link for a MBIM IP session with SessionId 1:</p>
+<blockquote>
+<div><p>ip link add dev wwan0-1 parentdev wwan0 type wwan linkid 1</p>
+</div></blockquote>
+<p>The driver will automatically map the “wwan0-1” network device to MBIM IP
+session 1.</p>
+</section>
+</section>
+<section id="at-port-userspace-abi">
+<h3>AT port userspace ABI<a class="headerlink" href="#at-port-userspace-abi" title="Permalink to this headline">¶</a></h3>
+<section id="dev-wwan0at0-character-device">
+<h4>/dev/wwan0at0 character device<a class="headerlink" href="#dev-wwan0at0-character-device" title="Permalink to this headline">¶</a></h4>
+<p>The driver exposes an AT port by implementing AT WWAN Port.
+The userspace end of the control port is a /dev/wwan0at0 character
+device. Application shall use this interface to issue AT commands.</p>
+<p>The MediaTek’s T700 modem supports the 3GPP TS 27.007 [4] specification.</p>
+</section>
+</section>
+</section>
+<section id="references">
+<h2>References<a class="headerlink" href="#references" title="Permalink to this headline">¶</a></h2>
+<p>[1] <em>MBIM (Mobile Broadband Interface Model) Errata-1</em></p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://www.usb.org/document-library/">https://www.usb.org/document-library/</a></p></li>
+</ul>
+<p>[2] <em>libmbim “a glib-based library for talking to WWAN modems and devices which
+speak the Mobile Interface Broadband Model (MBIM) protocol”</em></p>
+<ul class="simple">
+<li><p><a class="reference external" href="http://www.freedesktop.org/wiki/Software/libmbim/">http://www.freedesktop.org/wiki/Software/libmbim/</a></p></li>
+</ul>
+<p>[3] <em>Modem Manager “a DBus-activated daemon which controls mobile broadband
+(2G/3G/4G/5G) devices and connections”</em></p>
+<ul class="simple">
+<li><p><a class="reference external" href="http://www.freedesktop.org/wiki/Software/ModemManager/">http://www.freedesktop.org/wiki/Software/ModemManager/</a></p></li>
+</ul>
+<p>[4] <em>Specification # 27.007 - 3GPP</em></p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://www.3gpp.org/DynaReport/27007.htm">https://www.3gpp.org/DynaReport/27007.htm</a></p></li>
+</ul>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">t7xx driver for MTK PCIe based T700 5G modem</a><ul>
+<li><a class="reference internal" href="#basic-usage">Basic usage</a></li>
+<li><a class="reference internal" href="#management-application-development">Management application development</a><ul>
+<li><a class="reference internal" href="#mbim-control-channel-userspace-abi">MBIM control channel userspace ABI</a><ul>
+<li><a class="reference internal" href="#dev-wwan0mbim0-character-device">/dev/wwan0mbim0 character device</a></li>
+<li><a class="reference internal" href="#fragmentation">Fragmentation</a></li>
+<li><a class="reference internal" href="#dev-wwan0mbim0-write">/dev/wwan0mbim0 write()</a></li>
+<li><a class="reference internal" href="#dev-wwan0mbim0-read">/dev/wwan0mbim0 read()</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#mbim-data-channel-userspace-abi">MBIM data channel userspace ABI</a><ul>
+<li><a class="reference internal" href="#wwan0-x-network-device">wwan0-X network device</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#at-port-userspace-abi">AT port userspace ABI</a><ul>
+<li><a class="reference internal" href="#dev-wwan0at0-character-device">/dev/wwan0at0 character device</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#references">References</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/networking/device_drivers/wwan/t7xx.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/networking/device_drivers/wwan/t7xx.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

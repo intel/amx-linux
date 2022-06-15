@@ -1,0 +1,156 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>virtiofs: virtio-fs 主機&lt;-&gt;客機共享文件系統 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="Debugfs" href="debugfs.html" />
+    <link rel="prev" title="Linux Kernel中的文件系統" href="index.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是爲讓中文讀者更容易閱讀和理解，而不是作爲一個分支。因此，
+如果您對此文件有任何意見或改動，請先嘗試更新原始英文文件。如果要更改或
+修正某處翻譯文件，請將意見或補丁發送給維護者（聯繫方式見下）。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您發現本文檔與原始文件有任何不同或者有翻譯問題，請聯繫該文件的譯者，
+或者發送電子郵件給胡皓文以獲取幫助：&lt;<a class="reference external" href="mailto:src&#46;res&#37;&#52;&#48;email&#46;cn">src<span>&#46;</span>res<span>&#64;</span>email<span>&#46;</span>cn</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../filesystems/virtiofs.html#virtiofs-index"><span class="std std-ref">Documentation/filesystems/virtiofs.rst</span></a></p>
+</dd>
+</dl>
+<p>譯者</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>中文版維護者： 王文虎 Wang Wenhu &lt;wenhu.wang@vivo.com&gt;
+中文版翻譯者： 王文虎 Wang Wenhu &lt;wenhu.wang@vivo.com&gt;
+中文版校譯者： 王文虎 Wang Wenhu &lt;wenhu.wang@vivo.com&gt;
+中文版校譯者： 王文虎 Wang Wenhu &lt;wenhu.wang@vivo.com&gt;
+繁體中文版校譯者：胡皓文 Hu Haowen &lt;src.res@email.cn&gt;
+</pre></div>
+</div>
+<section id="virtiofs-virtio-fs">
+<h1>virtiofs: virtio-fs 主機&lt;-&gt;客機共享文件系統<a class="headerlink" href="#virtiofs-virtio-fs" title="Permalink to this headline">¶</a></h1>
+<ul class="simple">
+<li><p>Copyright (C) 2020 Vivo Communication Technology Co. Ltd.</p></li>
+</ul>
+<section id="id1">
+<h2>介紹<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>Linux的virtiofs文件系統實現了一個半虛擬化VIRTIO類型「virtio-fs」設備的驅動，通過該類型設備實現客機&lt;-&gt;主機文件系統共享。它允許客機掛載一個已經導出到主機的目錄。</p>
+<p>客機通常需要訪問主機或者遠程系統上的文件。使用場景包括：在新客機安裝時讓文件對其可見；從主機上的根文件系統啓動；對無狀態或臨時客機提供持久存儲和在客機之間共享目錄。</p>
+<p>儘管在某些任務可能通過使用已有的網絡文件系統完成，但是卻需要非常難以自動化的配置步驟，且將存儲網絡暴露給客機。而virtio-fs設備通過提供不經過網絡的文件系統訪問文件的設計方式解決了這些問題。</p>
+<p>另外，virto-fs設備發揮了主客機共存的優點提高了性能，並且提供了網絡文件系統所不具備
+的一些語義功能。</p>
+</section>
+<section id="id2">
+<h2>用法<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>以``myfs``標籤將文件系統掛載到``/mnt``:</p>
+<div class="highlight-sh notranslate"><div class="highlight"><pre><span></span>guest# mount -t virtiofs myfs /mnt
+</pre></div>
+</div>
+<p>請查閱 <a class="reference external" href="https://virtio-fs.gitlab.io/">https://virtio-fs.gitlab.io/</a> 了解配置QEMU和virtiofsd守護程序的詳細信息。</p>
+</section>
+<section id="id3">
+<h2>內幕<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h2>
+<p>由於virtio-fs設備將FUSE協議用於文件系統請求，因此Linux的virtiofs文件系統與FUSE文件系統客戶端緊密集成在一起。客機充當FUSE客戶端而主機充當FUSE伺服器，內核與用戶空間之間的/dev/fuse接口由virtio-fs設備接口代替。</p>
+<p>FUSE請求被置於虛擬隊列中由主機處理。主機填充緩衝區中的響應部分，而客機處理請求的完成部分。</p>
+<p>將/dev/fuse映射到虛擬隊列需要解決/dev/fuse和虛擬隊列之間語義上的差異。每次讀取/dev/fuse設備時，FUSE客戶端都可以選擇要傳輸的請求，從而可以使某些請求優先於其他請求。虛擬隊列有其隊列語義，無法更改已入隊請求的順序。在虛擬隊列已滿的情況下尤
+其關鍵，因爲此時不可能加入高優先級的請求。爲了解決此差異，virtio-fs設備採用「hiprio」（高優先級）虛擬隊列，專門用於有別於普通請求的高優先級請求。</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">virtiofs: virtio-fs 主機&lt;-&gt;客機共享文件系統</a><ul>
+<li><a class="reference internal" href="#id1">介紹</a></li>
+<li><a class="reference internal" href="#id2">用法</a></li>
+<li><a class="reference internal" href="#id3">內幕</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_TW/filesystems/virtiofs.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_TW/filesystems/virtiofs.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

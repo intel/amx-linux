@@ -1,0 +1,280 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>用户空间MAD访问 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../infiniband/user_mad.html"><span class="doc">Userspace MAD access</span></a></p>
+</dd>
+<dt class="field-even">翻译</dt>
+<dd class="field-even"><p>司延腾 Yanteng Si &lt;<a class="reference external" href="mailto:siyanteng&#37;&#52;&#48;loongson&#46;cn">siyanteng<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+<dt class="field-odd">校译</dt>
+<dd class="field-odd"><p>王普宇 Puyu Wang &lt;<a class="reference external" href="mailto:realpuyuwang&#37;&#52;&#48;gmail&#46;com">realpuyuwang<span>&#64;</span>gmail<span>&#46;</span>com</a>&gt;
+时奎亮 Alex Shi &lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;</p>
+</dd>
+</dl>
+<section id="mad">
+<span id="cn-infiniband-user-mad"></span><h1>用户空间MAD访问<a class="headerlink" href="#mad" title="Permalink to this headline">¶</a></h1>
+<section id="id1">
+<h2>设备文件<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>每个InfiniBand设备的每个端口都有一个“umad”设备和一个“issm”设备连接。
+例如，一个双端口的HCA将有两个umad设备和两个issm设备，而一个交换机将
+有每个类型的一个设备（对于交换机端口0）。</p>
+</div></blockquote>
+</section>
+<section id="id2">
+<h2>创建MAD代理<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>一个MAD代理可以通过填写一个结构体ib_user_mad_reg_req来创建，然后在
+适当的设备文件的文件描述符上调用IB_USER_MAD_REGISTER_AGENT ioctl。
+如果注册请求成功，结构体中会返回一个32位的ID。比如说:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct ib_user_mad_reg_req req = { /* ... */ };
+ret = ioctl(fd, IB_USER_MAD_REGISTER_AGENT, (char *) &amp;req);
+if (!ret)
+        my_agent = req.id;
+else
+        perror(&quot;agent register&quot;);
+</pre></div>
+</div>
+<p>代理可以通过IB_USER_MAD_UNREGISTER_AGENT ioctl取消注册。另外，所有
+通过文件描述符注册的代理在描述符关闭时将被取消注册。</p>
+<dl class="simple">
+<dt>2014</dt><dd><p>现在提供了一个新的注册IOctl，允许在注册时提供额外的字段。这个注册
+调用的用户隐含了对pkey_index的使用（见下文）。现在提供了一个新的
+注册IOctl，允许在注册时提供额外的字段。这个注册调用的用户隐含了对
+pkey_index的使用（见下文）。</p>
+</dd>
+</dl>
+</div></blockquote>
+</section>
+<section id="mads">
+<h2>接收MADs<a class="headerlink" href="#mads" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>使用read()接收MAD。现在接收端支持RMPP。传给read()的缓冲区必须至少是
+一个struct ib_user_mad + 256字节。比如说:</p>
+<p>如果传递的缓冲区不足以容纳收到的MAD（RMPP），errno被设置为ENOSPC，需
+要的缓冲区长度被设置在mad.length中。</p>
+<p>正常MAD(非RMPP)的读取示例:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct ib_user_mad *mad;
+mad = malloc(sizeof *mad + 256);
+ret = read(fd, mad, sizeof *mad + 256);
+if (ret != sizeof mad + 256) {
+        perror(&quot;read&quot;);
+        free(mad);
+}
+</pre></div>
+</div>
+<p>RMPP读取示例:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct ib_user_mad *mad;
+mad = malloc(sizeof *mad + 256);
+ret = read(fd, mad, sizeof *mad + 256);
+if (ret == -ENOSPC)) {
+        length = mad.length;
+        free(mad);
+        mad = malloc(sizeof *mad + length);
+        ret = read(fd, mad, sizeof *mad + length);
+}
+if (ret &lt; 0) {
+        perror(&quot;read&quot;);
+        free(mad);
+}
+</pre></div>
+</div>
+<p>除了实际的MAD内容外，其他结构体ib_user_mad字段将被填入收到的MAD的信
+息。例如，远程LID将在mad.lid中。</p>
+<p>如果发送超时，将产生一个接收，mad.status设置为ETIMEDOUT。否则，当一个
+MAD被成功接收后，mad.status将是0。</p>
+<p>poll()/select()可以用来等待一个MAD可以被读取。</p>
+<p>poll()/select()可以用来等待，直到可以读取一个MAD。</p>
+</div></blockquote>
+</section>
+<section id="id3">
+<h2>发送MADs<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>MADs是用write()发送的。发送的代理ID应该填入MAD的id字段，目的地LID应该
+填入lid字段，以此类推。发送端确实支持RMPP，所以可以发送任意长度的MAD。
+比如说:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct ib_user_mad *mad;
+
+mad = malloc(sizeof *mad + mad_length);
+
+/* fill in mad-&gt;data */
+
+mad-&gt;hdr.id  = my_agent;        /* req.id from agent registration */
+mad-&gt;hdr.lid = my_dest;         /* in network byte order... */
+/* etc. */
+
+ret = write(fd, &amp;mad, sizeof *mad + mad_length);
+if (ret != sizeof *mad + mad_length)
+        perror(&quot;write&quot;);
+</pre></div>
+</div>
+</div></blockquote>
+</section>
+<section id="ids">
+<h2>交换IDs<a class="headerlink" href="#ids" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>umad设备的用户可以在发送的MAD中使用交换ID字段的低32位（也就是网络字节顺序中
+最小有效的一半字段）来匹配请求/响应对。上面的32位是保留给内核使用的，在发送
+MAD之前会被改写。</p>
+</div></blockquote>
+</section>
+<section id="p-key">
+<h2>P_Key索引处理<a class="headerlink" href="#p-key" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>旧的ib_umad接口不允许为发送的MAD设置P_Key索引，也没有提供获取接收的MAD的
+P_Key索引的方法。一个带有pkey_index成员的struct ib_user_mad_hdr的新布局已
+经被定义；然而，为了保持与旧的应用程序的二进制兼容性，除非在文件描述符被用于
+其他用途之前调用IB_USER_MAD_ENABLE_PKEY或IB_USER_MAD_REGISTER_AGENT2 ioctl
+之一，否则不会使用这种新布局。</p>
+<p>在2008年9月，IB_USER_MAD_ABI_VERSION将被增加到6，默认使用新的ib_user_mad_hdr
+结构布局，并且IB_USER_MAD_ENABLE_PKEY ioctl将被删除。</p>
+</div></blockquote>
+</section>
+<section id="issm">
+<h2>设置IsSM功能位<a class="headerlink" href="#issm" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>要为一个端口设置IsSM功能位，只需打开相应的issm设备文件。如果IsSM位已经被设置，那
+么打开调用将阻塞，直到该位被清除（或者如果O_NONBLOCK标志被传递给open()，则立即返
+回，errno设置为EAGAIN）。当issm文件被关闭时，IsSM位将被清除。在issm文件上不能进
+行任何读、写或其他操作。</p>
+</div></blockquote>
+</section>
+<section id="dev">
+<h2>/dev文件<a class="headerlink" href="#dev" title="Permalink to this headline">¶</a></h2>
+<p>为了用 udev自动创建相应的字符设备文件，一个类似:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>  KERNEL==&quot;umad*&quot;, NAME=&quot;infiniband/%k&quot;
+  KERNEL==&quot;issm*&quot;, NAME=&quot;infiniband/%k&quot;
+
+的规则可以被使用。它将创建节点的名字::
+
+  /dev/infiniband/umad0
+  /dev/infiniband/issm0
+
+为第一个端口，以此类推。与这些设备相关的infiniband设备和端口可以从以下文件中确定::
+
+  /sys/class/infiniband_mad/umad0/ibdev
+  /sys/class/infiniband_mad/umad0/port
+
+和::
+
+  /sys/class/infiniband_mad/issm0/ibdev
+  /sys/class/infiniband_mad/issm0/port
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">用户空间MAD访问</a><ul>
+<li><a class="reference internal" href="#id1">设备文件</a></li>
+<li><a class="reference internal" href="#id2">创建MAD代理</a></li>
+<li><a class="reference internal" href="#mads">接收MADs</a></li>
+<li><a class="reference internal" href="#id3">发送MADs</a></li>
+<li><a class="reference internal" href="#ids">交换IDs</a></li>
+<li><a class="reference internal" href="#p-key">P_Key索引处理</a></li>
+<li><a class="reference internal" href="#issm">设置IsSM功能位</a></li>
+<li><a class="reference internal" href="#dev">/dev文件</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/infiniband/user_mad.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/infiniband/user_mad.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

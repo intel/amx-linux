@@ -1,0 +1,448 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>2. Networking subsystem (netdev) &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Kernel Maintainer PGP guide" href="maintainer-pgp-guide.html" />
+    <link rel="prev" title="1. The tip tree handbook" href="maintainer-tip.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="networking-subsystem-netdev">
+<span id="netdev-faq"></span><h1><span class="section-number">2. </span>Networking subsystem (netdev)<a class="headerlink" href="#networking-subsystem-netdev" title="Permalink to this headline">¶</a></h1>
+<section id="tl-dr">
+<h2><span class="section-number">2.1. </span>tl;dr<a class="headerlink" href="#tl-dr" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><ul class="simple">
+<li><p>designate your patch to a tree - <code class="docutils literal notranslate"><span class="pre">[PATCH</span> <span class="pre">net]</span></code> or <code class="docutils literal notranslate"><span class="pre">[PATCH</span> <span class="pre">net-next]</span></code></p></li>
+<li><p>for fixes the <code class="docutils literal notranslate"><span class="pre">Fixes:</span></code> tag is required, regardless of the tree</p></li>
+<li><p>don’t post large series (&gt; 15 patches), break them up</p></li>
+<li><p>don’t repost your patches within one 24h period</p></li>
+<li><p>reverse xmas tree</p></li>
+</ul>
+</div></blockquote>
+</section>
+<section id="netdev">
+<h2><span class="section-number">2.2. </span>netdev<a class="headerlink" href="#netdev" title="Permalink to this headline">¶</a></h2>
+<p>netdev is a mailing list for all network-related Linux stuff.  This
+includes anything found under net/ (i.e. core code like IPv6) and
+drivers/net (i.e. hardware specific drivers) in the Linux source tree.</p>
+<p>Note that some subsystems (e.g. wireless drivers) which have a high
+volume of traffic have their own specific mailing lists and trees.</p>
+<p>The netdev list is managed (like many other Linux mailing lists) through
+VGER (<a class="reference external" href="http://vger.kernel.org/">http://vger.kernel.org/</a>) with archives available at
+<a class="reference external" href="https://lore.kernel.org/netdev/">https://lore.kernel.org/netdev/</a></p>
+<p>Aside from subsystems like those mentioned above, all network-related
+Linux development (i.e. RFC, review, comments, etc.) takes place on
+netdev.</p>
+</section>
+<section id="development-cycle">
+<h2><span class="section-number">2.3. </span>Development cycle<a class="headerlink" href="#development-cycle" title="Permalink to this headline">¶</a></h2>
+<p>Here is a bit of background information on
+the cadence of Linux development.  Each new release starts off with a
+two week “merge window” where the main maintainers feed their new stuff
+to Linus for merging into the mainline tree.  After the two weeks, the
+merge window is closed, and it is called/tagged <code class="docutils literal notranslate"><span class="pre">-rc1</span></code>.  No new
+features get mainlined after this – only fixes to the rc1 content are
+expected.  After roughly a week of collecting fixes to the rc1 content,
+rc2 is released.  This repeats on a roughly weekly basis until rc7
+(typically; sometimes rc6 if things are quiet, or rc8 if things are in a
+state of churn), and a week after the last vX.Y-rcN was done, the
+official vX.Y is released.</p>
+<p>To find out where we are now in the cycle - load the mainline (Linus)
+page here:</p>
+<blockquote>
+<div><p><a class="reference external" href="https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git">https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git</a></p>
+</div></blockquote>
+<p>and note the top of the “tags” section.  If it is rc1, it is early in
+the dev cycle.  If it was tagged rc7 a week ago, then a release is
+probably imminent. If the most recent tag is a final release tag
+(without an <code class="docutils literal notranslate"><span class="pre">-rcN</span></code> suffix) - we are most likely in a merge window
+and <code class="docutils literal notranslate"><span class="pre">net-next</span></code> is closed.</p>
+</section>
+<section id="git-trees-and-patch-flow">
+<h2><span class="section-number">2.4. </span>git trees and patch flow<a class="headerlink" href="#git-trees-and-patch-flow" title="Permalink to this headline">¶</a></h2>
+<p>There are two networking trees (git repositories) in play.  Both are
+driven by David Miller, the main network maintainer.  There is the
+<code class="docutils literal notranslate"><span class="pre">net</span></code> tree, and the <code class="docutils literal notranslate"><span class="pre">net-next</span></code> tree.  As you can probably guess from
+the names, the <code class="docutils literal notranslate"><span class="pre">net</span></code> tree is for fixes to existing code already in the
+mainline tree from Linus, and <code class="docutils literal notranslate"><span class="pre">net-next</span></code> is where the new code goes
+for the future release.  You can find the trees here:</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://git.kernel.org/pub/scm/linux/kernel/git/netdev/net.git">https://git.kernel.org/pub/scm/linux/kernel/git/netdev/net.git</a></p></li>
+<li><p><a class="reference external" href="https://git.kernel.org/pub/scm/linux/kernel/git/netdev/net-next.git">https://git.kernel.org/pub/scm/linux/kernel/git/netdev/net-next.git</a></p></li>
+</ul>
+<p>Relating that to kernel development: At the beginning of the 2-week
+merge window, the <code class="docutils literal notranslate"><span class="pre">net-next</span></code> tree will be closed - no new changes/features.
+The accumulated new content of the past ~10 weeks will be passed onto
+mainline/Linus via a pull request for vX.Y – at the same time, the
+<code class="docutils literal notranslate"><span class="pre">net</span></code> tree will start accumulating fixes for this pulled content
+relating to vX.Y</p>
+<p>An announcement indicating when <code class="docutils literal notranslate"><span class="pre">net-next</span></code> has been closed is usually
+sent to netdev, but knowing the above, you can predict that in advance.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Do not send new <code class="docutils literal notranslate"><span class="pre">net-next</span></code> content to netdev during the
+period during which <code class="docutils literal notranslate"><span class="pre">net-next</span></code> tree is closed.</p>
+</div>
+<p>RFC patches sent for review only are obviously welcome at any time
+(use <code class="docutils literal notranslate"><span class="pre">--subject-prefix='RFC</span> <span class="pre">net-next'</span></code> with <code class="docutils literal notranslate"><span class="pre">git</span> <span class="pre">format-patch</span></code>).</p>
+<p>Shortly after the two weeks have passed (and vX.Y-rc1 is released), the
+tree for <code class="docutils literal notranslate"><span class="pre">net-next</span></code> reopens to collect content for the next (vX.Y+1)
+release.</p>
+<p>If you aren’t subscribed to netdev and/or are simply unsure if
+<code class="docutils literal notranslate"><span class="pre">net-next</span></code> has re-opened yet, simply check the <code class="docutils literal notranslate"><span class="pre">net-next</span></code> git
+repository link above for any new networking-related commits.  You may
+also check the following website for the current status:</p>
+<blockquote>
+<div><p><a class="reference external" href="http://vger.kernel.org/~davem/net-next.html">http://vger.kernel.org/~davem/net-next.html</a></p>
+</div></blockquote>
+<p>The <code class="docutils literal notranslate"><span class="pre">net</span></code> tree continues to collect fixes for the vX.Y content, and is
+fed back to Linus at regular (~weekly) intervals.  Meaning that the
+focus for <code class="docutils literal notranslate"><span class="pre">net</span></code> is on stabilization and bug fixes.</p>
+<p>Finally, the vX.Y gets released, and the whole cycle starts over.</p>
+</section>
+<section id="netdev-patch-review">
+<h2><span class="section-number">2.5. </span>netdev patch review<a class="headerlink" href="#netdev-patch-review" title="Permalink to this headline">¶</a></h2>
+<section id="patch-status">
+<h3><span class="section-number">2.5.1. </span>Patch status<a class="headerlink" href="#patch-status" title="Permalink to this headline">¶</a></h3>
+<p>Status of a patch can be checked by looking at the main patchwork
+queue for netdev:</p>
+<blockquote>
+<div><p><a class="reference external" href="https://patchwork.kernel.org/project/netdevbpf/list/">https://patchwork.kernel.org/project/netdevbpf/list/</a></p>
+</div></blockquote>
+<p>The “State” field will tell you exactly where things are at with your
+patch. Patches are indexed by the <code class="docutils literal notranslate"><span class="pre">Message-ID</span></code> header of the emails
+which carried them so if you have trouble finding your patch append
+the value of <code class="docutils literal notranslate"><span class="pre">Message-ID</span></code> to the URL above.</p>
+</section>
+<section id="updating-patch-status">
+<h3><span class="section-number">2.5.2. </span>Updating patch status<a class="headerlink" href="#updating-patch-status" title="Permalink to this headline">¶</a></h3>
+<p>It may be tempting to help the maintainers and update the state of your
+own patches when you post a new version or spot a bug. Please <strong>do not</strong>
+do that.
+Interfering with the patch status on patchwork will only cause confusion. Leave
+it to the maintainer to figure out what is the most recent and current
+version that should be applied. If there is any doubt, the maintainer
+will reply and ask what should be done.</p>
+</section>
+<section id="review-timelines">
+<h3><span class="section-number">2.5.3. </span>Review timelines<a class="headerlink" href="#review-timelines" title="Permalink to this headline">¶</a></h3>
+<p>Generally speaking, the patches get triaged quickly (in less than
+48h). But be patient, if your patch is active in patchwork (i.e. it’s
+listed on the project’s patch list) the chances it was missed are close to zero.
+Asking the maintainer for status updates on your
+patch is a good way to ensure your patch is ignored or pushed to the
+bottom of the priority list.</p>
+</section>
+<section id="partial-resends">
+<h3><span class="section-number">2.5.4. </span>Partial resends<a class="headerlink" href="#partial-resends" title="Permalink to this headline">¶</a></h3>
+<p>Please always resend the entire patch series and make sure you do number your
+patches such that it is clear this is the latest and greatest set of patches
+that can be applied. Do not try to resend just the patches which changed.</p>
+</section>
+<section id="handling-misapplied-patches">
+<h3><span class="section-number">2.5.5. </span>Handling misapplied patches<a class="headerlink" href="#handling-misapplied-patches" title="Permalink to this headline">¶</a></h3>
+<p>Occasionally a patch series gets applied before receiving critical feedback,
+or the wrong version of a series gets applied.
+There is no revert possible, once it is pushed out, it stays like that.
+Please send incremental versions on top of what has been merged in order to fix
+the patches the way they would look like if your latest patch series was to be
+merged.</p>
+</section>
+<section id="stable-tree">
+<h3><span class="section-number">2.5.6. </span>Stable tree<a class="headerlink" href="#stable-tree" title="Permalink to this headline">¶</a></h3>
+<p>While it used to be the case that netdev submissions were not supposed
+to carry explicit <code class="docutils literal notranslate"><span class="pre">CC:</span> <span class="pre">stable&#64;vger.kernel.org</span></code> tags that is no longer
+the case today. Please follow the standard stable rules in
+<a class="reference internal" href="stable-kernel-rules.html#stable-kernel-rules"><span class="std std-ref">Documentation/process/stable-kernel-rules.rst</span></a>,
+and make sure you include appropriate Fixes tags!</p>
+</section>
+<section id="security-fixes">
+<h3><span class="section-number">2.5.7. </span>Security fixes<a class="headerlink" href="#security-fixes" title="Permalink to this headline">¶</a></h3>
+<p>Do not email netdev maintainers directly if you think you discovered
+a bug that might have possible security implications.
+The current netdev maintainer has consistently requested that
+people use the mailing lists and not reach out directly.  If you aren’t
+OK with that, then perhaps consider mailing <a class="reference external" href="mailto:security&#37;&#52;&#48;kernel&#46;org">security<span>&#64;</span>kernel<span>&#46;</span>org</a> or
+reading about <a class="reference external" href="http://oss-security.openwall.org/wiki/mailing-lists/distros">http://oss-security.openwall.org/wiki/mailing-lists/distros</a>
+as possible alternative mechanisms.</p>
+</section>
+<section id="co-posting-changes-to-user-space-components">
+<h3><span class="section-number">2.5.8. </span>Co-posting changes to user space components<a class="headerlink" href="#co-posting-changes-to-user-space-components" title="Permalink to this headline">¶</a></h3>
+<p>User space code exercising kernel features should be posted
+alongside kernel patches. This gives reviewers a chance to see
+how any new interface is used and how well it works.</p>
+<p>When user space tools reside in the kernel repo itself all changes
+should generally come as one series. If series becomes too large
+or the user space project is not reviewed on netdev include a link
+to a public repo where user space patches can be seen.</p>
+<p>In case user space tooling lives in a separate repository but is
+reviewed on netdev  (e.g. patches to <code class="docutils literal notranslate"><span class="pre">iproute2</span></code> tools) kernel and
+user space patches should form separate series (threads) when posted
+to the mailing list, e.g.:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[PATCH net-next 0/3] net: some feature cover letter
+ └─ [PATCH net-next 1/3] net: some feature prep
+ └─ [PATCH net-next 2/3] net: some feature do it
+ └─ [PATCH net-next 3/3] selftest: net: some feature
+
+[PATCH iproute2-next] ip: add support for some feature
+</pre></div>
+</div>
+<p>Posting as one thread is discouraged because it confuses patchwork
+(as of patchwork 2.2.2).</p>
+</section>
+</section>
+<section id="preparing-changes">
+<h2><span class="section-number">2.6. </span>Preparing changes<a class="headerlink" href="#preparing-changes" title="Permalink to this headline">¶</a></h2>
+<p>Attention to detail is important.  Re-read your own work as if you were the
+reviewer.  You can start with using <code class="docutils literal notranslate"><span class="pre">checkpatch.pl</span></code>, perhaps even with
+the <code class="docutils literal notranslate"><span class="pre">--strict</span></code> flag.  But do not be mindlessly robotic in doing so.
+If your change is a bug fix, make sure your commit log indicates the
+end-user visible symptom, the underlying reason as to why it happens,
+and then if necessary, explain why the fix proposed is the best way to
+get things done.  Don’t mangle whitespace, and as is common, don’t
+mis-indent function arguments that span multiple lines.  If it is your
+first patch, mail it to yourself so you can test apply it to an
+unpatched tree to confirm infrastructure didn’t mangle it.</p>
+<p>Finally, go back and read
+<a class="reference internal" href="submitting-patches.html#submittingpatches"><span class="std std-ref">Documentation/process/submitting-patches.rst</span></a>
+to be sure you are not repeating some common mistake documented there.</p>
+<section id="indicating-target-tree">
+<h3><span class="section-number">2.6.1. </span>Indicating target tree<a class="headerlink" href="#indicating-target-tree" title="Permalink to this headline">¶</a></h3>
+<p>To help maintainers and CI bots you should explicitly mark which tree
+your patch is targeting. Assuming that you use git, use the prefix
+flag:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>git format-patch --subject-prefix=&#39;PATCH net-next&#39; start..finish
+</pre></div>
+</div>
+<p>Use <code class="docutils literal notranslate"><span class="pre">net</span></code> instead of <code class="docutils literal notranslate"><span class="pre">net-next</span></code> (always lower case) in the above for
+bug-fix <code class="docutils literal notranslate"><span class="pre">net</span></code> content.</p>
+</section>
+<section id="dividing-work-into-patches">
+<h3><span class="section-number">2.6.2. </span>Dividing work into patches<a class="headerlink" href="#dividing-work-into-patches" title="Permalink to this headline">¶</a></h3>
+<p>Put yourself in the shoes of the reviewer. Each patch is read separately
+and therefore should constitute a comprehensible step towards your stated
+goal.</p>
+<p>Avoid sending series longer than 15 patches. Larger series takes longer
+to review as reviewers will defer looking at it until they find a large
+chunk of time. A small series can be reviewed in a short time, so Maintainers
+just do it. As a result, a sequence of smaller series gets merged quicker and
+with better review coverage. Re-posting large series also increases the mailing
+list traffic.</p>
+</section>
+<section id="multi-line-comments">
+<h3><span class="section-number">2.6.3. </span>Multi-line comments<a class="headerlink" href="#multi-line-comments" title="Permalink to this headline">¶</a></h3>
+<p>Comment style convention is slightly different for networking and most of
+the tree.  Instead of this:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/*
+ * foobar blah blah blah
+ * another line of text
+ */
+</pre></div>
+</div>
+<p>it is requested that you make it look like this:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/* foobar blah blah blah
+ * another line of text
+ */
+</pre></div>
+</div>
+</section>
+<section id="local-variable-ordering-reverse-xmas-tree-rcs">
+<h3><span class="section-number">2.6.4. </span>Local variable ordering (“reverse xmas tree”, “RCS”)<a class="headerlink" href="#local-variable-ordering-reverse-xmas-tree-rcs" title="Permalink to this headline">¶</a></h3>
+<p>Netdev has a convention for ordering local variables in functions.
+Order the variable declaration lines longest to shortest, e.g.:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct scatterlist *sg;
+struct sk_buff *skb;
+int err, i;
+</pre></div>
+</div>
+<p>If there are dependencies between the variables preventing the ordering
+move the initialization out of line.</p>
+</section>
+<section id="format-precedence">
+<h3><span class="section-number">2.6.5. </span>Format precedence<a class="headerlink" href="#format-precedence" title="Permalink to this headline">¶</a></h3>
+<p>When working in existing code which uses nonstandard formatting make
+your code follow the most recent guidelines, so that eventually all code
+in the domain of netdev is in the preferred format.</p>
+</section>
+<section id="resending-after-review">
+<h3><span class="section-number">2.6.6. </span>Resending after review<a class="headerlink" href="#resending-after-review" title="Permalink to this headline">¶</a></h3>
+<p>Allow at least 24 hours to pass between postings. This will ensure reviewers
+from all geographical locations have a chance to chime in. Do not wait
+too long (weeks) between postings either as it will make it harder for reviewers
+to recall all the context.</p>
+<p>Make sure you address all the feedback in your new posting. Do not post a new
+version of the code if the discussion about the previous version is still
+ongoing, unless directly instructed by a reviewer.</p>
+</section>
+</section>
+<section id="testing">
+<h2><span class="section-number">2.7. </span>Testing<a class="headerlink" href="#testing" title="Permalink to this headline">¶</a></h2>
+<section id="expected-level-of-testing">
+<h3><span class="section-number">2.7.1. </span>Expected level of testing<a class="headerlink" href="#expected-level-of-testing" title="Permalink to this headline">¶</a></h3>
+<p>At the very minimum your changes must survive an <code class="docutils literal notranslate"><span class="pre">allyesconfig</span></code> and an
+<code class="docutils literal notranslate"><span class="pre">allmodconfig</span></code> build with <code class="docutils literal notranslate"><span class="pre">W=1</span></code> set without new warnings or failures.</p>
+<p>Ideally you will have done run-time testing specific to your change,
+and the patch series contains a set of kernel selftest for
+<code class="docutils literal notranslate"><span class="pre">tools/testing/selftests/net</span></code> or using the KUnit framework.</p>
+<p>You are expected to test your changes on top of the relevant networking
+tree (<code class="docutils literal notranslate"><span class="pre">net</span></code> or <code class="docutils literal notranslate"><span class="pre">net-next</span></code>) and not e.g. a stable tree or <code class="docutils literal notranslate"><span class="pre">linux-next</span></code>.</p>
+</section>
+<section id="patchwork-checks">
+<h3><span class="section-number">2.7.2. </span>patchwork checks<a class="headerlink" href="#patchwork-checks" title="Permalink to this headline">¶</a></h3>
+<p>Checks in patchwork are mostly simple wrappers around existing kernel
+scripts, the sources are available at:</p>
+<p><a class="reference external" href="https://github.com/kuba-moo/nipa/tree/master/tests">https://github.com/kuba-moo/nipa/tree/master/tests</a></p>
+<p><strong>Do not</strong> post your patches just to run them through the checks.
+You must ensure that your patches are ready by testing them locally
+before posting to the mailing list. The patchwork build bot instance
+gets overloaded very easily and <a class="reference external" href="mailto:netdev&#37;&#52;&#48;vger">netdev<span>&#64;</span>vger</a> really doesn’t need more
+traffic if we can help it.</p>
+</section>
+<section id="netdevsim">
+<h3><span class="section-number">2.7.3. </span>netdevsim<a class="headerlink" href="#netdevsim" title="Permalink to this headline">¶</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">netdevsim</span></code> is a test driver which can be used to exercise driver
+configuration APIs without requiring capable hardware.
+Mock-ups and tests based on <code class="docutils literal notranslate"><span class="pre">netdevsim</span></code> are strongly encouraged when
+adding new APIs, but <code class="docutils literal notranslate"><span class="pre">netdevsim</span></code> in itself is <strong>not</strong> considered
+a use case/user. You must also implement the new APIs in a real driver.</p>
+<p>We give no guarantees that <code class="docutils literal notranslate"><span class="pre">netdevsim</span></code> won’t change in the future
+in a way which would break what would normally be considered uAPI.</p>
+<p><code class="docutils literal notranslate"><span class="pre">netdevsim</span></code> is reserved for use by upstream tests only, so any
+new <code class="docutils literal notranslate"><span class="pre">netdevsim</span></code> features must be accompanied by selftests under
+<code class="docutils literal notranslate"><span class="pre">tools/testing/selftests/</span></code>.</p>
+</section>
+</section>
+<section id="testimonials-feedback">
+<h2><span class="section-number">2.8. </span>Testimonials / feedback<a class="headerlink" href="#testimonials-feedback" title="Permalink to this headline">¶</a></h2>
+<p>Some companies use peer feedback in employee performance reviews.
+Please feel free to request feedback from netdev maintainers,
+especially if you spend significant amount of time reviewing code
+and go out of your way to improve shared infrastructure.</p>
+<p>The feedback must be requested by you, the contributor, and will always
+be shared with you (even if you request for it to be submitted to your
+manager).</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">2. Networking subsystem (netdev)</a><ul>
+<li><a class="reference internal" href="#tl-dr">2.1. tl;dr</a></li>
+<li><a class="reference internal" href="#netdev">2.2. netdev</a></li>
+<li><a class="reference internal" href="#development-cycle">2.3. Development cycle</a></li>
+<li><a class="reference internal" href="#git-trees-and-patch-flow">2.4. git trees and patch flow</a></li>
+<li><a class="reference internal" href="#netdev-patch-review">2.5. netdev patch review</a><ul>
+<li><a class="reference internal" href="#patch-status">2.5.1. Patch status</a></li>
+<li><a class="reference internal" href="#updating-patch-status">2.5.2. Updating patch status</a></li>
+<li><a class="reference internal" href="#review-timelines">2.5.3. Review timelines</a></li>
+<li><a class="reference internal" href="#partial-resends">2.5.4. Partial resends</a></li>
+<li><a class="reference internal" href="#handling-misapplied-patches">2.5.5. Handling misapplied patches</a></li>
+<li><a class="reference internal" href="#stable-tree">2.5.6. Stable tree</a></li>
+<li><a class="reference internal" href="#security-fixes">2.5.7. Security fixes</a></li>
+<li><a class="reference internal" href="#co-posting-changes-to-user-space-components">2.5.8. Co-posting changes to user space components</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#preparing-changes">2.6. Preparing changes</a><ul>
+<li><a class="reference internal" href="#indicating-target-tree">2.6.1. Indicating target tree</a></li>
+<li><a class="reference internal" href="#dividing-work-into-patches">2.6.2. Dividing work into patches</a></li>
+<li><a class="reference internal" href="#multi-line-comments">2.6.3. Multi-line comments</a></li>
+<li><a class="reference internal" href="#local-variable-ordering-reverse-xmas-tree-rcs">2.6.4. Local variable ordering (“reverse xmas tree”, “RCS”)</a></li>
+<li><a class="reference internal" href="#format-precedence">2.6.5. Format precedence</a></li>
+<li><a class="reference internal" href="#resending-after-review">2.6.6. Resending after review</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#testing">2.7. Testing</a><ul>
+<li><a class="reference internal" href="#expected-level-of-testing">2.7.1. Expected level of testing</a></li>
+<li><a class="reference internal" href="#patchwork-checks">2.7.2. patchwork checks</a></li>
+<li><a class="reference internal" href="#netdevsim">2.7.3. netdevsim</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#testimonials-feedback">2.8. Testimonials / feedback</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/process/maintainer-netdev.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/process/maintainer-netdev.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

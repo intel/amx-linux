@@ -1,0 +1,259 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>The QNX6 Filesystem &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Ramfs, rootfs and initramfs" href="ramfs-rootfs-initramfs.html" />
+    <link rel="prev" title="The /proc Filesystem" href="proc.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="the-qnx6-filesystem">
+<h1>The QNX6 Filesystem<a class="headerlink" href="#the-qnx6-filesystem" title="Permalink to this headline">¶</a></h1>
+<p>The qnx6fs is used by newer QNX operating system versions. (e.g. Neutrino)
+It got introduced in QNX 6.4.0 and is used default since 6.4.1.</p>
+<section id="option">
+<h2>Option<a class="headerlink" href="#option" title="Permalink to this headline">¶</a></h2>
+<p>mmi_fs          Mount filesystem as used for example by Audi MMI 3G system</p>
+</section>
+<section id="specification">
+<h2>Specification<a class="headerlink" href="#specification" title="Permalink to this headline">¶</a></h2>
+<p>qnx6fs shares many properties with traditional Unix filesystems. It has the
+concepts of blocks, inodes and directories.</p>
+<p>On QNX it is possible to create little endian and big endian qnx6 filesystems.
+This feature makes it possible to create and use a different endianness fs
+for the target (QNX is used on quite a range of embedded systems) platform
+running on a different endianness.</p>
+<p>The Linux driver handles endianness transparently. (LE and BE)</p>
+<section id="blocks">
+<h3>Blocks<a class="headerlink" href="#blocks" title="Permalink to this headline">¶</a></h3>
+<p>The space in the device or file is split up into blocks. These are a fixed
+size of 512, 1024, 2048 or 4096, which is decided when the filesystem is
+created.</p>
+<p>Blockpointers are 32bit, so the maximum space that can be addressed is
+2^32 * 4096 bytes or 16TB</p>
+</section>
+<section id="the-superblocks">
+<h3>The superblocks<a class="headerlink" href="#the-superblocks" title="Permalink to this headline">¶</a></h3>
+<p>The superblock contains all global information about the filesystem.
+Each qnx6fs got two superblocks, each one having a 64bit serial number.
+That serial number is used to identify the “active” superblock.
+In write mode with reach new snapshot (after each synchronous write), the
+serial of the new master superblock is increased (old superblock serial + 1)</p>
+<p>So basically the snapshot functionality is realized by an atomic final
+update of the serial number. Before updating that serial, all modifications
+are done by copying all modified blocks during that specific write request
+(or period) and building up a new (stable) filesystem structure under the
+inactive superblock.</p>
+<p>Each superblock holds a set of root inodes for the different filesystem
+parts. (Inode, Bitmap and Longfilenames)
+Each of these root nodes holds information like total size of the stored
+data and the addressing levels in that specific tree.
+If the level value is 0, up to 16 direct blocks can be addressed by each
+node.</p>
+<p>Level 1 adds an additional indirect addressing level where each indirect
+addressing block holds up to blocksize / 4 bytes pointers to data blocks.
+Level 2 adds an additional indirect addressing block level (so, already up
+to 16 * 256 * 256 = 1048576 blocks that can be addressed by such a tree).</p>
+<p>Unused block pointers are always set to ~0 - regardless of root node,
+indirect addressing blocks or inodes.</p>
+<p>Data leaves are always on the lowest level. So no data is stored on upper
+tree levels.</p>
+<p>The first Superblock is located at 0x2000. (0x2000 is the bootblock size)
+The Audi MMI 3G first superblock directly starts at byte 0.</p>
+<p>Second superblock position can either be calculated from the superblock
+information (total number of filesystem blocks) or by taking the highest
+device address, zeroing the last 3 bytes and then subtracting 0x1000 from
+that address.</p>
+<p>0x1000 is the size reserved for each superblock - regardless of the
+blocksize of the filesystem.</p>
+</section>
+<section id="inodes">
+<h3>Inodes<a class="headerlink" href="#inodes" title="Permalink to this headline">¶</a></h3>
+<p>Each object in the filesystem is represented by an inode. (index node)
+The inode structure contains pointers to the filesystem blocks which contain
+the data held in the object and all of the metadata about an object except
+its longname. (filenames longer than 27 characters)
+The metadata about an object includes the permissions, owner, group, flags,
+size, number of blocks used, access time, change time and modification time.</p>
+<p>Object mode field is POSIX format. (which makes things easier)</p>
+<p>There are also pointers to the first 16 blocks, if the object data can be
+addressed with 16 direct blocks.</p>
+<p>For more than 16 blocks an indirect addressing in form of another tree is
+used. (scheme is the same as the one used for the superblock root nodes)</p>
+<p>The filesize is stored 64bit. Inode counting starts with 1. (while long
+filename inodes start with 0)</p>
+</section>
+<section id="directories">
+<h3>Directories<a class="headerlink" href="#directories" title="Permalink to this headline">¶</a></h3>
+<p>A directory is a filesystem object and has an inode just like a file.
+It is a specially formatted file containing records which associate each
+name with an inode number.</p>
+<p>‘.’ inode number points to the directory inode</p>
+<p>‘..’ inode number points to the parent directory inode</p>
+<p>Eeach filename record additionally got a filename length field.</p>
+<p>One special case are long filenames or subdirectory names.</p>
+<p>These got set a filename length field of 0xff in the corresponding directory
+record plus the longfile inode number also stored in that record.</p>
+<p>With that longfilename inode number, the longfilename tree can be walked
+starting with the superblock longfilename root node pointers.</p>
+</section>
+<section id="special-files">
+<h3>Special files<a class="headerlink" href="#special-files" title="Permalink to this headline">¶</a></h3>
+<p>Symbolic links are also filesystem objects with inodes. They got a specific
+bit in the inode mode field identifying them as symbolic link.</p>
+<p>The directory entry file inode pointer points to the target file inode.</p>
+<p>Hard links got an inode, a directory entry, but a specific mode bit set,
+no block pointers and the directory file record pointing to the target file
+inode.</p>
+<p>Character and block special devices do not exist in QNX as those files
+are handled by the QNX kernel/drivers and created in /dev independent of the
+underlaying filesystem.</p>
+</section>
+<section id="long-filenames">
+<h3>Long filenames<a class="headerlink" href="#long-filenames" title="Permalink to this headline">¶</a></h3>
+<p>Long filenames are stored in a separate addressing tree. The staring point
+is the longfilename root node in the active superblock.</p>
+<p>Each data block (tree leaves) holds one long filename. That filename is
+limited to 510 bytes. The first two starting bytes are used as length field
+for the actual filename.</p>
+<p>If that structure shall fit for all allowed blocksizes, it is clear why there
+is a limit of 510 bytes for the actual filename stored.</p>
+</section>
+<section id="bitmap">
+<h3>Bitmap<a class="headerlink" href="#bitmap" title="Permalink to this headline">¶</a></h3>
+<p>The qnx6fs filesystem allocation bitmap is stored in a tree under bitmap
+root node in the superblock and each bit in the bitmap represents one
+filesystem block.</p>
+<p>The first block is block 0, which starts 0x1000 after superblock start.
+So for a normal qnx6fs 0x3000 (bootblock + superblock) is the physical
+address at which block 0 is located.</p>
+<p>Bits at the end of the last bitmap block are set to 1, if the device is
+smaller than addressing space in the bitmap.</p>
+</section>
+<section id="bitmap-system-area">
+<h3>Bitmap system area<a class="headerlink" href="#bitmap-system-area" title="Permalink to this headline">¶</a></h3>
+<p>The bitmap itself is divided into three parts.</p>
+<p>First the system area, that is split into two halves.</p>
+<p>Then userspace.</p>
+<p>The requirement for a static, fixed preallocated system area comes from how
+qnx6fs deals with writes.</p>
+<p>Each superblock got its own half of the system area. So superblock #1
+always uses blocks from the lower half while superblock #2 just writes to
+blocks represented by the upper half bitmap system area bits.</p>
+<p>Bitmap blocks, Inode blocks and indirect addressing blocks for those two
+tree structures are treated as system blocks.</p>
+<p>The rational behind that is that a write request can work on a new snapshot
+(system area of the inactive - resp. lower serial numbered superblock) while
+at the same time there is still a complete stable filesystem structure in the
+other half of the system area.</p>
+<p>When finished with writing (a sync write is completed, the maximum sync leap
+time or a filesystem sync is requested), serial of the previously inactive
+superblock atomically is increased and the fs switches over to that - then
+stable declared - superblock.</p>
+<p>For all data outside the system area, blocks are just copied while writing.</p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">The QNX6 Filesystem</a><ul>
+<li><a class="reference internal" href="#option">Option</a></li>
+<li><a class="reference internal" href="#specification">Specification</a><ul>
+<li><a class="reference internal" href="#blocks">Blocks</a></li>
+<li><a class="reference internal" href="#the-superblocks">The superblocks</a></li>
+<li><a class="reference internal" href="#inodes">Inodes</a></li>
+<li><a class="reference internal" href="#directories">Directories</a></li>
+<li><a class="reference internal" href="#special-files">Special files</a></li>
+<li><a class="reference internal" href="#long-filenames">Long filenames</a></li>
+<li><a class="reference internal" href="#bitmap">Bitmap</a></li>
+<li><a class="reference internal" href="#bitmap-system-area">Bitmap system area</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/filesystems/qnx6.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/filesystems/qnx6.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

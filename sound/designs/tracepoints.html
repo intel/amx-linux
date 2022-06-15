@@ -1,0 +1,263 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Tracepoints in ALSA &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Proc Files of ALSA Drivers" href="procfile.html" />
+    <link rel="prev" title="ALSA Jack Controls" href="jack-controls.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="tracepoints-in-alsa">
+<h1>Tracepoints in ALSA<a class="headerlink" href="#tracepoints-in-alsa" title="Permalink to this headline">¶</a></h1>
+<p>2017/07/02
+Takasahi Sakamoto</p>
+<section id="tracepoints-in-alsa-pcm-core">
+<h2>Tracepoints in ALSA PCM core<a class="headerlink" href="#tracepoints-in-alsa-pcm-core" title="Permalink to this headline">¶</a></h2>
+<p>ALSA PCM core registers <code class="docutils literal notranslate"><span class="pre">snd_pcm</span></code> subsystem to kernel tracepoint system.
+This subsystem includes two categories of tracepoints; for state of PCM buffer
+and for processing of PCM hardware parameters. These tracepoints are available
+when corresponding kernel configurations are enabled. When <code class="docutils literal notranslate"><span class="pre">CONFIG_SND_DEBUG</span></code>
+is enabled, the latter tracepoints are available. When additional
+<code class="docutils literal notranslate"><span class="pre">SND_PCM_XRUN_DEBUG</span></code> is enabled too, the former trace points are enabled.</p>
+<section id="tracepoints-for-state-of-pcm-buffer">
+<h3>Tracepoints for state of PCM buffer<a class="headerlink" href="#tracepoints-for-state-of-pcm-buffer" title="Permalink to this headline">¶</a></h3>
+<p>This category includes four tracepoints; <code class="docutils literal notranslate"><span class="pre">hwptr</span></code>, <code class="docutils literal notranslate"><span class="pre">applptr</span></code>, <code class="docutils literal notranslate"><span class="pre">xrun</span></code> and
+<code class="docutils literal notranslate"><span class="pre">hw_ptr_error</span></code>.</p>
+</section>
+<section id="tracepoints-for-processing-of-pcm-hardware-parameters">
+<h3>Tracepoints for processing of PCM hardware parameters<a class="headerlink" href="#tracepoints-for-processing-of-pcm-hardware-parameters" title="Permalink to this headline">¶</a></h3>
+<p>This category includes two tracepoints; <code class="docutils literal notranslate"><span class="pre">hw_mask_param</span></code> and
+<code class="docutils literal notranslate"><span class="pre">hw_interval_param</span></code>.</p>
+<p>In a design of ALSA PCM core, data transmission is abstracted as PCM substream.
+Applications manage PCM substream to maintain data transmission for PCM frames.
+Before starting the data transmission, applications need to configure PCM
+substream. In this procedure, PCM hardware parameters are decided by
+interaction between applications and ALSA PCM core. Once decided, runtime of
+the PCM substream keeps the parameters.</p>
+<p>The parameters are described in struct snd_pcm_hw_params. This
+structure includes several types of parameters. Applications set preferable
+value to these parameters, then execute ioctl(2) with SNDRV_PCM_IOCTL_HW_REFINE
+or SNDRV_PCM_IOCTL_HW_PARAMS. The former is used just for refining available
+set of parameters. The latter is used for an actual decision of the parameters.</p>
+<p>The struct snd_pcm_hw_params structure has below members:</p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">flags</span></code></dt><dd><p>Configurable. ALSA PCM core and some drivers handle this flag to select
+convenient parameters or change their behaviour.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">masks</span></code></dt><dd><p>Configurable. This type of parameter is described in
+struct snd_mask and represent mask values. As of PCM protocol
+v2.0.13, three types are defined.</p>
+<ul class="simple">
+<li><p>SNDRV_PCM_HW_PARAM_ACCESS</p></li>
+<li><p>SNDRV_PCM_HW_PARAM_FORMAT</p></li>
+<li><p>SNDRV_PCM_HW_PARAM_SUBFORMAT</p></li>
+</ul>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">intervals</span></code></dt><dd><p>Configurable. This type of parameter is described in
+struct snd_interval and represent values with a range. As of
+PCM protocol v2.0.13, twelve types are defined.</p>
+<ul class="simple">
+<li><p>SNDRV_PCM_HW_PARAM_SAMPLE_BITS</p></li>
+<li><p>SNDRV_PCM_HW_PARAM_FRAME_BITS</p></li>
+<li><p>SNDRV_PCM_HW_PARAM_CHANNELS</p></li>
+<li><p>SNDRV_PCM_HW_PARAM_RATE</p></li>
+<li><p>SNDRV_PCM_HW_PARAM_PERIOD_TIME</p></li>
+<li><p>SNDRV_PCM_HW_PARAM_PERIOD_SIZE</p></li>
+<li><p>SNDRV_PCM_HW_PARAM_PERIOD_BYTES</p></li>
+<li><p>SNDRV_PCM_HW_PARAM_PERIODS</p></li>
+<li><p>SNDRV_PCM_HW_PARAM_BUFFER_TIME</p></li>
+<li><p>SNDRV_PCM_HW_PARAM_BUFFER_SIZE</p></li>
+<li><p>SNDRV_PCM_HW_PARAM_BUFFER_BYTES</p></li>
+<li><p>SNDRV_PCM_HW_PARAM_TICK_TIME</p></li>
+</ul>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">rmask</span></code></dt><dd><p>Configurable. This is evaluated at ioctl(2) with
+SNDRV_PCM_IOCTL_HW_REFINE only. Applications can select which
+mask/interval parameter can be changed by ALSA PCM core. For
+SNDRV_PCM_IOCTL_HW_PARAMS, this mask is ignored and all of parameters
+are going to be changed.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">cmask</span></code></dt><dd><p>Read-only. After returning from ioctl(2), buffer in user space for
+struct snd_pcm_hw_params includes result of each operation.
+This mask represents which mask/interval parameter is actually changed.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">info</span></code></dt><dd><p>Read-only. This represents hardware/driver capabilities as bit flags
+with SNDRV_PCM_INFO_XXX. Typically, applications execute ioctl(2) with
+SNDRV_PCM_IOCTL_HW_REFINE to retrieve this flag, then decide candidates
+of parameters and execute ioctl(2) with SNDRV_PCM_IOCTL_HW_PARAMS to
+configure PCM substream.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">msbits</span></code></dt><dd><p>Read-only. This value represents available bit width in MSB side of
+a PCM sample. When a parameter of SNDRV_PCM_HW_PARAM_SAMPLE_BITS was
+decided as a fixed number, this value is also calculated according to
+it. Else, zero. But this behaviour depends on implementations in driver
+side.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">rate_num</span></code></dt><dd><p>Read-only. This value represents numerator of sampling rate in fraction
+notation. Basically, when a parameter of SNDRV_PCM_HW_PARAM_RATE was
+decided as a single value, this value is also calculated according to
+it. Else, zero. But this behaviour depends on implementations in driver
+side.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">rate_den</span></code></dt><dd><p>Read-only. This value represents denominator of sampling rate in
+fraction notation. Basically, when a parameter of
+SNDRV_PCM_HW_PARAM_RATE was decided as a single value, this value is
+also calculated according to it. Else, zero. But this behaviour depends
+on implementations in driver side.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">fifo_size</span></code></dt><dd><p>Read-only. This value represents the size of FIFO in serial sound
+interface of hardware. Basically, each driver can assigns a proper
+value to this parameter but some drivers intentionally set zero with
+a care of hardware design or data transmission protocol.</p>
+</dd>
+</dl>
+<p>ALSA PCM core handles buffer of struct snd_pcm_hw_params when
+applications execute ioctl(2) with SNDRV_PCM_HW_REFINE or SNDRV_PCM_HW_PARAMS.
+Parameters in the buffer are changed according to
+struct snd_pcm_hardware and rules of constraints in the runtime. The
+structure describes capabilities of handled hardware. The rules describes
+dependencies on which a parameter is decided according to several parameters.
+A rule has a callback function, and drivers can register arbitrary functions
+to compute the target parameter. ALSA PCM core registers some rules to the
+runtime as a default.</p>
+<p>Each driver can join in the interaction as long as it prepared for two stuffs
+in a callback of struct snd_pcm_ops.open.</p>
+<ol class="arabic simple">
+<li><p>In the callback, drivers are expected to change a member of
+struct snd_pcm_hardware type in the runtime, according to
+capacities of corresponding hardware.</p></li>
+<li><p>In the same callback, drivers are also expected to register additional rules
+of constraints into the runtime when several parameters have dependencies
+due to hardware design.</p></li>
+</ol>
+<p>The driver can refers to result of the interaction in a callback of
+struct snd_pcm_ops.hw_params, however it should not change the
+content.</p>
+<p>Tracepoints in this category are designed to trace changes of the
+mask/interval parameters. When ALSA PCM core changes them, <code class="docutils literal notranslate"><span class="pre">hw_mask_param</span></code> or
+<code class="docutils literal notranslate"><span class="pre">hw_interval_param</span></code> event is probed according to type of the changed parameter.</p>
+<p>ALSA PCM core also has a pretty print format for each of the tracepoints. Below
+is an example for <code class="docutils literal notranslate"><span class="pre">hw_mask_param</span></code>.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>hw_mask_param: pcmC0D0p 001/023 FORMAT 00000000000000000000001000000044 00000000000000000000001000000044
+</pre></div>
+</div>
+<p>Below is an example for <code class="docutils literal notranslate"><span class="pre">hw_interval_param</span></code>.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>hw_interval_param: pcmC0D0p 000/023 BUFFER_SIZE 0 0 [0 4294967295] 0 1 [0 4294967295]
+</pre></div>
+</div>
+<p>The first three fields are common. They represent name of ALSA PCM character
+device, rules of constraint and name of the changed parameter, in order. The
+field for rules of constraint consists of two sub-fields; index of applied rule
+and total number of rules added to the runtime. As an exception, the index 000
+means that the parameter is changed by ALSA PCM core, regardless of the rules.</p>
+<p>The rest of field represent state of the parameter before/after changing. These
+fields are different according to type of the parameter. For parameters of mask
+type, the fields represent hexadecimal dump of content of the parameter. For
+parameters of interval type, the fields represent values of each member of
+<code class="docutils literal notranslate"><span class="pre">empty</span></code>, <code class="docutils literal notranslate"><span class="pre">integer</span></code>, <code class="docutils literal notranslate"><span class="pre">openmin</span></code>, <code class="docutils literal notranslate"><span class="pre">min</span></code>, <code class="docutils literal notranslate"><span class="pre">max</span></code>, <code class="docutils literal notranslate"><span class="pre">openmax</span></code> in
+struct snd_interval in this order.</p>
+</section>
+</section>
+<section id="tracepoints-in-drivers">
+<h2>Tracepoints in drivers<a class="headerlink" href="#tracepoints-in-drivers" title="Permalink to this headline">¶</a></h2>
+<p>Some drivers have tracepoints for developers’ convenience. For them, please
+refer to each documentation or implementation.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Tracepoints in ALSA</a><ul>
+<li><a class="reference internal" href="#tracepoints-in-alsa-pcm-core">Tracepoints in ALSA PCM core</a><ul>
+<li><a class="reference internal" href="#tracepoints-for-state-of-pcm-buffer">Tracepoints for state of PCM buffer</a></li>
+<li><a class="reference internal" href="#tracepoints-for-processing-of-pcm-hardware-parameters">Tracepoints for processing of PCM hardware parameters</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#tracepoints-in-drivers">Tracepoints in drivers</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/sound/designs/tracepoints.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/sound/designs/tracepoints.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

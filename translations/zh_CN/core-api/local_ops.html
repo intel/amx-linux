@@ -1,0 +1,292 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>本地原子操作的语义和行为 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="padata并行执行机制" href="padata.html" />
+    <link rel="prev" title="与atomic_t相比，refcount_t的API是这样的" href="refcount-vs-atomic.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../core-api/local_ops.html"><span class="doc">Semantics and Behavior of Local Atomic Operations</span></a></p>
+</dd>
+<dt class="field-even">翻译</dt>
+<dd class="field-even"><p>司延腾 Yanteng Si &lt;<a class="reference external" href="mailto:siyanteng&#37;&#52;&#48;loongson&#46;cn">siyanteng<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+</dl>
+<section id="cn-local-ops">
+<span id="id1"></span><h1>本地原子操作的语义和行为<a class="headerlink" href="#cn-local-ops" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">作者</dt>
+<dd class="field-odd"><p>Mathieu Desnoyers</p>
+</dd>
+</dl>
+<p>本文解释了本地原子操作的目的，如何为任何给定的架构实现这些操作，并说明了
+如何正确使用这些操作。它还强调了在内存写入顺序很重要的情况下，跨CPU读取
+这些本地变量时必须采取的预防措施。</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>注意，基于 <code class="docutils literal notranslate"><span class="pre">local_t</span></code> 的操作不建议用于一般内核操作。请使用 <code class="docutils literal notranslate"><span class="pre">this_cpu</span></code>
+操作来代替使用，除非真的有特殊目的。大多数内核中使用的 <code class="docutils literal notranslate"><span class="pre">local_t</span></code> 已
+经被 <code class="docutils literal notranslate"><span class="pre">this_cpu</span></code> 操作所取代。 <code class="docutils literal notranslate"><span class="pre">this_cpu</span></code> 操作在一条指令中结合了重
+定位和类似 <code class="docutils literal notranslate"><span class="pre">local_t</span></code> 的语义，产生了更紧凑和更快的执行代码。</p>
+</div>
+<section id="id2">
+<h2>本地原子操作的目的<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>本地原子操作的目的是提供快速和高度可重入的每CPU计数器。它们通过移除LOCK前
+缀和通常需要在CPU间同步的内存屏障，将标准原子操作的性能成本降到最低。</p>
+<p>在许多情况下，拥有快速的每CPU原子计数器是很有吸引力的：它不需要禁用中断来保护中
+断处理程序，它允许在NMI（Non Maskable Interrupt）处理程序中使用连贯的计数器。
+它对追踪目的和各种性能监测计数器特别有用。</p>
+<p>本地原子操作只保证在拥有数据的CPU上的变量修改的原子性。因此，必须注意确保只
+有一个CPU写到 <code class="docutils literal notranslate"><span class="pre">local_t</span></code> 的数据。这是通过使用每CPU的数据来实现的，并确
+保我们在一个抢占式安全上下文中修改它。然而，从任何一个CPU读取 <code class="docutils literal notranslate"><span class="pre">local_t</span></code>
+数据都是允许的：这样它就会显得与所有者CPU的其他内存写入顺序不一致。</p>
+</section>
+<section id="id3">
+<h2>针对特定架构的实现<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h2>
+<p>这可以通过稍微修改标准的原子操作来实现：只有它们的UP变体必须被保留。这通常
+意味着删除LOCK前缀（在i386和x86_64上）和任何SMP同步屏障。如果架构在SMP和
+UP之间没有不同的行为，在你的架构的 <code class="docutils literal notranslate"><span class="pre">local.h</span></code> 中包括 <code class="docutils literal notranslate"><span class="pre">asm-generic/local.h</span></code>
+就足够了。</p>
+<p>通过在一个结构体中嵌入一个 <code class="docutils literal notranslate"><span class="pre">atomic_long_t</span></code> ， <code class="docutils literal notranslate"><span class="pre">local_t</span></code> 类型被定义为
+一个不透明的 <code class="docutils literal notranslate"><span class="pre">signed</span> <span class="pre">long</span></code> 。这样做的目的是为了使从这个类型到
+<code class="docutils literal notranslate"><span class="pre">long</span></code> 的转换失败。该定义看起来像:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>typedef struct { atomic_long_t a; } local_t;
+</pre></div>
+</div>
+</section>
+<section id="id4">
+<h2>使用本地原子操作时应遵循的规则<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p>被本地操作触及的变量必须是每cpu的变量。</p></li>
+<li><p><em>只有</em> 这些变量的CPU所有者才可以写入这些变量。</p></li>
+<li><p>这个CPU可以从任何上下文（进程、中断、软中断、nmi…）中使用本地操作来更新
+它的local_t变量。</p></li>
+<li><p>当在进程上下文中使用本地操作时，必须禁用抢占（或中断），以确保进程在获得每
+CPU变量和进行实际的本地操作之间不会被迁移到不同的CPU。</p></li>
+<li><p>当在中断上下文中使用本地操作时，在主线内核上不需要特别注意，因为它们将在局
+部CPU上运行，并且已经禁用了抢占。然而，我建议无论如何都要明确地禁用抢占，
+以确保它在-rt内核上仍能正确工作。</p></li>
+<li><p>读取本地cpu变量将提供该变量的当前拷贝。</p></li>
+<li><p>对这些变量的读取可以从任何CPU进行，因为对 “ <code class="docutils literal notranslate"><span class="pre">long</span></code> ”，对齐的变量的更新
+总是原子的。由于写入程序的CPU没有进行内存同步，所以在读取 <em>其他</em> cpu的变
+量时，可以读取该变量的过期副本。</p></li>
+</ul>
+</section>
+<section id="id5">
+<h2>如何使用本地原子操作<a class="headerlink" href="#id5" title="Permalink to this headline">¶</a></h2>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#include &lt;linux/percpu.h&gt;
+#include &lt;asm/local.h&gt;
+
+static DEFINE_PER_CPU(local_t, counters) = LOCAL_INIT(0);
+</pre></div>
+</div>
+</section>
+<section id="id6">
+<h2>计数器<a class="headerlink" href="#id6" title="Permalink to this headline">¶</a></h2>
+<p>计数是在一个signed long的所有位上进行的。</p>
+<p>在可抢占的上下文中，围绕本地原子操作使用 <code class="docutils literal notranslate"><span class="pre">get_cpu_var()</span></code> 和
+<code class="docutils literal notranslate"><span class="pre">put_cpu_var()</span></code> ：它确保在对每个cpu变量进行写访问时，抢占被禁用。比如
+说:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>local_inc(&amp;get_cpu_var(counters));
+put_cpu_var(counters);
+</pre></div>
+</div>
+<p>如果你已经在一个抢占安全上下文中，你可以使用 <code class="docutils literal notranslate"><span class="pre">this_cpu_ptr()</span></code> 代替:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>local_inc(this_cpu_ptr(&amp;counters));
+</pre></div>
+</div>
+</section>
+<section id="id7">
+<h2>读取计数器<a class="headerlink" href="#id7" title="Permalink to this headline">¶</a></h2>
+<p>那些本地计数器可以从外部的CPU中读取，以求得计数的总和。请注意，local_read
+所看到的跨CPU的数据必须被认为是相对于拥有该数据的CPU上发生的其他内存写入来
+说不符合顺序的:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>long sum = 0;
+for_each_online_cpu(cpu)
+        sum += local_read(&amp;per_cpu(counters, cpu));
+</pre></div>
+</div>
+<p>如果你想使用远程local_read来同步CPU之间对资源的访问，必须在写入者和读取者
+的CPU上分别使用显式的 <code class="docutils literal notranslate"><span class="pre">smp_wmb()</span></code> 和 <code class="docutils literal notranslate"><span class="pre">smp_rmb()</span></code> 内存屏障。如果你使
+用 <code class="docutils literal notranslate"><span class="pre">local_t</span></code> 变量作为写在缓冲区中的字节的计数器，就会出现这种情况：在缓
+冲区写和计数器增量之间应该有一个 <code class="docutils literal notranslate"><span class="pre">smp_wmb()</span></code> ，在计数器读和缓冲区读之间
+也应有一个 <code class="docutils literal notranslate"><span class="pre">smp_rmb()</span></code> 。</p>
+<p>下面是一个使用 <code class="docutils literal notranslate"><span class="pre">local.h</span></code> 实现每个cpu基本计数器的示例模块:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/* test-local.c
+ *
+ * Sample module for local.h usage.
+ */
+
+
+#include &lt;asm/local.h&gt;
+#include &lt;linux/module.h&gt;
+#include &lt;linux/timer.h&gt;
+
+static DEFINE_PER_CPU(local_t, counters) = LOCAL_INIT(0);
+
+static struct timer_list test_timer;
+
+/* IPI called on each CPU. */
+static void test_each(void *info)
+{
+        /* Increment the counter from a non preemptible context */
+        printk(&quot;Increment on cpu %d\n&quot;, smp_processor_id());
+        local_inc(this_cpu_ptr(&amp;counters));
+
+        /* This is what incrementing the variable would look like within a
+         * preemptible context (it disables preemption) :
+         *
+         * local_inc(&amp;get_cpu_var(counters));
+         * put_cpu_var(counters);
+         */
+}
+
+static void do_test_timer(unsigned long data)
+{
+        int cpu;
+
+        /* Increment the counters */
+        on_each_cpu(test_each, NULL, 1);
+        /* Read all the counters */
+        printk(&quot;Counters read from CPU %d\n&quot;, smp_processor_id());
+        for_each_online_cpu(cpu) {
+                printk(&quot;Read : CPU %d, count %ld\n&quot;, cpu,
+                        local_read(&amp;per_cpu(counters, cpu)));
+        }
+        mod_timer(&amp;test_timer, jiffies + 1000);
+}
+
+static int __init test_init(void)
+{
+        /* initialize the timer that will increment the counter */
+        timer_setup(&amp;test_timer, do_test_timer, 0);
+        mod_timer(&amp;test_timer, jiffies + 1);
+
+        return 0;
+}
+
+static void __exit test_exit(void)
+{
+        timer_shutdown_sync(&amp;test_timer);
+}
+
+module_init(test_init);
+module_exit(test_exit);
+
+MODULE_LICENSE(&quot;GPL&quot;);
+MODULE_AUTHOR(&quot;Mathieu Desnoyers&quot;);
+MODULE_DESCRIPTION(&quot;Local Atomic Ops&quot;);
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">本地原子操作的语义和行为</a><ul>
+<li><a class="reference internal" href="#id2">本地原子操作的目的</a></li>
+<li><a class="reference internal" href="#id3">针对特定架构的实现</a></li>
+<li><a class="reference internal" href="#id4">使用本地原子操作时应遵循的规则</a></li>
+<li><a class="reference internal" href="#id5">如何使用本地原子操作</a></li>
+<li><a class="reference internal" href="#id6">计数器</a></li>
+<li><a class="reference internal" href="#id7">读取计数器</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/core-api/local_ops.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/core-api/local_ops.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

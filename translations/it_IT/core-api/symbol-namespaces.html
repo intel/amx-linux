@@ -1,0 +1,272 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Spazio dei nomi dei simboli &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="한국어 번역" href="../../ko_KR/index.html" />
+    <link rel="prev" title="Documentazione dell’API di base" href="index.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>In caso di dubbi sulla correttezza del contenuto di questa traduzione,
+l’unico riferimento valido è la documentazione ufficiale in inglese.
+Per maggiori informazioni consultate le <a class="reference internal" href="../index.html#it-disclaimer"><span class="std std-ref">avvertenze</span></a>.</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../core-api/symbol-namespaces.html"><span class="doc">Symbol Namespaces</span></a></p>
+</dd>
+<dt class="field-even">Translator</dt>
+<dd class="field-even"><p>Federico Vaga &lt;<a class="reference external" href="mailto:federico&#46;vaga&#37;&#52;&#48;vaga&#46;pv&#46;it">federico<span>&#46;</span>vaga<span>&#64;</span>vaga<span>&#46;</span>pv<span>&#46;</span>it</a>&gt;</p>
+</dd>
+</dl>
+<section id="spazio-dei-nomi-dei-simboli">
+<h1>Spazio dei nomi dei simboli<a class="headerlink" href="#spazio-dei-nomi-dei-simboli" title="Permalink to this headline">¶</a></h1>
+<p>Questo documento descrive come usare lo spazio dei nomi dei simboli
+per strutturare quello che viene esportato internamente al kernel
+grazie alle macro della famiglia EXPORT_SYMBOL().</p>
+<section id="introduzione">
+<h2>1. Introduzione<a class="headerlink" href="#introduzione" title="Permalink to this headline">¶</a></h2>
+<p>Lo spazio dei nomi dei simboli è stato introdotto come mezzo per strutturare
+l’API esposta internamente al kernel. Permette ai manutentori di un
+sottosistema di organizzare i simboli esportati in diversi spazi di
+nomi. Questo meccanismo è utile per la documentazione (pensate ad
+esempio allo spazio dei nomi SUBSYSTEM_DEBUG) così come per limitare
+la disponibilità di un gruppo di simboli in altre parti del kernel. Ad
+oggi, i moduli che usano simboli esportati da uno spazio di nomi
+devono prima importare detto spazio. Altrimenti il kernel, a seconda
+della configurazione, potrebbe rifiutare di caricare il modulo o
+avvisare l’utente di un’importazione mancante.</p>
+</section>
+<section id="come-definire-uno-spazio-dei-nomi-dei-simboli">
+<h2>2. Come definire uno spazio dei nomi dei simboli<a class="headerlink" href="#come-definire-uno-spazio-dei-nomi-dei-simboli" title="Permalink to this headline">¶</a></h2>
+<p>I simboli possono essere esportati in spazi dei nomi usando diversi
+meccanismi.  Tutti questi meccanismi cambiano il modo in cui
+EXPORT_SYMBOL e simili vengono guidati verso la creazione di voci in ksymtab.</p>
+</section>
+<section id="usare-le-macro-export-symbol">
+<h2>2.1 Usare le macro EXPORT_SYMBOL<a class="headerlink" href="#usare-le-macro-export-symbol" title="Permalink to this headline">¶</a></h2>
+<p>In aggiunta alle macro EXPORT_SYMBOL() e EXPORT_SYMBOL_GPL(), che permettono
+di esportare simboli del kernel nella rispettiva tabella, ci sono
+varianti che permettono di esportare simboli all’interno di uno spazio dei
+nomi: EXPORT_SYMBOL_NS() ed EXPORT_SYMBOL_NS_GPL(). Queste macro richiedono un
+argomento aggiuntivo: lo spazio dei nomi.
+Tenete presente che per via dell’espansione delle macro questo argomento deve
+essere un simbolo di preprocessore. Per esempio per esportare il
+simbolo <code class="docutils literal notranslate"><span class="pre">usb_stor_suspend</span></code> nello spazio dei nomi <code class="docutils literal notranslate"><span class="pre">USB_STORAGE</span></code> usate:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>EXPORT_SYMBOL_NS(usb_stor_suspend, USB_STORAGE);
+</pre></div>
+</div>
+<p>Di conseguenza, nella tabella dei simboli del kernel ci sarà una voce
+rappresentata dalla struttura <code class="docutils literal notranslate"><span class="pre">kernel_symbol</span></code> che avrà il campo
+<code class="docutils literal notranslate"><span class="pre">namespace</span></code> (spazio dei nomi) impostato. Un simbolo esportato senza uno spazio
+dei nomi avrà questo campo impostato a <code class="docutils literal notranslate"><span class="pre">NULL</span></code>. Non esiste uno spazio dei nomi
+di base. Il programma <code class="docutils literal notranslate"><span class="pre">modpost</span></code> e il codice in kernel/module/main.c usano lo
+spazio dei nomi, rispettivamente, durante la compilazione e durante il
+caricamento di un modulo.</p>
+</section>
+<section id="usare-il-simbolo-di-preprocessore-default-symbol-namespace">
+<h2>2.2 Usare il simbolo di preprocessore DEFAULT_SYMBOL_NAMESPACE<a class="headerlink" href="#usare-il-simbolo-di-preprocessore-default-symbol-namespace" title="Permalink to this headline">¶</a></h2>
+<p>Definire lo spazio dei nomi per tutti i simboli di un sottosistema può essere
+logorante e di difficile manutenzione. Perciò è stato fornito un simbolo
+di preprocessore di base (DEFAULT_SYMBOL_NAMESPACE), che, se impostato,
+diventa lo spazio dei simboli di base per tutti gli usi di EXPORT_SYMBOL()
+ed EXPORT_SYMBOL_GPL() che non specificano esplicitamente uno spazio dei nomi.</p>
+<p>Ci sono molti modi per specificare questo simbolo di preprocessore e il loro
+uso dipende dalle preferenze del manutentore di un sottosistema. La prima
+possibilità è quella di definire il simbolo nel <code class="docutils literal notranslate"><span class="pre">Makefile</span></code> del sottosistema.
+Per esempio per esportare tutti i simboli definiti in usb-common nello spazio
+dei nomi USB_COMMON, si può aggiungere la seguente linea in
+drivers/usb/common/Makefile:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ccflags-y += -DDEFAULT_SYMBOL_NAMESPACE=USB_COMMON
+</pre></div>
+</div>
+<p>Questo cambierà tutte le macro EXPORT_SYMBOL() ed EXPORT_SYMBOL_GPL(). Invece,
+un simbolo esportato con EXPORT_SYMBOL_NS() non verrà cambiato e il simbolo
+verrà esportato nello spazio dei nomi indicato.</p>
+<p>Una seconda possibilità è quella di definire il simbolo di preprocessore
+direttamente nei file da compilare. L’esempio precedente diventerebbe:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#undef  DEFAULT_SYMBOL_NAMESPACE
+#define DEFAULT_SYMBOL_NAMESPACE USB_COMMON
+</pre></div>
+</div>
+<p>Questo va messo prima di un qualsiasi uso di EXPORT_SYMBOL.</p>
+</section>
+<section id="come-usare-i-simboli-esportati-attraverso-uno-spazio-dei-nomi">
+<h2>3. Come usare i simboli esportati attraverso uno spazio dei nomi<a class="headerlink" href="#come-usare-i-simboli-esportati-attraverso-uno-spazio-dei-nomi" title="Permalink to this headline">¶</a></h2>
+<p>Per usare i simboli esportati da uno spazio dei nomi, i moduli del
+kernel devono esplicitamente importare il relativo spazio dei nomi; altrimenti
+il kernel potrebbe rifiutarsi di caricare il modulo. Il codice del
+modulo deve usare la macro MODULE_IMPORT_NS per importare lo spazio
+dei nomi che contiene i simboli desiderati. Per esempio un modulo che
+usa il simbolo usb_stor_suspend deve importare lo spazio dei nomi
+USB_STORAGE usando la seguente dichiarazione:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>MODULE_IMPORT_NS(USB_STORAGE);
+</pre></div>
+</div>
+<p>Questo creerà un’etichetta <code class="docutils literal notranslate"><span class="pre">modinfo</span></code> per ogni spazio dei nomi
+importato. Un risvolto di questo fatto è che gli spazi dei
+nomi importati da un modulo possono essere ispezionati tramite
+modinfo:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ modinfo drivers/usb/storage/ums-karma.ko
+[...]
+import_ns:      USB_STORAGE
+[...]
+</pre></div>
+</div>
+<p>Si consiglia di posizionare la dichiarazione MODULE_IMPORT_NS() vicino
+ai metadati del modulo come MODULE_AUTHOR() o MODULE_LICENSE(). Fate
+riferimento alla sezione 5. per creare automaticamente le importazioni
+mancanti.</p>
+</section>
+<section id="caricare-moduli-che-usano-simboli-provenienti-da-spazi-dei-nomi">
+<h2>4. Caricare moduli che usano simboli provenienti da spazi dei nomi<a class="headerlink" href="#caricare-moduli-che-usano-simboli-provenienti-da-spazi-dei-nomi" title="Permalink to this headline">¶</a></h2>
+<p>Quando un modulo viene caricato (per esempio usando <code class="docutils literal notranslate"><span class="pre">insmod</span></code>), il kernel
+verificherà la disponibilità di ogni simbolo usato e se lo spazio dei nomi
+che potrebbe contenerli è stato importato. Il comportamento di base del kernel
+è di rifiutarsi di caricare quei moduli che non importano tutti gli spazi dei
+nomi necessari. L’errore verrà annotato e il caricamento fallirà con l’errore
+EINVAL. Per caricare i moduli che non soddisfano questo requisito esiste
+un’opzione di configurazione: impostare
+MODULE_ALLOW_MISSING_NAMESPACE_IMPORTS=y caricherà i moduli comunque ma
+emetterà un avviso.</p>
+</section>
+<section id="creare-automaticamente-la-dichiarazione-module-import-ns">
+<h2>5. Creare automaticamente la dichiarazione MODULE_IMPORT_NS<a class="headerlink" href="#creare-automaticamente-la-dichiarazione-module-import-ns" title="Permalink to this headline">¶</a></h2>
+<p>La mancanza di un’importazione può essere individuata facilmente al momento
+della compilazione. Infatti, modpost emetterà un avviso se il modulo usa
+un simbolo da uno spazio dei nomi che non è stato importato.
+La dichiarazione MODULE_IMPORT_NS() viene solitamente aggiunta in un posto
+ben definito (assieme agli altri metadati del modulo). Per facilitare
+la vita di chi scrive moduli (e i manutentori di sottosistemi), esistono uno
+script e un target make per correggere le importazioni mancanti. Questo può
+essere fatto con:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ make nsdeps
+</pre></div>
+</div>
+<p>Lo scenario tipico di chi scrive un modulo potrebbe essere:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>- scrivere codice che dipende da un simbolo appartenente ad uno spazio
+  dei nomi non importato
+- eseguire ``make``
+- aver notato un avviso da modpost che parla di un&#39;importazione
+  mancante
+- eseguire ``make nsdeps`` per aggiungere import nel posto giusto
+</pre></div>
+</div>
+<p>Per i manutentori di sottosistemi che vogliono aggiungere uno spazio dei nomi,
+l’approccio è simile. Di nuovo, eseguendo <code class="docutils literal notranslate"><span class="pre">make</span> <span class="pre">nsdeps</span></code> aggiungerà le
+importazioni mancanti nei moduli inclusi nel kernel:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>- spostare o aggiungere simboli ad uno spazio dei nomi (per esempio
+  usando EXPORT_SYMBOL_NS())
+- eseguire ``make`` (preferibilmente con allmodconfig per coprire tutti
+  i moduli del kernel)
+- aver notato un avviso da modpost che parla di un&#39;importazione
+  mancante
+- eseguire ``make nsdeps`` per aggiungere import nel posto giusto
+</pre></div>
+</div>
+<p>Potete anche eseguire nsdeps per moduli esterni. Solitamente si usa così:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ make -C &lt;path_to_kernel_src&gt; M=$PWD nsdeps
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Spazio dei nomi dei simboli</a><ul>
+<li><a class="reference internal" href="#introduzione">1. Introduzione</a></li>
+<li><a class="reference internal" href="#come-definire-uno-spazio-dei-nomi-dei-simboli">2. Come definire uno spazio dei nomi dei simboli</a></li>
+<li><a class="reference internal" href="#usare-le-macro-export-symbol">2.1 Usare le macro EXPORT_SYMBOL</a></li>
+<li><a class="reference internal" href="#usare-il-simbolo-di-preprocessore-default-symbol-namespace">2.2 Usare il simbolo di preprocessore DEFAULT_SYMBOL_NAMESPACE</a></li>
+<li><a class="reference internal" href="#come-usare-i-simboli-esportati-attraverso-uno-spazio-dei-nomi">3. Come usare i simboli esportati attraverso uno spazio dei nomi</a></li>
+<li><a class="reference internal" href="#caricare-moduli-che-usano-simboli-provenienti-da-spazi-dei-nomi">4. Caricare moduli che usano simboli provenienti da spazi dei nomi</a></li>
+<li><a class="reference internal" href="#creare-automaticamente-la-dichiarazione-module-import-ns">5. Creare automaticamente la dichiarazione MODULE_IMPORT_NS</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/it_IT/core-api/symbol-namespaces.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/it_IT/core-api/symbol-namespaces.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

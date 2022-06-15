@@ -1,0 +1,222 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Getting Started &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="Detailed Usages" href="usage.html" />
+    <link rel="prev" title="DAMON: Data Access MONitor" href="index.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="getting-started">
+<h1>Getting Started<a class="headerlink" href="#getting-started" title="Permalink to this headline">¶</a></h1>
+<p>This document briefly describes how you can use DAMON by demonstrating its
+default user space tool.  Please note that this document describes only a part
+of its features for brevity.  Please refer to the usage <a class="reference external" href="https://github.com/awslabs/damo/blob/next/USAGE.md">doc</a> of the tool for more
+details.</p>
+<section id="prerequisites">
+<h2>Prerequisites<a class="headerlink" href="#prerequisites" title="Permalink to this headline">¶</a></h2>
+<section id="kernel">
+<h3>Kernel<a class="headerlink" href="#kernel" title="Permalink to this headline">¶</a></h3>
+<p>You should first ensure your system is running on a kernel built with
+<code class="docutils literal notranslate"><span class="pre">CONFIG_DAMON_*=y</span></code>.</p>
+</section>
+<section id="user-space-tool">
+<h3>User Space Tool<a class="headerlink" href="#user-space-tool" title="Permalink to this headline">¶</a></h3>
+<p>For the demonstration, we will use the default user space tool for DAMON,
+called DAMON Operator (DAMO).  It is available at
+<a class="reference external" href="https://github.com/awslabs/damo">https://github.com/awslabs/damo</a>.  The examples below assume that <code class="docutils literal notranslate"><span class="pre">damo</span></code> is on
+your <code class="docutils literal notranslate"><span class="pre">$PATH</span></code>.  It’s not mandatory, though.</p>
+<p>Because DAMO is using the sysfs interface (refer to <a class="reference internal" href="usage.html"><span class="doc">Detailed Usages</span></a> for the
+detail) of DAMON, you should ensure <a class="reference internal" href="../../../filesystems/sysfs.html"><span class="doc">sysfs</span></a> is
+mounted.</p>
+</section>
+</section>
+<section id="recording-data-access-patterns">
+<h2>Recording Data Access Patterns<a class="headerlink" href="#recording-data-access-patterns" title="Permalink to this headline">¶</a></h2>
+<p>The commands below record the memory access patterns of a program and save the
+monitoring results to a file.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ git clone https://github.com/sjp38/masim
+$ cd masim; make; ./masim ./configs/zigzag.cfg &amp;
+$ sudo damo record -o damon.data $(pidof masim)
+</pre></div>
+</div>
+<p>The first two lines of the commands download an artificial memory access
+generator program and run it in the background.  The generator will repeatedly
+access two 100 MiB sized memory regions one by one.  You can substitute this
+with your real workload.  The last line asks <code class="docutils literal notranslate"><span class="pre">damo</span></code> to record the access
+pattern in the <code class="docutils literal notranslate"><span class="pre">damon.data</span></code> file.</p>
+</section>
+<section id="visualizing-recorded-patterns">
+<h2>Visualizing Recorded Patterns<a class="headerlink" href="#visualizing-recorded-patterns" title="Permalink to this headline">¶</a></h2>
+<p>You can visualize the pattern in a heatmap, showing which memory region
+(x-axis) got accessed when (y-axis) and how frequently (number).:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ sudo damo report heats --heatmap stdout
+22222222222222222222222222222222222222211111111111111111111111111111111111111100
+44444444444444444444444444444444444444434444444444444444444444444444444444443200
+44444444444444444444444444444444444444433444444444444444444444444444444444444200
+33333333333333333333333333333333333333344555555555555555555555555555555555555200
+33333333333333333333333333333333333344444444444444444444444444444444444444444200
+22222222222222222222222222222222222223355555555555555555555555555555555555555200
+00000000000000000000000000000000000000288888888888888888888888888888888888888400
+00000000000000000000000000000000000000288888888888888888888888888888888888888400
+33333333333333333333333333333333333333355555555555555555555555555555555555555200
+88888888888888888888888888888888888888600000000000000000000000000000000000000000
+88888888888888888888888888888888888888600000000000000000000000000000000000000000
+33333333333333333333333333333333333333444444444444444444444444444444444444443200
+00000000000000000000000000000000000000288888888888888888888888888888888888888400
+[...]
+# access_frequency:  0  1  2  3  4  5  6  7  8  9
+# x-axis: space (139728247021568-139728453431248: 196.848 MiB)
+# y-axis: time (15256597248362-15326899978162: 1 m 10.303 s)
+# resolution: 80x40 (2.461 MiB and 1.758 s for each character)
+</pre></div>
+</div>
+<p>You can also visualize the distribution of the working set size, sorted by the
+size.:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ sudo damo report wss --range 0 101 10
+# &lt;percentile&gt; &lt;wss&gt;
+# target_id     18446632103789443072
+# avr:  107.708 MiB
+  0             0 B |                                                           |
+ 10      95.328 MiB |****************************                               |
+ 20      95.332 MiB |****************************                               |
+ 30      95.340 MiB |****************************                               |
+ 40      95.387 MiB |****************************                               |
+ 50      95.387 MiB |****************************                               |
+ 60      95.398 MiB |****************************                               |
+ 70      95.398 MiB |****************************                               |
+ 80      95.504 MiB |****************************                               |
+ 90     190.703 MiB |*********************************************************  |
+100     196.875 MiB |***********************************************************|
+</pre></div>
+</div>
+<p>Using <code class="docutils literal notranslate"><span class="pre">--sortby</span></code> option with the above command, you can show how the working
+set size has chronologically changed.:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ sudo damo report wss --range 0 101 10 --sortby time
+# &lt;percentile&gt; &lt;wss&gt;
+# target_id     18446632103789443072
+# avr:  107.708 MiB
+  0       3.051 MiB |                                                           |
+ 10     190.703 MiB |***********************************************************|
+ 20      95.336 MiB |*****************************                              |
+ 30      95.328 MiB |*****************************                              |
+ 40      95.387 MiB |*****************************                              |
+ 50      95.332 MiB |*****************************                              |
+ 60      95.320 MiB |*****************************                              |
+ 70      95.398 MiB |*****************************                              |
+ 80      95.398 MiB |*****************************                              |
+ 90      95.340 MiB |*****************************                              |
+100      95.398 MiB |*****************************                              |
+</pre></div>
+</div>
+</section>
+<section id="data-access-pattern-aware-memory-management">
+<h2>Data Access Pattern Aware Memory Management<a class="headerlink" href="#data-access-pattern-aware-memory-management" title="Permalink to this headline">¶</a></h2>
+<p>Below three commands make every memory region of size &gt;=4K that doesn’t
+accessed for &gt;=60 seconds in your workload to be swapped out.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo &quot;#min-size max-size min-acc max-acc min-age max-age action&quot; &gt; test_scheme
+$ echo &quot;4K        max      0       0       60s     max     pageout&quot; &gt;&gt; test_scheme
+$ damo schemes -c test_scheme &lt;pid of your workload&gt;
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Getting Started</a><ul>
+<li><a class="reference internal" href="#prerequisites">Prerequisites</a><ul>
+<li><a class="reference internal" href="#kernel">Kernel</a></li>
+<li><a class="reference internal" href="#user-space-tool">User Space Tool</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#recording-data-access-patterns">Recording Data Access Patterns</a></li>
+<li><a class="reference internal" href="#visualizing-recorded-patterns">Visualizing Recorded Patterns</a></li>
+<li><a class="reference internal" href="#data-access-pattern-aware-memory-management">Data Access Pattern Aware Memory Management</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/admin-guide/mm/damon/start.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/admin-guide/mm/damon/start.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

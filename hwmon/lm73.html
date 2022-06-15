@@ -1,0 +1,220 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Kernel driver lm73 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Kernel driver lm75" href="lm75.html" />
+    <link rel="prev" title="Kernel driver lm70" href="lm70.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="kernel-driver-lm73">
+<h1>Kernel driver lm73<a class="headerlink" href="#kernel-driver-lm73" title="Permalink to this headline">¶</a></h1>
+<p>Supported chips:</p>
+<blockquote>
+<div><ul>
+<li><p>Texas Instruments LM73</p>
+<p>Prefix: ‘lm73’</p>
+<p>Addresses scanned: I2C 0x48, 0x49, 0x4a, 0x4c, 0x4d, and 0x4e</p>
+<p>Datasheet: Publicly available at the Texas Instruments website</p>
+<blockquote>
+<div><p><a class="reference external" href="https://www.ti.com/product/lm73">https://www.ti.com/product/lm73</a></p>
+</div></blockquote>
+</li>
+</ul>
+</div></blockquote>
+<p>Author: Guillaume Ligneul &lt;<a class="reference external" href="mailto:guillaume&#46;ligneul&#37;&#52;&#48;gmail&#46;com">guillaume<span>&#46;</span>ligneul<span>&#64;</span>gmail<span>&#46;</span>com</a>&gt;</p>
+<p>Documentation: Chris Verges &lt;<a class="reference external" href="mailto:kg4ysn&#37;&#52;&#48;gmail&#46;com">kg4ysn<span>&#64;</span>gmail<span>&#46;</span>com</a>&gt;</p>
+<section id="description">
+<h2>Description<a class="headerlink" href="#description" title="Permalink to this headline">¶</a></h2>
+<p>The LM73 is a digital temperature sensor.  All temperature values are
+given in degrees Celsius.</p>
+</section>
+<section id="measurement-resolution-support">
+<h2>Measurement Resolution Support<a class="headerlink" href="#measurement-resolution-support" title="Permalink to this headline">¶</a></h2>
+<p>The LM73 supports four resolutions, defined in terms of degrees C per
+LSB: 0.25, 0.125, 0.0625, and 0.3125.  Changing the resolution mode
+affects the conversion time of the LM73’s analog-to-digital converter.
+From userspace, the desired resolution can be specified as a function of
+conversion time via the ‘update_interval’ sysfs attribute for the
+device.  This attribute will normalize ranges of input values to the
+maximum times defined for the resolution in the datasheet.</p>
+<blockquote>
+<div><table class="docutils align-default">
+<colgroup>
+<col style="width: 34%" />
+<col style="width: 34%" />
+<col style="width: 32%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Resolution</p></th>
+<th class="head"><p>Conv. Time</p></th>
+<th class="head"><p>Input Range</p></th>
+</tr>
+<tr class="row-even"><th class="head"><p>(C/LSB)</p></th>
+<th class="head"><p>(msec)</p></th>
+<th class="head"><p>(msec)</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-odd"><td><p>0.25</p></td>
+<td><p>14</p></td>
+<td><p>0..14</p></td>
+</tr>
+<tr class="row-even"><td><p>0.125</p></td>
+<td><p>28</p></td>
+<td><p>15..28</p></td>
+</tr>
+<tr class="row-odd"><td><p>0.0625</p></td>
+<td><p>56</p></td>
+<td><p>29..56</p></td>
+</tr>
+<tr class="row-even"><td><p>0.03125</p></td>
+<td><p>112</p></td>
+<td><p>57..infinity</p></td>
+</tr>
+</tbody>
+</table>
+</div></blockquote>
+<p>The following examples show how the ‘update_interval’ attribute can be
+used to change the conversion time:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo 0 &gt; update_interval
+$ cat update_interval
+14
+$ cat temp1_input
+24250
+
+$ echo 22 &gt; update_interval
+$ cat update_interval
+28
+$ cat temp1_input
+24125
+
+$ echo 56 &gt; update_interval
+$ cat update_interval
+56
+$ cat temp1_input
+24062
+
+$ echo 85 &gt; update_interval
+$ cat update_interval
+112
+$ cat temp1_input
+24031
+</pre></div>
+</div>
+<p>As shown here, the lm73 driver automatically adjusts any user input for
+‘update_interval’ via a step function.  Reading back the
+‘update_interval’ value after a write operation will confirm the
+conversion time actively in use.</p>
+<p>Mathematically, the resolution can be derived from the conversion time
+via the following function:</p>
+<blockquote>
+<div><p>g(x) = 0.250 * [log(x/14) / log(2)]</p>
+</div></blockquote>
+<p>where ‘x’ is the output from ‘update_interval’ and ‘g(x)’ is the
+resolution in degrees C per LSB.</p>
+</section>
+<section id="alarm-support">
+<h2>Alarm Support<a class="headerlink" href="#alarm-support" title="Permalink to this headline">¶</a></h2>
+<p>The LM73 features a simple over-temperature alarm mechanism.  This
+feature is exposed via the sysfs attributes.</p>
+<p>The attributes ‘temp1_max_alarm’ and ‘temp1_min_alarm’ are flags
+provided by the LM73 that indicate whether the measured temperature has
+passed the ‘temp1_max’ and ‘temp1_min’ thresholds, respectively.  These
+values _must_ be read to clear the registers on the LM73.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Kernel driver lm73</a><ul>
+<li><a class="reference internal" href="#description">Description</a></li>
+<li><a class="reference internal" href="#measurement-resolution-support">Measurement Resolution Support</a></li>
+<li><a class="reference internal" href="#alarm-support">Alarm Support</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/hwmon/lm73.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/hwmon/lm73.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

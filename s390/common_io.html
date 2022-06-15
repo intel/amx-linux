@@ -1,0 +1,232 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>S/390 common I/O-Layer &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="S/390 PCI" href="pci.html" />
+    <link rel="prev" title="The s390 SCSI dump tool (zfcpdump)" href="zfcpdump.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="s-390-common-i-o-layer">
+<h1>S/390 common I/O-Layer<a class="headerlink" href="#s-390-common-i-o-layer" title="Permalink to this headline">¶</a></h1>
+<section id="command-line-parameters-procfs-and-debugfs-entries">
+<h2>command line parameters, procfs and debugfs entries<a class="headerlink" href="#command-line-parameters-procfs-and-debugfs-entries" title="Permalink to this headline">¶</a></h2>
+<section id="command-line-parameters">
+<h3>Command line parameters<a class="headerlink" href="#command-line-parameters" title="Permalink to this headline">¶</a></h3>
+<ul>
+<li><p>ccw_timeout_log</p>
+<p>Enable logging of debug information in case of ccw device timeouts.</p>
+</li>
+<li><p>cio_ignore = device[,device[,..]]</p>
+<blockquote>
+<div><p>device := {all | [!]ipldev | [!]condev | [!]&lt;devno&gt; | [!]&lt;devno&gt;-&lt;devno&gt;}</p>
+</div></blockquote>
+<p>The given devices will be ignored by the common I/O-layer; no detection
+and device sensing will be done on any of those devices. The subchannel to
+which the device in question is attached will be treated as if no device was
+attached.</p>
+<p>An ignored device can be un-ignored later; see the “/proc entries”-section for
+details.</p>
+<p>The devices must be given either as bus ids (0.x.abcd) or as hexadecimal
+device numbers (0xabcd or abcd, for 2.4 backward compatibility). If you
+give a device number 0xabcd, it will be interpreted as 0.0.abcd.</p>
+<p>You can use the ‘all’ keyword to ignore all devices. The ‘ipldev’ and ‘condev’
+keywords can be used to refer to the CCW based boot device and CCW console
+device respectively (these are probably useful only when combined with the ‘!’
+operator). The ‘!’ operator will cause the I/O-layer to _not_ ignore a device.
+The command line
+is parsed from left to right.</p>
+<p>For example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>cio_ignore=0.0.0023-0.0.0042,0.0.4711
+</pre></div>
+</div>
+<p>will ignore all devices ranging from 0.0.0023 to 0.0.0042 and the device
+0.0.4711, if detected.</p>
+<p>As another example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>cio_ignore=all,!0.0.4711,!0.0.fd00-0.0.fd02
+</pre></div>
+</div>
+<p>will ignore all devices but 0.0.4711, 0.0.fd00, 0.0.fd01, 0.0.fd02.</p>
+<p>By default, no devices are ignored.</p>
+</li>
+</ul>
+</section>
+<section id="proc-entries">
+<h3>/proc entries<a class="headerlink" href="#proc-entries" title="Permalink to this headline">¶</a></h3>
+<ul>
+<li><p>/proc/cio_ignore</p>
+<p>Lists the ranges of devices (by bus id) which are ignored by common I/O.</p>
+<p>You can un-ignore certain or all devices by piping to /proc/cio_ignore.
+“free all” will un-ignore all ignored devices,
+“free &lt;device range&gt;, &lt;device range&gt;, …” will un-ignore the specified
+devices.</p>
+<p>For example, if devices 0.0.0023 to 0.0.0042 and 0.0.4711 are ignored,</p>
+<ul class="simple">
+<li><p>echo free 0.0.0030-0.0.0032 &gt; /proc/cio_ignore
+will un-ignore devices 0.0.0030 to 0.0.0032 and will leave devices 0.0.0023
+to 0.0.002f, 0.0.0033 to 0.0.0042 and 0.0.4711 ignored;</p></li>
+<li><p>echo free 0.0.0041 &gt; /proc/cio_ignore will furthermore un-ignore device
+0.0.0041;</p></li>
+<li><p>echo free all &gt; /proc/cio_ignore will un-ignore all remaining ignored
+devices.</p></li>
+</ul>
+<p>When a device is un-ignored, device recognition and sensing is performed and
+the device driver will be notified if possible, so the device will become
+available to the system. Note that un-ignoring is performed asynchronously.</p>
+<p>You can also add ranges of devices to be ignored by piping to
+/proc/cio_ignore; “add &lt;device range&gt;, &lt;device range&gt;, …” will ignore the
+specified devices.</p>
+<dl class="simple">
+<dt>Note: While already known devices can be added to the list of devices to be</dt><dd><p>ignored, there will be no effect on then. However, if such a device
+disappears and then reappears, it will then be ignored. To make
+known devices go away, you need the “purge” command (see below).</p>
+</dd>
+</dl>
+<p>For example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>&quot;echo add 0.0.a000-0.0.accc, 0.0.af00-0.0.afff &gt; /proc/cio_ignore&quot;
+</pre></div>
+</div>
+<p>will add 0.0.a000-0.0.accc and 0.0.af00-0.0.afff to the list of ignored
+devices.</p>
+<p>You can remove already known but now ignored devices via:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>&quot;echo purge &gt; /proc/cio_ignore&quot;
+</pre></div>
+</div>
+<p>All devices ignored but still registered and not online (= not in use)
+will be deregistered and thus removed from the system.</p>
+<p>The devices can be specified either by bus id (0.x.abcd) or, for 2.4 backward
+compatibility, by the device number in hexadecimal (0xabcd or abcd). Device
+numbers given as 0xabcd will be interpreted as 0.0.abcd.</p>
+</li>
+<li><p>/proc/cio_settle</p>
+<p>A write request to this file is blocked until all queued cio actions are
+handled. This will allow userspace to wait for pending work affecting
+device availability after changing cio_ignore or the hardware configuration.</p>
+</li>
+<li><p>For some of the information present in the /proc filesystem in 2.4 (namely,
+/proc/subchannels and /proc/chpids), see <a class="reference internal" href="driver-model.html"><span class="doc">S/390 driver model interfaces</span></a>.
+Information formerly in /proc/irq_count is now in /proc/interrupts.</p></li>
+</ul>
+</section>
+<section id="debugfs-entries">
+<h3>debugfs entries<a class="headerlink" href="#debugfs-entries" title="Permalink to this headline">¶</a></h3>
+<ul>
+<li><p>/sys/kernel/debug/s390dbf/cio_*/ (S/390 debug feature)</p>
+<p>Some views generated by the debug feature to hold various debug outputs.</p>
+<ul class="simple">
+<li><p>/sys/kernel/debug/s390dbf/cio_crw/sprintf
+Messages from the processing of pending channel report words (machine check
+handling).</p></li>
+<li><p>/sys/kernel/debug/s390dbf/cio_msg/sprintf
+Various debug messages from the common I/O-layer.</p></li>
+<li><p>/sys/kernel/debug/s390dbf/cio_trace/hex_ascii
+Logs the calling of functions in the common I/O-layer and, if applicable,
+which subchannel they were called for, as well as dumps of some data
+structures (like irb in an error case).</p></li>
+</ul>
+<p>The level of logging can be changed to be more or less verbose by piping to
+/sys/kernel/debug/s390dbf/cio_*/level a number between 0 and 6; see the
+documentation on the S/390 debug feature (<a class="reference internal" href="s390dbf.html"><span class="doc">S390 Debug Feature</span></a>)
+for details.</p>
+</li>
+</ul>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">S/390 common I/O-Layer</a><ul>
+<li><a class="reference internal" href="#command-line-parameters-procfs-and-debugfs-entries">command line parameters, procfs and debugfs entries</a><ul>
+<li><a class="reference internal" href="#command-line-parameters">Command line parameters</a></li>
+<li><a class="reference internal" href="#proc-entries">/proc entries</a></li>
+<li><a class="reference internal" href="#debugfs-entries">debugfs entries</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/s390/common_io.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/s390/common_io.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

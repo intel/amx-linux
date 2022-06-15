@@ -1,0 +1,261 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Kernel driver fam15h_power &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Kernel driver fsp3y" href="fsp-3y.html" />
+    <link rel="prev" title="Kernel driver f71882fg" href="f71882fg.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="kernel-driver-fam15h-power">
+<h1>Kernel driver fam15h_power<a class="headerlink" href="#kernel-driver-fam15h-power" title="Permalink to this headline">¶</a></h1>
+<p>Supported chips:</p>
+<ul>
+<li><p>AMD Family 15h Processors</p></li>
+<li><p>AMD Family 16h Processors</p>
+<p>Prefix: ‘fam15h_power’</p>
+<p>Addresses scanned: PCI space</p>
+<p>Datasheets:</p>
+<ul class="simple">
+<li><p>BIOS and Kernel Developer’s Guide (BKDG) For AMD Family 15h Processors</p></li>
+<li><p>BIOS and Kernel Developer’s Guide (BKDG) For AMD Family 16h Processors</p></li>
+<li><p>AMD64 Architecture Programmer’s Manual Volume 2: System Programming</p></li>
+</ul>
+</li>
+</ul>
+<p>Author: Andreas Herrmann &lt;<a class="reference external" href="mailto:herrmann&#46;der&#46;user&#37;&#52;&#48;googlemail&#46;com">herrmann<span>&#46;</span>der<span>&#46;</span>user<span>&#64;</span>googlemail<span>&#46;</span>com</a>&gt;</p>
+<section id="description">
+<h2>Description<a class="headerlink" href="#description" title="Permalink to this headline">¶</a></h2>
+<ol class="arabic simple">
+<li><p>Processor TDP (Thermal design power)</p></li>
+</ol>
+<p>Given a fixed frequency and voltage, the power consumption of a
+processor varies based on the workload being executed. Derated power
+is the power consumed when running a specific application. Thermal
+design power (TDP) is an example of derated power.</p>
+<p>This driver permits reading of registers providing power information
+of AMD Family 15h and 16h processors via TDP algorithm.</p>
+<p>For AMD Family 15h and 16h processors the following power values can
+be calculated using different processor northbridge function
+registers:</p>
+<ul class="simple">
+<li><dl class="simple">
+<dt>BasePwrWatts:</dt><dd><p>Specifies in watts the maximum amount of power
+consumed by the processor for NB and logic external to the core.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>ProcessorPwrWatts:</dt><dd><p>Specifies in watts the maximum amount of power
+the processor can support.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>CurrPwrWatts:</dt><dd><p>Specifies in watts the current amount of power being
+consumed by the processor.</p>
+</dd>
+</dl>
+</li>
+</ul>
+<p>This driver provides ProcessorPwrWatts and CurrPwrWatts:</p>
+<ul class="simple">
+<li><p>power1_crit (ProcessorPwrWatts)</p></li>
+<li><p>power1_input (CurrPwrWatts)</p></li>
+</ul>
+<p>On multi-node processors the calculated value is for the entire
+package and not for a single node. Thus the driver creates sysfs
+attributes only for internal node0 of a multi-node processor.</p>
+<ol class="arabic simple" start="2">
+<li><p>Accumulated Power Mechanism</p></li>
+</ol>
+<p>This driver also introduces an algorithm that should be used to
+calculate the average power consumed by a processor during a
+measurement interval Tm. The feature of accumulated power mechanism is
+indicated by CPUID Fn8000_0007_EDX[12].</p>
+<ul class="simple">
+<li><dl class="simple">
+<dt>Tsample:</dt><dd><p>compute unit power accumulator sample period</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>Tref:</dt><dd><p>the PTSC counter period</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>PTSC:</dt><dd><p>performance timestamp counter</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>N:</dt><dd><p>the ratio of compute unit power accumulator sample period to the
+PTSC period</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>Jmax:</dt><dd><p>max compute unit accumulated power which is indicated by
+MaxCpuSwPwrAcc MSR C001007b</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>Jx/Jy:</dt><dd><p>compute unit accumulated power which is indicated by
+CpuSwPwrAcc MSR C001007a</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>Tx/Ty:</dt><dd><p>the value of performance timestamp counter which is indicated
+by CU_PTSC MSR C0010280</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>PwrCPUave:</dt><dd><p>CPU average power</p>
+</dd>
+</dl>
+</li>
+</ul>
+<ol class="lowerroman">
+<li><p>Determine the ratio of Tsample to Tref by executing CPUID Fn8000_0007.</p>
+<blockquote>
+<div><p>N = value of CPUID Fn8000_0007_ECX[CpuPwrSampleTimeRatio[15:0]].</p>
+</div></blockquote>
+</li>
+<li><p>Read the full range of the cumulative energy value from the new
+MSR MaxCpuSwPwrAcc.</p>
+<blockquote>
+<div><p>Jmax = value returned.</p>
+</div></blockquote>
+</li>
+<li><p>At time x, SW reads CpuSwPwrAcc MSR and samples the PTSC.</p>
+<blockquote>
+<div><p>Jx = value read from CpuSwPwrAcc and Tx = value read from PTSC.</p>
+</div></blockquote>
+</li>
+<li><p>At time y, SW reads CpuSwPwrAcc MSR and samples the PTSC.</p>
+<blockquote>
+<div><p>Jy = value read from CpuSwPwrAcc and Ty = value read from PTSC.</p>
+</div></blockquote>
+</li>
+<li><p>Calculate the average power consumption for a compute unit over
+time period (y-x). Unit of result is uWatt:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>if (Jy &lt; Jx) // Rollover has occurred
+        Jdelta = (Jy + Jmax) - Jx
+else
+        Jdelta = Jy - Jx
+PwrCPUave = N * Jdelta * 1000 / (Ty - Tx)
+</pre></div>
+</div>
+</li>
+</ol>
+<p>This driver provides PwrCPUave and interval(default is 10 millisecond
+and maximum is 1 second):</p>
+<ul class="simple">
+<li><p>power1_average (PwrCPUave)</p></li>
+<li><p>power1_average_interval (Interval)</p></li>
+</ul>
+<p>The power1_average_interval can be updated at /etc/sensors3.conf file
+as below:</p>
+<dl class="simple">
+<dt>chip <cite>fam15h_power-*</cite></dt><dd><p>set power1_average_interval 0.01</p>
+</dd>
+</dl>
+<p>Then save it with “sensors -s”.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Kernel driver fam15h_power</a><ul>
+<li><a class="reference internal" href="#description">Description</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/hwmon/fam15h_power.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/hwmon/fam15h_power.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

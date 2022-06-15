@@ -1,0 +1,165 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Linux I2C and DMA &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="I2C/SMBUS Fault Codes" href="fault-codes.html" />
+    <link rel="prev" title="Implementing I2C device drivers in userspace" href="dev-interface.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="linux-i2c-and-dma">
+<h1>Linux I2C and DMA<a class="headerlink" href="#linux-i2c-and-dma" title="Permalink to this headline">¶</a></h1>
+<p>Given that I2C is a low-speed bus, over which the majority of messages
+transferred are small, it is not considered a prime user of DMA access. At this
+time of writing, only 10% of I2C bus master drivers have DMA support
+implemented. And the vast majority of transactions are so small that setting up
+DMA for it will likely add more overhead than a plain PIO transfer.</p>
+<p>Therefore, it is <em>not</em> mandatory that the buffer of an I2C message is DMA safe.
+It does not seem reasonable to apply additional burdens when the feature is so
+rarely used. However, it is recommended to use a DMA-safe buffer if your
+message size is likely applicable for DMA. Most drivers have this threshold
+around 8 bytes (as of today, this is mostly an educated guess, however). For
+any message of 16 byte or larger, it is probably a really good idea. Please
+note that other subsystems you use might add requirements. E.g., if your
+I2C bus master driver is using USB as a bridge, then you need to have DMA
+safe buffers always, because USB requires it.</p>
+<section id="clients">
+<h2>Clients<a class="headerlink" href="#clients" title="Permalink to this headline">¶</a></h2>
+<p>For clients, if you use a DMA safe buffer in i2c_msg, set the I2C_M_DMA_SAFE
+flag with it. Then, the I2C core and drivers know they can safely operate DMA
+on it. Note that using this flag is optional. I2C host drivers which are not
+updated to use this flag will work like before. And like before, they risk
+using an unsafe DMA buffer. To improve this situation, using I2C_M_DMA_SAFE in
+more and more clients and host drivers is the planned way forward. Note also
+that setting this flag makes only sense in kernel space. User space data is
+copied into kernel space anyhow. The I2C core makes sure the destination
+buffers in kernel space are always DMA capable. Also, when the core emulates
+SMBus transactions via I2C, the buffers for block transfers are DMA safe. Users
+of <a class="reference internal" href="../driver-api/i2c.html#c.i2c_master_send" title="i2c_master_send"><code class="xref c c-func docutils literal notranslate"><span class="pre">i2c_master_send()</span></code></a> and <a class="reference internal" href="../driver-api/i2c.html#c.i2c_master_recv" title="i2c_master_recv"><code class="xref c c-func docutils literal notranslate"><span class="pre">i2c_master_recv()</span></code></a> functions can now use DMA safe
+variants (<a class="reference internal" href="../driver-api/i2c.html#c.i2c_master_send_dmasafe" title="i2c_master_send_dmasafe"><code class="xref c c-func docutils literal notranslate"><span class="pre">i2c_master_send_dmasafe()</span></code></a> and <a class="reference internal" href="../driver-api/i2c.html#c.i2c_master_recv_dmasafe" title="i2c_master_recv_dmasafe"><code class="xref c c-func docutils literal notranslate"><span class="pre">i2c_master_recv_dmasafe()</span></code></a>) once they
+know their buffers are DMA safe. Users of <a class="reference internal" href="../driver-api/i2c.html#c.i2c_transfer" title="i2c_transfer"><code class="xref c c-func docutils literal notranslate"><span class="pre">i2c_transfer()</span></code></a> must set the
+I2C_M_DMA_SAFE flag manually.</p>
+</section>
+<section id="masters">
+<h2>Masters<a class="headerlink" href="#masters" title="Permalink to this headline">¶</a></h2>
+<p>Bus master drivers wishing to implement safe DMA can use helper functions from
+the I2C core. One gives you a DMA-safe buffer for a given i2c_msg as long as a
+certain threshold is met:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>dma_buf = i2c_get_dma_safe_msg_buf(msg, threshold_in_byte);
+</pre></div>
+</div>
+<p>If a buffer is returned, it is either msg-&gt;buf for the I2C_M_DMA_SAFE case or a
+bounce buffer. But you don’t need to care about that detail, just use the
+returned buffer. If NULL is returned, the threshold was not met or a bounce
+buffer could not be allocated. Fall back to PIO in that case.</p>
+<p>In any case, a buffer obtained from above needs to be released. Another helper
+function ensures a potentially used bounce buffer is freed:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>i2c_put_dma_safe_msg_buf(dma_buf, msg, xferred);
+</pre></div>
+</div>
+<p>The last argument ‘xferred’ controls if the buffer is synced back to the
+message or not. No syncing is needed in cases setting up DMA had an error and
+there was no data transferred.</p>
+<p>The bounce buffer handling from the core is generic and simple. It will always
+allocate a new bounce buffer. If you want a more sophisticated handling (e.g.
+reusing pre-allocated buffers), you are free to implement your own.</p>
+<p>Please also check the in-kernel documentation for details. The i2c-sh_mobile
+driver can be used as a reference example how to use the above helpers.</p>
+<p>Final note: If you plan to use DMA with I2C (or with anything else, actually)
+make sure you have CONFIG_DMA_API_DEBUG enabled during development. It can help
+you find various issues which can be complex to debug otherwise.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Linux I2C and DMA</a><ul>
+<li><a class="reference internal" href="#clients">Clients</a></li>
+<li><a class="reference internal" href="#masters">Masters</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/i2c/dma-considerations.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/i2c/dma-considerations.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

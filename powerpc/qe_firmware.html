@@ -1,0 +1,357 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Freescale QUICC Engine Firmware Uploading &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Power Architecture 64-bit Linux system call ABI" href="syscall64-abi.html" />
+    <link rel="prev" title="Ptrace" href="ptrace.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="freescale-quicc-engine-firmware-uploading">
+<h1>Freescale QUICC Engine Firmware Uploading<a class="headerlink" href="#freescale-quicc-engine-firmware-uploading" title="Permalink to this headline">¶</a></h1>
+<ol class="loweralpha simple" start="3">
+<li><p>2007 Timur Tabi &lt;timur at freescale.com&gt;,
+Freescale Semiconductor</p></li>
+</ol>
+<section id="revision-information">
+<h2>Revision Information<a class="headerlink" href="#revision-information" title="Permalink to this headline">¶</a></h2>
+<p>November 30, 2007: Rev 1.0 - Initial version</p>
+</section>
+<section id="i-software-license-for-firmware">
+<h2>I - Software License for Firmware<a class="headerlink" href="#i-software-license-for-firmware" title="Permalink to this headline">¶</a></h2>
+<p>Each firmware file comes with its own software license.  For information on
+the particular license, please see the license text that is distributed with
+the firmware.</p>
+</section>
+<section id="ii-microcode-availability">
+<h2>II - Microcode Availability<a class="headerlink" href="#ii-microcode-availability" title="Permalink to this headline">¶</a></h2>
+<p>Firmware files are distributed through various channels.  Some are available on
+<a class="reference external" href="http://opensource.freescale.com">http://opensource.freescale.com</a>.  For other firmware files, please contact
+your Freescale representative or your operating system vendor.</p>
+</section>
+<section id="iii-description-and-terminology">
+<h2>III - Description and Terminology<a class="headerlink" href="#iii-description-and-terminology" title="Permalink to this headline">¶</a></h2>
+<p>In this document, the term ‘microcode’ refers to the sequence of 32-bit
+integers that compose the actual QE microcode.</p>
+<p>The term ‘firmware’ refers to a binary blob that contains the microcode as
+well as other data that</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>describes the microcode’s purpose</p></li>
+<li><p>describes how and where to upload the microcode</p></li>
+<li><p>specifies the values of various registers</p></li>
+<li><p>includes additional data for use by specific device drivers</p></li>
+</ol>
+</div></blockquote>
+<p>Firmware files are binary files that contain only a firmware.</p>
+</section>
+<section id="iv-microcode-programming-details">
+<h2>IV - Microcode Programming Details<a class="headerlink" href="#iv-microcode-programming-details" title="Permalink to this headline">¶</a></h2>
+<p>The QE architecture allows for only one microcode present in I-RAM for each
+RISC processor.  To replace any current microcode, a full QE reset (which
+disables the microcode) must be performed first.</p>
+<p>QE microcode is uploaded using the following procedure:</p>
+<ol class="arabic simple">
+<li><p>The microcode is placed into I-RAM at a specific location, using the
+IRAM.IADD and IRAM.IDATA registers.</p></li>
+<li><p>The CERCR.CIR bit is set to 0 or 1, depending on whether the firmware
+needs split I-RAM.  Split I-RAM is only meaningful for SOCs that have
+QEs with multiple RISC processors, such as the 8360.  Splitting the I-RAM
+allows each processor to run a different microcode, effectively creating an
+asymmetric multiprocessing (AMP) system.</p></li>
+<li><p>The TIBCR trap registers are loaded with the addresses of the trap handlers
+in the microcode.</p></li>
+<li><p>The RSP.ECCR register is programmed with the value provided.</p></li>
+<li><p>If necessary, device drivers that need the virtual traps and extended mode
+data will use them.</p></li>
+</ol>
+<p>Virtual Microcode Traps</p>
+<p>These virtual traps are conditional branches in the microcode.  These are
+“soft” provisional introduced in the ROMcode in order to enable higher
+flexibility and save h/w traps If new features are activated or an issue is
+being fixed in the RAM package utilizing they should be activated.  This data
+structure signals the microcode which of these virtual traps is active.</p>
+<p>This structure contains 6 words that the application should copy to some
+specific been defined.  This table describes the structure:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>---------------------------------------------------------------
+| Offset in |                  | Destination Offset | Size of |
+|   array   |     Protocol     |   within PRAM      | Operand |
+--------------------------------------------------------------|
+|     0     | Ethernet         |      0xF8          | 4 bytes |
+|           | interworking     |                    |         |
+---------------------------------------------------------------
+|     4     | ATM              |      0xF8          | 4 bytes |
+|           | interworking     |                    |         |
+---------------------------------------------------------------
+|     8     | PPP              |      0xF8          | 4 bytes |
+|           | interworking     |                    |         |
+---------------------------------------------------------------
+|     12    | Ethernet RX      |      0x22          | 1 byte  |
+|           | Distributor Page |                    |         |
+---------------------------------------------------------------
+|     16    | ATM Globtal      |      0x28          | 1 byte  |
+|           | Params Table     |                    |         |
+---------------------------------------------------------------
+|     20    | Insert Frame     |      0xF8          | 4 bytes |
+---------------------------------------------------------------
+</pre></div>
+</div>
+<p>Extended Modes</p>
+<p>This is a double word bit array (64 bits) that defines special functionality
+which has an impact on the software drivers.  Each bit has its own impact
+and has special instructions for the s/w associated with it.  This structure is
+described in this table:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>-----------------------------------------------------------------------
+| Bit #  |     Name     |   Description                               |
+-----------------------------------------------------------------------
+|   0    | General      | Indicates that prior to each host command   |
+|        | push command | given by the application, the software must |
+|        |              | assert a special host command (push command)|
+|        |              | CECDR = 0x00800000.                         |
+|        |              | CECR = 0x01c1000f.                          |
+-----------------------------------------------------------------------
+|   1    | UCC ATM      | Indicates that after issuing ATM RX INIT    |
+|        | RX INIT      | command, the host must issue another special|
+|        | push command | command (push command) and immediately      |
+|        |              | following that re-issue the ATM RX INIT     |
+|        |              | command. (This makes the sequence of        |
+|        |              | initializing the ATM receiver a sequence of |
+|        |              | three host commands)                        |
+|        |              | CECDR = 0x00800000.                         |
+|        |              | CECR = 0x01c1000f.                          |
+-----------------------------------------------------------------------
+|   2    | Add/remove   | Indicates that following the specific host  |
+|        | command      | command: &quot;Add/Remove entry in Hash Lookup   |
+|        | validation   | Table&quot; used in Interworking setup, the user |
+|        |              | must issue another command.                 |
+|        |              | CECDR = 0xce000003.                         |
+|        |              | CECR = 0x01c10f58.                          |
+-----------------------------------------------------------------------
+|   3    | General push | Indicates that the s/w has to initialize    |
+|        | command      | some pointers in the Ethernet thread pages  |
+|        |              | which are used when Header Compression is   |
+|        |              | activated.  The full details of these       |
+|        |              | pointers is located in the software drivers.|
+-----------------------------------------------------------------------
+|   4    | General push | Indicates that after issuing Ethernet TX    |
+|        | command      | INIT command, user must issue this command  |
+|        |              | for each SNUM of Ethernet TX thread.        |
+|        |              | CECDR = 0x00800003.                         |
+|        |              | CECR = 0x7&#39;b{0}, 8&#39;b{Enet TX thread SNUM},  |
+|        |              |        1&#39;b{1}, 12&#39;b{0}, 4&#39;b{1}              |
+-----------------------------------------------------------------------
+| 5 - 31 |     N/A      | Reserved, set to zero.                      |
+-----------------------------------------------------------------------
+</pre></div>
+</div>
+</section>
+<section id="v-firmware-structure-layout">
+<h2>V - Firmware Structure Layout<a class="headerlink" href="#v-firmware-structure-layout" title="Permalink to this headline">¶</a></h2>
+<p>QE microcode from Freescale is typically provided as a header file.  This
+header file contains macros that define the microcode binary itself as well as
+some other data used in uploading that microcode.  The format of these files
+do not lend themselves to simple inclusion into other code.  Hence,
+the need for a more portable format.  This section defines that format.</p>
+<p>Instead of distributing a header file, the microcode and related data are
+embedded into a binary blob.  This blob is passed to the qe_upload_firmware()
+function, which parses the blob and performs everything necessary to upload
+the microcode.</p>
+<p>All integers are big-endian.  See the comments for function
+qe_upload_firmware() for up-to-date implementation information.</p>
+<p>This structure supports versioning, where the version of the structure is
+embedded into the structure itself.  To ensure forward and backwards
+compatibility, all versions of the structure must use the same ‘qe_header’
+structure at the beginning.</p>
+<dl>
+<dt>‘header’ (type: struct qe_header):</dt><dd><p>The ‘length’ field is the size, in bytes, of the entire structure,
+including all the microcode embedded in it, as well as the CRC (if
+present).</p>
+<p>The ‘magic’ field is an array of three bytes that contains the letters
+‘Q’, ‘E’, and ‘F’.  This is an identifier that indicates that this
+structure is a QE Firmware structure.</p>
+<p>The ‘version’ field is a single byte that indicates the version of this
+structure.  If the layout of the structure should ever need to be
+changed to add support for additional types of microcode, then the
+version number should also be changed.</p>
+</dd>
+</dl>
+<p>The ‘id’ field is a null-terminated string(suitable for printing) that
+identifies the firmware.</p>
+<p>The ‘count’ field indicates the number of ‘microcode’ structures.  There
+must be one and only one ‘microcode’ structure for each RISC processor.
+Therefore, this field also represents the number of RISC processors for this
+SOC.</p>
+<p>The ‘soc’ structure contains the SOC numbers and revisions used to match
+the microcode to the SOC itself.  Normally, the microcode loader should
+check the data in this structure with the SOC number and revisions, and
+only upload the microcode if there’s a match.  However, this check is not
+made on all platforms.</p>
+<p>Although it is not recommended, you can specify ‘0’ in the soc.model
+field to skip matching SOCs altogether.</p>
+<p>The ‘model’ field is a 16-bit number that matches the actual SOC. The
+‘major’ and ‘minor’ fields are the major and minor revision numbers,
+respectively, of the SOC.</p>
+<p>For example, to match the 8323, revision 1.0:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>soc.model = 8323
+soc.major = 1
+soc.minor = 0
+</pre></div>
+</div>
+<p>‘padding’ is necessary for structure alignment.  This field ensures that the
+‘extended_modes’ field is aligned on a 64-bit boundary.</p>
+<p>‘extended_modes’ is a bitfield that defines special functionality which has an
+impact on the device drivers.  Each bit has its own impact and has special
+instructions for the driver associated with it.  This field is stored in
+the QE library and available to any driver that calles qe_get_firmware_info().</p>
+<p>‘vtraps’ is an array of 8 words that contain virtual trap values for each
+virtual traps.  As with ‘extended_modes’, this field is stored in the QE
+library and available to any driver that calles qe_get_firmware_info().</p>
+<dl>
+<dt>‘microcode’ (type: struct qe_microcode):</dt><dd><p>For each RISC processor there is one ‘microcode’ structure.  The first
+‘microcode’ structure is for the first RISC, and so on.</p>
+<p>The ‘id’ field is a null-terminated string suitable for printing that
+identifies this particular microcode.</p>
+<p>‘traps’ is an array of 16 words that contain hardware trap values
+for each of the 16 traps.  If trap[i] is 0, then this particular
+trap is to be ignored (i.e. not written to TIBCR[i]).  The entire value
+is written as-is to the TIBCR[i] register, so be sure to set the EN
+and T_IBP bits if necessary.</p>
+<p>‘eccr’ is the value to program into the ECCR register.</p>
+<p>‘iram_offset’ is the offset into IRAM to start writing the
+microcode.</p>
+<p>‘count’ is the number of 32-bit words in the microcode.</p>
+<p>‘code_offset’ is the offset, in bytes, from the beginning of this
+structure where the microcode itself can be found.  The first
+microcode binary should be located immediately after the ‘microcode’
+array.</p>
+<p>‘major’, ‘minor’, and ‘revision’ are the major, minor, and revision
+version numbers, respectively, of the microcode.  If all values are 0,
+then these fields are ignored.</p>
+<p>‘reserved’ is necessary for structure alignment.  Since ‘microcode’
+is an array, the 64-bit ‘extended_modes’ field needs to be aligned
+on a 64-bit boundary, and this can only happen if the size of
+‘microcode’ is a multiple of 8 bytes.  To ensure that, we add
+‘reserved’.</p>
+</dd>
+</dl>
+<p>After the last microcode is a 32-bit CRC.  It can be calculated using
+this algorithm:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>u32 crc32(const u8 *p, unsigned int len)
+{
+      unsigned int i;
+      u32 crc = 0;
+
+      while (len--) {
+         crc ^= *p++;
+         for (i = 0; i &lt; 8; i++)
+                 crc = (crc &gt;&gt; 1) ^ ((crc &amp; 1) ? 0xedb88320 : 0);
+      }
+      return crc;
+}
+</pre></div>
+</div>
+</section>
+<section id="vi-sample-code-for-creating-firmware-files">
+<h2>VI - Sample Code for Creating Firmware Files<a class="headerlink" href="#vi-sample-code-for-creating-firmware-files" title="Permalink to this headline">¶</a></h2>
+<p>A Python program that creates firmware binaries from the header files normally
+distributed by Freescale can be found on <a class="reference external" href="http://opensource.freescale.com">http://opensource.freescale.com</a>.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Freescale QUICC Engine Firmware Uploading</a><ul>
+<li><a class="reference internal" href="#revision-information">Revision Information</a></li>
+<li><a class="reference internal" href="#i-software-license-for-firmware">I - Software License for Firmware</a></li>
+<li><a class="reference internal" href="#ii-microcode-availability">II - Microcode Availability</a></li>
+<li><a class="reference internal" href="#iii-description-and-terminology">III - Description and Terminology</a></li>
+<li><a class="reference internal" href="#iv-microcode-programming-details">IV - Microcode Programming Details</a></li>
+<li><a class="reference internal" href="#v-firmware-structure-layout">V - Firmware Structure Layout</a></li>
+<li><a class="reference internal" href="#vi-sample-code-for-creating-firmware-files">VI - Sample Code for Creating Firmware Files</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/powerpc/qe_firmware.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/powerpc/qe_firmware.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

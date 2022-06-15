@@ -1,0 +1,198 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Kernel driver w1_ds2438 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Kernel driver w1_ds28e04" href="w1_ds28e04.html" />
+    <link rel="prev" title="Kernel driver w1_ds2423" href="w1_ds2423.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="kernel-driver-w1-ds2438">
+<h1>Kernel driver w1_ds2438<a class="headerlink" href="#kernel-driver-w1-ds2438" title="Permalink to this headline">¶</a></h1>
+<p>Supported chips:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Maxim DS2438 Smart Battery Monitor</p></li>
+</ul>
+</div></blockquote>
+<dl>
+<dt>supported family codes:</dt><dd><table class="docutils align-default">
+<colgroup>
+<col style="width: 80%" />
+<col style="width: 20%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>W1_FAMILY_DS2438</p></td>
+<td><p>0x26</p></td>
+</tr>
+</tbody>
+</table>
+</dd>
+</dl>
+<p>Author: Mariusz Bialonczyk &lt;<a class="reference external" href="mailto:manio&#37;&#52;&#48;skyboo&#46;net">manio<span>&#64;</span>skyboo<span>&#46;</span>net</a>&gt;</p>
+<section id="description">
+<h2>Description<a class="headerlink" href="#description" title="Permalink to this headline">¶</a></h2>
+<p>The DS2438 chip provides several functions that are desirable to carry in
+a battery pack. It also has a 40 bytes of nonvolatile EEPROM.
+Because the ability of temperature, current and voltage measurement, the chip
+is also often used in weather stations and applications such as: rain gauge,
+wind speed/direction measuring, humidity sensing, etc.</p>
+<p>Current support is provided through the following sysfs files (all files
+except “iad” and “offset” are readonly):</p>
+</section>
+<section id="iad">
+<h2>“iad”<a class="headerlink" href="#iad" title="Permalink to this headline">¶</a></h2>
+<p>This file controls the ‘Current A/D Control Bit’ (IAD) in the
+Status/Configuration Register.
+Writing a zero value will clear the IAD bit and disables the current
+measurements.
+Writing value “1” is setting the IAD bit (enables the measurements).
+The IAD bit is enabled by default in the DS2438.</p>
+<p>When writing to sysfs file bits 2-7 are ignored, so it’s safe to write ASCII.
+An I/O error is returned when there is a problem setting the new value.</p>
+</section>
+<section id="page0">
+<h2>“page0”<a class="headerlink" href="#page0" title="Permalink to this headline">¶</a></h2>
+<p>This file provides full 8 bytes of the chip Page 0 (00h).
+This page contains the most frequently accessed information of the DS2438.
+Internally when this file is read, the additional CRC byte is also obtained
+from the slave device. If it is correct, the 8 bytes page data are passed
+to userspace, otherwise an I/O error is returned.</p>
+</section>
+<section id="page1">
+<h2>“page1”<a class="headerlink" href="#page1" title="Permalink to this headline">¶</a></h2>
+<p>This file provides full 8 bytes of the chip Page 1 (01h).
+This page contains the ICA, elapsed time meter and current offset data of the DS2438.
+Internally when this file is read, the additional CRC byte is also obtained
+from the slave device. If it is correct, the 8 bytes page data are passed
+to userspace, otherwise an I/O error is returned.</p>
+</section>
+<section id="offset">
+<h2>“offset”<a class="headerlink" href="#offset" title="Permalink to this headline">¶</a></h2>
+<p>This file controls the 2-byte Offset Register of the chip.
+Writing a 2-byte value will change the Offset Register, which changes the
+current measurement done by the chip. Changing this register to the two’s complement
+of the current register while forcing zero current through the load will calibrate
+the chip, canceling offset errors in the current ADC.</p>
+</section>
+<section id="temperature">
+<h2>“temperature”<a class="headerlink" href="#temperature" title="Permalink to this headline">¶</a></h2>
+<p>Opening and reading this file initiates the CONVERT_T (temperature conversion)
+command of the chip, afterwards the temperature is read from the device
+registers and provided as an ASCII decimal value.</p>
+<p>Important: The returned value has to be divided by 256 to get a real
+temperature in degrees Celsius.</p>
+</section>
+<section id="vad-vdd">
+<h2>“vad”, “vdd”<a class="headerlink" href="#vad-vdd" title="Permalink to this headline">¶</a></h2>
+<p>Opening and reading this file initiates the CONVERT_V (voltage conversion)
+command of the chip.</p>
+<p>Depending on a sysfs filename a different input for the A/D will be selected:</p>
+<dl class="simple">
+<dt>vad:</dt><dd><p>general purpose A/D input (VAD)</p>
+</dd>
+<dt>vdd:</dt><dd><p>battery input (VDD)</p>
+</dd>
+</dl>
+<p>After the voltage conversion the value is returned as decimal ASCII.
+Note: To get a volts the value has to be divided by 100.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Kernel driver w1_ds2438</a><ul>
+<li><a class="reference internal" href="#description">Description</a></li>
+<li><a class="reference internal" href="#iad">“iad”</a></li>
+<li><a class="reference internal" href="#page0">“page0”</a></li>
+<li><a class="reference internal" href="#page1">“page1”</a></li>
+<li><a class="reference internal" href="#offset">“offset”</a></li>
+<li><a class="reference internal" href="#temperature">“temperature”</a></li>
+<li><a class="reference internal" href="#vad-vdd">“vad”, “vdd”</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/w1/slaves/w1_ds2438.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/w1/slaves/w1_ds2438.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

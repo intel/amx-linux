@@ -1,0 +1,292 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Coding Guidelines &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Arch Support" href="arch-support.html" />
+    <link rel="prev" title="General Information" href="general-information.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="coding-guidelines">
+<h1>Coding Guidelines<a class="headerlink" href="#coding-guidelines" title="Permalink to this headline">¶</a></h1>
+<p>This document describes how to write Rust code in the kernel.</p>
+<section id="style-formatting">
+<h2>Style &amp; formatting<a class="headerlink" href="#style-formatting" title="Permalink to this headline">¶</a></h2>
+<p>The code should be formatted using <code class="docutils literal notranslate"><span class="pre">rustfmt</span></code>. In this way, a person
+contributing from time to time to the kernel does not need to learn and
+remember one more style guide. More importantly, reviewers and maintainers
+do not need to spend time pointing out style issues anymore, and thus
+less patch roundtrips may be needed to land a change.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Conventions on comments and documentation are not checked by
+<code class="docutils literal notranslate"><span class="pre">rustfmt</span></code>. Thus those are still needed to be taken care of.</p>
+</div>
+<p>The default settings of <code class="docutils literal notranslate"><span class="pre">rustfmt</span></code> are used. This means the idiomatic Rust
+style is followed. For instance, 4 spaces are used for indentation rather
+than tabs.</p>
+<p>It is convenient to instruct editors/IDEs to format while typing,
+when saving or at commit time. However, if for some reason reformatting
+the entire kernel Rust sources is needed at some point, the following can be
+run:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>make LLVM=1 rustfmt
+</pre></div>
+</div>
+<p>It is also possible to check if everything is formatted (printing a diff
+otherwise), for instance for a CI, with:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>make LLVM=1 rustfmtcheck
+</pre></div>
+</div>
+<p>Like <code class="docutils literal notranslate"><span class="pre">clang-format</span></code> for the rest of the kernel, <code class="docutils literal notranslate"><span class="pre">rustfmt</span></code> works on
+individual files, and does not require a kernel configuration. Sometimes it may
+even work with broken code.</p>
+</section>
+<section id="comments">
+<h2>Comments<a class="headerlink" href="#comments" title="Permalink to this headline">¶</a></h2>
+<p>“Normal” comments (i.e. <code class="docutils literal notranslate"><span class="pre">//</span></code>, rather than code documentation which starts
+with <code class="docutils literal notranslate"><span class="pre">///</span></code> or <code class="docutils literal notranslate"><span class="pre">//!</span></code>) are written in Markdown the same way as documentation
+comments are, even though they will not be rendered. This improves consistency,
+simplifies the rules and allows to move content between the two kinds of
+comments more easily. For instance:</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// `object` is ready to be handled now.</span>
+<span class="n">f</span><span class="p">(</span><span class="n">object</span><span class="p">);</span><span class="w"></span>
+</pre></div>
+</div>
+<p>Furthermore, just like documentation, comments are capitalized at the beginning
+of a sentence and ended with a period (even if it is a single sentence). This
+includes <code class="docutils literal notranslate"><span class="pre">//</span> <span class="pre">SAFETY:</span></code>, <code class="docutils literal notranslate"><span class="pre">//</span> <span class="pre">TODO:</span></code> and other “tagged” comments, e.g.:</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// FIXME: The error should be handled properly.</span>
+</pre></div>
+</div>
+<p>Comments should not be used for documentation purposes: comments are intended
+for implementation details, not users. This distinction is useful even if the
+reader of the source file is both an implementor and a user of an API. In fact,
+sometimes it is useful to use both comments and documentation at the same time.
+For instance, for a <code class="docutils literal notranslate"><span class="pre">TODO</span></code> list or to comment on the documentation itself.
+For the latter case, comments can be inserted in the middle; that is, closer to
+the line of documentation to be commented. For any other case, comments are
+written after the documentation, e.g.:</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="sd">/// Returns a new [`Foo`].</span>
+<span class="sd">///</span>
+<span class="sd">/// # Examples</span>
+<span class="sd">///</span>
+<span class="c1">// TODO: Find a better example.</span>
+<span class="sd">/// ```</span>
+<span class="sd">/// let foo = f(42);</span>
+<span class="sd">/// ```</span>
+<span class="c1">// FIXME: Use fallible approach.</span>
+<span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">f</span><span class="p">(</span><span class="n">x</span>: <span class="kt">i32</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="nc">Foo</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="c1">// ...</span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+<p>One special kind of comments are the <code class="docutils literal notranslate"><span class="pre">//</span> <span class="pre">SAFETY:</span></code> comments. These must appear
+before every <code class="docutils literal notranslate"><span class="pre">unsafe</span></code> block, and they explain why the code inside the block is
+correct/sound, i.e. why it cannot trigger undefined behavior in any case, e.g.:</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// SAFETY: `p` is valid by the safety requirements.</span>
+<span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="o">*</span><span class="n">p</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">//</span> <span class="pre">SAFETY:</span></code> comments are not to be confused with the <code class="docutils literal notranslate"><span class="pre">#</span> <span class="pre">Safety</span></code> sections
+in code documentation. <code class="docutils literal notranslate"><span class="pre">#</span> <span class="pre">Safety</span></code> sections specify the contract that callers
+(for functions) or implementors (for traits) need to abide by. <code class="docutils literal notranslate"><span class="pre">//</span> <span class="pre">SAFETY:</span></code>
+comments show why a call (for functions) or implementation (for traits) actually
+respects the preconditions stated in a <code class="docutils literal notranslate"><span class="pre">#</span> <span class="pre">Safety</span></code> section or the language
+reference.</p>
+</section>
+<section id="code-documentation">
+<h2>Code documentation<a class="headerlink" href="#code-documentation" title="Permalink to this headline">¶</a></h2>
+<p>Rust kernel code is not documented like C kernel code (i.e. via kernel-doc).
+Instead, the usual system for documenting Rust code is used: the <code class="docutils literal notranslate"><span class="pre">rustdoc</span></code>
+tool, which uses Markdown (a lightweight markup language).</p>
+<p>To learn Markdown, there are many guides available out there. For instance,
+the one at:</p>
+<blockquote>
+<div><p><a class="reference external" href="https://commonmark.org/help/">https://commonmark.org/help/</a></p>
+</div></blockquote>
+<p>This is how a well-documented Rust function may look like:</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="sd">/// Returns the contained [`Some`] value, consuming the `self` value,</span>
+<span class="sd">/// without checking that the value is not [`None`].</span>
+<span class="sd">///</span>
+<span class="sd">/// # Safety</span>
+<span class="sd">///</span>
+<span class="sd">/// Calling this method on [`None`] is *[undefined behavior]*.</span>
+<span class="sd">///</span>
+<span class="sd">/// [undefined behavior]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html</span>
+<span class="sd">///</span>
+<span class="sd">/// # Examples</span>
+<span class="sd">///</span>
+<span class="sd">/// ```</span>
+<span class="sd">/// let x = Some(&quot;air&quot;);</span>
+<span class="sd">/// assert_eq!(unsafe { x.unwrap_unchecked() }, &quot;air&quot;);</span>
+<span class="sd">/// ```</span>
+<span class="k">pub</span><span class="w"> </span><span class="k">unsafe</span><span class="w"> </span><span class="k">fn</span> <span class="nf">unwrap_unchecked</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="nc">T</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">match</span><span class="w"> </span><span class="bp">self</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="nb">Some</span><span class="p">(</span><span class="n">val</span><span class="p">)</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="n">val</span><span class="p">,</span><span class="w"></span>
+
+<span class="w">        </span><span class="c1">// SAFETY: The safety contract must be upheld by the caller.</span>
+<span class="w">        </span><span class="nb">None</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">hint</span>::<span class="n">unreachable_unchecked</span><span class="p">()</span><span class="w"> </span><span class="p">},</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+<p>This example showcases a few <code class="docutils literal notranslate"><span class="pre">rustdoc</span></code> features and some conventions followed
+in the kernel:</p>
+<blockquote>
+<div><ul>
+<li><p>The first paragraph must be a single sentence briefly describing what
+the documented item does. Further explanations must go in extra paragraphs.</p></li>
+<li><p>Unsafe functions must document their safety preconditions under
+a <code class="docutils literal notranslate"><span class="pre">#</span> <span class="pre">Safety</span></code> section.</p></li>
+<li><p>While not shown here, if a function may panic, the conditions under which
+that happens must be described under a <code class="docutils literal notranslate"><span class="pre">#</span> <span class="pre">Panics</span></code> section.</p>
+<p>Please note that panicking should be very rare and used only with a good
+reason. In almost all cases, a fallible approach should be used, typically
+returning a <code class="docutils literal notranslate"><span class="pre">Result</span></code>.</p>
+</li>
+<li><p>If providing examples of usage would help readers, they must be written in
+a section called <code class="docutils literal notranslate"><span class="pre">#</span> <span class="pre">Examples</span></code>.</p></li>
+<li><p>Rust items (functions, types, constants…) must be linked appropriately
+(<code class="docutils literal notranslate"><span class="pre">rustdoc</span></code> will create a link automatically).</p></li>
+<li><p>Any <code class="docutils literal notranslate"><span class="pre">unsafe</span></code> block must be preceded by a <code class="docutils literal notranslate"><span class="pre">//</span> <span class="pre">SAFETY:</span></code> comment
+describing why the code inside is sound.</p>
+<p>While sometimes the reason might look trivial and therefore unneeded,
+writing these comments is not just a good way of documenting what has been
+taken into account, but most importantly, it provides a way to know that
+there are no <em>extra</em> implicit constraints.</p>
+</li>
+</ul>
+</div></blockquote>
+<p>To learn more about how to write documentation for Rust and extra features,
+please take a look at the <code class="docutils literal notranslate"><span class="pre">rustdoc</span></code> book at:</p>
+<blockquote>
+<div><p><a class="reference external" href="https://doc.rust-lang.org/rustdoc/how-to-write-documentation.html">https://doc.rust-lang.org/rustdoc/how-to-write-documentation.html</a></p>
+</div></blockquote>
+</section>
+<section id="naming">
+<h2>Naming<a class="headerlink" href="#naming" title="Permalink to this headline">¶</a></h2>
+<p>Rust kernel code follows the usual Rust naming conventions:</p>
+<blockquote>
+<div><p><a class="reference external" href="https://rust-lang.github.io/api-guidelines/naming.html">https://rust-lang.github.io/api-guidelines/naming.html</a></p>
+</div></blockquote>
+<p>When existing C concepts (e.g. macros, functions, objects…) are wrapped into
+a Rust abstraction, a name as close as reasonably possible to the C side should
+be used in order to avoid confusion and to improve readability when switching
+back and forth between the C and Rust sides. For instance, macros such as
+<code class="docutils literal notranslate"><span class="pre">pr_info</span></code> from C are named the same in the Rust side.</p>
+<p>Having said that, casing should be adjusted to follow the Rust naming
+conventions, and namespacing introduced by modules and types should not be
+repeated in the item names. For instance, when wrapping constants like:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cp">#define GPIO_LINE_DIRECTION_IN  0</span>
+<span class="cp">#define GPIO_LINE_DIRECTION_OUT 1</span>
+</pre></div>
+</div>
+<p>The equivalent in Rust may look like (ignoring documentation):</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="k">pub</span><span class="w"> </span><span class="k">mod</span> <span class="nn">gpio</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="k">enum</span> <span class="nc">LineDirection</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="n">In</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">bindings</span>::<span class="n">GPIO_LINE_DIRECTION_IN</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="n">_</span><span class="p">,</span><span class="w"></span>
+<span class="w">        </span><span class="n">Out</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">bindings</span>::<span class="n">GPIO_LINE_DIRECTION_OUT</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="n">_</span><span class="p">,</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+<p>That is, the equivalent of <code class="docutils literal notranslate"><span class="pre">GPIO_LINE_DIRECTION_IN</span></code> would be referred to as
+<code class="docutils literal notranslate"><span class="pre">gpio::LineDirection::In</span></code>. In particular, it should not be named
+<code class="docutils literal notranslate"><span class="pre">gpio::gpio_line_direction::GPIO_LINE_DIRECTION_IN</span></code>.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Coding Guidelines</a><ul>
+<li><a class="reference internal" href="#style-formatting">Style &amp; formatting</a></li>
+<li><a class="reference internal" href="#comments">Comments</a></li>
+<li><a class="reference internal" href="#code-documentation">Code documentation</a></li>
+<li><a class="reference internal" href="#naming">Naming</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/rust/coding-guidelines.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/rust/coding-guidelines.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

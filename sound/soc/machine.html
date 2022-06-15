@@ -1,0 +1,192 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>ASoC Machine Driver &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Audio Pops and Clicks" href="pops-clicks.html" />
+    <link rel="prev" title="ASoC Platform Driver" href="platform.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="asoc-machine-driver">
+<h1>ASoC Machine Driver<a class="headerlink" href="#asoc-machine-driver" title="Permalink to this headline">¶</a></h1>
+<p>The ASoC machine (or board) driver is the code that glues together all the
+component drivers (e.g. codecs, platforms and DAIs). It also describes the
+relationships between each component which include audio paths, GPIOs,
+interrupts, clocking, jacks and voltage regulators.</p>
+<p>The machine driver can contain codec and platform specific code. It registers
+the audio subsystem with the kernel as a platform device and is represented by
+the following struct:-</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/* SoC machine */
+struct snd_soc_card {
+      char *name;
+
+      ...
+
+      int (*probe)(struct platform_device *pdev);
+      int (*remove)(struct platform_device *pdev);
+
+      /* the pre and post PM functions are used to do any PM work before and
+       * after the codec and DAIs do any PM work. */
+      int (*suspend_pre)(struct platform_device *pdev, pm_message_t state);
+      int (*suspend_post)(struct platform_device *pdev, pm_message_t state);
+      int (*resume_pre)(struct platform_device *pdev);
+      int (*resume_post)(struct platform_device *pdev);
+
+      ...
+
+      /* CPU &lt;--&gt; Codec DAI links  */
+      struct snd_soc_dai_link *dai_link;
+      int num_links;
+
+      ...
+};
+</pre></div>
+</div>
+<section id="probe-remove">
+<h2>probe()/remove()<a class="headerlink" href="#probe-remove" title="Permalink to this headline">¶</a></h2>
+<p>probe/remove are optional. Do any machine specific probe here.</p>
+</section>
+<section id="suspend-resume">
+<h2>suspend()/resume()<a class="headerlink" href="#suspend-resume" title="Permalink to this headline">¶</a></h2>
+<p>The machine driver has pre and post versions of suspend and resume to take care
+of any machine audio tasks that have to be done before or after the codec, DAIs
+and DMA is suspended and resumed. Optional.</p>
+</section>
+<section id="machine-dai-configuration">
+<h2>Machine DAI Configuration<a class="headerlink" href="#machine-dai-configuration" title="Permalink to this headline">¶</a></h2>
+<p>The machine DAI configuration glues all the codec and CPU DAIs together. It can
+also be used to set up the DAI system clock and for any machine related DAI
+initialisation e.g. the machine audio map can be connected to the codec audio
+map, unconnected codec pins can be set as such.</p>
+<p>struct snd_soc_dai_link is used to set up each DAI in your machine. e.g.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/* corgi digital audio interface glue - connects codec &lt;--&gt; CPU */
+static struct snd_soc_dai_link corgi_dai = {
+      .name = &quot;WM8731&quot;,
+      .stream_name = &quot;WM8731&quot;,
+      .cpu_dai_name = &quot;pxa-is2-dai&quot;,
+      .codec_dai_name = &quot;wm8731-hifi&quot;,
+      .platform_name = &quot;pxa-pcm-audio&quot;,
+      .codec_name = &quot;wm8713-codec.0-001a&quot;,
+      .init = corgi_wm8731_init,
+      .ops = &amp;corgi_ops,
+};
+</pre></div>
+</div>
+<p>struct snd_soc_card then sets up the machine with its DAIs. e.g.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/* corgi audio machine driver */
+static struct snd_soc_card snd_soc_corgi = {
+      .name = &quot;Corgi&quot;,
+      .dai_link = &amp;corgi_dai,
+      .num_links = 1,
+};
+</pre></div>
+</div>
+</section>
+<section id="machine-power-map">
+<h2>Machine Power Map<a class="headerlink" href="#machine-power-map" title="Permalink to this headline">¶</a></h2>
+<p>The machine driver can optionally extend the codec power map and to become an
+audio power map of the audio subsystem. This allows for automatic power up/down
+of speaker/HP amplifiers, etc. Codec pins can be connected to the machines jack
+sockets in the machine init function.</p>
+</section>
+<section id="machine-controls">
+<h2>Machine Controls<a class="headerlink" href="#machine-controls" title="Permalink to this headline">¶</a></h2>
+<p>Machine specific audio mixer controls can be added in the DAI init function.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">ASoC Machine Driver</a><ul>
+<li><a class="reference internal" href="#probe-remove">probe()/remove()</a></li>
+<li><a class="reference internal" href="#suspend-resume">suspend()/resume()</a></li>
+<li><a class="reference internal" href="#machine-dai-configuration">Machine DAI Configuration</a></li>
+<li><a class="reference internal" href="#machine-power-map">Machine Power Map</a></li>
+<li><a class="reference internal" href="#machine-controls">Machine Controls</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/sound/soc/machine.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/sound/soc/machine.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

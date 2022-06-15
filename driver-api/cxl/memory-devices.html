@@ -1,0 +1,1500 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Compute Express Link Memory Devices &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Serial Peripheral Interface (SPI)" href="../spi.html" />
+    <link rel="prev" title="Compute Express Link" href="index.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="compute-express-link-memory-devices">
+<h1>Compute Express Link Memory Devices<a class="headerlink" href="#compute-express-link-memory-devices" title="Permalink to this headline">¶</a></h1>
+<p>A Compute Express Link Memory Device is a CXL component that implements the
+CXL.mem protocol. It contains some amount of volatile memory, persistent memory,
+or both. It is enumerated as a PCI device for configuration and passing
+messages over an MMIO mailbox. Its contribution to the System Physical
+Address space is handled via HDM (Host Managed Device Memory) decoders
+that optionally define a device’s contribution to an interleaved address
+range across multiple devices underneath a host-bridge or interleaved
+across host-bridges.</p>
+<section id="cxl-bus-theory-of-operation">
+<h2>CXL Bus: Theory of Operation<a class="headerlink" href="#cxl-bus-theory-of-operation" title="Permalink to this headline">¶</a></h2>
+<p>Similar to how a RAID driver takes disk objects and assembles them into a new
+logical device, the CXL subsystem is tasked to take PCIe and ACPI objects and
+assemble them into a CXL.mem decode topology. The need for runtime configuration
+of the CXL.mem topology is also similar to RAID in that different environments
+with the same hardware configuration may decide to assemble the topology in
+contrasting ways. One may choose performance (RAID0) striping memory across
+multiple Host Bridges and endpoints while another may opt for fault tolerance
+and disable any striping in the CXL.mem topology.</p>
+<p>Platform firmware enumerates a menu of interleave options at the “CXL root port”
+(Linux term for the top of the CXL decode topology). From there, PCIe topology
+dictates which endpoints can participate in which Host Bridge decode regimes.
+Each PCIe Switch in the path between the root and an endpoint introduces a point
+at which the interleave can be split. For example platform firmware may say at a
+given range only decodes to 1 one Host Bridge, but that Host Bridge may in turn
+interleave cycles across multiple Root Ports. An intervening Switch between a
+port and an endpoint may interleave cycles across multiple Downstream Switch
+Ports, etc.</p>
+<p>Here is a sample listing of a CXL topology defined by ‘cxl_test’. The ‘cxl_test’
+module generates an emulated CXL topology of 2 Host Bridges each with 2 Root
+Ports. Each of those Root Ports are connected to 2-way switches with endpoints
+connected to those downstream ports for a total of 8 endpoints:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># cxl list -BEMPu -b cxl_test
+{
+  &quot;bus&quot;:&quot;root3&quot;,
+  &quot;provider&quot;:&quot;cxl_test&quot;,
+  &quot;ports:root3&quot;:[
+    {
+      &quot;port&quot;:&quot;port5&quot;,
+      &quot;host&quot;:&quot;cxl_host_bridge.1&quot;,
+      &quot;ports:port5&quot;:[
+        {
+          &quot;port&quot;:&quot;port8&quot;,
+          &quot;host&quot;:&quot;cxl_switch_uport.1&quot;,
+          &quot;endpoints:port8&quot;:[
+            {
+              &quot;endpoint&quot;:&quot;endpoint9&quot;,
+              &quot;host&quot;:&quot;mem2&quot;,
+              &quot;memdev&quot;:{
+                &quot;memdev&quot;:&quot;mem2&quot;,
+                &quot;pmem_size&quot;:&quot;256.00 MiB (268.44 MB)&quot;,
+                &quot;ram_size&quot;:&quot;256.00 MiB (268.44 MB)&quot;,
+                &quot;serial&quot;:&quot;0x1&quot;,
+                &quot;numa_node&quot;:1,
+                &quot;host&quot;:&quot;cxl_mem.1&quot;
+              }
+            },
+            {
+              &quot;endpoint&quot;:&quot;endpoint15&quot;,
+              &quot;host&quot;:&quot;mem6&quot;,
+              &quot;memdev&quot;:{
+                &quot;memdev&quot;:&quot;mem6&quot;,
+                &quot;pmem_size&quot;:&quot;256.00 MiB (268.44 MB)&quot;,
+                &quot;ram_size&quot;:&quot;256.00 MiB (268.44 MB)&quot;,
+                &quot;serial&quot;:&quot;0x5&quot;,
+                &quot;numa_node&quot;:1,
+                &quot;host&quot;:&quot;cxl_mem.5&quot;
+              }
+            }
+          ]
+        },
+        {
+          &quot;port&quot;:&quot;port12&quot;,
+          &quot;host&quot;:&quot;cxl_switch_uport.3&quot;,
+          &quot;endpoints:port12&quot;:[
+            {
+              &quot;endpoint&quot;:&quot;endpoint17&quot;,
+              &quot;host&quot;:&quot;mem8&quot;,
+              &quot;memdev&quot;:{
+                &quot;memdev&quot;:&quot;mem8&quot;,
+                &quot;pmem_size&quot;:&quot;256.00 MiB (268.44 MB)&quot;,
+                &quot;ram_size&quot;:&quot;256.00 MiB (268.44 MB)&quot;,
+                &quot;serial&quot;:&quot;0x7&quot;,
+                &quot;numa_node&quot;:1,
+                &quot;host&quot;:&quot;cxl_mem.7&quot;
+              }
+            },
+            {
+              &quot;endpoint&quot;:&quot;endpoint13&quot;,
+              &quot;host&quot;:&quot;mem4&quot;,
+              &quot;memdev&quot;:{
+                &quot;memdev&quot;:&quot;mem4&quot;,
+                &quot;pmem_size&quot;:&quot;256.00 MiB (268.44 MB)&quot;,
+                &quot;ram_size&quot;:&quot;256.00 MiB (268.44 MB)&quot;,
+                &quot;serial&quot;:&quot;0x3&quot;,
+                &quot;numa_node&quot;:1,
+                &quot;host&quot;:&quot;cxl_mem.3&quot;
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      &quot;port&quot;:&quot;port4&quot;,
+      &quot;host&quot;:&quot;cxl_host_bridge.0&quot;,
+      &quot;ports:port4&quot;:[
+        {
+          &quot;port&quot;:&quot;port6&quot;,
+          &quot;host&quot;:&quot;cxl_switch_uport.0&quot;,
+          &quot;endpoints:port6&quot;:[
+            {
+              &quot;endpoint&quot;:&quot;endpoint7&quot;,
+              &quot;host&quot;:&quot;mem1&quot;,
+              &quot;memdev&quot;:{
+                &quot;memdev&quot;:&quot;mem1&quot;,
+                &quot;pmem_size&quot;:&quot;256.00 MiB (268.44 MB)&quot;,
+                &quot;ram_size&quot;:&quot;256.00 MiB (268.44 MB)&quot;,
+                &quot;serial&quot;:&quot;0&quot;,
+                &quot;numa_node&quot;:0,
+                &quot;host&quot;:&quot;cxl_mem.0&quot;
+              }
+            },
+            {
+              &quot;endpoint&quot;:&quot;endpoint14&quot;,
+              &quot;host&quot;:&quot;mem5&quot;,
+              &quot;memdev&quot;:{
+                &quot;memdev&quot;:&quot;mem5&quot;,
+                &quot;pmem_size&quot;:&quot;256.00 MiB (268.44 MB)&quot;,
+                &quot;ram_size&quot;:&quot;256.00 MiB (268.44 MB)&quot;,
+                &quot;serial&quot;:&quot;0x4&quot;,
+                &quot;numa_node&quot;:0,
+                &quot;host&quot;:&quot;cxl_mem.4&quot;
+              }
+            }
+          ]
+        },
+        {
+          &quot;port&quot;:&quot;port10&quot;,
+          &quot;host&quot;:&quot;cxl_switch_uport.2&quot;,
+          &quot;endpoints:port10&quot;:[
+            {
+              &quot;endpoint&quot;:&quot;endpoint16&quot;,
+              &quot;host&quot;:&quot;mem7&quot;,
+              &quot;memdev&quot;:{
+                &quot;memdev&quot;:&quot;mem7&quot;,
+                &quot;pmem_size&quot;:&quot;256.00 MiB (268.44 MB)&quot;,
+                &quot;ram_size&quot;:&quot;256.00 MiB (268.44 MB)&quot;,
+                &quot;serial&quot;:&quot;0x6&quot;,
+                &quot;numa_node&quot;:0,
+                &quot;host&quot;:&quot;cxl_mem.6&quot;
+              }
+            },
+            {
+              &quot;endpoint&quot;:&quot;endpoint11&quot;,
+              &quot;host&quot;:&quot;mem3&quot;,
+              &quot;memdev&quot;:{
+                &quot;memdev&quot;:&quot;mem3&quot;,
+                &quot;pmem_size&quot;:&quot;256.00 MiB (268.44 MB)&quot;,
+                &quot;ram_size&quot;:&quot;256.00 MiB (268.44 MB)&quot;,
+                &quot;serial&quot;:&quot;0x2&quot;,
+                &quot;numa_node&quot;:0,
+                &quot;host&quot;:&quot;cxl_mem.2&quot;
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+</pre></div>
+</div>
+<p>In that listing each “root”, “port”, and “endpoint” object correspond a kernel
+‘<a class="reference internal" href="#c.cxl_port" title="cxl_port"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cxl_port</span></code></a>’ object. A ‘cxl_port’ is a device that can decode CXL.mem to
+its descendants. So “root” claims non-PCIe enumerable platform decode ranges and
+decodes them to “ports”, “ports” decode to “endpoints”, and “endpoints”
+represent the decode from SPA (System Physical Address) to DPA (Device Physical
+Address).</p>
+<p>Continuing the RAID analogy, disks have both topology metadata and on device
+metadata that determine RAID set assembly. CXL Port topology and CXL Port link
+status is metadata for CXL.mem set assembly. The CXL Port topology is enumerated
+by the arrival of a CXL.mem device. I.e. unless and until the PCIe core attaches
+the cxl_pci driver to a CXL Memory Expander there is no role for CXL Port
+objects. Conversely for hot-unplug / removal scenarios, there is no need for
+the Linux PCI core to tear down switch-level CXL resources because the endpoint
+-&gt;remove() event cleans up the port data that was established to support that
+Memory Expander.</p>
+<p>The port metadata and potential decode schemes that a give memory device may
+participate can be determined via a command like:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># cxl list -BDMu -d root -m mem3
+{
+  &quot;bus&quot;:&quot;root3&quot;,
+  &quot;provider&quot;:&quot;cxl_test&quot;,
+  &quot;decoders:root3&quot;:[
+    {
+      &quot;decoder&quot;:&quot;decoder3.1&quot;,
+      &quot;resource&quot;:&quot;0x8030000000&quot;,
+      &quot;size&quot;:&quot;512.00 MiB (536.87 MB)&quot;,
+      &quot;volatile_capable&quot;:true,
+      &quot;nr_targets&quot;:2
+    },
+    {
+      &quot;decoder&quot;:&quot;decoder3.3&quot;,
+      &quot;resource&quot;:&quot;0x8060000000&quot;,
+      &quot;size&quot;:&quot;512.00 MiB (536.87 MB)&quot;,
+      &quot;pmem_capable&quot;:true,
+      &quot;nr_targets&quot;:2
+    },
+    {
+      &quot;decoder&quot;:&quot;decoder3.0&quot;,
+      &quot;resource&quot;:&quot;0x8020000000&quot;,
+      &quot;size&quot;:&quot;256.00 MiB (268.44 MB)&quot;,
+      &quot;volatile_capable&quot;:true,
+      &quot;nr_targets&quot;:1
+    },
+    {
+      &quot;decoder&quot;:&quot;decoder3.2&quot;,
+      &quot;resource&quot;:&quot;0x8050000000&quot;,
+      &quot;size&quot;:&quot;256.00 MiB (268.44 MB)&quot;,
+      &quot;pmem_capable&quot;:true,
+      &quot;nr_targets&quot;:1
+    }
+  ],
+  &quot;memdevs:root3&quot;:[
+    {
+      &quot;memdev&quot;:&quot;mem3&quot;,
+      &quot;pmem_size&quot;:&quot;256.00 MiB (268.44 MB)&quot;,
+      &quot;ram_size&quot;:&quot;256.00 MiB (268.44 MB)&quot;,
+      &quot;serial&quot;:&quot;0x2&quot;,
+      &quot;numa_node&quot;:0,
+      &quot;host&quot;:&quot;cxl_mem.2&quot;
+    }
+  ]
+}
+</pre></div>
+</div>
+<p>…which queries the CXL topology to ask “given CXL Memory Expander with a kernel
+device name of ‘mem3’ which platform level decode ranges may this device
+participate”. A given expander can participate in multiple CXL.mem interleave
+sets simultaneously depending on how many decoder resource it has. In this
+example mem3 can participate in one or more of a PMEM interleave that spans to
+Host Bridges, a PMEM interleave that targets a single Host Bridge, a Volatile
+memory interleave that spans 2 Host Bridges, and a Volatile memory interleave
+that only targets a single Host Bridge.</p>
+<p>Conversely the memory devices that can participate in a given platform level
+decode scheme can be determined via a command like the following:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># cxl list -MDu -d 3.2
+[
+  {
+    &quot;memdevs&quot;:[
+      {
+        &quot;memdev&quot;:&quot;mem1&quot;,
+        &quot;pmem_size&quot;:&quot;256.00 MiB (268.44 MB)&quot;,
+        &quot;ram_size&quot;:&quot;256.00 MiB (268.44 MB)&quot;,
+        &quot;serial&quot;:&quot;0&quot;,
+        &quot;numa_node&quot;:0,
+        &quot;host&quot;:&quot;cxl_mem.0&quot;
+      },
+      {
+        &quot;memdev&quot;:&quot;mem5&quot;,
+        &quot;pmem_size&quot;:&quot;256.00 MiB (268.44 MB)&quot;,
+        &quot;ram_size&quot;:&quot;256.00 MiB (268.44 MB)&quot;,
+        &quot;serial&quot;:&quot;0x4&quot;,
+        &quot;numa_node&quot;:0,
+        &quot;host&quot;:&quot;cxl_mem.4&quot;
+      },
+      {
+        &quot;memdev&quot;:&quot;mem7&quot;,
+        &quot;pmem_size&quot;:&quot;256.00 MiB (268.44 MB)&quot;,
+        &quot;ram_size&quot;:&quot;256.00 MiB (268.44 MB)&quot;,
+        &quot;serial&quot;:&quot;0x6&quot;,
+        &quot;numa_node&quot;:0,
+        &quot;host&quot;:&quot;cxl_mem.6&quot;
+      },
+      {
+        &quot;memdev&quot;:&quot;mem3&quot;,
+        &quot;pmem_size&quot;:&quot;256.00 MiB (268.44 MB)&quot;,
+        &quot;ram_size&quot;:&quot;256.00 MiB (268.44 MB)&quot;,
+        &quot;serial&quot;:&quot;0x2&quot;,
+        &quot;numa_node&quot;:0,
+        &quot;host&quot;:&quot;cxl_mem.2&quot;
+      }
+    ]
+  },
+  {
+    &quot;root decoders&quot;:[
+      {
+        &quot;decoder&quot;:&quot;decoder3.2&quot;,
+        &quot;resource&quot;:&quot;0x8050000000&quot;,
+        &quot;size&quot;:&quot;256.00 MiB (268.44 MB)&quot;,
+        &quot;pmem_capable&quot;:true,
+        &quot;nr_targets&quot;:1
+      }
+    ]
+  }
+]
+</pre></div>
+</div>
+<p>…where the naming scheme for decoders is “decoder&lt;port_id&gt;.&lt;instance_id&gt;”.</p>
+</section>
+<section id="driver-infrastructure">
+<h2>Driver Infrastructure<a class="headerlink" href="#driver-infrastructure" title="Permalink to this headline">¶</a></h2>
+<p>This section covers the driver infrastructure for a CXL memory device.</p>
+<section id="cxl-memory-device">
+<h3>CXL Memory Device<a class="headerlink" href="#cxl-memory-device" title="Permalink to this headline">¶</a></h3>
+<p>This implements the PCI exclusive functionality for a CXL device as it is
+defined by the Compute Express Link specification. CXL devices may surface
+certain functionality even if it isn’t CXL enabled. While this driver is
+focused around the PCI specific aspects of a CXL device, it binds to the
+specific CXL memory device class code, and therefore the implementation of
+cxl_pci is focused around CXL memory devices.</p>
+<dl class="simple">
+<dt>The driver has several responsibilities, mainly:</dt><dd><ul class="simple">
+<li><p>Create the memX device and register on the CXL bus.</p></li>
+<li><p>Enumerate device’s register interface and map them.</p></li>
+<li><p>Registers nvdimm bridge device with cxl_core.</p></li>
+<li><p>Registers a CXL mailbox with cxl_core.</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="function">
+<dt id="c.__cxl_pci_mbox_send_cmd">
+int <code class="sig-name descname">__cxl_pci_mbox_send_cmd</code><span class="sig-paren">(</span>struct cxl_dev_state<em> *cxlds</em>, struct cxl_mbox_cmd<em> *mbox_cmd</em><span class="sig-paren">)</span><a class="headerlink" href="#c.__cxl_pci_mbox_send_cmd" title="Permalink to this definition">¶</a></dt>
+<dd><p>Execute a mailbox command</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cxl_dev_state</span> <span class="pre">*cxlds</span></code></dt><dd><p>The device state to communicate with.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cxl_mbox_cmd</span> <span class="pre">*mbox_cmd</span></code></dt><dd><p>Command to send to the memory device.</p>
+</dd>
+</dl>
+<p><strong>Context</strong></p>
+<p>Any context. Expects mbox_mutex to be held.</p>
+<p><strong>Return</strong></p>
+<dl class="simple">
+<dt>-ETIMEDOUT if timeout occurred waiting for completion. 0 on success.</dt><dd><p>Caller should check the return code in <strong>mbox_cmd</strong> to make sure it
+succeeded.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This is a generic form of the CXL mailbox send command thus only using the
+registers defined by the mailbox capability ID - CXL 2.0 8.2.8.4. Memory
+devices, and perhaps other types of CXL devices may have further information
+available upon error conditions. Driver facilities wishing to send mailbox
+commands should use the wrapper command.</p>
+<p>The CXL spec allows for up to two mailboxes. The intention is for the primary
+mailbox to be OS controlled and the secondary mailbox to be used by system
+firmware. This allows the OS and firmware to communicate with the device and
+not need to coordinate with each other. The driver only uses the primary
+mailbox.</p>
+</div>
+<p>CXL memory endpoint devices and switches are CXL capable devices that are
+participating in CXL.mem protocol. Their functionality builds on top of the
+CXL.io protocol that allows enumerating and configuring components via
+standard PCI mechanisms.</p>
+<p>The cxl_mem driver owns kicking off the enumeration of this CXL.mem
+capability. With the detection of a CXL capable endpoint, the driver will
+walk up to find the platform specific port it is connected to, and determine
+if there are intervening switches in the path. If there are switches, a
+secondary action is to enumerate those (implemented in cxl_core). Finally the
+cxl_mem driver adds the device it is bound to as a CXL endpoint-port for use
+in higher level operations.</p>
+</section>
+<section id="cxl-port">
+<h3>CXL Port<a class="headerlink" href="#cxl-port" title="Permalink to this headline">¶</a></h3>
+<p>The port driver enumerates dport via PCI and scans for HDM
+(Host-managed-Device-Memory) decoder resources via the
+<strong>component_reg_phys</strong> value passed in by the agent that registered the
+port. All descendant ports of a CXL root port (described by platform
+firmware) are managed in this drivers context. Each driver instance
+is responsible for tearing down the driver context of immediate
+descendant ports. The locking for this is validated by
+CONFIG_PROVE_CXL_LOCKING.</p>
+<p>The primary service this driver provides is presenting APIs to other
+drivers to utilize the decoders, and indicating to userspace (via bind
+status) the connectivity of the CXL.mem protocol throughout the
+PCIe topology.</p>
+</section>
+<section id="cxl-core">
+<h3>CXL Core<a class="headerlink" href="#cxl-core" title="Permalink to this headline">¶</a></h3>
+<p>The CXL core objects like ports, decoders, and regions are shared
+between the subsystem drivers cxl_acpi, cxl_pci, and core drivers
+(port-driver, region-driver, nvdimm object-drivers… etc).</p>
+<dl class="type">
+<dt id="c.cxl_register_map">
+struct <code class="sig-name descname">cxl_register_map</code><a class="headerlink" href="#c.cxl_register_map" title="Permalink to this definition">¶</a></dt>
+<dd><p>DVSEC harvested register block mapping parameters</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct cxl_register_map {
+    void __iomem *base;
+    resource_size_t resource;
+    resource_size_t max_size;
+    u8 reg_type;
+    union {
+        struct cxl_component_reg_map component_map;
+        struct cxl_device_reg_map device_map;
+    };
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">base</span></code></dt><dd><p>virtual base of the register-block-BAR + <strong>block_offset</strong></p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">resource</span></code></dt><dd><p>physical resource base of the register block</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">max_size</span></code></dt><dd><p>maximum mapping size to perform register search</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">reg_type</span></code></dt><dd><p>see enum cxl_regloc_type</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">{unnamed_union}</span></code></dt><dd><p>anonymous</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">component_map</span></code></dt><dd><p>cxl_reg_map for component registers</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">device_map</span></code></dt><dd><p>cxl_reg_maps for device registers</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.cxl_decoder">
+struct <code class="sig-name descname">cxl_decoder</code><a class="headerlink" href="#c.cxl_decoder" title="Permalink to this definition">¶</a></dt>
+<dd><p>Common CXL HDM Decoder Attributes</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct cxl_decoder {
+    struct device dev;
+    int id;
+    struct range hpa_range;
+    int interleave_ways;
+    int interleave_granularity;
+    enum cxl_decoder_type target_type;
+    struct cxl_region *region;
+    unsigned long flags;
+    int (*commit)(struct cxl_decoder *cxld);
+    int (*reset)(struct cxl_decoder *cxld);
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">dev</span></code></dt><dd><p>this decoder’s device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">id</span></code></dt><dd><p>kernel device name id</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">hpa_range</span></code></dt><dd><p>Host physical address range mapped by this decoder</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">interleave_ways</span></code></dt><dd><p>number of cxl_dports in this decode</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">interleave_granularity</span></code></dt><dd><p>data stride per dport</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">target_type</span></code></dt><dd><p>accelerator vs expander (type2 vs type3) selector</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">region</span></code></dt><dd><p>currently assigned region for this decoder</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">flags</span></code></dt><dd><p>memory type capabilities and locking</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">commit</span></code></dt><dd><p>device/decoder-type specific callback to commit settings to hw</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">reset</span></code></dt><dd><p>device/decoder-type specific callback to reset hw settings</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.cxl_endpoint_decoder">
+struct <code class="sig-name descname">cxl_endpoint_decoder</code><a class="headerlink" href="#c.cxl_endpoint_decoder" title="Permalink to this definition">¶</a></dt>
+<dd><p>Endpoint / SPA to DPA decoder</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct cxl_endpoint_decoder {
+    struct cxl_decoder cxld;
+    struct resource *dpa_res;
+    resource_size_t skip;
+    enum cxl_decoder_mode mode;
+    int pos;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">cxld</span></code></dt><dd><p>base cxl_decoder_object</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dpa_res</span></code></dt><dd><p>actively claimed DPA span of this decoder</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">skip</span></code></dt><dd><p>offset into <strong>dpa_res</strong> where <strong>cxld.hpa_range</strong> maps</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">mode</span></code></dt><dd><p>which memory type / access-mode-partition this decoder targets</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">pos</span></code></dt><dd><p>interleave position in <strong>cxld.region</strong></p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.cxl_switch_decoder">
+struct <code class="sig-name descname">cxl_switch_decoder</code><a class="headerlink" href="#c.cxl_switch_decoder" title="Permalink to this definition">¶</a></dt>
+<dd><p>Switch specific CXL HDM Decoder</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct cxl_switch_decoder {
+    struct cxl_decoder cxld;
+    seqlock_t target_lock;
+    int nr_targets;
+    struct cxl_dport *target[];
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">cxld</span></code></dt><dd><p>base cxl_decoder object</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">target_lock</span></code></dt><dd><p>coordinate coherent reads of the target list</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">nr_targets</span></code></dt><dd><p>number of elements in <strong>target</strong></p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">target</span></code></dt><dd><p>active ordered target list in current decoder configuration</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>The ‘switch’ decoder type represents the decoder instances of cxl_port’s that
+route from the root of a CXL memory decode topology to the endpoints. They
+come in two flavors, root-level decoders, statically defined by platform
+firmware, and mid-level decoders, where interleave-granularity,
+interleave-width, and the target list are mutable.</p>
+<dl class="type">
+<dt id="c.cxl_root_decoder">
+struct <code class="sig-name descname">cxl_root_decoder</code><a class="headerlink" href="#c.cxl_root_decoder" title="Permalink to this definition">¶</a></dt>
+<dd><p>Static platform CXL address decoder</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct cxl_root_decoder {
+    struct resource *res;
+    atomic_t region_id;
+    cxl_calc_hb_fn calc_hb;
+    void *platform_data;
+    struct cxl_switch_decoder cxlsd;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">res</span></code></dt><dd><p>host / parent resource for region allocations</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">region_id</span></code></dt><dd><p>region id for next region provisioning event</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">calc_hb</span></code></dt><dd><p>which host bridge covers the n’th position by granularity</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">platform_data</span></code></dt><dd><p>platform specific configuration data</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">cxlsd</span></code></dt><dd><p>base cxl switch decoder</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.cxl_region_params">
+struct <code class="sig-name descname">cxl_region_params</code><a class="headerlink" href="#c.cxl_region_params" title="Permalink to this definition">¶</a></dt>
+<dd><p>region settings</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct cxl_region_params {
+    enum cxl_config_state state;
+    uuid_t uuid;
+    int interleave_ways;
+    int interleave_granularity;
+    struct resource *res;
+    struct cxl_endpoint_decoder *targets[CXL_DECODER_MAX_INTERLEAVE];
+    int nr_targets;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">state</span></code></dt><dd><p>allow the driver to lockdown further parameter changes</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">uuid</span></code></dt><dd><p>unique id for persistent regions</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">interleave_ways</span></code></dt><dd><p>number of endpoints in the region</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">interleave_granularity</span></code></dt><dd><p>capacity each endpoint contributes to a stripe</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">res</span></code></dt><dd><p>allocated iomem capacity for this region</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">targets</span></code></dt><dd><p>active ordered targets in current decoder configuration</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">nr_targets</span></code></dt><dd><p>number of targets</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>State transitions are protected by the cxl_region_rwsem</p>
+<dl class="type">
+<dt id="c.cxl_region">
+struct <code class="sig-name descname">cxl_region</code><a class="headerlink" href="#c.cxl_region" title="Permalink to this definition">¶</a></dt>
+<dd><p>CXL region</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct cxl_region {
+    struct device dev;
+    int id;
+    enum cxl_decoder_mode mode;
+    enum cxl_decoder_type type;
+    struct cxl_nvdimm_bridge *cxl_nvb;
+    struct cxl_pmem_region *cxlr_pmem;
+    unsigned long flags;
+    struct cxl_region_params params;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">dev</span></code></dt><dd><p>This region’s device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">id</span></code></dt><dd><p>This region’s id. Id is globally unique across all regions</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">mode</span></code></dt><dd><p>Endpoint decoder allocation / access mode</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">type</span></code></dt><dd><p>Endpoint decoder target type</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">cxl_nvb</span></code></dt><dd><p>nvdimm bridge for coordinating <strong>cxlr_pmem</strong> setup / shutdown</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">cxlr_pmem</span></code></dt><dd><p>(for pmem regions) cached copy of the nvdimm bridge</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">flags</span></code></dt><dd><p>Region state flags</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">params</span></code></dt><dd><p>active + config params for the region</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.cxl_port">
+struct <code class="sig-name descname">cxl_port</code><a class="headerlink" href="#c.cxl_port" title="Permalink to this definition">¶</a></dt>
+<dd><p>logical collection of upstream port devices and downstream port devices to construct a CXL memory decode hierarchy.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct cxl_port {
+    struct device dev;
+    struct device *uport;
+    struct device *host_bridge;
+    int id;
+    struct xarray dports;
+    struct xarray endpoints;
+    struct xarray regions;
+    struct cxl_dport *parent_dport;
+    struct ida decoder_ida;
+    int nr_dports;
+    int hdm_end;
+    int commit_end;
+    resource_size_t component_reg_phys;
+    bool dead;
+    unsigned int depth;
+    struct cxl_cdat {
+        void *table;
+        size_t length;
+    } cdat;
+    bool cdat_available;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">dev</span></code></dt><dd><p>this port’s device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">uport</span></code></dt><dd><p>PCI or platform device implementing the upstream port capability</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">host_bridge</span></code></dt><dd><p>Shortcut to the platform attach point for this port</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">id</span></code></dt><dd><p>id for port device-name</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dports</span></code></dt><dd><p>cxl_dport instances referenced by decoders</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">endpoints</span></code></dt><dd><p>cxl_ep instances, endpoints that are a descendant of this port</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">regions</span></code></dt><dd><p>cxl_region_ref instances, regions mapped by this port</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">parent_dport</span></code></dt><dd><p>dport that points to this port in the parent</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">decoder_ida</span></code></dt><dd><p>allocator for decoder ids</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">nr_dports</span></code></dt><dd><p>number of entries in <strong>dports</strong></p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">hdm_end</span></code></dt><dd><p>track last allocated HDM decoder instance for allocation ordering</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">commit_end</span></code></dt><dd><p>cursor to track highest committed decoder for commit ordering</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">component_reg_phys</span></code></dt><dd><p>component register capability base address (optional)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dead</span></code></dt><dd><p>last ep has been removed, force port re-creation</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">depth</span></code></dt><dd><p>How deep this port is relative to the root. depth 0 is the root.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">cdat</span></code></dt><dd><p>Cached CDAT data</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">cdat_available</span></code></dt><dd><p>Should a CDAT attribute be available in sysfs</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.cxl_dport">
+struct <code class="sig-name descname">cxl_dport</code><a class="headerlink" href="#c.cxl_dport" title="Permalink to this definition">¶</a></dt>
+<dd><p>CXL downstream port</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct cxl_dport {
+    struct device *dport;
+    int port_id;
+    resource_size_t component_reg_phys;
+    resource_size_t rcrb;
+    bool rch;
+    struct cxl_port *port;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">dport</span></code></dt><dd><p>PCI bridge or firmware device representing the downstream link</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">port_id</span></code></dt><dd><p>unique hardware identifier for dport in decoder target list</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">component_reg_phys</span></code></dt><dd><p>downstream port component registers</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">rcrb</span></code></dt><dd><p>base address for the Root Complex Register Block</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">rch</span></code></dt><dd><p>Indicate whether this dport was enumerated in RCH or VH mode</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">port</span></code></dt><dd><p>reference to cxl_port that contains this downstream port</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.cxl_ep">
+struct <code class="sig-name descname">cxl_ep</code><a class="headerlink" href="#c.cxl_ep" title="Permalink to this definition">¶</a></dt>
+<dd><p>track an endpoint’s interest in a port</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct cxl_ep {
+    struct device *ep;
+    struct cxl_dport *dport;
+    struct cxl_port *next;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">ep</span></code></dt><dd><p>device that hosts a generic CXL endpoint (expander or accelerator)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dport</span></code></dt><dd><p>which dport routes to this endpoint on <strong>port</strong></p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">next</span></code></dt><dd><p>cxl switch port across the link attached to <strong>dport</strong> NULL if
+attached to an endpoint</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.cxl_region_ref">
+struct <code class="sig-name descname">cxl_region_ref</code><a class="headerlink" href="#c.cxl_region_ref" title="Permalink to this definition">¶</a></dt>
+<dd><p>track a region’s interest in a port</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct cxl_region_ref {
+    struct cxl_port *port;
+    struct cxl_decoder *decoder;
+    struct cxl_region *region;
+    struct xarray endpoints;
+    int nr_targets_set;
+    int nr_eps;
+    int nr_targets;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">port</span></code></dt><dd><p>point in topology to install this reference</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">decoder</span></code></dt><dd><p>decoder assigned for <strong>region</strong> in <strong>port</strong></p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">region</span></code></dt><dd><p>region for this reference</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">endpoints</span></code></dt><dd><p>cxl_ep references for region members beneath <strong>port</strong></p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">nr_targets_set</span></code></dt><dd><p>track how many targets have been programmed during setup</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">nr_eps</span></code></dt><dd><p>number of endpoints beneath <strong>port</strong></p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">nr_targets</span></code></dt><dd><p>number of distinct targets needed to reach <strong>nr_eps</strong></p>
+</dd>
+</dl>
+</div>
+<p>The CXL core provides a set of interfaces that can be consumed by CXL aware
+drivers. The interfaces allow for creation, modification, and destruction of
+regions, memory devices, ports, and decoders. CXL aware drivers must register
+with the CXL core via these interfaces in order to be able to participate in
+cross-device interleave coordination. The CXL core also establishes and
+maintains the bridge to the nvdimm subsystem.</p>
+<p>CXL core introduces sysfs hierarchy to control the devices that are
+instantiated by the core.</p>
+<dl class="function">
+<dt id="c.devm_cxl_add_port">
+struct <a class="reference internal" href="#c.cxl_port" title="cxl_port">cxl_port</a> * <code class="sig-name descname">devm_cxl_add_port</code><span class="sig-paren">(</span>struct <a class="reference internal" href="../infrastructure.html#c.device" title="device">device</a><em> *host</em>, struct <a class="reference internal" href="../infrastructure.html#c.device" title="device">device</a><em> *uport</em>, resource_size_t<em> component_reg_phys</em>, struct <a class="reference internal" href="#c.cxl_dport" title="cxl_dport">cxl_dport</a><em> *parent_dport</em><span class="sig-paren">)</span><a class="headerlink" href="#c.devm_cxl_add_port" title="Permalink to this definition">¶</a></dt>
+<dd><p>register a cxl_port in CXL memory decode hierarchy</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*host</span></code></dt><dd><p>host device for devm operations</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*uport</span></code></dt><dd><p>“physical” device implementing this upstream port</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">resource_size_t</span> <span class="pre">component_reg_phys</span></code></dt><dd><p>(optional) for configurable cxl_port instances</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cxl_dport</span> <span class="pre">*parent_dport</span></code></dt><dd><p>next hop up in the CXL memory decode hierarchy</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.devm_cxl_add_dport">
+struct <a class="reference internal" href="#c.cxl_dport" title="cxl_dport">cxl_dport</a> * <code class="sig-name descname">devm_cxl_add_dport</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.cxl_port" title="cxl_port">cxl_port</a><em> *port</em>, struct <a class="reference internal" href="../infrastructure.html#c.device" title="device">device</a><em> *dport_dev</em>, int<em> port_id</em>, resource_size_t<em> component_reg_phys</em><span class="sig-paren">)</span><a class="headerlink" href="#c.devm_cxl_add_dport" title="Permalink to this definition">¶</a></dt>
+<dd><p>append VH downstream port data to a cxl_port</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cxl_port</span> <span class="pre">*port</span></code></dt><dd><p>the cxl_port that references this dport</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dport_dev</span></code></dt><dd><p>firmware or PCI device representing the dport</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">port_id</span></code></dt><dd><p>identifier for this dport in a decoder’s target list</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">resource_size_t</span> <span class="pre">component_reg_phys</span></code></dt><dd><p>optional location of CXL component registers</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Note that dports are appended to the devm release action’s of the
+either the port’s host (for root ports), or the port itself (for
+switch ports)</p>
+</div>
+<dl class="function">
+<dt id="c.devm_cxl_add_rch_dport">
+struct <a class="reference internal" href="#c.cxl_dport" title="cxl_dport">cxl_dport</a> * <code class="sig-name descname">devm_cxl_add_rch_dport</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.cxl_port" title="cxl_port">cxl_port</a><em> *port</em>, struct <a class="reference internal" href="../infrastructure.html#c.device" title="device">device</a><em> *dport_dev</em>, int<em> port_id</em>, resource_size_t<em> component_reg_phys</em>, resource_size_t<em> rcrb</em><span class="sig-paren">)</span><a class="headerlink" href="#c.devm_cxl_add_rch_dport" title="Permalink to this definition">¶</a></dt>
+<dd><p>append RCH downstream port data to a cxl_port</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cxl_port</span> <span class="pre">*port</span></code></dt><dd><p>the cxl_port that references this dport</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dport_dev</span></code></dt><dd><p>firmware or PCI device representing the dport</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">port_id</span></code></dt><dd><p>identifier for this dport in a decoder’s target list</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">resource_size_t</span> <span class="pre">component_reg_phys</span></code></dt><dd><p>optional location of CXL component registers</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">resource_size_t</span> <span class="pre">rcrb</span></code></dt><dd><p>mandatory location of a Root Complex Register Block</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>See CXL 3.0 9.11.8 CXL Devices Attached to an RCH</p>
+</div>
+<dl class="function">
+<dt id="c.cxl_add_ep">
+int <code class="sig-name descname">cxl_add_ep</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.cxl_dport" title="cxl_dport">cxl_dport</a><em> *dport</em>, struct <a class="reference internal" href="../infrastructure.html#c.device" title="device">device</a><em> *ep_dev</em><span class="sig-paren">)</span><a class="headerlink" href="#c.cxl_add_ep" title="Permalink to this definition">¶</a></dt>
+<dd><p>register an endpoint’s interest in a port</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cxl_dport</span> <span class="pre">*dport</span></code></dt><dd><p>the dport that routes to <strong>ep_dev</strong></p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*ep_dev</span></code></dt><dd><p>device representing the endpoint</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Intermediate CXL ports are scanned based on the arrival of endpoints.
+When those endpoints depart the port can be destroyed once all
+endpoints that care about that port have been removed.</p>
+</div>
+<dl class="function">
+<dt id="c.cxl_decoder_init">
+int <code class="sig-name descname">cxl_decoder_init</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.cxl_port" title="cxl_port">cxl_port</a><em> *port</em>, struct <a class="reference internal" href="#c.cxl_decoder" title="cxl_decoder">cxl_decoder</a><em> *cxld</em><span class="sig-paren">)</span><a class="headerlink" href="#c.cxl_decoder_init" title="Permalink to this definition">¶</a></dt>
+<dd><p>Common decoder setup / initialization</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cxl_port</span> <span class="pre">*port</span></code></dt><dd><p>owning port of this decoder</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cxl_decoder</span> <span class="pre">*cxld</span></code></dt><dd><p>common decoder properties to initialize</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>A port may contain one or more decoders. Each of those decoders
+enable some address space for CXL.mem utilization. A decoder is
+expected to be configured by the caller before registering via
+<a class="reference internal" href="#c.cxl_decoder_add" title="cxl_decoder_add"><code class="xref c c-func docutils literal notranslate"><span class="pre">cxl_decoder_add()</span></code></a></p>
+</div>
+<dl class="function">
+<dt id="c.cxl_root_decoder_alloc">
+struct <a class="reference internal" href="#c.cxl_root_decoder" title="cxl_root_decoder">cxl_root_decoder</a> * <code class="sig-name descname">cxl_root_decoder_alloc</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.cxl_port" title="cxl_port">cxl_port</a><em> *port</em>, unsigned int<em> nr_targets</em>, cxl_calc_hb_fn<em> calc_hb</em><span class="sig-paren">)</span><a class="headerlink" href="#c.cxl_root_decoder_alloc" title="Permalink to this definition">¶</a></dt>
+<dd><p>Allocate a root level decoder</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cxl_port</span> <span class="pre">*port</span></code></dt><dd><p>owning CXL root of this decoder</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">nr_targets</span></code></dt><dd><p>static number of downstream targets</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">cxl_calc_hb_fn</span> <span class="pre">calc_hb</span></code></dt><dd><p>which host bridge covers the n’th position by granularity</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p>A new cxl decoder to be registered by <a class="reference internal" href="#c.cxl_decoder_add" title="cxl_decoder_add"><code class="xref c c-func docutils literal notranslate"><span class="pre">cxl_decoder_add()</span></code></a>. A
+‘CXL root’ decoder is one that decodes from a top-level / static platform
+firmware description of CXL resources into a CXL standard decode
+topology.</p>
+</div>
+<dl class="function">
+<dt id="c.cxl_switch_decoder_alloc">
+struct <a class="reference internal" href="#c.cxl_switch_decoder" title="cxl_switch_decoder">cxl_switch_decoder</a> * <code class="sig-name descname">cxl_switch_decoder_alloc</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.cxl_port" title="cxl_port">cxl_port</a><em> *port</em>, unsigned int<em> nr_targets</em><span class="sig-paren">)</span><a class="headerlink" href="#c.cxl_switch_decoder_alloc" title="Permalink to this definition">¶</a></dt>
+<dd><p>Allocate a switch level decoder</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cxl_port</span> <span class="pre">*port</span></code></dt><dd><p>owning CXL switch port of this decoder</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">nr_targets</span></code></dt><dd><p>max number of dynamically addressable downstream targets</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p>A new cxl decoder to be registered by <a class="reference internal" href="#c.cxl_decoder_add" title="cxl_decoder_add"><code class="xref c c-func docutils literal notranslate"><span class="pre">cxl_decoder_add()</span></code></a>. A
+‘switch’ decoder is any decoder that can be enumerated by PCIe
+topology and the HDM Decoder Capability. This includes the decoders
+that sit between Switch Upstream Ports / Switch Downstream Ports and
+Host Bridges / Root Ports.</p>
+</div>
+<dl class="function">
+<dt id="c.cxl_endpoint_decoder_alloc">
+struct <a class="reference internal" href="#c.cxl_endpoint_decoder" title="cxl_endpoint_decoder">cxl_endpoint_decoder</a> * <code class="sig-name descname">cxl_endpoint_decoder_alloc</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.cxl_port" title="cxl_port">cxl_port</a><em> *port</em><span class="sig-paren">)</span><a class="headerlink" href="#c.cxl_endpoint_decoder_alloc" title="Permalink to this definition">¶</a></dt>
+<dd><p>Allocate an endpoint decoder</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cxl_port</span> <span class="pre">*port</span></code></dt><dd><p>owning port of this decoder</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p>A new cxl decoder to be registered by <a class="reference internal" href="#c.cxl_decoder_add" title="cxl_decoder_add"><code class="xref c c-func docutils literal notranslate"><span class="pre">cxl_decoder_add()</span></code></a></p>
+</div>
+<dl class="function">
+<dt id="c.cxl_decoder_add_locked">
+int <code class="sig-name descname">cxl_decoder_add_locked</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.cxl_decoder" title="cxl_decoder">cxl_decoder</a><em> *cxld</em>, int<em> *target_map</em><span class="sig-paren">)</span><a class="headerlink" href="#c.cxl_decoder_add_locked" title="Permalink to this definition">¶</a></dt>
+<dd><p>Add a decoder with targets</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cxl_decoder</span> <span class="pre">*cxld</span></code></dt><dd><p>The cxl decoder allocated by cxl_&lt;type&gt;_decoder_alloc()</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">*target_map</span></code></dt><dd><p>A list of downstream ports that this decoder can direct memory
+traffic to. These numbers should correspond with the port number
+in the PCIe Link Capabilities structure.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Certain types of decoders may not have any targets. The main example of this
+is an endpoint device. A more awkward example is a hostbridge whose root
+ports get hot added (technically possible, though unlikely).</p>
+<p>This is the locked variant of <a class="reference internal" href="#c.cxl_decoder_add" title="cxl_decoder_add"><code class="xref c c-func docutils literal notranslate"><span class="pre">cxl_decoder_add()</span></code></a>.</p>
+<p><strong>Context</strong></p>
+<p>Process context. Expects the device lock of the port that owns the
+<strong>cxld</strong> to be held.</p>
+<p><strong>Return</strong></p>
+<dl class="simple">
+<dt>Negative error code if the decoder wasn’t properly configured; else</dt><dd><p>returns 0.</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.cxl_decoder_add">
+int <code class="sig-name descname">cxl_decoder_add</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.cxl_decoder" title="cxl_decoder">cxl_decoder</a><em> *cxld</em>, int<em> *target_map</em><span class="sig-paren">)</span><a class="headerlink" href="#c.cxl_decoder_add" title="Permalink to this definition">¶</a></dt>
+<dd><p>Add a decoder with targets</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cxl_decoder</span> <span class="pre">*cxld</span></code></dt><dd><p>The cxl decoder allocated by cxl_&lt;type&gt;_decoder_alloc()</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">*target_map</span></code></dt><dd><p>A list of downstream ports that this decoder can direct memory
+traffic to. These numbers should correspond with the port number
+in the PCIe Link Capabilities structure.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This is the unlocked variant of <a class="reference internal" href="#c.cxl_decoder_add_locked" title="cxl_decoder_add_locked"><code class="xref c c-func docutils literal notranslate"><span class="pre">cxl_decoder_add_locked()</span></code></a>.
+See <a class="reference internal" href="#c.cxl_decoder_add_locked" title="cxl_decoder_add_locked"><code class="xref c c-func docutils literal notranslate"><span class="pre">cxl_decoder_add_locked()</span></code></a>.</p>
+<p><strong>Context</strong></p>
+<p>Process context. Takes and releases the device lock of the port that
+owns the <strong>cxld</strong>.</p>
+</div>
+<dl class="function">
+<dt id="c.__cxl_driver_register">
+int <code class="sig-name descname">__cxl_driver_register</code><span class="sig-paren">(</span>struct cxl_driver<em> *cxl_drv</em>, struct module<em> *owner</em>, const char<em> *modname</em><span class="sig-paren">)</span><a class="headerlink" href="#c.__cxl_driver_register" title="Permalink to this definition">¶</a></dt>
+<dd><p>register a driver for the cxl bus</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cxl_driver</span> <span class="pre">*cxl_drv</span></code></dt><dd><p>cxl driver structure to attach</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">module</span> <span class="pre">*owner</span></code></dt><dd><p>owning module/driver</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*modname</span></code></dt><dd><p>KBUILD_MODNAME for parent driver</p>
+</dd>
+</dl>
+</div>
+<p>Compute Express Link protocols are layered on top of PCIe. CXL core provides
+a set of helpers for CXL interactions which occur via PCIe.</p>
+<dl class="function">
+<dt id="c.devm_cxl_port_enumerate_dports">
+int <code class="sig-name descname">devm_cxl_port_enumerate_dports</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.cxl_port" title="cxl_port">cxl_port</a><em> *port</em><span class="sig-paren">)</span><a class="headerlink" href="#c.devm_cxl_port_enumerate_dports" title="Permalink to this definition">¶</a></dt>
+<dd><p>enumerate downstream ports of the upstream port</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cxl_port</span> <span class="pre">*port</span></code></dt><dd><p>cxl_port whose -&gt;uport is the upstream of dports to be enumerated</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Returns a positive number of dports enumerated or a negative error
+code.</p>
+</div>
+<dl class="function">
+<dt id="c.cxl_hdm_decode_init">
+int <code class="sig-name descname">cxl_hdm_decode_init</code><span class="sig-paren">(</span>struct cxl_dev_state<em> *cxlds</em>, struct cxl_hdm<em> *cxlhdm</em><span class="sig-paren">)</span><a class="headerlink" href="#c.cxl_hdm_decode_init" title="Permalink to this definition">¶</a></dt>
+<dd><p>Setup HDM decoding for the endpoint</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cxl_dev_state</span> <span class="pre">*cxlds</span></code></dt><dd><p>Device state</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cxl_hdm</span> <span class="pre">*cxlhdm</span></code></dt><dd><p>Mapped HDM decoder Capability</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Try to enable the endpoint’s HDM Decoder Capability</p>
+</div>
+<dl class="function">
+<dt id="c.read_cdat_data">
+void <code class="sig-name descname">read_cdat_data</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.cxl_port" title="cxl_port">cxl_port</a><em> *port</em><span class="sig-paren">)</span><a class="headerlink" href="#c.read_cdat_data" title="Permalink to this definition">¶</a></dt>
+<dd><p>Read the CDAT data on this port</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cxl_port</span> <span class="pre">*port</span></code></dt><dd><p>Port to read data from</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This call will sleep waiting for responses from the DOE mailbox.</p>
+</div>
+<p>The core CXL PMEM infrastructure supports persistent memory
+provisioning and serves as a bridge to the LIBNVDIMM subsystem. A CXL
+‘bridge’ device is added at the root of a CXL device topology if
+platform firmware advertises at least one persistent memory capable
+CXL window. That root-level bridge corresponds to a LIBNVDIMM ‘bus’
+device. Then for each cxl_memdev in the CXL device topology a bridge
+device is added to host a LIBNVDIMM dimm object. When these bridges
+are registered native LIBNVDIMM uapis are translated to CXL
+operations, for example, namespace label access commands.</p>
+<p>CXL device capabilities are enumerated by PCI DVSEC (Designated
+Vendor-specific) and / or descriptors provided by platform firmware.
+They can be defined as a set like the device and component registers
+mandated by CXL Section 8.1.12.2 Memory Device PCIe Capabilities and
+Extended Capabilities, or they can be individual capabilities
+appended to bridged and endpoint devices.</p>
+<p>Provide common infrastructure for enumerating and mapping these
+discrete capabilities.</p>
+<p>Core implementation of the CXL 2.0 Type-3 Memory Device Mailbox. The
+implementation is used by the cxl_pci driver to initialize the device
+and implement the cxl_mem.h IOCTL UAPI. It also implements the
+backend of the cxl_pmem_ctl() transport for LIBNVDIMM.</p>
+</section>
+<section id="cxl-regions">
+<h3>CXL Regions<a class="headerlink" href="#cxl-regions" title="Permalink to this headline">¶</a></h3>
+<p>CXL Regions represent mapped memory capacity in system physical address
+space. Whereas the CXL Root Decoders identify the bounds of potential CXL
+Memory ranges, Regions represent the active mapped capacity by the HDM
+Decoder Capability structures throughout the Host Bridges, Switches, and
+Endpoints in the topology.</p>
+<p>Region configuration has ordering constraints. UUID may be set at any time
+but is only visible for persistent regions.
+1. Interleave granularity
+2. Interleave size
+3. Decoder targets</p>
+<dl class="function">
+<dt id="c.cxl_port_attach_region">
+int <code class="sig-name descname">cxl_port_attach_region</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.cxl_port" title="cxl_port">cxl_port</a><em> *port</em>, struct <a class="reference internal" href="#c.cxl_region" title="cxl_region">cxl_region</a><em> *cxlr</em>, struct <a class="reference internal" href="#c.cxl_endpoint_decoder" title="cxl_endpoint_decoder">cxl_endpoint_decoder</a><em> *cxled</em>, int<em> pos</em><span class="sig-paren">)</span><a class="headerlink" href="#c.cxl_port_attach_region" title="Permalink to this definition">¶</a></dt>
+<dd><p>track a region’s interest in a port by endpoint</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cxl_port</span> <span class="pre">*port</span></code></dt><dd><p>port to add a new region reference ‘<a class="reference internal" href="#c.cxl_region_ref" title="cxl_region_ref"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cxl_region_ref</span></code></a>’</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cxl_region</span> <span class="pre">*cxlr</span></code></dt><dd><p>region to attach to <strong>port</strong></p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cxl_endpoint_decoder</span> <span class="pre">*cxled</span></code></dt><dd><p>endpoint decoder used to create or further pin a region reference</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">pos</span></code></dt><dd><p>interleave position of <strong>cxled</strong> in <strong>cxlr</strong></p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>The attach event is an opportunity to validate CXL decode setup
+constraints and record metadata needed for programming HDM decoders,
+in particular decoder target lists.</p>
+<p>The steps are:</p>
+<ul class="simple">
+<li><p>validate that there are no other regions with a higher HPA already
+associated with <strong>port</strong></p></li>
+<li><p>establish a region reference if one is not already present</p>
+<ul>
+<li><p>additionally allocate a decoder instance that will host <strong>cxlr</strong> on
+<strong>port</strong></p></li>
+</ul>
+</li>
+<li><p>pin the region reference by the endpoint</p></li>
+<li><p>account for how many entries in <strong>port</strong>’s target list are needed to
+cover all of the added endpoints.</p></li>
+</ul>
+</div>
+<dl class="function">
+<dt id="c.devm_cxl_add_region">
+struct <a class="reference internal" href="#c.cxl_region" title="cxl_region">cxl_region</a> * <code class="sig-name descname">devm_cxl_add_region</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.cxl_root_decoder" title="cxl_root_decoder">cxl_root_decoder</a><em> *cxlrd</em>, int<em> id</em>, enum cxl_decoder_mode<em> mode</em>, enum cxl_decoder_type<em> type</em><span class="sig-paren">)</span><a class="headerlink" href="#c.devm_cxl_add_region" title="Permalink to this definition">¶</a></dt>
+<dd><p>Adds a region to a decoder</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cxl_root_decoder</span> <span class="pre">*cxlrd</span></code></dt><dd><p>root decoder</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">id</span></code></dt><dd><p>memregion id to create, or memregion_free() on failure</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">enum</span> <span class="pre">cxl_decoder_mode</span> <span class="pre">mode</span></code></dt><dd><p>mode for the endpoint decoders of this region</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">enum</span> <span class="pre">cxl_decoder_type</span> <span class="pre">type</span></code></dt><dd><p>select whether this is an expander or accelerator (type-2 or type-3)</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This is the second step of region initialization. Regions exist within an
+address space which is mapped by a <strong>cxlrd</strong>.</p>
+<p><strong>Return</strong></p>
+<p>0 if the region was added to the <strong>cxlrd</strong>, else returns negative error
+code. The region will be named “regionZ” where Z is the unique region number.</p>
+</div>
+<dl class="function">
+<dt id="c.devm_cxl_add_pmem_region">
+int <code class="sig-name descname">devm_cxl_add_pmem_region</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.cxl_region" title="cxl_region">cxl_region</a><em> *cxlr</em><span class="sig-paren">)</span><a class="headerlink" href="#c.devm_cxl_add_pmem_region" title="Permalink to this definition">¶</a></dt>
+<dd><p>add a cxl_region-to-nd_region bridge</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cxl_region</span> <span class="pre">*cxlr</span></code></dt><dd><p>parent CXL region for this pmem region bridge device</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p>0 on success negative error code on failure.</p>
+</div>
+</section>
+</section>
+<section id="external-interfaces">
+<h2>External Interfaces<a class="headerlink" href="#external-interfaces" title="Permalink to this headline">¶</a></h2>
+<section id="cxl-ioctl-interface">
+<h3>CXL IOCTL Interface<a class="headerlink" href="#cxl-ioctl-interface" title="Permalink to this headline">¶</a></h3>
+<p>Not all of all commands that the driver supports are always available for use
+by userspace. Userspace must check the results from the QUERY command in
+order to determine the live set of commands.</p>
+<dl class="type">
+<dt id="c.cxl_command_info">
+struct <code class="sig-name descname">cxl_command_info</code><a class="headerlink" href="#c.cxl_command_info" title="Permalink to this definition">¶</a></dt>
+<dd><p>Command information returned from a query.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct cxl_command_info {
+    __u32 id;
+    __u32 flags;
+#define CXL_MEM_COMMAND_FLAG_MASK GENMASK(0, 0);
+    __u32 size_in;
+    __u32 size_out;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">id</span></code></dt><dd><p>ID number for the command.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">flags</span></code></dt><dd><p>Flags that specify command behavior.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">size_in</span></code></dt><dd><p>Expected input size, or ~0 if variable length.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">size_out</span></code></dt><dd><p>Expected output size, or ~0 if variable length.</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>Represents a single command that is supported by both the driver and the
+hardware. This is returned as part of an array from the query ioctl. The
+following would be a command that takes a variable length input and returns 0
+bytes of output.</p>
+<blockquote>
+<div><ul class="simple">
+<li><p><strong>id</strong> = 10</p></li>
+<li><p><strong>flags</strong> = 0</p></li>
+<li><p><strong>size_in</strong> = ~0</p></li>
+<li><p><strong>size_out</strong> = 0</p></li>
+</ul>
+</div></blockquote>
+<p>See <a class="reference internal" href="#c.cxl_mem_query_commands" title="cxl_mem_query_commands"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cxl_mem_query_commands</span></code></a>.</p>
+<dl class="type">
+<dt id="c.cxl_mem_query_commands">
+struct <code class="sig-name descname">cxl_mem_query_commands</code><a class="headerlink" href="#c.cxl_mem_query_commands" title="Permalink to this definition">¶</a></dt>
+<dd><p>Query supported commands.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct cxl_mem_query_commands {
+    __u32 n_commands;
+    __u32 rsvd;
+    struct cxl_command_info __user commands[];
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">n_commands</span></code></dt><dd><p>In/out parameter. When <strong>n_commands</strong> is &gt; 0, the driver will
+return min(num_support_commands, n_commands). When <strong>n_commands</strong>
+is 0, driver will return the number of total supported commands.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">rsvd</span></code></dt><dd><p>Reserved for future use.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">commands</span></code></dt><dd><p>Output array of supported commands. This array must be allocated
+by userspace to be at least min(num_support_commands, <strong>n_commands</strong>)</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>Allow userspace to query the available commands supported by both the driver,
+and the hardware. Commands that aren’t supported by either the driver, or the
+hardware are not returned in the query.</p>
+<p><strong>Examples</strong></p>
+<blockquote>
+<div><ul class="simple">
+<li><p>{ .n_commands = 0 } // Get number of supported commands</p></li>
+<li><p>{ .n_commands = 15, .commands = buf } // Return first 15 (or less)
+supported commands</p></li>
+</ul>
+<p>See <a class="reference internal" href="#c.cxl_command_info" title="cxl_command_info"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">cxl_command_info</span></code></a>.</p>
+</div></blockquote>
+<dl class="type">
+<dt id="c.cxl_send_command">
+struct <code class="sig-name descname">cxl_send_command</code><a class="headerlink" href="#c.cxl_send_command" title="Permalink to this definition">¶</a></dt>
+<dd><p>Send a command to a memory device.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct cxl_send_command {
+    __u32 id;
+    __u32 flags;
+    union {
+        struct {
+            __u16 opcode;
+            __u16 rsvd;
+        } raw;
+        __u32 rsvd;
+    };
+    __u32 retval;
+    struct {
+        __u32 size;
+        __u32 rsvd;
+        __u64 payload;
+    } in;
+    struct {
+        __u32 size;
+        __u32 rsvd;
+        __u64 payload;
+    } out;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">id</span></code></dt><dd><p>The command to send to the memory device. This must be one of the
+commands returned by the query command.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">flags</span></code></dt><dd><p>Flags for the command (input).</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">{unnamed_union}</span></code></dt><dd><p>anonymous</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">raw</span></code></dt><dd><p>Special fields for raw commands</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">raw.opcode</span></code></dt><dd><p>Opcode passed to hardware when using the RAW command.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">raw.rsvd</span></code></dt><dd><p>Must be zero.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">rsvd</span></code></dt><dd><p>Must be zero.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">retval</span></code></dt><dd><p>Return value from the memory device (output).</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">in</span></code></dt><dd><p>Parameters associated with input payload.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">in.size</span></code></dt><dd><p>Size of the payload to provide to the device (input).</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">in.rsvd</span></code></dt><dd><p>Must be zero.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">in.payload</span></code></dt><dd><p>Pointer to memory for payload input, payload is little endian.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">out</span></code></dt><dd><p>Parameters associated with output payload.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">out.size</span></code></dt><dd><p>Size of the payload received from the device (input/output). This
+field is filled in by userspace to let the driver know how much
+space was allocated for output. It is populated by the driver to
+let userspace know how large the output payload actually was.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">out.rsvd</span></code></dt><dd><p>Must be zero.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">out.payload</span></code></dt><dd><p>Pointer to memory for payload output, payload is little endian.</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>Mechanism for userspace to send a command to the hardware for processing. The
+driver will do basic validation on the command sizes. In some cases even the
+payload may be introspected. Userspace is required to allocate large enough
+buffers for size_out which can be variable length in certain situations.</p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Compute Express Link Memory Devices</a><ul>
+<li><a class="reference internal" href="#cxl-bus-theory-of-operation">CXL Bus: Theory of Operation</a></li>
+<li><a class="reference internal" href="#driver-infrastructure">Driver Infrastructure</a><ul>
+<li><a class="reference internal" href="#cxl-memory-device">CXL Memory Device</a></li>
+<li><a class="reference internal" href="#cxl-port">CXL Port</a></li>
+<li><a class="reference internal" href="#cxl-core">CXL Core</a></li>
+<li><a class="reference internal" href="#cxl-regions">CXL Regions</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#external-interfaces">External Interfaces</a><ul>
+<li><a class="reference internal" href="#cxl-ioctl-interface">CXL IOCTL Interface</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/cxl/memory-devices.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/cxl/memory-devices.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

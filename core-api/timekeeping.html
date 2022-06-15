@@ -1,0 +1,355 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>ktime accessors &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="The errseq_t datatype" href="errseq.html" />
+    <link rel="prev" title="this_cpu operations" href="this_cpu_ops.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="ktime-accessors">
+<h1>ktime accessors<a class="headerlink" href="#ktime-accessors" title="Permalink to this headline">¶</a></h1>
+<p>Device drivers can read the current time using <a class="reference internal" href="#c.ktime_get" title="ktime_get"><code class="xref c c-func docutils literal notranslate"><span class="pre">ktime_get()</span></code></a> and the many
+related functions declared in linux/timekeeping.h. As a rule of thumb,
+using an accessor with a shorter name is preferred over one with a longer
+name if both are equally fit for a particular use case.</p>
+<section id="basic-ktime-t-based-interfaces">
+<h2>Basic ktime_t based interfaces<a class="headerlink" href="#basic-ktime-t-based-interfaces" title="Permalink to this headline">¶</a></h2>
+<p>The recommended simplest form returns an opaque ktime_t, with variants
+that return time for different clock references:</p>
+<dl class="function">
+<dt id="c.ktime_get">
+ktime_t <code class="sig-name descname">ktime_get</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get" title="Permalink to this definition">¶</a></dt>
+<dd><p>CLOCK_MONOTONIC</p>
+<p>Useful for reliable timestamps and measuring short time intervals
+accurately. Starts at system boot time but stops during suspend.</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="c.ktime_get_boottime">
+ktime_t <code class="sig-name descname">ktime_get_boottime</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_boottime" title="Permalink to this definition">¶</a></dt>
+<dd><p>CLOCK_BOOTTIME</p>
+<p>Like <a class="reference internal" href="#c.ktime_get" title="ktime_get"><code class="xref c c-func docutils literal notranslate"><span class="pre">ktime_get()</span></code></a>, but does not stop when suspended. This can be
+used e.g. for key expiration times that need to be synchronized
+with other machines across a suspend operation.</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="c.ktime_get_real">
+ktime_t <code class="sig-name descname">ktime_get_real</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_real" title="Permalink to this definition">¶</a></dt>
+<dd><p>CLOCK_REALTIME</p>
+<p>Returns the time in relative to the UNIX epoch starting in 1970
+using the Coordinated Universal Time (UTC), same as gettimeofday()
+user space. This is used for all timestamps that need to
+persist across a reboot, like inode times, but should be avoided
+for internal uses, since it can jump backwards due to a leap
+second update, NTP adjustment settimeofday() operation from user
+space.</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="c.ktime_get_clocktai">
+ktime_t <code class="sig-name descname">ktime_get_clocktai</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_clocktai" title="Permalink to this definition">¶</a></dt>
+<dd><blockquote>
+<div><p>CLOCK_TAI</p>
+</div></blockquote>
+<p>Like <a class="reference internal" href="#c.ktime_get_real" title="ktime_get_real"><code class="xref c c-func docutils literal notranslate"><span class="pre">ktime_get_real()</span></code></a>, but uses the International Atomic Time (TAI)
+reference instead of UTC to avoid jumping on leap second updates.
+This is rarely useful in the kernel.</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="c.ktime_get_raw">
+ktime_t <code class="sig-name descname">ktime_get_raw</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_raw" title="Permalink to this definition">¶</a></dt>
+<dd><p>CLOCK_MONOTONIC_RAW</p>
+<p>Like <a class="reference internal" href="#c.ktime_get" title="ktime_get"><code class="xref c c-func docutils literal notranslate"><span class="pre">ktime_get()</span></code></a>, but runs at the same rate as the hardware
+clocksource without (NTP) adjustments for clock drift. This is
+also rarely needed in the kernel.</p>
+</dd></dl>
+
+</section>
+<section id="nanosecond-timespec64-and-second-output">
+<h2>nanosecond, timespec64, and second output<a class="headerlink" href="#nanosecond-timespec64-and-second-output" title="Permalink to this headline">¶</a></h2>
+<p>For all of the above, there are variants that return the time in a
+different format depending on what is required by the user:</p>
+<dl class="function">
+<dt id="c.ktime_get_ns">
+u64 <code class="sig-name descname">ktime_get_ns</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_ns" title="Permalink to this definition">¶</a></dt>
+<dt id="c.ktime_get_boottime_ns">
+u64 <code class="sig-name descname">ktime_get_boottime_ns</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_boottime_ns" title="Permalink to this definition">¶</a></dt>
+<dt id="c.ktime_get_real_ns">
+u64 <code class="sig-name descname">ktime_get_real_ns</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_real_ns" title="Permalink to this definition">¶</a></dt>
+<dt id="c.ktime_get_clocktai_ns">
+u64 <code class="sig-name descname">ktime_get_clocktai_ns</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_clocktai_ns" title="Permalink to this definition">¶</a></dt>
+<dt id="c.ktime_get_raw_ns">
+u64 <code class="sig-name descname">ktime_get_raw_ns</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_raw_ns" title="Permalink to this definition">¶</a></dt>
+<dd><p>Same as the plain ktime_get functions, but returning a u64 number
+of nanoseconds in the respective time reference, which may be
+more convenient for some callers.</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="c.ktime_get_ts64">
+void <code class="sig-name descname">ktime_get_ts64</code><span class="sig-paren">(</span>struct timespec64<em> *</em><span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_ts64" title="Permalink to this definition">¶</a></dt>
+<dt id="c.ktime_get_boottime_ts64">
+void <code class="sig-name descname">ktime_get_boottime_ts64</code><span class="sig-paren">(</span>struct timespec64<em> *</em><span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_boottime_ts64" title="Permalink to this definition">¶</a></dt>
+<dt id="c.ktime_get_real_ts64">
+void <code class="sig-name descname">ktime_get_real_ts64</code><span class="sig-paren">(</span>struct timespec64<em> *</em><span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_real_ts64" title="Permalink to this definition">¶</a></dt>
+<dt id="c.ktime_get_clocktai_ts64">
+void <code class="sig-name descname">ktime_get_clocktai_ts64</code><span class="sig-paren">(</span>struct timespec64<em> *</em><span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_clocktai_ts64" title="Permalink to this definition">¶</a></dt>
+<dt id="c.ktime_get_raw_ts64">
+void <code class="sig-name descname">ktime_get_raw_ts64</code><span class="sig-paren">(</span>struct timespec64<em> *</em><span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_raw_ts64" title="Permalink to this definition">¶</a></dt>
+<dd><p>Same above, but returns the time in a ‘struct timespec64’, split
+into seconds and nanoseconds. This can avoid an extra division
+when printing the time, or when passing it into an external
+interface that expects a ‘timespec’ or ‘timeval’ structure.</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="c.ktime_get_seconds">
+time64_t <code class="sig-name descname">ktime_get_seconds</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_seconds" title="Permalink to this definition">¶</a></dt>
+<dt id="c.ktime_get_boottime_seconds">
+time64_t <code class="sig-name descname">ktime_get_boottime_seconds</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_boottime_seconds" title="Permalink to this definition">¶</a></dt>
+<dt id="c.ktime_get_real_seconds">
+time64_t <code class="sig-name descname">ktime_get_real_seconds</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_real_seconds" title="Permalink to this definition">¶</a></dt>
+<dt id="c.ktime_get_clocktai_seconds">
+time64_t <code class="sig-name descname">ktime_get_clocktai_seconds</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_clocktai_seconds" title="Permalink to this definition">¶</a></dt>
+<dt id="c.ktime_get_raw_seconds">
+time64_t <code class="sig-name descname">ktime_get_raw_seconds</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_raw_seconds" title="Permalink to this definition">¶</a></dt>
+<dd><p>Return a coarse-grained version of the time as a scalar
+time64_t. This avoids accessing the clock hardware and rounds
+down the seconds to the full seconds of the last timer tick
+using the respective reference.</p>
+</dd></dl>
+
+</section>
+<section id="coarse-and-fast-ns-access">
+<h2>Coarse and fast_ns access<a class="headerlink" href="#coarse-and-fast-ns-access" title="Permalink to this headline">¶</a></h2>
+<p>Some additional variants exist for more specialized cases:</p>
+<dl class="function">
+<dt id="c.ktime_get_coarse">
+ktime_t <code class="sig-name descname">ktime_get_coarse</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_coarse" title="Permalink to this definition">¶</a></dt>
+<dt id="c.ktime_get_coarse_boottime">
+ktime_t <code class="sig-name descname">ktime_get_coarse_boottime</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_coarse_boottime" title="Permalink to this definition">¶</a></dt>
+<dt id="c.ktime_get_coarse_real">
+ktime_t <code class="sig-name descname">ktime_get_coarse_real</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_coarse_real" title="Permalink to this definition">¶</a></dt>
+<dt id="c.ktime_get_coarse_clocktai">
+ktime_t <code class="sig-name descname">ktime_get_coarse_clocktai</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_coarse_clocktai" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="function">
+<dt id="c.ktime_get_coarse_ns">
+u64 <code class="sig-name descname">ktime_get_coarse_ns</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_coarse_ns" title="Permalink to this definition">¶</a></dt>
+<dt id="c.ktime_get_coarse_boottime_ns">
+u64 <code class="sig-name descname">ktime_get_coarse_boottime_ns</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_coarse_boottime_ns" title="Permalink to this definition">¶</a></dt>
+<dt id="c.ktime_get_coarse_real_ns">
+u64 <code class="sig-name descname">ktime_get_coarse_real_ns</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_coarse_real_ns" title="Permalink to this definition">¶</a></dt>
+<dt id="c.ktime_get_coarse_clocktai_ns">
+u64 <code class="sig-name descname">ktime_get_coarse_clocktai_ns</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_coarse_clocktai_ns" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="function">
+<dt id="c.ktime_get_coarse_ts64">
+void <code class="sig-name descname">ktime_get_coarse_ts64</code><span class="sig-paren">(</span>struct timespec64<em> *</em><span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_coarse_ts64" title="Permalink to this definition">¶</a></dt>
+<dt id="c.ktime_get_coarse_boottime_ts64">
+void <code class="sig-name descname">ktime_get_coarse_boottime_ts64</code><span class="sig-paren">(</span>struct timespec64<em> *</em><span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_coarse_boottime_ts64" title="Permalink to this definition">¶</a></dt>
+<dt id="c.ktime_get_coarse_real_ts64">
+void <code class="sig-name descname">ktime_get_coarse_real_ts64</code><span class="sig-paren">(</span>struct timespec64<em> *</em><span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_coarse_real_ts64" title="Permalink to this definition">¶</a></dt>
+<dt id="c.ktime_get_coarse_clocktai_ts64">
+void <code class="sig-name descname">ktime_get_coarse_clocktai_ts64</code><span class="sig-paren">(</span>struct timespec64<em> *</em><span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_coarse_clocktai_ts64" title="Permalink to this definition">¶</a></dt>
+<dd><p>These are quicker than the non-coarse versions, but less accurate,
+corresponding to CLOCK_MONOTONIC_COARSE and CLOCK_REALTIME_COARSE
+in user space, along with the equivalent boottime/tai/raw
+timebase not available in user space.</p>
+<p>The time returned here corresponds to the last timer tick, which
+may be as much as 10ms in the past (for CONFIG_HZ=100), same as
+reading the ‘jiffies’ variable.  These are only useful when called
+in a fast path and one still expects better than second accuracy,
+but can’t easily use ‘jiffies’, e.g. for inode timestamps.
+Skipping the hardware clock access saves around 100 CPU cycles
+on most modern machines with a reliable cycle counter, but
+up to several microseconds on older hardware with an external
+clocksource.</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="c.ktime_get_mono_fast_ns">
+u64 <code class="sig-name descname">ktime_get_mono_fast_ns</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_mono_fast_ns" title="Permalink to this definition">¶</a></dt>
+<dt id="c.ktime_get_raw_fast_ns">
+u64 <code class="sig-name descname">ktime_get_raw_fast_ns</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_raw_fast_ns" title="Permalink to this definition">¶</a></dt>
+<dt id="c.ktime_get_boot_fast_ns">
+u64 <code class="sig-name descname">ktime_get_boot_fast_ns</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_boot_fast_ns" title="Permalink to this definition">¶</a></dt>
+<dt id="c.ktime_get_tai_fast_ns">
+u64 <code class="sig-name descname">ktime_get_tai_fast_ns</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_tai_fast_ns" title="Permalink to this definition">¶</a></dt>
+<dt id="c.ktime_get_real_fast_ns">
+u64 <code class="sig-name descname">ktime_get_real_fast_ns</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_real_fast_ns" title="Permalink to this definition">¶</a></dt>
+<dd><p>These variants are safe to call from any context, including from
+a non-maskable interrupt (NMI) during a timekeeper update, and
+while we are entering suspend with the clocksource powered down.
+This is useful in some tracing or debugging code as well as
+machine check reporting, but most drivers should never call them,
+since the time is allowed to jump under certain conditions.</p>
+</dd></dl>
+
+</section>
+<section id="deprecated-time-interfaces">
+<h2>Deprecated time interfaces<a class="headerlink" href="#deprecated-time-interfaces" title="Permalink to this headline">¶</a></h2>
+<p>Older kernels used some other interfaces that are now being phased out
+but may appear in third-party drivers being ported here. In particular,
+all interfaces returning a ‘struct timeval’ or ‘struct timespec’ have
+been replaced because the tv_sec member overflows in year 2038 on 32-bit
+architectures. These are the recommended replacements:</p>
+<dl class="function">
+<dt id="c.ktime_get_ts">
+void <code class="sig-name descname">ktime_get_ts</code><span class="sig-paren">(</span>struct timespec<em> *</em><span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_ts" title="Permalink to this definition">¶</a></dt>
+<dd><p>Use <a class="reference internal" href="#c.ktime_get" title="ktime_get"><code class="xref c c-func docutils literal notranslate"><span class="pre">ktime_get()</span></code></a> or <a class="reference internal" href="#c.ktime_get_ts64" title="ktime_get_ts64"><code class="xref c c-func docutils literal notranslate"><span class="pre">ktime_get_ts64()</span></code></a> instead.</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="c.do_gettimeofday">
+void <code class="sig-name descname">do_gettimeofday</code><span class="sig-paren">(</span>struct timeval<em> *</em><span class="sig-paren">)</span><a class="headerlink" href="#c.do_gettimeofday" title="Permalink to this definition">¶</a></dt>
+<dt id="c.getnstimeofday">
+void <code class="sig-name descname">getnstimeofday</code><span class="sig-paren">(</span>struct timespec<em> *</em><span class="sig-paren">)</span><a class="headerlink" href="#c.getnstimeofday" title="Permalink to this definition">¶</a></dt>
+<dt id="c.getnstimeofday64">
+void <code class="sig-name descname">getnstimeofday64</code><span class="sig-paren">(</span>struct timespec64<em> *</em><span class="sig-paren">)</span><a class="headerlink" href="#c.getnstimeofday64" title="Permalink to this definition">¶</a></dt>
+<dt id="c.ktime_get_real_ts">
+void <code class="sig-name descname">ktime_get_real_ts</code><span class="sig-paren">(</span>struct timespec<em> *</em><span class="sig-paren">)</span><a class="headerlink" href="#c.ktime_get_real_ts" title="Permalink to this definition">¶</a></dt>
+<dd><p><a class="reference internal" href="#c.ktime_get_real_ts64" title="ktime_get_real_ts64"><code class="xref c c-func docutils literal notranslate"><span class="pre">ktime_get_real_ts64()</span></code></a> is a direct replacement, but consider using
+monotonic time (<a class="reference internal" href="#c.ktime_get_ts64" title="ktime_get_ts64"><code class="xref c c-func docutils literal notranslate"><span class="pre">ktime_get_ts64()</span></code></a>) and/or a ktime_t based interface
+(<a class="reference internal" href="#c.ktime_get" title="ktime_get"><code class="xref c c-func docutils literal notranslate"><span class="pre">ktime_get()</span></code></a>/<a class="reference internal" href="#c.ktime_get_real" title="ktime_get_real"><code class="xref c c-func docutils literal notranslate"><span class="pre">ktime_get_real()</span></code></a>).</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="c.current_kernel_time">
+struct timespec <code class="sig-name descname">current_kernel_time</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.current_kernel_time" title="Permalink to this definition">¶</a></dt>
+<dt id="c.current_kernel_time64">
+struct timespec64 <code class="sig-name descname">current_kernel_time64</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.current_kernel_time64" title="Permalink to this definition">¶</a></dt>
+<dt id="c.get_monotonic_coarse">
+struct timespec <code class="sig-name descname">get_monotonic_coarse</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.get_monotonic_coarse" title="Permalink to this definition">¶</a></dt>
+<dt id="c.get_monotonic_coarse64">
+struct timespec64 <code class="sig-name descname">get_monotonic_coarse64</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.get_monotonic_coarse64" title="Permalink to this definition">¶</a></dt>
+<dd><p>These are replaced by <a class="reference internal" href="#c.ktime_get_coarse_real_ts64" title="ktime_get_coarse_real_ts64"><code class="xref c c-func docutils literal notranslate"><span class="pre">ktime_get_coarse_real_ts64()</span></code></a> and
+<a class="reference internal" href="#c.ktime_get_coarse_ts64" title="ktime_get_coarse_ts64"><code class="xref c c-func docutils literal notranslate"><span class="pre">ktime_get_coarse_ts64()</span></code></a>. However, A lot of code that wants
+coarse-grained times can use the simple ‘jiffies’ instead, while
+some drivers may actually want the higher resolution accessors
+these days.</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="c.getrawmonotonic">
+struct timespec <code class="sig-name descname">getrawmonotonic</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.getrawmonotonic" title="Permalink to this definition">¶</a></dt>
+<dt id="c.getrawmonotonic64">
+struct timespec64 <code class="sig-name descname">getrawmonotonic64</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.getrawmonotonic64" title="Permalink to this definition">¶</a></dt>
+<dt id="c.timekeeping_clocktai">
+struct timespec <code class="sig-name descname">timekeeping_clocktai</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.timekeeping_clocktai" title="Permalink to this definition">¶</a></dt>
+<dt id="c.timekeeping_clocktai64">
+struct timespec64 <code class="sig-name descname">timekeeping_clocktai64</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.timekeeping_clocktai64" title="Permalink to this definition">¶</a></dt>
+<dt id="c.get_monotonic_boottime">
+struct timespec <code class="sig-name descname">get_monotonic_boottime</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.get_monotonic_boottime" title="Permalink to this definition">¶</a></dt>
+<dt id="c.get_monotonic_boottime64">
+struct timespec64 <code class="sig-name descname">get_monotonic_boottime64</code><span class="sig-paren">(</span>void<span class="sig-paren">)</span><a class="headerlink" href="#c.get_monotonic_boottime64" title="Permalink to this definition">¶</a></dt>
+<dd><p>These are replaced by <a class="reference internal" href="#c.ktime_get_raw" title="ktime_get_raw"><code class="xref c c-func docutils literal notranslate"><span class="pre">ktime_get_raw()</span></code></a>/<a class="reference internal" href="#c.ktime_get_raw_ts64" title="ktime_get_raw_ts64"><code class="xref c c-func docutils literal notranslate"><span class="pre">ktime_get_raw_ts64()</span></code></a>,
+<a class="reference internal" href="#c.ktime_get_clocktai" title="ktime_get_clocktai"><code class="xref c c-func docutils literal notranslate"><span class="pre">ktime_get_clocktai()</span></code></a>/<a class="reference internal" href="#c.ktime_get_clocktai_ts64" title="ktime_get_clocktai_ts64"><code class="xref c c-func docutils literal notranslate"><span class="pre">ktime_get_clocktai_ts64()</span></code></a> as well
+as <a class="reference internal" href="#c.ktime_get_boottime" title="ktime_get_boottime"><code class="xref c c-func docutils literal notranslate"><span class="pre">ktime_get_boottime()</span></code></a>/<a class="reference internal" href="#c.ktime_get_boottime_ts64" title="ktime_get_boottime_ts64"><code class="xref c c-func docutils literal notranslate"><span class="pre">ktime_get_boottime_ts64()</span></code></a>.
+However, if the particular choice of clock source is not
+important for the user, consider converting to
+<a class="reference internal" href="#c.ktime_get" title="ktime_get"><code class="xref c c-func docutils literal notranslate"><span class="pre">ktime_get()</span></code></a>/<a class="reference internal" href="#c.ktime_get_ts64" title="ktime_get_ts64"><code class="xref c c-func docutils literal notranslate"><span class="pre">ktime_get_ts64()</span></code></a> instead for consistency.</p>
+</dd></dl>
+
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">ktime accessors</a><ul>
+<li><a class="reference internal" href="#basic-ktime-t-based-interfaces">Basic ktime_t based interfaces</a></li>
+<li><a class="reference internal" href="#nanosecond-timespec64-and-second-output">nanosecond, timespec64, and second output</a></li>
+<li><a class="reference internal" href="#coarse-and-fast-ns-access">Coarse and fast_ns access</a></li>
+<li><a class="reference internal" href="#deprecated-time-interfaces">Deprecated time interfaces</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/core-api/timekeeping.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/core-api/timekeeping.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

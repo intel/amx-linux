@@ -1,0 +1,368 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Kernel-provided User Helpers &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Kernel Memory Layout on ARM Linux" href="memory.html" />
+    <link rel="prev" title="Kernel mode NEON" href="kernel_mode_neon.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="kernel-provided-user-helpers">
+<h1>Kernel-provided User Helpers<a class="headerlink" href="#kernel-provided-user-helpers" title="Permalink to this headline">¶</a></h1>
+<p>These are segment of kernel provided user code reachable from user space
+at a fixed address in kernel memory.  This is used to provide user space
+with some operations which require kernel help because of unimplemented
+native feature and/or instructions in many ARM CPUs. The idea is for this
+code to be executed directly in user mode for best efficiency but which is
+too intimate with the kernel counter part to be left to user libraries.
+In fact this code might even differ from one CPU to another depending on
+the available instruction set, or whether it is a SMP systems. In other
+words, the kernel reserves the right to change this code as needed without
+warning. Only the entry points and their results as documented here are
+guaranteed to be stable.</p>
+<p>This is different from (but doesn’t preclude) a full blown VDSO
+implementation, however a VDSO would prevent some assembly tricks with
+constants that allows for efficient branching to those code segments. And
+since those code segments only use a few cycles before returning to user
+code, the overhead of a VDSO indirect far call would add a measurable
+overhead to such minimalistic operations.</p>
+<p>User space is expected to bypass those helpers and implement those things
+inline (either in the code emitted directly by the compiler, or part of
+the implementation of a library call) when optimizing for a recent enough
+processor that has the necessary native support, but only if resulting
+binaries are already to be incompatible with earlier ARM processors due to
+usage of similar native instructions for other things.  In other words
+don’t make binaries unable to run on earlier processors just for the sake
+of not using these kernel helpers if your compiled code is not going to
+use new instructions for other purpose.</p>
+<p>New helpers may be added over time, so an older kernel may be missing some
+helpers present in a newer kernel.  For this reason, programs must check
+the value of __kuser_helper_version (see below) before assuming that it is
+safe to call any particular helper.  This check should ideally be
+performed only once at process startup time, and execution aborted early
+if the required helpers are not provided by the kernel version that
+process is running on.</p>
+<section id="kuser-helper-version">
+<h2>kuser_helper_version<a class="headerlink" href="#kuser-helper-version" title="Permalink to this headline">¶</a></h2>
+<p>Location:       0xffff0ffc</p>
+<p>Reference declaration:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>extern int32_t __kuser_helper_version;
+</pre></div>
+</div>
+<p>Definition:</p>
+<blockquote>
+<div><p>This field contains the number of helpers being implemented by the
+running kernel.  User space may read this to determine the availability
+of a particular helper.</p>
+</div></blockquote>
+<p>Usage example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#define __kuser_helper_version (*(int32_t *)0xffff0ffc)
+
+void check_kuser_version(void)
+{
+      if (__kuser_helper_version &lt; 2) {
+              fprintf(stderr, &quot;can&#39;t do atomic operations, kernel too old\n&quot;);
+              abort();
+      }
+}
+</pre></div>
+</div>
+<p>Notes:</p>
+<blockquote>
+<div><p>User space may assume that the value of this field never changes
+during the lifetime of any single process.  This means that this
+field can be read once during the initialisation of a library or
+startup phase of a program.</p>
+</div></blockquote>
+</section>
+<section id="kuser-get-tls">
+<h2>kuser_get_tls<a class="headerlink" href="#kuser-get-tls" title="Permalink to this headline">¶</a></h2>
+<p>Location:       0xffff0fe0</p>
+<p>Reference prototype:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void * __kuser_get_tls(void);
+</pre></div>
+</div>
+<p>Input:</p>
+<blockquote>
+<div><p>lr = return address</p>
+</div></blockquote>
+<p>Output:</p>
+<blockquote>
+<div><p>r0 = TLS value</p>
+</div></blockquote>
+<p>Clobbered registers:</p>
+<blockquote>
+<div><p>none</p>
+</div></blockquote>
+<p>Definition:</p>
+<blockquote>
+<div><p>Get the TLS value as previously set via the __ARM_NR_set_tls syscall.</p>
+</div></blockquote>
+<p>Usage example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>typedef void * (__kuser_get_tls_t)(void);
+#define __kuser_get_tls (*(__kuser_get_tls_t *)0xffff0fe0)
+
+void foo()
+{
+      void *tls = __kuser_get_tls();
+      printf(&quot;TLS = %p\n&quot;, tls);
+}
+</pre></div>
+</div>
+<p>Notes:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Valid only if __kuser_helper_version &gt;= 1 (from kernel version 2.6.12).</p></li>
+</ul>
+</div></blockquote>
+</section>
+<section id="kuser-cmpxchg">
+<h2>kuser_cmpxchg<a class="headerlink" href="#kuser-cmpxchg" title="Permalink to this headline">¶</a></h2>
+<p>Location:       0xffff0fc0</p>
+<p>Reference prototype:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int __kuser_cmpxchg(int32_t oldval, int32_t newval, volatile int32_t *ptr);
+</pre></div>
+</div>
+<p>Input:</p>
+<blockquote>
+<div><p>r0 = oldval
+r1 = newval
+r2 = ptr
+lr = return address</p>
+</div></blockquote>
+<p>Output:</p>
+<blockquote>
+<div><p>r0 = success code (zero or non-zero)
+C flag = set if r0 == 0, clear if r0 != 0</p>
+</div></blockquote>
+<p>Clobbered registers:</p>
+<blockquote>
+<div><p>r3, ip, flags</p>
+</div></blockquote>
+<p>Definition:</p>
+<blockquote>
+<div><p>Atomically store newval in <cite>*ptr</cite> only if <cite>*ptr</cite> is equal to oldval.
+Return zero if <cite>*ptr</cite> was changed or non-zero if no exchange happened.
+The C flag is also set if <cite>*ptr</cite> was changed to allow for assembly
+optimization in the calling code.</p>
+</div></blockquote>
+<p>Usage example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>typedef int (__kuser_cmpxchg_t)(int oldval, int newval, volatile int *ptr);
+#define __kuser_cmpxchg (*(__kuser_cmpxchg_t *)0xffff0fc0)
+
+int atomic_add(volatile int *ptr, int val)
+{
+      int old, new;
+
+      do {
+              old = *ptr;
+              new = old + val;
+      } while(__kuser_cmpxchg(old, new, ptr));
+
+      return new;
+}
+</pre></div>
+</div>
+<p>Notes:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>This routine already includes memory barriers as needed.</p></li>
+<li><p>Valid only if __kuser_helper_version &gt;= 2 (from kernel version 2.6.12).</p></li>
+</ul>
+</div></blockquote>
+</section>
+<section id="kuser-memory-barrier">
+<h2>kuser_memory_barrier<a class="headerlink" href="#kuser-memory-barrier" title="Permalink to this headline">¶</a></h2>
+<p>Location:       0xffff0fa0</p>
+<p>Reference prototype:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void __kuser_memory_barrier(void);
+</pre></div>
+</div>
+<p>Input:</p>
+<blockquote>
+<div><p>lr = return address</p>
+</div></blockquote>
+<p>Output:</p>
+<blockquote>
+<div><p>none</p>
+</div></blockquote>
+<p>Clobbered registers:</p>
+<blockquote>
+<div><p>none</p>
+</div></blockquote>
+<p>Definition:</p>
+<blockquote>
+<div><p>Apply any needed memory barrier to preserve consistency with data modified
+manually and __kuser_cmpxchg usage.</p>
+</div></blockquote>
+<p>Usage example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>typedef void (__kuser_dmb_t)(void);
+#define __kuser_dmb (*(__kuser_dmb_t *)0xffff0fa0)
+</pre></div>
+</div>
+<p>Notes:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Valid only if __kuser_helper_version &gt;= 3 (from kernel version 2.6.15).</p></li>
+</ul>
+</div></blockquote>
+</section>
+<section id="kuser-cmpxchg64">
+<h2>kuser_cmpxchg64<a class="headerlink" href="#kuser-cmpxchg64" title="Permalink to this headline">¶</a></h2>
+<p>Location:       0xffff0f60</p>
+<p>Reference prototype:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int __kuser_cmpxchg64(const int64_t *oldval,
+                      const int64_t *newval,
+                      volatile int64_t *ptr);
+</pre></div>
+</div>
+<p>Input:</p>
+<blockquote>
+<div><p>r0 = pointer to oldval
+r1 = pointer to newval
+r2 = pointer to target value
+lr = return address</p>
+</div></blockquote>
+<p>Output:</p>
+<blockquote>
+<div><p>r0 = success code (zero or non-zero)
+C flag = set if r0 == 0, clear if r0 != 0</p>
+</div></blockquote>
+<p>Clobbered registers:</p>
+<blockquote>
+<div><p>r3, lr, flags</p>
+</div></blockquote>
+<p>Definition:</p>
+<blockquote>
+<div><p>Atomically store the 64-bit value pointed by <cite>*newval</cite> in <cite>*ptr</cite> only if <cite>*ptr</cite>
+is equal to the 64-bit value pointed by <cite>*oldval</cite>.  Return zero if <cite>*ptr</cite> was
+changed or non-zero if no exchange happened.</p>
+<p>The C flag is also set if <cite>*ptr</cite> was changed to allow for assembly
+optimization in the calling code.</p>
+</div></blockquote>
+<p>Usage example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>typedef int (__kuser_cmpxchg64_t)(const int64_t *oldval,
+                                  const int64_t *newval,
+                                  volatile int64_t *ptr);
+#define __kuser_cmpxchg64 (*(__kuser_cmpxchg64_t *)0xffff0f60)
+
+int64_t atomic_add64(volatile int64_t *ptr, int64_t val)
+{
+      int64_t old, new;
+
+      do {
+              old = *ptr;
+              new = old + val;
+      } while(__kuser_cmpxchg64(&amp;old, &amp;new, ptr));
+
+      return new;
+}
+</pre></div>
+</div>
+<p>Notes:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>This routine already includes memory barriers as needed.</p></li>
+<li><p>Due to the length of this sequence, this spans 2 conventional kuser
+“slots”, therefore 0xffff0f80 is not used as a valid entry point.</p></li>
+<li><p>Valid only if __kuser_helper_version &gt;= 5 (from kernel version 3.1).</p></li>
+</ul>
+</div></blockquote>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Kernel-provided User Helpers</a><ul>
+<li><a class="reference internal" href="#kuser-helper-version">kuser_helper_version</a></li>
+<li><a class="reference internal" href="#kuser-get-tls">kuser_get_tls</a></li>
+<li><a class="reference internal" href="#kuser-cmpxchg">kuser_cmpxchg</a></li>
+<li><a class="reference internal" href="#kuser-memory-barrier">kuser_memory_barrier</a></li>
+<li><a class="reference internal" href="#kuser-cmpxchg64">kuser_cmpxchg64</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/arm/kernel_user_helpers.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/arm/kernel_user_helpers.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

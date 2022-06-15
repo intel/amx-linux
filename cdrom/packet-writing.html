@@ -1,0 +1,236 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Packet writing &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Linux CPUFreq - CPU frequency and voltage scaling code in the Linux(TM) kernel" href="../cpu-freq/index.html" />
+    <link rel="prev" title="A Linux CD-ROM standard" href="cdrom-standard.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="packet-writing">
+<h1>Packet writing<a class="headerlink" href="#packet-writing" title="Permalink to this headline">¶</a></h1>
+<section id="getting-started-quick">
+<h2>Getting started quick<a class="headerlink" href="#getting-started-quick" title="Permalink to this headline">¶</a></h2>
+<ul>
+<li><p>Select packet support in the block device section and UDF support in
+the file system section.</p></li>
+<li><p>Compile and install kernel and modules, reboot.</p></li>
+<li><p>You need the udftools package (pktsetup, mkudffs, cdrwtool).
+Download from <a class="reference external" href="https://github.com/pali/udftools">https://github.com/pali/udftools</a></p></li>
+<li><p>Grab a new CD-RW disc and format it (assuming CD-RW is hdc, substitute
+as appropriate):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># cdrwtool -d /dev/hdc -q
+</pre></div>
+</div>
+</li>
+<li><p>Setup your writer:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># pktsetup dev_name /dev/hdc
+</pre></div>
+</div>
+</li>
+<li><p>Now you can mount /dev/pktcdvd/dev_name and copy files to it. Enjoy:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># mount /dev/pktcdvd/dev_name /cdrom -t udf -o rw,noatime
+</pre></div>
+</div>
+</li>
+</ul>
+</section>
+<section id="packet-writing-for-dvd-rw-media">
+<h2>Packet writing for DVD-RW media<a class="headerlink" href="#packet-writing-for-dvd-rw-media" title="Permalink to this headline">¶</a></h2>
+<p>DVD-RW discs can be written to much like CD-RW discs if they are in
+the so called “restricted overwrite” mode. To put a disc in restricted
+overwrite mode, run:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># dvd+rw-format /dev/hdc
+</pre></div>
+</div>
+<p>You can then use the disc the same way you would use a CD-RW disc:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># pktsetup dev_name /dev/hdc
+# mount /dev/pktcdvd/dev_name /cdrom -t udf -o rw,noatime
+</pre></div>
+</div>
+</section>
+<section id="id1">
+<h2>Packet writing for DVD+RW media<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>According to the DVD+RW specification, a drive supporting DVD+RW discs
+shall implement “true random writes with 2KB granularity”, which means
+that it should be possible to put any filesystem with a block size &gt;=
+2KB on such a disc. For example, it should be possible to do:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># dvd+rw-format /dev/hdc   (only needed if the disc has never
+                            been formatted)
+# mkudffs /dev/hdc
+# mount /dev/hdc /cdrom -t udf -o rw,noatime
+</pre></div>
+</div>
+<p>However, some drives don’t follow the specification and expect the
+host to perform aligned writes at 32KB boundaries. Other drives do
+follow the specification, but suffer bad performance problems if the
+writes are not 32KB aligned.</p>
+<p>Both problems can be solved by using the pktcdvd driver, which always
+generates aligned writes:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># dvd+rw-format /dev/hdc
+# pktsetup dev_name /dev/hdc
+# mkudffs /dev/pktcdvd/dev_name
+# mount /dev/pktcdvd/dev_name /cdrom -t udf -o rw,noatime
+</pre></div>
+</div>
+</section>
+<section id="packet-writing-for-dvd-ram-media">
+<h2>Packet writing for DVD-RAM media<a class="headerlink" href="#packet-writing-for-dvd-ram-media" title="Permalink to this headline">¶</a></h2>
+<p>DVD-RAM discs are random writable, so using the pktcdvd driver is not
+necessary. However, using the pktcdvd driver can improve performance
+in the same way it does for DVD+RW media.</p>
+</section>
+<section id="notes">
+<h2>Notes<a class="headerlink" href="#notes" title="Permalink to this headline">¶</a></h2>
+<ul>
+<li><p>CD-RW media can usually not be overwritten more than about 1000
+times, so to avoid unnecessary wear on the media, you should always
+use the noatime mount option.</p></li>
+<li><p>Defect management (ie automatic remapping of bad sectors) has not
+been implemented yet, so you are likely to get at least some
+filesystem corruption if the disc wears out.</p></li>
+<li><p>Since the pktcdvd driver makes the disc appear as a regular block
+device with a 2KB block size, you can put any filesystem you like on
+the disc. For example, run:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># /sbin/mke2fs /dev/pktcdvd/dev_name
+</pre></div>
+</div>
+<p>to create an ext2 filesystem on the disc.</p>
+</li>
+</ul>
+</section>
+<section id="using-the-pktcdvd-sysfs-interface">
+<h2>Using the pktcdvd sysfs interface<a class="headerlink" href="#using-the-pktcdvd-sysfs-interface" title="Permalink to this headline">¶</a></h2>
+<p>Since Linux 2.6.20, the pktcdvd module has a sysfs interface
+and can be controlled by it. For example the “pktcdvd” tool uses
+this interface. (see <a class="reference external" href="http://tom.ist-im-web.de/linux/software/pktcdvd">http://tom.ist-im-web.de/linux/software/pktcdvd</a> )</p>
+<p>“pktcdvd” works similar to “pktsetup”, e.g.:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># pktcdvd -a dev_name /dev/hdc
+# mkudffs /dev/pktcdvd/dev_name
+# mount -t udf -o rw,noatime /dev/pktcdvd/dev_name /dvdram
+# cp files /dvdram
+# umount /dvdram
+# pktcdvd -r dev_name
+</pre></div>
+</div>
+<p>For a description of the sysfs interface look into the file:</p>
+<blockquote>
+<div><p>Documentation/ABI/testing/sysfs-class-pktcdvd</p>
+</div></blockquote>
+</section>
+<section id="using-the-pktcdvd-debugfs-interface">
+<h2>Using the pktcdvd debugfs interface<a class="headerlink" href="#using-the-pktcdvd-debugfs-interface" title="Permalink to this headline">¶</a></h2>
+<p>To read pktcdvd device infos in human readable form, do:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># cat /sys/kernel/debug/pktcdvd/pktcdvd[0-7]/info
+</pre></div>
+</div>
+<p>For a description of the debugfs interface look into the file:</p>
+<blockquote>
+<div><p>Documentation/ABI/testing/debugfs-pktcdvd</p>
+</div></blockquote>
+</section>
+<section id="links">
+<h2>Links<a class="headerlink" href="#links" title="Permalink to this headline">¶</a></h2>
+<p>See <a class="reference external" href="http://fy.chalmers.se/~appro/linux/DVD+RW/">http://fy.chalmers.se/~appro/linux/DVD+RW/</a> for more information
+about DVD writing.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Packet writing</a><ul>
+<li><a class="reference internal" href="#getting-started-quick">Getting started quick</a></li>
+<li><a class="reference internal" href="#packet-writing-for-dvd-rw-media">Packet writing for DVD-RW media</a></li>
+<li><a class="reference internal" href="#id1">Packet writing for DVD+RW media</a></li>
+<li><a class="reference internal" href="#packet-writing-for-dvd-ram-media">Packet writing for DVD-RAM media</a></li>
+<li><a class="reference internal" href="#notes">Notes</a></li>
+<li><a class="reference internal" href="#using-the-pktcdvd-sysfs-interface">Using the pktcdvd sysfs interface</a></li>
+<li><a class="reference internal" href="#using-the-pktcdvd-debugfs-interface">Using the pktcdvd debugfs interface</a></li>
+<li><a class="reference internal" href="#links">Links</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/cdrom/packet-writing.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/cdrom/packet-writing.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,164 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>drm/v3d Broadcom V3D Graphics Driver &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="drm/vc4 Broadcom VC4 Graphics Driver" href="vc4.html" />
+    <link rel="prev" title="drm/tve200 Faraday TV Encoder 200" href="tve200.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="drm-v3d-broadcom-v3d-graphics-driver">
+<h1>drm/v3d Broadcom V3D Graphics Driver<a class="headerlink" href="#drm-v3d-broadcom-v3d-graphics-driver" title="Permalink to this headline">¶</a></h1>
+<p>This driver supports the Broadcom V3D 3.3 and 4.1 OpenGL ES GPUs.
+For V3D 2.x support, see the VC4 driver.</p>
+<p>The V3D GPU includes a tiled render (composed of a bin and render
+pipelines), the TFU (texture formatting unit), and the CSD (compute
+shader dispatch).</p>
+<section id="gpu-buffer-object-bo-management">
+<h2>GPU buffer object (BO) management<a class="headerlink" href="#gpu-buffer-object-bo-management" title="Permalink to this headline">¶</a></h2>
+<p>Compared to VC4 (V3D 2.x), V3D 3.3 introduces an MMU between the
+GPU and the bus, allowing us to use shmem objects for our storage
+instead of CMA.</p>
+<p>Physically contiguous objects may still be imported to V3D, but the
+driver doesn’t allocate physically contiguous objects on its own.
+Display engines requiring physically contiguous allocations should
+look into Mesa’s “renderonly” support (as used by the Mesa pl111
+driver) for an example of how to integrate with V3D.</p>
+<p>Long term, we should support evicting pages from the MMU when under
+memory pressure (thus the v3d_bo_get_pages() refcounting), but
+that’s not a high priority since our systems tend to not have swap.</p>
+<section id="address-space-management">
+<h3>Address space management<a class="headerlink" href="#address-space-management" title="Permalink to this headline">¶</a></h3>
+<p>The V3D 3.x hardware (compared to VC4) now includes an MMU.  It has
+a single level of page tables for the V3D’s 4GB address space to
+map to AXI bus addresses, thus it could need up to 4MB of
+physically contiguous memory to store the PTEs.</p>
+<p>Because the 4MB of contiguous memory for page tables is precious,
+and switching between them is expensive, we load all BOs into the
+same 4GB address space.</p>
+<p>To protect clients from each other, we should use the GMP to
+quickly mask out (at 128kb granularity) what pages are available to
+each client.  This is not yet implemented.</p>
+</section>
+<section id="gpu-scheduling">
+<h3>GPU Scheduling<a class="headerlink" href="#gpu-scheduling" title="Permalink to this headline">¶</a></h3>
+<p>The shared DRM GPU scheduler is used to coordinate submitting jobs
+to the hardware.  Each DRM fd (roughly a client process) gets its
+own scheduler entity, which will process jobs in order.  The GPU
+scheduler will round-robin between clients to submit the next job.</p>
+<p>For simplicity, and in order to keep latency low for interactive
+jobs when bulk background jobs are queued up, we submit a new job
+to the HW only when it has completed the last one, instead of
+filling up the CT[01]Q FIFOs with jobs.  Similarly, we use
+<a class="reference internal" href="drm-mm.html#c.drm_sched_job_add_dependency" title="drm_sched_job_add_dependency"><code class="xref c c-func docutils literal notranslate"><span class="pre">drm_sched_job_add_dependency()</span></code></a> to manage the dependency between bin and
+render, instead of having the clients submit jobs using the HW’s
+semaphores to interlock between them.</p>
+</section>
+</section>
+<section id="interrupts">
+<h2>Interrupts<a class="headerlink" href="#interrupts" title="Permalink to this headline">¶</a></h2>
+<p>When we take a bin, render, TFU done, or CSD done interrupt, we
+need to signal the fence for that job so that the scheduler can
+queue up the next one and unblock any waiters.</p>
+<p>When we take the binner out of memory interrupt, we need to
+allocate some new memory and pass it to the binner so that the
+current job can make progress.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">drm/v3d Broadcom V3D Graphics Driver</a><ul>
+<li><a class="reference internal" href="#gpu-buffer-object-bo-management">GPU buffer object (BO) management</a><ul>
+<li><a class="reference internal" href="#address-space-management">Address space management</a></li>
+<li><a class="reference internal" href="#gpu-scheduling">GPU Scheduling</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#interrupts">Interrupts</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/gpu/v3d.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/gpu/v3d.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

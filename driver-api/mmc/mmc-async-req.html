@@ -1,0 +1,191 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>MMC Asynchronous Request &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="MMC tools introduction" href="mmc-tools.html" />
+    <link rel="prev" title="SD and MMC Device Partitions" href="mmc-dev-parts.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="mmc-asynchronous-request">
+<h1>MMC Asynchronous Request<a class="headerlink" href="#mmc-asynchronous-request" title="Permalink to this headline">¶</a></h1>
+<section id="rationale">
+<h2>Rationale<a class="headerlink" href="#rationale" title="Permalink to this headline">¶</a></h2>
+<p>How significant is the cache maintenance overhead?</p>
+<p>It depends. Fast eMMC and multiple cache levels with speculative cache
+pre-fetch makes the cache overhead relatively significant. If the DMA
+preparations for the next request are done in parallel with the current
+transfer, the DMA preparation overhead would not affect the MMC performance.</p>
+<p>The intention of non-blocking (asynchronous) MMC requests is to minimize the
+time between when an MMC request ends and another MMC request begins.</p>
+<p>Using mmc_wait_for_req(), the MMC controller is idle while dma_map_sg and
+dma_unmap_sg are processing. Using non-blocking MMC requests makes it
+possible to prepare the caches for next job in parallel with an active
+MMC request.</p>
+</section>
+<section id="mmc-block-driver">
+<h2>MMC block driver<a class="headerlink" href="#mmc-block-driver" title="Permalink to this headline">¶</a></h2>
+<p>The mmc_blk_issue_rw_rq() in the MMC block driver is made non-blocking.</p>
+<p>The increase in throughput is proportional to the time it takes to
+prepare (major part of preparations are dma_map_sg() and dma_unmap_sg())
+a request and how fast the memory is. The faster the MMC/SD is the
+more significant the prepare request time becomes. Roughly the expected
+performance gain is 5% for large writes and 10% on large reads on a L2 cache
+platform. In power save mode, when clocks run on a lower frequency, the DMA
+preparation may cost even more. As long as these slower preparations are run
+in parallel with the transfer performance won’t be affected.</p>
+</section>
+<section id="details-on-measurements-from-iozone-and-mmc-test">
+<h2>Details on measurements from IOZone and mmc_test<a class="headerlink" href="#details-on-measurements-from-iozone-and-mmc-test" title="Permalink to this headline">¶</a></h2>
+<p><a class="reference external" href="https://wiki.linaro.org/WorkingGroups/Kernel/Specs/StoragePerfMMC-async-req">https://wiki.linaro.org/WorkingGroups/Kernel/Specs/StoragePerfMMC-async-req</a></p>
+</section>
+<section id="mmc-core-api-extension">
+<h2>MMC core API extension<a class="headerlink" href="#mmc-core-api-extension" title="Permalink to this headline">¶</a></h2>
+<p>There is one new public function mmc_start_req().</p>
+<p>It starts a new MMC command request for a host. The function isn’t
+truly non-blocking. If there is an ongoing async request it waits
+for completion of that request and starts the new one and returns. It
+doesn’t wait for the new request to complete. If there is no ongoing
+request it starts the new request and returns immediately.</p>
+</section>
+<section id="mmc-host-extensions">
+<h2>MMC host extensions<a class="headerlink" href="#mmc-host-extensions" title="Permalink to this headline">¶</a></h2>
+<p>There are two optional members in the mmc_host_ops – pre_req() and
+post_req() – that the host driver may implement in order to move work
+to before and after the actual mmc_host_ops.request() function is called.</p>
+<p>In the DMA case pre_req() may do dma_map_sg() and prepare the DMA
+descriptor, and post_req() runs the dma_unmap_sg().</p>
+</section>
+<section id="optimize-for-the-first-request">
+<h2>Optimize for the first request<a class="headerlink" href="#optimize-for-the-first-request" title="Permalink to this headline">¶</a></h2>
+<p>The first request in a series of requests can’t be prepared in parallel
+with the previous transfer, since there is no previous request.</p>
+<p>The argument is_first_req in pre_req() indicates that there is no previous
+request. The host driver may optimize for this scenario to minimize
+the performance loss. A way to optimize for this is to split the current
+request in two chunks, prepare the first chunk and start the request,
+and finally prepare the second chunk and start the transfer.</p>
+<p>Pseudocode to handle is_first_req scenario with minimal prepare overhead:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>if (is_first_req &amp;&amp; req-&gt;size &gt; threshold)
+   /* start MMC transfer for the complete transfer size */
+   mmc_start_command(MMC_CMD_TRANSFER_FULL_SIZE);
+
+   /*
+    * Begin to prepare DMA while cmd is being processed by MMC.
+    * The first chunk of the request should take the same time
+    * to prepare as the &quot;MMC process command time&quot;.
+    * If prepare time exceeds MMC cmd time
+    * the transfer is delayed, guesstimate max 4k as first chunk size.
+    */
+    prepare_1st_chunk_for_dma(req);
+    /* flush pending desc to the DMAC (dmaengine.h) */
+    dma_issue_pending(req-&gt;dma_desc);
+
+    prepare_2nd_chunk_for_dma(req);
+    /*
+     * The second issue_pending should be called before MMC runs out
+     * of the first chunk. If the MMC runs out of the first data chunk
+     * before this call, the transfer is delayed.
+     */
+    dma_issue_pending(req-&gt;dma_desc);
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">MMC Asynchronous Request</a><ul>
+<li><a class="reference internal" href="#rationale">Rationale</a></li>
+<li><a class="reference internal" href="#mmc-block-driver">MMC block driver</a></li>
+<li><a class="reference internal" href="#details-on-measurements-from-iozone-and-mmc-test">Details on measurements from IOZone and mmc_test</a></li>
+<li><a class="reference internal" href="#mmc-core-api-extension">MMC core API extension</a></li>
+<li><a class="reference internal" href="#mmc-host-extensions">MMC host extensions</a></li>
+<li><a class="reference internal" href="#optimize-for-the-first-request">Optimize for the first request</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/mmc/mmc-async-req.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/mmc/mmc-async-req.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

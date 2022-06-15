@@ -1,0 +1,151 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>virtiofs: virtio-fs 主机&lt;-&gt;客机共享文件系统 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../filesystems/virtiofs.html#virtiofs-index"><span class="std std-ref">Documentation/filesystems/virtiofs.rst</span></a></p>
+</dd>
+</dl>
+<p>译者</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>中文版维护者： 王文虎 Wang Wenhu &lt;wenhu.wang@vivo.com&gt;
+中文版翻译者： 王文虎 Wang Wenhu &lt;wenhu.wang@vivo.com&gt;
+中文版校译者： 王文虎 Wang Wenhu &lt;wenhu.wang@vivo.com&gt;
+</pre></div>
+</div>
+<section id="virtiofs-virtio-fs">
+<h1>virtiofs: virtio-fs 主机&lt;-&gt;客机共享文件系统<a class="headerlink" href="#virtiofs-virtio-fs" title="Permalink to this headline">¶</a></h1>
+<ul class="simple">
+<li><p>Copyright (C) 2020 Vivo Communication Technology Co. Ltd.</p></li>
+</ul>
+<section id="id1">
+<h2>介绍<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>Linux的virtiofs文件系统实现了一个半虚拟化VIRTIO类型“virtio-fs”设备的驱动，通过该类型设备实现客机&lt;-&gt;主机文件系统共享。它允许客机挂载一个已经导出到主机的目录。</p>
+<p>客机通常需要访问主机或者远程系统上的文件。使用场景包括：在新客机安装时让文件对其可见；从主机上的根文件系统启动；对无状态或临时客机提供持久存储和在客机之间共享目录。</p>
+<p>尽管在某些任务可能通过使用已有的网络文件系统完成，但是却需要非常难以自动化的配置步骤，且将存储网络暴露给客机。而virtio-fs设备通过提供不经过网络的文件系统访问文件的设计方式解决了这些问题。</p>
+<p>另外，virto-fs设备发挥了主客机共存的优点提高了性能，并且提供了网络文件系统所不具备
+的一些语义功能。</p>
+</section>
+<section id="id2">
+<h2>用法<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>以``myfs``标签将文件系统挂载到``/mnt``:</p>
+<div class="highlight-sh notranslate"><div class="highlight"><pre><span></span>guest# mount -t virtiofs myfs /mnt
+</pre></div>
+</div>
+<p>请查阅 <a class="reference external" href="https://virtio-fs.gitlab.io/">https://virtio-fs.gitlab.io/</a> 了解配置QEMU和virtiofsd守护程序的详细信息。</p>
+</section>
+<section id="id3">
+<h2>内幕<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h2>
+<p>由于virtio-fs设备将FUSE协议用于文件系统请求，因此Linux的virtiofs文件系统与FUSE文件系统客户端紧密集成在一起。客机充当FUSE客户端而主机充当FUSE服务器，内核与用户空间之间的/dev/fuse接口由virtio-fs设备接口代替。</p>
+<p>FUSE请求被置于虚拟队列中由主机处理。主机填充缓冲区中的响应部分，而客机处理请求的完成部分。</p>
+<p>将/dev/fuse映射到虚拟队列需要解决/dev/fuse和虚拟队列之间语义上的差异。每次读取/dev/fuse设备时，FUSE客户端都可以选择要传输的请求，从而可以使某些请求优先于其他请求。虚拟队列有其队列语义，无法更改已入队请求的顺序。在虚拟队列已满的情况下尤
+其关键，因为此时不可能加入高优先级的请求。为了解决此差异，virtio-fs设备采用“hiprio”（高优先级）虚拟队列，专门用于有别于普通请求的高优先级请求。</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">virtiofs: virtio-fs 主机&lt;-&gt;客机共享文件系统</a><ul>
+<li><a class="reference internal" href="#id1">介绍</a></li>
+<li><a class="reference internal" href="#id2">用法</a></li>
+<li><a class="reference internal" href="#id3">内幕</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/filesystems/virtiofs.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/filesystems/virtiofs.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

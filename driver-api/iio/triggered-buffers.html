@@ -1,0 +1,217 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Triggered Buffers &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="HW consumer" href="hw-consumer.html" />
+    <link rel="prev" title="Triggers" href="triggers.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="triggered-buffers">
+<h1>Triggered Buffers<a class="headerlink" href="#triggered-buffers" title="Permalink to this headline">¶</a></h1>
+<p>Now that we know what buffers and triggers are let’s see how they work together.</p>
+<section id="iio-triggered-buffer-setup">
+<h2>IIO triggered buffer setup<a class="headerlink" href="#iio-triggered-buffer-setup" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p><code class="xref c c-func docutils literal notranslate"><span class="pre">iio_triggered_buffer_setup()</span></code> — Setup triggered buffer and pollfunc</p></li>
+<li><p><a class="reference internal" href="#c.iio_triggered_buffer_cleanup" title="iio_triggered_buffer_cleanup"><code class="xref c c-func docutils literal notranslate"><span class="pre">iio_triggered_buffer_cleanup()</span></code></a> — Free resources allocated by
+<code class="xref c c-func docutils literal notranslate"><span class="pre">iio_triggered_buffer_setup()</span></code></p></li>
+<li><p><a class="reference internal" href="core.html#c.iio_buffer_setup_ops" title="iio_buffer_setup_ops"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iio_buffer_setup_ops</span></code></a> — buffer setup related callbacks</p></li>
+</ul>
+<p>A typical triggered buffer setup looks like this:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>const struct iio_buffer_setup_ops sensor_buffer_setup_ops = {
+  .preenable    = sensor_buffer_preenable,
+  .postenable   = sensor_buffer_postenable,
+  .postdisable  = sensor_buffer_postdisable,
+  .predisable   = sensor_buffer_predisable,
+};
+
+irqreturn_t sensor_iio_pollfunc(int irq, void *p)
+{
+    pf-&gt;timestamp = iio_get_time_ns((struct indio_dev *)p);
+    return IRQ_WAKE_THREAD;
+}
+
+irqreturn_t sensor_trigger_handler(int irq, void *p)
+{
+    u16 buf[8];
+    int i = 0;
+
+    /* read data for each active channel */
+    for_each_set_bit(bit, active_scan_mask, masklength)
+        buf[i++] = sensor_get_data(bit)
+
+    iio_push_to_buffers_with_timestamp(indio_dev, buf, timestamp);
+
+    iio_trigger_notify_done(trigger);
+    return IRQ_HANDLED;
+}
+
+/* setup triggered buffer, usually in probe function */
+iio_triggered_buffer_setup(indio_dev, sensor_iio_polfunc,
+                           sensor_trigger_handler,
+                           sensor_buffer_setup_ops);
+</pre></div>
+</div>
+<p>The important things to notice here are:</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="core.html#c.iio_buffer_setup_ops" title="iio_buffer_setup_ops"><code class="xref c c-type docutils literal notranslate"><span class="pre">iio_buffer_setup_ops</span></code></a>, the buffer setup functions to be called at
+predefined points in the buffer configuration sequence (e.g. before enable,
+after disable). If not specified, the IIO core uses the default
+iio_triggered_buffer_setup_ops.</p></li>
+<li><p><strong>sensor_iio_pollfunc</strong>, the function that will be used as top half of poll
+function. It should do as little processing as possible, because it runs in
+interrupt context. The most common operation is recording of the current
+timestamp and for this reason one can use the IIO core defined
+<code class="xref c c-func docutils literal notranslate"><span class="pre">iio_pollfunc_store_time()</span></code> function.</p></li>
+<li><p><strong>sensor_trigger_handler</strong>, the function that will be used as bottom half of
+the poll function. This runs in the context of a kernel thread and all the
+processing takes place here. It usually reads data from the device and
+stores it in the internal buffer together with the timestamp recorded in the
+top half.</p></li>
+</ul>
+</section>
+<section id="more-details">
+<h2>More details<a class="headerlink" href="#more-details" title="Permalink to this headline">¶</a></h2>
+<dl class="function">
+<dt id="c.iio_triggered_buffer_setup_ext">
+int <code class="sig-name descname">iio_triggered_buffer_setup_ext</code><span class="sig-paren">(</span>struct <a class="reference internal" href="core.html#c.iio_dev" title="iio_dev">iio_dev</a><em> *indio_dev</em>, irqreturn_t (<em>*h</em>)(int irq, void *p), irqreturn_t (*thread)(int irq, void *p), enum iio_buffer_direction<em> direction</em>, const struct <a class="reference internal" href="core.html#c.iio_buffer_setup_ops" title="iio_buffer_setup_ops">iio_buffer_setup_ops</a><em> *setup_ops</em>, const struct iio_dev_attr<em> **buffer_attrs</em><span class="sig-paren">)</span><a class="headerlink" href="#c.iio_triggered_buffer_setup_ext" title="Permalink to this definition">¶</a></dt>
+<dd><p>Setup triggered buffer and pollfunc</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iio_dev</span> <span class="pre">*indio_dev</span></code></dt><dd><p>IIO device structure</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">irqreturn_t</span> <span class="pre">(*h)(int</span> <span class="pre">irq,</span> <span class="pre">void</span> <span class="pre">*p)</span></code></dt><dd><p>Function which will be used as pollfunc top half</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">irqreturn_t</span> <span class="pre">(*thread)(int</span> <span class="pre">irq,</span> <span class="pre">void</span> <span class="pre">*p)</span></code></dt><dd><p>Function which will be used as pollfunc bottom half</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">enum</span> <span class="pre">iio_buffer_direction</span> <span class="pre">direction</span></code></dt><dd><p>Direction of the data stream (in/out).</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">struct</span> <span class="pre">iio_buffer_setup_ops</span> <span class="pre">*setup_ops</span></code></dt><dd><p>Buffer setup functions to use for this device.
+If NULL the default setup functions for triggered
+buffers will be used.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">struct</span> <span class="pre">iio_dev_attr</span> <span class="pre">**buffer_attrs</span></code></dt><dd><p>Extra sysfs buffer attributes for this IIO buffer</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This function combines some common tasks which will normally be performed
+when setting up a triggered buffer. It will allocate the buffer and the
+pollfunc.</p>
+<p>Before calling this function the indio_dev structure should already be
+completely initialized, but not yet registered. In practice this means that
+this function should be called right before <a class="reference internal" href="core.html#c.iio_device_register" title="iio_device_register"><code class="xref c c-func docutils literal notranslate"><span class="pre">iio_device_register()</span></code></a>.</p>
+<p>To free the resources allocated by this function call
+<a class="reference internal" href="#c.iio_triggered_buffer_cleanup" title="iio_triggered_buffer_cleanup"><code class="xref c c-func docutils literal notranslate"><span class="pre">iio_triggered_buffer_cleanup()</span></code></a>.</p>
+</div>
+<dl class="function">
+<dt id="c.iio_triggered_buffer_cleanup">
+void <code class="sig-name descname">iio_triggered_buffer_cleanup</code><span class="sig-paren">(</span>struct <a class="reference internal" href="core.html#c.iio_dev" title="iio_dev">iio_dev</a><em> *indio_dev</em><span class="sig-paren">)</span><a class="headerlink" href="#c.iio_triggered_buffer_cleanup" title="Permalink to this definition">¶</a></dt>
+<dd><p>Free resources allocated by <a class="reference internal" href="#c.iio_triggered_buffer_setup_ext" title="iio_triggered_buffer_setup_ext"><code class="xref c c-func docutils literal notranslate"><span class="pre">iio_triggered_buffer_setup_ext()</span></code></a></p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iio_dev</span> <span class="pre">*indio_dev</span></code></dt><dd><p>IIO device structure</p>
+</dd>
+</dl>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Triggered Buffers</a><ul>
+<li><a class="reference internal" href="#iio-triggered-buffer-setup">IIO triggered buffer setup</a></li>
+<li><a class="reference internal" href="#more-details">More details</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/iio/triggered-buffers.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/iio/triggered-buffers.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

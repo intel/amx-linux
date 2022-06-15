@@ -1,0 +1,205 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>如何通过sysfs将CPU拓扑导出 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="Softlockup与hardlockup检测机制(又名:nmi_watchdog)" href="lockup-watchdogs.html" />
+    <link rel="prev" title="CPU 负载" href="cpu-load.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../admin-guide/cputopology.html"><span class="doc">How CPU topology info is exported via sysfs</span></a></p>
+</dd>
+<dt class="field-even">翻译</dt>
+<dd class="field-even"><p>唐艺舟 Tang Yizhou &lt;<a class="reference external" href="mailto:tangyeechou&#37;&#52;&#48;gmail&#46;com">tangyeechou<span>&#64;</span>gmail<span>&#46;</span>com</a>&gt;</p>
+</dd>
+</dl>
+<section id="sysfscpu">
+<h1>如何通过sysfs将CPU拓扑导出<a class="headerlink" href="#sysfscpu" title="Permalink to this headline">¶</a></h1>
+<p>CPU拓扑信息通过sysfs导出。显示的项（属性）和某些架构的/proc/cpuinfo输出相似。它们位于
+/sys/devices/system/cpu/cpuX/topology/。请阅读ABI文件：
+Documentation/ABI/stable/sysfs-devices-system-cpu。</p>
+<p>drivers/base/topology.c是体系结构中性的，它导出了这些属性。然而，die、cluster、book、
+draw这些层次结构相关的文件仅在体系结构提供了下文描述的宏的条件下被创建。</p>
+<p>对于支持这个特性的体系结构，它必须在include/asm-XXX/topology.h中定义这些宏中的一部分:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#define topology_physical_package_id(cpu)
+#define topology_die_id(cpu)
+#define topology_cluster_id(cpu)
+#define topology_core_id(cpu)
+#define topology_book_id(cpu)
+#define topology_drawer_id(cpu)
+#define topology_sibling_cpumask(cpu)
+#define topology_core_cpumask(cpu)
+#define topology_cluster_cpumask(cpu)
+#define topology_die_cpumask(cpu)
+#define topology_book_cpumask(cpu)
+#define topology_drawer_cpumask(cpu)
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">**_id</span> <span class="pre">macros</span></code> 的类型是int。
+<code class="docutils literal notranslate"><span class="pre">**_cpumask</span> <span class="pre">macros</span></code> 的类型是 <code class="docutils literal notranslate"><span class="pre">(const)</span> <span class="pre">struct</span> <span class="pre">cpumask</span> <span class="pre">*</span></code> 。后者和恰当的
+<code class="docutils literal notranslate"><span class="pre">**_siblings</span></code> sysfs属性对应（除了topology_sibling_cpumask()，它和thread_siblings
+对应）。</p>
+<p>为了在所有体系结构上保持一致，include/linux/topology.h提供了上述所有宏的默认定义，以防
+它们未在include/asm-XXX/topology.h中定义:</p>
+<ol class="arabic simple">
+<li><p>topology_physical_package_id: -1</p></li>
+<li><p>topology_die_id: -1</p></li>
+<li><p>topology_cluster_id: -1</p></li>
+<li><p>topology_core_id: 0</p></li>
+<li><p>topology_book_id: -1</p></li>
+<li><p>topology_drawer_id: -1</p></li>
+<li><p>topology_sibling_cpumask: 仅入参CPU</p></li>
+<li><p>topology_core_cpumask: 仅入参CPU</p></li>
+<li><p>topology_cluster_cpumask: 仅入参CPU</p></li>
+<li><p>topology_die_cpumask: 仅入参CPU</p></li>
+<li><p>topology_book_cpumask:  仅入参CPU</p></li>
+<li><p>topology_drawer_cpumask: 仅入参CPU</p></li>
+</ol>
+<p>此外，CPU拓扑信息由/sys/devices/system/cpu提供，包含下述文件。输出对应的内部数据源放在
+方括号（”[]”）中。</p>
+<blockquote>
+<div><table class="docutils align-default">
+<colgroup>
+<col style="width: 14%" />
+<col style="width: 86%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>kernel_max:</p></td>
+<td><p>内核配置允许的最大CPU下标值。[NR_CPUS-1]</p></td>
+</tr>
+<tr class="row-even"><td><p>offline:</p></td>
+<td><p>由于热插拔移除或者超过内核允许的CPU上限（上文描述的kernel_max）
+导致未上线的CPU。[~cpu_online_mask + cpus &gt;= NR_CPUS]</p></td>
+</tr>
+<tr class="row-odd"><td><p>online:</p></td>
+<td><p>在线的CPU，可供调度使用。[cpu_online_mask]</p></td>
+</tr>
+<tr class="row-even"><td><p>possible:</p></td>
+<td><p>已被分配资源的CPU，如果它们CPU实际存在，可以上线。
+[cpu_possible_mask]</p></td>
+</tr>
+<tr class="row-odd"><td><p>present:</p></td>
+<td><p>被系统识别实际存在的CPU。[cpu_present_mask]</p></td>
+</tr>
+</tbody>
+</table>
+</div></blockquote>
+<p>上述输出的格式和cpulist_parse()兼容[参见 &lt;linux/cpumask.h&gt;]。下面给些例子。</p>
+<p>在本例中，系统中有64个CPU，但是CPU 32-63超过了kernel_max值，因为NR_CPUS配置项是32，
+取值范围被限制为0..31。此外注意CPU2和4-31未上线，但是可以上线，因为它们同时存在于
+present和possible:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>kernel_max: 31
+   offline: 2,4-31,32-63
+    online: 0-1,3
+  possible: 0-31
+   present: 0-31
+</pre></div>
+</div>
+<p>在本例中，NR_CPUS配置项是128，但内核启动时设置possible_cpus=144。系统中有4个CPU，
+CPU2被手动设置下线（也是唯一一个可以上线的CPU）:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>kernel_max: 127
+   offline: 2,4-127,128-143
+    online: 0-1,3
+  possible: 0-127
+   present: 0-3
+</pre></div>
+</div>
+<p>阅读Documentation/core-api/cpu_hotplug.rst可了解开机参数possible_cpus=NUM，同时还
+可以了解各种cpumask的信息。</p>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/admin-guide/cputopology.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/admin-guide/cputopology.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

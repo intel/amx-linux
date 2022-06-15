@@ -1,0 +1,352 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Texas Instruments CPSW switchdev based ethernet driver &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../../" src="../../../../_static/documentation_options.js"></script>
+    <script src="../../../../_static/jquery.js"></script>
+    <script src="../../../../_static/underscore.js"></script>
+    <script src="../../../../_static/doctools.js"></script>
+    <script src="../../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" />
+    <link rel="next" title="Texas Instruments K3 AM65 CPSW NUSS switchdev based ethernet driver" href="am65_nuss_cpsw_switchdev.html" />
+    <link rel="prev" title="Texas Instruments CPSW ethernet driver" href="cpsw.html" />
+   
+  <link rel="stylesheet" href="../../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="texas-instruments-cpsw-switchdev-based-ethernet-driver">
+<h1>Texas Instruments CPSW switchdev based ethernet driver<a class="headerlink" href="#texas-instruments-cpsw-switchdev-based-ethernet-driver" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">Version</dt>
+<dd class="field-odd"><p>2.0</p>
+</dd>
+</dl>
+<section id="port-renaming">
+<h2>Port renaming<a class="headerlink" href="#port-renaming" title="Permalink to this headline">¶</a></h2>
+<p>On older udev versions renaming of ethX to swXpY will not be automatically
+supported</p>
+<p>In order to rename via udev:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ip -d link show dev sw0p1 | grep switchid
+
+SUBSYSTEM==&quot;net&quot;, ACTION==&quot;add&quot;, ATTR{phys_switch_id}==&lt;switchid&gt;, \
+        ATTR{phys_port_name}!=&quot;&quot;, NAME=&quot;sw0$attr{phys_port_name}&quot;
+</pre></div>
+</div>
+</section>
+<section id="dual-mac-mode">
+<h2>Dual mac mode<a class="headerlink" href="#dual-mac-mode" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p>The new (cpsw_new.c) driver is operating in dual-emac mode by default, thus
+working as 2 individual network interfaces. Main differences from legacy CPSW
+driver are:</p></li>
+</ul>
+<blockquote>
+<div><ul>
+<li><p>optimized promiscuous mode: The P0_UNI_FLOOD (both ports) is enabled in
+addition to ALLMULTI (current port) instead of ALE_BYPASS.
+So, Ports in promiscuous mode will keep possibility of mcast and vlan
+filtering, which is provides significant benefits when ports are joined
+to the same bridge, but without enabling “switch” mode, or to different
+bridges.</p></li>
+<li><p>learning disabled on ports as it make not too much sense for
+segregated ports - no forwarding in HW.</p></li>
+<li><p>enabled basic support for devlink.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>devlink dev show
+        platform/48484000.switch
+
+devlink dev param show
+platform/48484000.switch:
+name switch_mode type driver-specific
+values:
+        cmode runtime value false
+name ale_bypass type driver-specific
+values:
+        cmode runtime value false
+</pre></div>
+</div>
+</li>
+</ul>
+</div></blockquote>
+</section>
+<section id="devlink-configuration-parameters">
+<h2>Devlink configuration parameters<a class="headerlink" href="#devlink-configuration-parameters" title="Permalink to this headline">¶</a></h2>
+<p>See <a class="reference internal" href="../../../devlink/ti-cpsw-switch.html"><span class="doc">ti-cpsw-switch devlink support</span></a></p>
+</section>
+<section id="bridging-in-dual-mac-mode">
+<h2>Bridging in dual mac mode<a class="headerlink" href="#bridging-in-dual-mac-mode" title="Permalink to this headline">¶</a></h2>
+<p>The dual_mac mode requires two vids to be reserved for internal purposes,
+which, by default, equal CPSW Port numbers. As result, bridge has to be
+configured in vlan unaware mode or default_pvid has to be adjusted:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ip link add name br0 type bridge
+ip link set dev br0 type bridge vlan_filtering 0
+echo 0 &gt; /sys/class/net/br0/bridge/default_pvid
+ip link set dev sw0p1 master br0
+ip link set dev sw0p2 master br0
+</pre></div>
+</div>
+<p>or:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ip link add name br0 type bridge
+ip link set dev br0 type bridge vlan_filtering 0
+echo 100 &gt; /sys/class/net/br0/bridge/default_pvid
+ip link set dev br0 type bridge vlan_filtering 1
+ip link set dev sw0p1 master br0
+ip link set dev sw0p2 master br0
+</pre></div>
+</div>
+</section>
+<section id="enabling-switch">
+<h2>Enabling “switch”<a class="headerlink" href="#enabling-switch" title="Permalink to this headline">¶</a></h2>
+<p>The Switch mode can be enabled by configuring devlink driver parameter
+“switch_mode” to 1/true:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>devlink dev param set platform/48484000.switch \
+name switch_mode value 1 cmode runtime
+</pre></div>
+</div>
+<p>This can be done regardless of the state of Port’s netdev devices - UP/DOWN, but
+Port’s netdev devices have to be in UP before joining to the bridge to avoid
+overwriting of bridge configuration as CPSW switch driver copletly reloads its
+configuration when first Port changes its state to UP.</p>
+<p>When the both interfaces joined the bridge - CPSW switch driver will enable
+marking packets with offload_fwd_mark flag unless “ale_bypass=0”</p>
+<p>All configuration is implemented via switchdev API.</p>
+</section>
+<section id="bridge-setup">
+<h2>Bridge setup<a class="headerlink" href="#bridge-setup" title="Permalink to this headline">¶</a></h2>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>devlink dev param set platform/48484000.switch \
+name switch_mode value 1 cmode runtime
+
+ip link add name br0 type bridge
+ip link set dev br0 type bridge ageing_time 1000
+ip link set dev sw0p1 up
+ip link set dev sw0p2 up
+ip link set dev sw0p1 master br0
+ip link set dev sw0p2 master br0
+
+[*] bridge vlan add dev br0 vid 1 pvid untagged self
+
+[*] if vlan_filtering=1. where default_pvid=1
+
+Note. Steps [*] are mandatory.
+</pre></div>
+</div>
+</section>
+<section id="on-off-stp">
+<h2>On/off STP<a class="headerlink" href="#on-off-stp" title="Permalink to this headline">¶</a></h2>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ip link set dev BRDEV type bridge stp_state 1/0
+</pre></div>
+</div>
+</section>
+<section id="vlan-configuration">
+<h2>VLAN configuration<a class="headerlink" href="#vlan-configuration" title="Permalink to this headline">¶</a></h2>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>bridge vlan add dev br0 vid 1 pvid untagged self &lt;---- add cpu port to VLAN 1
+</pre></div>
+</div>
+<p>Note. This step is mandatory for bridge/default_pvid.</p>
+</section>
+<section id="add-extra-vlans">
+<h2>Add extra VLANs<a class="headerlink" href="#add-extra-vlans" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><ol class="arabic">
+<li><p>untagged:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>bridge vlan add dev sw0p1 vid 100 pvid untagged master
+bridge vlan add dev sw0p2 vid 100 pvid untagged master
+bridge vlan add dev br0 vid 100 pvid untagged self &lt;---- Add cpu port to VLAN100
+</pre></div>
+</div>
+</li>
+<li><p>tagged:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>bridge vlan add dev sw0p1 vid 100 master
+bridge vlan add dev sw0p2 vid 100 master
+bridge vlan add dev br0 vid 100 pvid tagged self &lt;---- Add cpu port to VLAN100
+</pre></div>
+</div>
+</li>
+</ol>
+</div></blockquote>
+<section id="fdbs">
+<h3>FDBs<a class="headerlink" href="#fdbs" title="Permalink to this headline">¶</a></h3>
+<p>FDBs are automatically added on the appropriate switch port upon detection</p>
+<p>Manually adding FDBs:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>bridge fdb add aa:bb:cc:dd:ee:ff dev sw0p1 master vlan 100
+bridge fdb add aa:bb:cc:dd:ee:fe dev sw0p2 master &lt;---- Add on all VLANs
+</pre></div>
+</div>
+</section>
+<section id="mdbs">
+<h3>MDBs<a class="headerlink" href="#mdbs" title="Permalink to this headline">¶</a></h3>
+<p>MDBs are automatically added on the appropriate switch port upon detection</p>
+<p>Manually adding MDBs:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>bridge mdb add dev br0 port sw0p1 grp 239.1.1.1 permanent vid 100
+bridge mdb add dev br0 port sw0p1 grp 239.1.1.1 permanent &lt;---- Add on all VLANs
+</pre></div>
+</div>
+</section>
+</section>
+<section id="multicast-flooding">
+<h2>Multicast flooding<a class="headerlink" href="#multicast-flooding" title="Permalink to this headline">¶</a></h2>
+<p>CPU port mcast_flooding is always on</p>
+<p>Turning flooding on/off on swithch ports:
+bridge link set dev sw0p1 mcast_flood on/off</p>
+</section>
+<section id="access-and-trunk-port">
+<h2>Access and Trunk port<a class="headerlink" href="#access-and-trunk-port" title="Permalink to this headline">¶</a></h2>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>bridge vlan add dev sw0p1 vid 100 pvid untagged master
+bridge vlan add dev sw0p2 vid 100 master
+
+
+bridge vlan add dev br0 vid 100 self
+ip link add link br0 name br0.100 type vlan id 100
+</pre></div>
+</div>
+<p>Note. Setting PVID on Bridge device itself working only for
+default VLAN (default_pvid).</p>
+</section>
+<section id="nfs">
+<h2>NFS<a class="headerlink" href="#nfs" title="Permalink to this headline">¶</a></h2>
+<p>The only way for NFS to work is by chrooting to a minimal environment when
+switch configuration that will affect connectivity is needed.
+Assuming you are booting NFS with eth1 interface(the script is hacky and
+it’s just there to prove NFS is doable).</p>
+<p>setup.sh:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#!/bin/sh
+mkdir proc
+mount -t proc none /proc
+ifconfig br0  &gt; /dev/null
+if [ $? -ne 0 ]; then
+        echo &quot;Setting up bridge&quot;
+        ip link add name br0 type bridge
+        ip link set dev br0 type bridge ageing_time 1000
+        ip link set dev br0 type bridge vlan_filtering 1
+
+        ip link set eth1 down
+        ip link set eth1 name sw0p1
+        ip link set dev sw0p1 up
+        ip link set dev sw0p2 up
+        ip link set dev sw0p2 master br0
+        ip link set dev sw0p1 master br0
+        bridge vlan add dev br0 vid 1 pvid untagged self
+        ifconfig sw0p1 0.0.0.0
+        udhchc -i br0
+fi
+umount /proc
+</pre></div>
+</div>
+<p>run_nfs.sh::</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#!/bin/sh
+mkdir /tmp/root/bin -p
+mkdir /tmp/root/lib -p
+
+cp -r /lib/ /tmp/root/
+cp -r /bin/ /tmp/root/
+cp /sbin/ip /tmp/root/bin
+cp /sbin/bridge /tmp/root/bin
+cp /sbin/ifconfig /tmp/root/bin
+cp /sbin/udhcpc /tmp/root/bin
+cp /path/to/setup.sh /tmp/root/bin
+chroot /tmp/root/ busybox sh /bin/setup.sh
+
+run ./run_nfs.sh
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Texas Instruments CPSW switchdev based ethernet driver</a><ul>
+<li><a class="reference internal" href="#port-renaming">Port renaming</a></li>
+<li><a class="reference internal" href="#dual-mac-mode">Dual mac mode</a></li>
+<li><a class="reference internal" href="#devlink-configuration-parameters">Devlink configuration parameters</a></li>
+<li><a class="reference internal" href="#bridging-in-dual-mac-mode">Bridging in dual mac mode</a></li>
+<li><a class="reference internal" href="#enabling-switch">Enabling “switch”</a></li>
+<li><a class="reference internal" href="#bridge-setup">Bridge setup</a></li>
+<li><a class="reference internal" href="#on-off-stp">On/off STP</a></li>
+<li><a class="reference internal" href="#vlan-configuration">VLAN configuration</a></li>
+<li><a class="reference internal" href="#add-extra-vlans">Add extra VLANs</a><ul>
+<li><a class="reference internal" href="#fdbs">FDBs</a></li>
+<li><a class="reference internal" href="#mdbs">MDBs</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#multicast-flooding">Multicast flooding</a></li>
+<li><a class="reference internal" href="#access-and-trunk-port">Access and Trunk port</a></li>
+<li><a class="reference internal" href="#nfs">NFS</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../../_sources/networking/device_drivers/ethernet/ti/cpsw_switchdev.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../../_sources/networking/device_drivers/ethernet/ti/cpsw_switchdev.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

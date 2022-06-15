@@ -1,0 +1,305 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Open Firmware Devicetree Unittest &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="DeviceTree Kernel API" href="kernel-api.html" />
+    <link rel="prev" title="Linux and the Devicetree" href="usage-model.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="open-firmware-devicetree-unittest">
+<h1>Open Firmware Devicetree Unittest<a class="headerlink" href="#open-firmware-devicetree-unittest" title="Permalink to this headline">¶</a></h1>
+<p>Author: Gaurav Minocha &lt;<a class="reference external" href="mailto:gaurav&#46;minocha&#46;os&#37;&#52;&#48;gmail&#46;com">gaurav<span>&#46;</span>minocha<span>&#46;</span>os<span>&#64;</span>gmail<span>&#46;</span>com</a>&gt;</p>
+<section id="introduction">
+<h2>1. Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>This document explains how the test data required for executing OF unittest
+is attached to the live tree dynamically, independent of the machine’s
+architecture.</p>
+<p>It is recommended to read the following documents before moving ahead.</p>
+<ol class="arabic simple">
+<li><p><a class="reference internal" href="usage-model.html"><span class="doc">Linux and the Devicetree</span></a></p></li>
+<li><p><a class="reference external" href="http://www.devicetree.org/Device_Tree_Usage">http://www.devicetree.org/Device_Tree_Usage</a></p></li>
+</ol>
+<p>OF Selftest has been designed to test the interface (include/linux/of.h)
+provided to device driver developers to fetch the device information..etc.
+from the unflattened device tree data structure. This interface is used by
+most of the device drivers in various use cases.</p>
+</section>
+<section id="verbose-output-expect">
+<h2>2. Verbose Output (EXPECT)<a class="headerlink" href="#verbose-output-expect" title="Permalink to this headline">¶</a></h2>
+<p>If unittest detects a problem it will print a warning or error message to
+the console.  Unittest also triggers warning and error messages from other
+kernel code as a result of intentionally bad unittest data.  This has led
+to confusion as to whether the triggered messages are an expected result
+of a test or whether there is a real problem that is independent of unittest.</p>
+<p>‘EXPECT : text’ (begin) and ‘EXPECT / : text’ (end) messages have been
+added to unittest to report that a warning or error is expected.  The
+begin is printed before triggering the warning or error, and the end is
+printed after triggering the warning or error.</p>
+<p>The EXPECT messages result in very noisy console messages that are difficult
+to read.  The script scripts/dtc/of_unittest_expect was created to filter
+this verbosity and highlight mismatches between triggered warnings and
+errors vs expected warnings and errors.  More information is available
+from ‘scripts/dtc/of_unittest_expect –help’.</p>
+</section>
+<section id="test-data">
+<h2>3. Test-data<a class="headerlink" href="#test-data" title="Permalink to this headline">¶</a></h2>
+<p>The Device Tree Source file (drivers/of/unittest-data/testcases.dts) contains
+the test data required for executing the unit tests automated in
+drivers/of/unittest.c. Currently, following Device Tree Source Include files
+(.dtsi) are included in testcases.dts:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>drivers/of/unittest-data/tests-interrupts.dtsi
+drivers/of/unittest-data/tests-platform.dtsi
+drivers/of/unittest-data/tests-phandle.dtsi
+drivers/of/unittest-data/tests-match.dtsi
+</pre></div>
+</div>
+<p>When the kernel is build with OF_SELFTEST enabled, then the following make
+rule:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$(obj)/%.dtb: $(src)/%.dts FORCE
+        $(call if_changed_dep, dtc)
+</pre></div>
+</div>
+<p>is used to compile the DT source file (testcases.dts) into a binary blob
+(testcases.dtb), also referred as flattened DT.</p>
+<p>After that, using the following rule the binary blob above is wrapped as an
+assembly file (testcases.dtb.S):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$(obj)/%.dtb.S: $(obj)/%.dtb
+        $(call cmd, dt_S_dtb)
+</pre></div>
+</div>
+<p>The assembly file is compiled into an object file (testcases.dtb.o), and is
+linked into the kernel image.</p>
+<section id="adding-the-test-data">
+<h3>3.1. Adding the test data<a class="headerlink" href="#adding-the-test-data" title="Permalink to this headline">¶</a></h3>
+<p>Un-flattened device tree structure:</p>
+<p>Un-flattened device tree consists of connected device_node(s) in form of a tree
+structure described below:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>// following struct members are used to construct the tree
+struct device_node {
+    ...
+    struct  device_node *parent;
+    struct  device_node *child;
+    struct  device_node *sibling;
+    ...
+};
+</pre></div>
+</div>
+<p>Figure 1, describes a generic structure of machine’s un-flattened device tree
+considering only child and sibling pointers. There exists another pointer,
+<code class="docutils literal notranslate"><span class="pre">*parent</span></code>, that is used to traverse the tree in the reverse direction. So, at
+a particular level the child node and all the sibling nodes will have a parent
+pointer pointing to a common node (e.g. child1, sibling2, sibling3, sibling4’s
+parent points to root node):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>root (&#39;/&#39;)
+|
+child1 -&gt; sibling2 -&gt; sibling3 -&gt; sibling4 -&gt; null
+|         |           |           |
+|         |           |          null
+|         |           |
+|         |        child31 -&gt; sibling32 -&gt; null
+|         |           |          |
+|         |          null       null
+|         |
+|      child21 -&gt; sibling22 -&gt; sibling23 -&gt; null
+|         |          |            |
+|        null       null         null
+|
+child11 -&gt; sibling12 -&gt; sibling13 -&gt; sibling14 -&gt; null
+|           |           |            |
+|           |           |           null
+|           |           |
+null        null       child131 -&gt; null
+                        |
+                        null
+</pre></div>
+</div>
+<p>Figure 1: Generic structure of un-flattened device tree</p>
+<p>Before executing OF unittest, it is required to attach the test data to
+machine’s device tree (if present). So, when selftest_data_add() is called,
+at first it reads the flattened device tree data linked into the kernel image
+via the following kernel symbols:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>__dtb_testcases_begin - address marking the start of test data blob
+__dtb_testcases_end   - address marking the end of test data blob
+</pre></div>
+</div>
+<p>Secondly, it calls <a class="reference internal" href="kernel-api.html#c.of_fdt_unflatten_tree" title="of_fdt_unflatten_tree"><code class="xref c c-func docutils literal notranslate"><span class="pre">of_fdt_unflatten_tree()</span></code></a> to unflatten the flattened
+blob. And finally, if the machine’s device tree (i.e live tree) is present,
+then it attaches the unflattened test data tree to the live tree, else it
+attaches itself as a live device tree.</p>
+<p>attach_node_and_children() uses of_attach_node() to attach the nodes into the
+live tree as explained below. To explain the same, the test data tree described
+in Figure 2 is attached to the live tree described in Figure 1:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>root (&#39;/&#39;)
+    |
+testcase-data
+    |
+test-child0 -&gt; test-sibling1 -&gt; test-sibling2 -&gt; test-sibling3 -&gt; null
+    |               |                |                |
+test-child01      null             null             null
+</pre></div>
+</div>
+<p>Figure 2: Example test data tree to be attached to live tree.</p>
+<p>According to the scenario above, the live tree is already present so it isn’t
+required to attach the root(‘/’) node. All other nodes are attached by calling
+of_attach_node() on each node.</p>
+<p>In the function of_attach_node(), the new node is attached as the child of the
+given parent in live tree. But, if parent already has a child then the new node
+replaces the current child and turns it into its sibling. So, when the testcase
+data node is attached to the live tree above (Figure 1), the final structure is
+as shown in Figure 3:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>root (&#39;/&#39;)
+|
+testcase-data -&gt; child1 -&gt; sibling2 -&gt; sibling3 -&gt; sibling4 -&gt; null
+|               |          |           |           |
+(...)             |          |           |          null
+                |          |         child31 -&gt; sibling32 -&gt; null
+                |          |           |           |
+                |          |          null        null
+                |          |
+                |        child21 -&gt; sibling22 -&gt; sibling23 -&gt; null
+                |          |           |            |
+                |         null        null         null
+                |
+                child11 -&gt; sibling12 -&gt; sibling13 -&gt; sibling14 -&gt; null
+                |          |            |            |
+                null       null          |           null
+                                        |
+                                        child131 -&gt; null
+                                        |
+                                        null
+-----------------------------------------------------------------------
+
+root (&#39;/&#39;)
+|
+testcase-data -&gt; child1 -&gt; sibling2 -&gt; sibling3 -&gt; sibling4 -&gt; null
+|               |          |           |           |
+|             (...)      (...)       (...)        null
+|
+test-sibling3 -&gt; test-sibling2 -&gt; test-sibling1 -&gt; test-child0 -&gt; null
+|                |                   |                |
+null             null                null         test-child01
+</pre></div>
+</div>
+<p>Figure 3: Live device tree structure after attaching the testcase-data.</p>
+<p>Astute readers would have noticed that test-child0 node becomes the last
+sibling compared to the earlier structure (Figure 2). After attaching first
+test-child0 the test-sibling1 is attached that pushes the child node
+(i.e. test-child0) to become a sibling and makes itself a child node,
+as mentioned above.</p>
+<p>If a duplicate node is found (i.e. if a node with same full_name property is
+already present in the live tree), then the node isn’t attached rather its
+properties are updated to the live tree’s node by calling the function
+update_node_properties().</p>
+</section>
+<section id="removing-the-test-data">
+<h3>3.2. Removing the test data<a class="headerlink" href="#removing-the-test-data" title="Permalink to this headline">¶</a></h3>
+<p>Once the test case execution is complete, selftest_data_remove is called in
+order to remove the device nodes attached initially (first the leaf nodes are
+detached and then moving up the parent nodes are removed, and eventually the
+whole tree). selftest_data_remove() calls detach_node_and_children() that uses
+<a class="reference internal" href="kernel-api.html#c.of_detach_node" title="of_detach_node"><code class="xref c c-func docutils literal notranslate"><span class="pre">of_detach_node()</span></code></a> to detach the nodes from the live device tree.</p>
+<p>To detach a node, <a class="reference internal" href="kernel-api.html#c.of_detach_node" title="of_detach_node"><code class="xref c c-func docutils literal notranslate"><span class="pre">of_detach_node()</span></code></a> either updates the child pointer of given
+node’s parent to its sibling or attaches the previous sibling to the given
+node’s sibling, as appropriate. That is it :)</p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Open Firmware Devicetree Unittest</a><ul>
+<li><a class="reference internal" href="#introduction">1. Introduction</a></li>
+<li><a class="reference internal" href="#verbose-output-expect">2. Verbose Output (EXPECT)</a></li>
+<li><a class="reference internal" href="#test-data">3. Test-data</a><ul>
+<li><a class="reference internal" href="#adding-the-test-data">3.1. Adding the test data</a></li>
+<li><a class="reference internal" href="#removing-the-test-data">3.2. Removing the test data</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/devicetree/of_unittest.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/devicetree/of_unittest.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

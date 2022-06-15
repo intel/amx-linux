@@ -1,0 +1,187 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Regulator Machine Driver Interface &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Linux voltage and current regulator framework" href="overview.html" />
+    <link rel="prev" title="Regulator API design notes" href="design.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="regulator-machine-driver-interface">
+<h1>Regulator Machine Driver Interface<a class="headerlink" href="#regulator-machine-driver-interface" title="Permalink to this headline">¶</a></h1>
+<p>The regulator machine driver interface is intended for board/machine specific
+initialisation code to configure the regulator subsystem.</p>
+<p>Consider the following machine:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Regulator-1 -+-&gt; Regulator-2 --&gt; [Consumer A @ 1.8 - 2.0V]
+             |
+             +-&gt; [Consumer B @ 3.3V]
+</pre></div>
+</div>
+<p>The drivers for consumers A &amp; B must be mapped to the correct regulator in
+order to control their power supplies. This mapping can be achieved in machine
+initialisation code by creating a <a class="reference internal" href="../../driver-api/regulator.html#c.regulator_consumer_supply" title="regulator_consumer_supply"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">regulator_consumer_supply</span></code></a> for
+each regulator:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct regulator_consumer_supply {
+      const char *dev_name;   /* consumer dev_name() */
+      const char *supply;     /* consumer supply - e.g. &quot;vcc&quot; */
+};
+</pre></div>
+</div>
+<p>e.g. for the machine above:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>static struct regulator_consumer_supply regulator1_consumers[] = {
+      REGULATOR_SUPPLY(&quot;Vcc&quot;, &quot;consumer B&quot;),
+};
+
+static struct regulator_consumer_supply regulator2_consumers[] = {
+      REGULATOR_SUPPLY(&quot;Vcc&quot;, &quot;consumer A&quot;),
+};
+</pre></div>
+</div>
+<p>This maps Regulator-1 to the ‘Vcc’ supply for Consumer B and maps Regulator-2
+to the ‘Vcc’ supply for Consumer A.</p>
+<p>Constraints can now be registered by defining a <a class="reference internal" href="../../driver-api/regulator.html#c.regulator_init_data" title="regulator_init_data"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">regulator_init_data</span></code></a>
+for each regulator power domain. This structure also maps the consumers
+to their supply regulators:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>static struct regulator_init_data regulator1_data = {
+      .constraints = {
+              .name = &quot;Regulator-1&quot;,
+              .min_uV = 3300000,
+              .max_uV = 3300000,
+              .valid_modes_mask = REGULATOR_MODE_NORMAL,
+      },
+      .num_consumer_supplies = ARRAY_SIZE(regulator1_consumers),
+      .consumer_supplies = regulator1_consumers,
+};
+</pre></div>
+</div>
+<p>The name field should be set to something that is usefully descriptive
+for the board for configuration of supplies for other regulators and
+for use in logging and other diagnostic output.  Normally the name
+used for the supply rail in the schematic is a good choice.  If no
+name is provided then the subsystem will choose one.</p>
+<p>Regulator-1 supplies power to Regulator-2. This relationship must be registered
+with the core so that Regulator-1 is also enabled when Consumer A enables its
+supply (Regulator-2). The supply regulator is set by the supply_regulator
+field below and co:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>static struct regulator_init_data regulator2_data = {
+      .supply_regulator = &quot;Regulator-1&quot;,
+      .constraints = {
+              .min_uV = 1800000,
+              .max_uV = 2000000,
+              .valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
+              .valid_modes_mask = REGULATOR_MODE_NORMAL,
+      },
+      .num_consumer_supplies = ARRAY_SIZE(regulator2_consumers),
+      .consumer_supplies = regulator2_consumers,
+};
+</pre></div>
+</div>
+<p>Finally the regulator devices must be registered in the usual manner:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>static struct platform_device regulator_devices[] = {
+      {
+              .name = &quot;regulator&quot;,
+              .id = DCDC_1,
+              .dev = {
+                      .platform_data = &amp;regulator1_data,
+              },
+      },
+      {
+              .name = &quot;regulator&quot;,
+              .id = DCDC_2,
+              .dev = {
+                      .platform_data = &amp;regulator2_data,
+              },
+      },
+};
+/* register regulator 1 device */
+platform_device_register(&amp;regulator_devices[0]);
+
+/* register regulator 2 device */
+platform_device_register(&amp;regulator_devices[1]);
+</pre></div>
+</div>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/power/regulator/machine.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/power/regulator/machine.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

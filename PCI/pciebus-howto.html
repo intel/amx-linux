@@ -1,0 +1,323 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>2. The PCI Express Port Bus Driver Guide HOWTO &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="3. PCI Express I/O Virtualization Howto" href="pci-iov-howto.html" />
+    <link rel="prev" title="1. How To Write Linux PCI Drivers" href="pci.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="the-pci-express-port-bus-driver-guide-howto">
+<h1><span class="section-number">2. </span>The PCI Express Port Bus Driver Guide HOWTO<a class="headerlink" href="#the-pci-express-port-bus-driver-guide-howto" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">Author</dt>
+<dd class="field-odd"><p>Tom L Nguyen <a class="reference external" href="mailto:tom&#46;l&#46;nguyen&#37;&#52;&#48;intel&#46;com">tom<span>&#46;</span>l<span>&#46;</span>nguyen<span>&#64;</span>intel<span>&#46;</span>com</a> 11/03/2004</p>
+</dd>
+<dt class="field-even">Copyright</dt>
+<dd class="field-even"><p>© 2004 Intel Corporation</p>
+</dd>
+</dl>
+<section id="about-this-guide">
+<h2><span class="section-number">2.1. </span>About this guide<a class="headerlink" href="#about-this-guide" title="Permalink to this headline">¶</a></h2>
+<p>This guide describes the basics of the PCI Express Port Bus driver
+and provides information on how to enable the service drivers to
+register/unregister with the PCI Express Port Bus Driver.</p>
+</section>
+<section id="what-is-the-pci-express-port-bus-driver">
+<h2><span class="section-number">2.2. </span>What is the PCI Express Port Bus Driver<a class="headerlink" href="#what-is-the-pci-express-port-bus-driver" title="Permalink to this headline">¶</a></h2>
+<p>A PCI Express Port is a logical PCI-PCI Bridge structure. There
+are two types of PCI Express Port: the Root Port and the Switch
+Port. The Root Port originates a PCI Express link from a PCI Express
+Root Complex and the Switch Port connects PCI Express links to
+internal logical PCI buses. The Switch Port, which has its secondary
+bus representing the switch’s internal routing logic, is called the
+switch’s Upstream Port. The switch’s Downstream Port is bridging from
+switch’s internal routing bus to a bus representing the downstream
+PCI Express link from the PCI Express Switch.</p>
+<p>A PCI Express Port can provide up to four distinct functions,
+referred to in this document as services, depending on its port type.
+PCI Express Port’s services include native hotplug support (HP),
+power management event support (PME), advanced error reporting
+support (AER), and virtual channel support (VC). These services may
+be handled by a single complex driver or be individually distributed
+and handled by corresponding service drivers.</p>
+</section>
+<section id="why-use-the-pci-express-port-bus-driver">
+<h2><span class="section-number">2.3. </span>Why use the PCI Express Port Bus Driver?<a class="headerlink" href="#why-use-the-pci-express-port-bus-driver" title="Permalink to this headline">¶</a></h2>
+<p>In existing Linux kernels, the Linux Device Driver Model allows a
+physical device to be handled by only a single driver. The PCI
+Express Port is a PCI-PCI Bridge device with multiple distinct
+services. To maintain a clean and simple solution each service
+may have its own software service driver. In this case several
+service drivers will compete for a single PCI-PCI Bridge device.
+For example, if the PCI Express Root Port native hotplug service
+driver is loaded first, it claims a PCI-PCI Bridge Root Port. The
+kernel therefore does not load other service drivers for that Root
+Port. In other words, it is impossible to have multiple service
+drivers load and run on a PCI-PCI Bridge device simultaneously
+using the current driver model.</p>
+<p>To enable multiple service drivers running simultaneously requires
+having a PCI Express Port Bus driver, which manages all populated
+PCI Express Ports and distributes all provided service requests
+to the corresponding service drivers as required. Some key
+advantages of using the PCI Express Port Bus driver are listed below:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Allow multiple service drivers to run simultaneously on
+a PCI-PCI Bridge Port device.</p></li>
+<li><p>Allow service drivers implemented in an independent
+staged approach.</p></li>
+<li><p>Allow one service driver to run on multiple PCI-PCI Bridge
+Port devices.</p></li>
+<li><p>Manage and distribute resources of a PCI-PCI Bridge Port
+device to requested service drivers.</p></li>
+</ul>
+</div></blockquote>
+</section>
+<section id="configuring-the-pci-express-port-bus-driver-vs-service-drivers">
+<h2><span class="section-number">2.4. </span>Configuring the PCI Express Port Bus Driver vs. Service Drivers<a class="headerlink" href="#configuring-the-pci-express-port-bus-driver-vs-service-drivers" title="Permalink to this headline">¶</a></h2>
+<section id="including-the-pci-express-port-bus-driver-support-into-the-kernel">
+<h3><span class="section-number">2.4.1. </span>Including the PCI Express Port Bus Driver Support into the Kernel<a class="headerlink" href="#including-the-pci-express-port-bus-driver-support-into-the-kernel" title="Permalink to this headline">¶</a></h3>
+<p>Including the PCI Express Port Bus driver depends on whether the PCI
+Express support is included in the kernel config. The kernel will
+automatically include the PCI Express Port Bus driver as a kernel
+driver when the PCI Express support is enabled in the kernel.</p>
+</section>
+<section id="enabling-service-driver-support">
+<h3><span class="section-number">2.4.2. </span>Enabling Service Driver Support<a class="headerlink" href="#enabling-service-driver-support" title="Permalink to this headline">¶</a></h3>
+<p>PCI device drivers are implemented based on Linux Device Driver Model.
+All service drivers are PCI device drivers. As discussed above, it is
+impossible to load any service driver once the kernel has loaded the
+PCI Express Port Bus Driver. To meet the PCI Express Port Bus Driver
+Model requires some minimal changes on existing service drivers that
+imposes no impact on the functionality of existing service drivers.</p>
+<p>A service driver is required to use the two APIs shown below to
+register its service with the PCI Express Port Bus driver (see
+section 5.2.1 &amp; 5.2.2). It is important that a service driver
+initializes the pcie_port_service_driver data structure, included in
+header file /include/linux/pcieport_if.h, before calling these APIs.
+Failure to do so will result an identity mismatch, which prevents
+the PCI Express Port Bus driver from loading a service driver.</p>
+<section id="pcie-port-service-register">
+<h4><span class="section-number">2.4.2.1. </span>pcie_port_service_register<a class="headerlink" href="#pcie-port-service-register" title="Permalink to this headline">¶</a></h4>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int pcie_port_service_register(struct pcie_port_service_driver *new)
+</pre></div>
+</div>
+<p>This API replaces the Linux Driver Model’s pci_register_driver API. A
+service driver should always calls pcie_port_service_register at
+module init. Note that after service driver being loaded, calls
+such as pci_enable_device(dev) and pci_set_master(dev) are no longer
+necessary since these calls are executed by the PCI Port Bus driver.</p>
+</section>
+<section id="pcie-port-service-unregister">
+<h4><span class="section-number">2.4.2.2. </span>pcie_port_service_unregister<a class="headerlink" href="#pcie-port-service-unregister" title="Permalink to this headline">¶</a></h4>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void pcie_port_service_unregister(struct pcie_port_service_driver *new)
+</pre></div>
+</div>
+<p>pcie_port_service_unregister replaces the Linux Driver Model’s
+pci_unregister_driver. It’s always called by service driver when a
+module exits.</p>
+</section>
+<section id="sample-code">
+<h4><span class="section-number">2.4.2.3. </span>Sample Code<a class="headerlink" href="#sample-code" title="Permalink to this headline">¶</a></h4>
+<p>Below is sample service driver code to initialize the port service
+driver data structure.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>static struct pcie_port_service_id service_id[] = { {
+  .vendor = PCI_ANY_ID,
+  .device = PCI_ANY_ID,
+  .port_type = PCIE_RC_PORT,
+  .service_type = PCIE_PORT_SERVICE_AER,
+  }, { /* end: all zeroes */ }
+};
+
+static struct pcie_port_service_driver root_aerdrv = {
+  .name               = (char *)device_name,
+  .id_table   = &amp;service_id[0],
+
+  .probe              = aerdrv_load,
+  .remove             = aerdrv_unload,
+
+  .suspend    = aerdrv_suspend,
+  .resume             = aerdrv_resume,
+};
+</pre></div>
+</div>
+<p>Below is a sample code for registering/unregistering a service
+driver.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>static int __init aerdrv_service_init(void)
+{
+  int retval = 0;
+
+  retval = pcie_port_service_register(&amp;root_aerdrv);
+  if (!retval) {
+    /*
+    * FIX ME
+    */
+  }
+  return retval;
+}
+
+static void __exit aerdrv_service_exit(void)
+{
+  pcie_port_service_unregister(&amp;root_aerdrv);
+}
+
+module_init(aerdrv_service_init);
+module_exit(aerdrv_service_exit);
+</pre></div>
+</div>
+</section>
+</section>
+</section>
+<section id="possible-resource-conflicts">
+<h2><span class="section-number">2.5. </span>Possible Resource Conflicts<a class="headerlink" href="#possible-resource-conflicts" title="Permalink to this headline">¶</a></h2>
+<p>Since all service drivers of a PCI-PCI Bridge Port device are
+allowed to run simultaneously, below lists a few of possible resource
+conflicts with proposed solutions.</p>
+<section id="msi-and-msi-x-vector-resource">
+<h3><span class="section-number">2.5.1. </span>MSI and MSI-X Vector Resource<a class="headerlink" href="#msi-and-msi-x-vector-resource" title="Permalink to this headline">¶</a></h3>
+<p>Once MSI or MSI-X interrupts are enabled on a device, it stays in this
+mode until they are disabled again.  Since service drivers of the same
+PCI-PCI Bridge port share the same physical device, if an individual
+service driver enables or disables MSI/MSI-X mode it may result
+unpredictable behavior.</p>
+<p>To avoid this situation all service drivers are not permitted to
+switch interrupt mode on its device. The PCI Express Port Bus driver
+is responsible for determining the interrupt mode and this should be
+transparent to service drivers. Service drivers need to know only
+the vector IRQ assigned to the field irq of struct pcie_device, which
+is passed in when the PCI Express Port Bus driver probes each service
+driver. Service drivers should use (struct pcie_device*)dev-&gt;irq to
+call request_irq/free_irq. In addition, the interrupt mode is stored
+in the field interrupt_mode of struct pcie_device.</p>
+</section>
+<section id="pci-memory-io-mapped-regions">
+<h3><span class="section-number">2.5.2. </span>PCI Memory/IO Mapped Regions<a class="headerlink" href="#pci-memory-io-mapped-regions" title="Permalink to this headline">¶</a></h3>
+<p>Service drivers for PCI Express Power Management (PME), Advanced
+Error Reporting (AER), Hot-Plug (HP) and Virtual Channel (VC) access
+PCI configuration space on the PCI Express port. In all cases the
+registers accessed are independent of each other. This patch assumes
+that all service drivers will be well behaved and not overwrite
+other service driver’s configuration settings.</p>
+</section>
+<section id="pci-config-registers">
+<h3><span class="section-number">2.5.3. </span>PCI Config Registers<a class="headerlink" href="#pci-config-registers" title="Permalink to this headline">¶</a></h3>
+<p>Each service driver runs its PCI config operations on its own
+capability structure except the PCI Express capability structure, in
+which Root Control register and Device Control register are shared
+between PME and AER. This patch assumes that all service drivers
+will be well behaved and not overwrite other service driver’s
+configuration settings.</p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">2. The PCI Express Port Bus Driver Guide HOWTO</a><ul>
+<li><a class="reference internal" href="#about-this-guide">2.1. About this guide</a></li>
+<li><a class="reference internal" href="#what-is-the-pci-express-port-bus-driver">2.2. What is the PCI Express Port Bus Driver</a></li>
+<li><a class="reference internal" href="#why-use-the-pci-express-port-bus-driver">2.3. Why use the PCI Express Port Bus Driver?</a></li>
+<li><a class="reference internal" href="#configuring-the-pci-express-port-bus-driver-vs-service-drivers">2.4. Configuring the PCI Express Port Bus Driver vs. Service Drivers</a><ul>
+<li><a class="reference internal" href="#including-the-pci-express-port-bus-driver-support-into-the-kernel">2.4.1. Including the PCI Express Port Bus Driver Support into the Kernel</a></li>
+<li><a class="reference internal" href="#enabling-service-driver-support">2.4.2. Enabling Service Driver Support</a><ul>
+<li><a class="reference internal" href="#pcie-port-service-register">2.4.2.1. pcie_port_service_register</a></li>
+<li><a class="reference internal" href="#pcie-port-service-unregister">2.4.2.2. pcie_port_service_unregister</a></li>
+<li><a class="reference internal" href="#sample-code">2.4.2.3. Sample Code</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#possible-resource-conflicts">2.5. Possible Resource Conflicts</a><ul>
+<li><a class="reference internal" href="#msi-and-msi-x-vector-resource">2.5.1. MSI and MSI-X Vector Resource</a></li>
+<li><a class="reference internal" href="#pci-memory-io-mapped-regions">2.5.2. PCI Memory/IO Mapped Regions</a></li>
+<li><a class="reference internal" href="#pci-config-registers">2.5.3. PCI Config Registers</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/PCI/pciebus-howto.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/PCI/pciebus-howto.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

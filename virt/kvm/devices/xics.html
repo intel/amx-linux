@@ -1,0 +1,194 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>XICS interrupt controller &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="POWER9 eXternal Interrupt Virtualization Engine (XIVE Gen1)" href="xive.html" />
+    <link rel="prev" title="Generic vm interface" href="vm.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="xics-interrupt-controller">
+<h1>XICS interrupt controller<a class="headerlink" href="#xics-interrupt-controller" title="Permalink to this headline">¶</a></h1>
+<p>Device type supported: KVM_DEV_TYPE_XICS</p>
+<dl>
+<dt>Groups:</dt><dd><ol class="arabic">
+<li><dl>
+<dt>KVM_DEV_XICS_GRP_SOURCES</dt><dd><p>Attributes:</p>
+<blockquote>
+<div><p>One per interrupt source, indexed by the source number.</p>
+</div></blockquote>
+</dd>
+</dl>
+</li>
+<li><dl>
+<dt>KVM_DEV_XICS_GRP_CTRL</dt><dd><p>Attributes:</p>
+<blockquote>
+<div><p>2.1 KVM_DEV_XICS_NR_SERVERS (write only)</p>
+</div></blockquote>
+</dd>
+</dl>
+</li>
+</ol>
+<p>The kvm_device_attr.addr points to a __u32 value which is the number of
+interrupt server numbers (ie, highest possible vcpu id plus one).</p>
+<p>Errors:</p>
+<blockquote>
+<div><table class="docutils align-default">
+<colgroup>
+<col style="width: 14%" />
+<col style="width: 86%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>-EINVAL</p></td>
+<td><p>Value greater than KVM_MAX_VCPU_IDS.</p></td>
+</tr>
+<tr class="row-even"><td><p>-EFAULT</p></td>
+<td><p>Invalid user pointer for attr-&gt;addr.</p></td>
+</tr>
+<tr class="row-odd"><td><p>-EBUSY</p></td>
+<td><p>A vcpu is already connected to the device.</p></td>
+</tr>
+</tbody>
+</table>
+</div></blockquote>
+</dd>
+</dl>
+<p>This device emulates the XICS (eXternal Interrupt Controller
+Specification) defined in PAPR.  The XICS has a set of interrupt
+sources, each identified by a 20-bit source number, and a set of
+Interrupt Control Presentation (ICP) entities, also called “servers”,
+each associated with a virtual CPU.</p>
+<p>The ICP entities are created by enabling the KVM_CAP_IRQ_ARCH
+capability for each vcpu, specifying KVM_CAP_IRQ_XICS in args[0] and
+the interrupt server number (i.e. the vcpu number from the XICS’s
+point of view) in args[1] of the kvm_enable_cap struct.  Each ICP has
+64 bits of state which can be read and written using the
+KVM_GET_ONE_REG and KVM_SET_ONE_REG ioctls on the vcpu.  The 64 bit
+state word has the following bitfields, starting at the
+least-significant end of the word:</p>
+<ul class="simple">
+<li><p>Unused, 16 bits</p></li>
+<li><p>Pending interrupt priority, 8 bits
+Zero is the highest priority, 255 means no interrupt is pending.</p></li>
+<li><p>Pending IPI (inter-processor interrupt) priority, 8 bits
+Zero is the highest priority, 255 means no IPI is pending.</p></li>
+<li><p>Pending interrupt source number, 24 bits
+Zero means no interrupt pending, 2 means an IPI is pending</p></li>
+<li><p>Current processor priority, 8 bits
+Zero is the highest priority, meaning no interrupts can be
+delivered, and 255 is the lowest priority.</p></li>
+</ul>
+<p>Each source has 64 bits of state that can be read and written using
+the KVM_GET_DEVICE_ATTR and KVM_SET_DEVICE_ATTR ioctls, specifying the
+KVM_DEV_XICS_GRP_SOURCES attribute group, with the attribute number being
+the interrupt source number.  The 64 bit state word has the following
+bitfields, starting from the least-significant end of the word:</p>
+<ul>
+<li><p>Destination (server number), 32 bits</p>
+<p>This specifies where the interrupt should be sent, and is the
+interrupt server number specified for the destination vcpu.</p>
+</li>
+<li><p>Priority, 8 bits</p>
+<p>This is the priority specified for this interrupt source, where 0 is
+the highest priority and 255 is the lowest.  An interrupt with a
+priority of 255 will never be delivered.</p>
+</li>
+<li><p>Level sensitive flag, 1 bit</p>
+<p>This bit is 1 for a level-sensitive interrupt source, or 0 for
+edge-sensitive (or MSI).</p>
+</li>
+<li><p>Masked flag, 1 bit</p>
+<p>This bit is set to 1 if the interrupt is masked (cannot be delivered
+regardless of its priority), for example by the ibm,int-off RTAS
+call, or 0 if it is not masked.</p>
+</li>
+<li><p>Pending flag, 1 bit</p>
+<p>This bit is 1 if the source has a pending interrupt, otherwise 0.</p>
+</li>
+</ul>
+<p>Only one XICS instance may be created per VM.</p>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/virt/kvm/devices/xics.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/virt/kvm/devices/xics.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

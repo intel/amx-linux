@@ -1,0 +1,276 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>8.2. How to get the bt8xx cards working &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="8.3. Firmware files for lmedm04 cards" href="lmedm04.html" />
+    <link rel="prev" title="8.1. Avermedia DVB-T on BT878 Release Notes" href="avermedia.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="how-to-get-the-bt8xx-cards-working">
+<h1><span class="section-number">8.2. </span>How to get the bt8xx cards working<a class="headerlink" href="#how-to-get-the-bt8xx-cards-working" title="Permalink to this headline">¶</a></h1>
+<dl class="simple">
+<dt>Authors:</dt><dd><p>Richard Walker,
+Jamie Honan,
+Michael Hunold,
+Manu Abraham,
+Uwe Bugla,
+Michael Krufky</p>
+</dd>
+</dl>
+<section id="general-information">
+<h2><span class="section-number">8.2.1. </span>General information<a class="headerlink" href="#general-information" title="Permalink to this headline">¶</a></h2>
+<p>This class of cards has a bt878a as the PCI interface, and require the bttv
+driver for accessing the i2c bus and the gpio pins of the bt8xx chipset.</p>
+<p>Please see <a class="reference internal" href="bttv-cardlist.html"><span class="doc">BTTV cards list</span></a> for a complete
+list of Cards based on the Conexant Bt8xx PCI bridge supported by the
+Linux Kernel.</p>
+<p>In order to be able to compile the kernel, some config options should be
+enabled:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>./scripts/config -e PCI
+./scripts/config -e INPUT
+./scripts/config -m I2C
+./scripts/config -m MEDIA_SUPPORT
+./scripts/config -e MEDIA_PCI_SUPPORT
+./scripts/config -e MEDIA_ANALOG_TV_SUPPORT
+./scripts/config -e MEDIA_DIGITAL_TV_SUPPORT
+./scripts/config -e MEDIA_RADIO_SUPPORT
+./scripts/config -e RC_CORE
+./scripts/config -m VIDEO_BT848
+./scripts/config -m DVB_BT8XX
+</pre></div>
+</div>
+<p>If you want to automatically support all possible variants of the Bt8xx
+cards, you should also do:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>./scripts/config -e MEDIA_SUBDRV_AUTOSELECT
+</pre></div>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Please use the following options with care as deselection of drivers which
+are in fact necessary may result in DVB devices that cannot be tuned due
+to lack of driver support.</p>
+</div>
+<p>If your goal is to just support an specific board, you may, instead,
+disable MEDIA_SUBDRV_AUTOSELECT and manually select the frontend drivers
+required by your board. With that, you can save some RAM.</p>
+<p>You can do that by calling make xconfig/qconfig/menuconfig and look at
+the options on those menu options (only enabled if
+<code class="docutils literal notranslate"><span class="pre">Autoselect</span> <span class="pre">ancillary</span> <span class="pre">drivers</span></code> is disabled:</p>
+<ol class="arabic simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">Device</span> <span class="pre">drivers</span></code> =&gt; <code class="docutils literal notranslate"><span class="pre">Multimedia</span> <span class="pre">support</span></code> =&gt; <code class="docutils literal notranslate"><span class="pre">Customize</span> <span class="pre">TV</span> <span class="pre">tuners</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Device</span> <span class="pre">drivers</span></code> =&gt; <code class="docutils literal notranslate"><span class="pre">Multimedia</span> <span class="pre">support</span></code> =&gt; <code class="docutils literal notranslate"><span class="pre">Customize</span> <span class="pre">DVB</span> <span class="pre">frontends</span></code></p></li>
+</ol>
+<p>Then, on each of the above menu, please select your card-specific
+frontend and tuner modules.</p>
+</section>
+<section id="loading-modules">
+<h2><span class="section-number">8.2.2. </span>Loading Modules<a class="headerlink" href="#loading-modules" title="Permalink to this headline">¶</a></h2>
+<p>Regular case: If the bttv driver detects a bt8xx-based DVB card, all
+frontend and backend modules will be loaded automatically.</p>
+<p>Exceptions are:</p>
+<ul class="simple">
+<li><p>Old TV cards without EEPROMs, sharing a common PCI subsystem ID;</p></li>
+<li><p>Old TwinHan DST cards or clones with or without CA slot and not
+containing an Eeprom.</p></li>
+</ul>
+<p>In the following cases overriding the PCI type detection for bttv and
+for dvb-bt8xx drivers by passing modprobe parameters may be necessary.</p>
+<section id="running-twinhan-and-clones">
+<h3><span class="section-number">8.2.2.1. </span>Running TwinHan and Clones<a class="headerlink" href="#running-twinhan-and-clones" title="Permalink to this headline">¶</a></h3>
+<p>As shown at <a class="reference internal" href="bttv-cardlist.html"><span class="doc">BTTV cards list</span></a>, TwinHan and
+clones use <code class="docutils literal notranslate"><span class="pre">card=113</span></code> modprobe parameter. So, in order to properly
+detect it for devices without EEPROM, you should use:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ modprobe bttv card=113
+$ modprobe dst
+</pre></div>
+</div>
+<p>Useful parameters for verbosity level and debugging the dst module:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>verbose=0:              messages are disabled
+        1:              only error messages are displayed
+        2:              notifications are displayed
+        3:              other useful messages are displayed
+        4:              debug setting
+dst_addons=0:           card is a free to air (FTA) card only
+        0x20:   card has a conditional access slot for scrambled channels
+dst_algo=0:             (default) Software tuning algorithm
+         1:             Hardware tuning algorithm
+</pre></div>
+</div>
+<p>The autodetected values are determined by the cards’ “response string”.</p>
+<p>In your logs see f. ex.: dst_get_device_id: Recognize [DSTMCI].</p>
+<p>For bug reports please send in a complete log with verbose=4 activated.
+Please also see <a class="reference internal" href="ci.html"><span class="doc">Digital TV Conditional Access Interface</span></a>.</p>
+</section>
+<section id="running-multiple-cards">
+<h3><span class="section-number">8.2.2.2. </span>Running multiple cards<a class="headerlink" href="#running-multiple-cards" title="Permalink to this headline">¶</a></h3>
+<p>See <a class="reference internal" href="bttv-cardlist.html"><span class="doc">BTTV cards list</span></a> for a complete list of
+Card ID. Some examples:</p>
+<blockquote>
+<div><table class="docutils align-default">
+<colgroup>
+<col style="width: 90%" />
+<col style="width: 10%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Brand name</p></th>
+<th class="head"><p>ID</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Pinnacle PCTV Sat</p></td>
+<td><p>94</p></td>
+</tr>
+<tr class="row-odd"><td><p>Nebula Electronics Digi TV</p></td>
+<td><p>104</p></td>
+</tr>
+<tr class="row-even"><td><p>pcHDTV HD-2000 TV</p></td>
+<td><p>112</p></td>
+</tr>
+<tr class="row-odd"><td><p>Twinhan DST and clones</p></td>
+<td><p>113</p></td>
+</tr>
+<tr class="row-even"><td><p>Avermedia AverTV DVB-T 77:</p></td>
+<td><p>123</p></td>
+</tr>
+<tr class="row-odd"><td><p>Avermedia AverTV DVB-T 761</p></td>
+<td><p>124</p></td>
+</tr>
+<tr class="row-even"><td><p>DViCO FusionHDTV DVB-T Lite</p></td>
+<td><p>128</p></td>
+</tr>
+<tr class="row-odd"><td><p>DViCO FusionHDTV 5 Lite</p></td>
+<td><p>135</p></td>
+</tr>
+</tbody>
+</table>
+</div></blockquote>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>When you have multiple cards, the order of the card ID should
+match the order where they’re detected by the system. Please notice
+that removing/inserting other PCI cards may change the detection
+order.</p>
+</div>
+<p>Example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ modprobe bttv card=113 card=135
+</pre></div>
+</div>
+<p>In case of further problems please subscribe and send questions to
+the mailing list: <a class="reference external" href="mailto:linux-media&#37;&#52;&#48;vger&#46;kernel&#46;org">linux-media<span>&#64;</span>vger<span>&#46;</span>kernel<span>&#46;</span>org</a>.</p>
+</section>
+<section id="probing-the-cards-with-broken-pci-subsystem-id">
+<h3><span class="section-number">8.2.2.3. </span>Probing the cards with broken PCI subsystem ID<a class="headerlink" href="#probing-the-cards-with-broken-pci-subsystem-id" title="Permalink to this headline">¶</a></h3>
+<p>There are some TwinHan cards whose EEPROM has become corrupted for some
+reason. The cards do not have a correct PCI subsystem ID.
+Still, it is possible to force probing the cards with:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo 109e 0878 $subvendor $subdevice &gt; \
+        /sys/bus/pci/drivers/bt878/new_id
+</pre></div>
+</div>
+<p>The two numbers there are:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>109e: PCI_VENDOR_ID_BROOKTREE
+0878: PCI_DEVICE_ID_BROOKTREE_878
+</pre></div>
+</div>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">8.2. How to get the bt8xx cards working</a><ul>
+<li><a class="reference internal" href="#general-information">8.2.1. General information</a></li>
+<li><a class="reference internal" href="#loading-modules">8.2.2. Loading Modules</a><ul>
+<li><a class="reference internal" href="#running-twinhan-and-clones">8.2.2.1. Running TwinHan and Clones</a></li>
+<li><a class="reference internal" href="#running-multiple-cards">8.2.2.2. Running multiple cards</a></li>
+<li><a class="reference internal" href="#probing-the-cards-with-broken-pci-subsystem-id">8.2.2.3. Probing the cards with broken PCI subsystem ID</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/admin-guide/media/bt8xx.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/admin-guide/media/bt8xx.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

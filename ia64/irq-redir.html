@@ -1,0 +1,172 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>IRQ affinity on IA64 platforms &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="An ad-hoc collection of notes on IA64 MCA and INIT processing" href="mca.html" />
+    <link rel="prev" title="Light-weight System Calls for IA-64" href="fsys.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="irq-affinity-on-ia64-platforms">
+<h1>IRQ affinity on IA64 platforms<a class="headerlink" href="#irq-affinity-on-ia64-platforms" title="Permalink to this headline">¶</a></h1>
+<p>07.01.2002, Erich Focht &lt;<a class="reference external" href="mailto:efocht&#37;&#52;&#48;ess&#46;nec&#46;de">efocht<span>&#64;</span>ess<span>&#46;</span>nec<span>&#46;</span>de</a>&gt;</p>
+<p>By writing to /proc/irq/IRQ#/smp_affinity the interrupt routing can be
+controlled. The behavior on IA64 platforms is slightly different from
+that described in <a class="reference internal" href="../core-api/irq/irq-affinity.html"><span class="doc">SMP IRQ affinity</span></a> for i386 systems.</p>
+<p>Because of the usage of SAPIC mode and physical destination mode the
+IRQ target is one particular CPU and cannot be a mask of several
+CPUs. Only the first non-zero bit is taken into account.</p>
+<section id="usage-examples">
+<h2>Usage examples<a class="headerlink" href="#usage-examples" title="Permalink to this headline">¶</a></h2>
+<p>The target CPU has to be specified as a hexadecimal CPU mask. The
+first non-zero bit is the selected CPU. This format has been kept for
+compatibility reasons with i386.</p>
+<p>Set the delivery mode of interrupt 41 to fixed and route the
+interrupts to CPU #3 (logical CPU number) (2^3=0x08):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>echo &quot;8&quot; &gt;/proc/irq/41/smp_affinity
+</pre></div>
+</div>
+<p>Set the default route for IRQ number 41 to CPU 6 in lowest priority
+delivery mode (redirectable):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>echo &quot;r 40&quot; &gt;/proc/irq/41/smp_affinity
+</pre></div>
+</div>
+<p>The output of the command:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>cat /proc/irq/IRQ#/smp_affinity
+</pre></div>
+</div>
+<p>gives the target CPU mask for the specified interrupt vector. If the CPU
+mask is preceded by the character “r”, the interrupt is redirectable
+(i.e. lowest priority mode routing is used), otherwise its route is
+fixed.</p>
+</section>
+<section id="initialization-and-default-behavior">
+<h2>Initialization and default behavior<a class="headerlink" href="#initialization-and-default-behavior" title="Permalink to this headline">¶</a></h2>
+<p>If the platform features IRQ redirection (info provided by SAL) all
+IO-SAPIC interrupts are initialized with CPU#0 as their default target
+and the routing is the so called “lowest priority mode” (actually
+fixed SAPIC mode with hint). The XTP chipset registers are used as hints
+for the IRQ routing. Currently in Linux XTP registers can have three
+values:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>minimal for an idle task,</p></li>
+<li><p>normal if any other task runs,</p></li>
+<li><p>maximal if the CPU is going to be switched off.</p></li>
+</ul>
+</div></blockquote>
+<p>The IRQ is routed to the CPU with lowest XTP register value, the
+search begins at the default CPU. Therefore most of the interrupts
+will be handled by CPU #0.</p>
+<p>If the platform doesn’t feature interrupt redirection IOSAPIC fixed
+routing is used. The target CPUs are distributed in a round robin
+manner. IRQs will be routed only to the selected target CPUs. Check
+with:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>cat /proc/interrupts
+</pre></div>
+</div>
+</section>
+<section id="comments">
+<h2>Comments<a class="headerlink" href="#comments" title="Permalink to this headline">¶</a></h2>
+<p>On large (multi-node) systems it is recommended to route the IRQs to
+the node to which the corresponding device is connected.
+For systems like the NEC AzusA we get IRQ node-affinity for free. This
+is because usually the chipsets on each node redirect the interrupts
+only to their own CPUs (as they cannot see the XTP registers on the
+other nodes).</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">IRQ affinity on IA64 platforms</a><ul>
+<li><a class="reference internal" href="#usage-examples">Usage examples</a></li>
+<li><a class="reference internal" href="#initialization-and-default-behavior">Initialization and default behavior</a></li>
+<li><a class="reference internal" href="#comments">Comments</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/ia64/irq-redir.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/ia64/irq-redir.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

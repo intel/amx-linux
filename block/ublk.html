@@ -1,0 +1,382 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Userspace block device driver (ublk driver) &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="cdrom" href="../cdrom/index.html" />
+    <link rel="prev" title="Explicit volatile write back cache control" href="writeback_cache_control.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="userspace-block-device-driver-ublk-driver">
+<h1>Userspace block device driver (ublk driver)<a class="headerlink" href="#userspace-block-device-driver-ublk-driver" title="Permalink to this headline">¶</a></h1>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Permalink to this headline">¶</a></h2>
+<p>ublk is a generic framework for implementing block device logic from userspace.
+The motivation behind it is that moving virtual block drivers into userspace,
+such as loop, nbd and similar can be very helpful. It can help to implement
+new virtual block device such as ublk-qcow2 (there are several attempts of
+implementing qcow2 driver in kernel).</p>
+<p>Userspace block devices are attractive because:</p>
+<ul class="simple">
+<li><p>They can be written many programming languages.</p></li>
+<li><p>They can use libraries that are not available in the kernel.</p></li>
+<li><p>They can be debugged with tools familiar to application developers.</p></li>
+<li><p>Crashes do not kernel panic the machine.</p></li>
+<li><p>Bugs are likely to have a lower security impact than bugs in kernel
+code.</p></li>
+<li><p>They can be installed and updated independently of the kernel.</p></li>
+<li><p>They can be used to simulate block device easily with user specified
+parameters/setting for test/debug purpose</p></li>
+</ul>
+<p>ublk block device (<code class="docutils literal notranslate"><span class="pre">/dev/ublkb*</span></code>) is added by ublk driver. Any IO request
+on the device will be forwarded to ublk userspace program. For convenience,
+in this document, <code class="docutils literal notranslate"><span class="pre">ublk</span> <span class="pre">server</span></code> refers to generic ublk userspace
+program. <code class="docutils literal notranslate"><span class="pre">ublksrv</span></code> <a class="footnote-reference brackets" href="#userspace" id="id1">1</a> is one of such implementation. It
+provides <code class="docutils literal notranslate"><span class="pre">libublksrv</span></code> <a class="footnote-reference brackets" href="#userspace-lib" id="id2">2</a> library for developing specific
+user block device conveniently, while also generic type block device is
+included, such as loop and null. Richard W.M. Jones wrote userspace nbd device
+<code class="docutils literal notranslate"><span class="pre">nbdublk</span></code> <a class="footnote-reference brackets" href="#userspace-nbdublk" id="id3">3</a>  based on <code class="docutils literal notranslate"><span class="pre">libublksrv</span></code> <a class="footnote-reference brackets" href="#userspace-lib" id="id4">2</a>.</p>
+<p>After the IO is handled by userspace, the result is committed back to the
+driver, thus completing the request cycle. This way, any specific IO handling
+logic is totally done by userspace, such as loop’s IO handling, NBD’s IO
+communication, or qcow2’s IO mapping.</p>
+<p><code class="docutils literal notranslate"><span class="pre">/dev/ublkb*</span></code> is driven by blk-mq request-based driver. Each request is
+assigned by one queue wide unique tag. ublk server assigns unique tag to each
+IO too, which is 1:1 mapped with IO of <code class="docutils literal notranslate"><span class="pre">/dev/ublkb*</span></code>.</p>
+<p>Both the IO request forward and IO handling result committing are done via
+<code class="docutils literal notranslate"><span class="pre">io_uring</span></code> passthrough command; that is why ublk is also one io_uring based
+block driver. It has been observed that using io_uring passthrough command can
+give better IOPS than block IO; which is why ublk is one of high performance
+implementation of userspace block device: not only IO request communication is
+done by io_uring, but also the preferred IO handling in ublk server is io_uring
+based approach too.</p>
+<p>ublk provides control interface to set/get ublk block device parameters.
+The interface is extendable and kabi compatible: basically any ublk request
+queue’s parameter or ublk generic feature parameters can be set/get via the
+interface. Thus, ublk is generic userspace block device framework.
+For example, it is easy to setup a ublk device with specified block
+parameters from userspace.</p>
+</section>
+<section id="using-ublk">
+<h2>Using ublk<a class="headerlink" href="#using-ublk" title="Permalink to this headline">¶</a></h2>
+<p>ublk requires userspace ublk server to handle real block device logic.</p>
+<p>Below is example of using <code class="docutils literal notranslate"><span class="pre">ublksrv</span></code> to provide ublk-based loop device.</p>
+<ul>
+<li><p>add a device:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ublk add -t loop -f ublk-loop.img
+</pre></div>
+</div>
+</li>
+<li><p>format with xfs, then use it:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>mkfs.xfs /dev/ublkb0
+mount /dev/ublkb0 /mnt
+# do anything. all IOs are handled by io_uring
+...
+umount /mnt
+</pre></div>
+</div>
+</li>
+<li><p>list the devices with their info:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ublk list
+</pre></div>
+</div>
+</li>
+<li><p>delete the device:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ublk del -a
+ublk del -n $ublk_dev_id
+</pre></div>
+</div>
+</li>
+</ul>
+<p>See usage details in README of <code class="docutils literal notranslate"><span class="pre">ublksrv</span></code> <a class="footnote-reference brackets" href="#userspace-readme" id="id5">4</a>.</p>
+</section>
+<section id="design">
+<h2>Design<a class="headerlink" href="#design" title="Permalink to this headline">¶</a></h2>
+<section id="control-plane">
+<h3>Control plane<a class="headerlink" href="#control-plane" title="Permalink to this headline">¶</a></h3>
+<p>ublk driver provides global misc device node (<code class="docutils literal notranslate"><span class="pre">/dev/ublk-control</span></code>) for
+managing and controlling ublk devices with help of several control commands:</p>
+<ul>
+<li><p><code class="docutils literal notranslate"><span class="pre">UBLK_CMD_ADD_DEV</span></code></p>
+<p>Add a ublk char device (<code class="docutils literal notranslate"><span class="pre">/dev/ublkc*</span></code>) which is talked with ublk server
+WRT IO command communication. Basic device info is sent together with this
+command. It sets UAPI structure of <code class="docutils literal notranslate"><span class="pre">ublksrv_ctrl_dev_info</span></code>,
+such as <code class="docutils literal notranslate"><span class="pre">nr_hw_queues</span></code>, <code class="docutils literal notranslate"><span class="pre">queue_depth</span></code>, and max IO request buffer size,
+for which the info is negotiated with the driver and sent back to the server.
+When this command is completed, the basic device info is immutable.</p>
+</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">UBLK_CMD_SET_PARAMS</span></code> / <code class="docutils literal notranslate"><span class="pre">UBLK_CMD_GET_PARAMS</span></code></p>
+<p>Set or get parameters of the device, which can be either generic feature
+related, or request queue limit related, but can’t be IO logic specific,
+because the driver does not handle any IO logic. This command has to be
+sent before sending <code class="docutils literal notranslate"><span class="pre">UBLK_CMD_START_DEV</span></code>.</p>
+</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">UBLK_CMD_START_DEV</span></code></p>
+<p>After the server prepares userspace resources (such as creating per-queue
+pthread &amp; io_uring for handling ublk IO), this command is sent to the
+driver for allocating &amp; exposing <code class="docutils literal notranslate"><span class="pre">/dev/ublkb*</span></code>. Parameters set via
+<code class="docutils literal notranslate"><span class="pre">UBLK_CMD_SET_PARAMS</span></code> are applied for creating the device.</p>
+</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">UBLK_CMD_STOP_DEV</span></code></p>
+<p>Halt IO on <code class="docutils literal notranslate"><span class="pre">/dev/ublkb*</span></code> and remove the device. When this command returns,
+ublk server will release resources (such as destroying per-queue pthread &amp;
+io_uring).</p>
+</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">UBLK_CMD_DEL_DEV</span></code></p>
+<p>Remove <code class="docutils literal notranslate"><span class="pre">/dev/ublkc*</span></code>. When this command returns, the allocated ublk device
+number can be reused.</p>
+</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">UBLK_CMD_GET_QUEUE_AFFINITY</span></code></p>
+<p>When <code class="docutils literal notranslate"><span class="pre">/dev/ublkc</span></code> is added, the driver creates block layer tagset, so
+that each queue’s affinity info is available. The server sends
+<code class="docutils literal notranslate"><span class="pre">UBLK_CMD_GET_QUEUE_AFFINITY</span></code> to retrieve queue affinity info. It can
+set up the per-queue context efficiently, such as bind affine CPUs with IO
+pthread and try to allocate buffers in IO thread context.</p>
+</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">UBLK_CMD_GET_DEV_INFO</span></code></p>
+<p>For retrieving device info via <code class="docutils literal notranslate"><span class="pre">ublksrv_ctrl_dev_info</span></code>. It is the server’s
+responsibility to save IO target specific info in userspace.</p>
+</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">UBLK_CMD_START_USER_RECOVERY</span></code></p>
+<p>This command is valid if <code class="docutils literal notranslate"><span class="pre">UBLK_F_USER_RECOVERY</span></code> feature is enabled. This
+command is accepted after the old process has exited, ublk device is quiesced
+and <code class="docutils literal notranslate"><span class="pre">/dev/ublkc*</span></code> is released. User should send this command before he starts
+a new process which re-opens <code class="docutils literal notranslate"><span class="pre">/dev/ublkc*</span></code>. When this command returns, the
+ublk device is ready for the new process.</p>
+</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">UBLK_CMD_END_USER_RECOVERY</span></code></p>
+<p>This command is valid if <code class="docutils literal notranslate"><span class="pre">UBLK_F_USER_RECOVERY</span></code> feature is enabled. This
+command is accepted after ublk device is quiesced and a new process has
+opened <code class="docutils literal notranslate"><span class="pre">/dev/ublkc*</span></code> and get all ublk queues be ready. When this command
+returns, ublk device is unquiesced and new I/O requests are passed to the
+new process.</p>
+</li>
+<li><p>user recovery feature description</p>
+<p>Two new features are added for user recovery: <code class="docutils literal notranslate"><span class="pre">UBLK_F_USER_RECOVERY</span></code> and
+<code class="docutils literal notranslate"><span class="pre">UBLK_F_USER_RECOVERY_REISSUE</span></code>.</p>
+<p>With <code class="docutils literal notranslate"><span class="pre">UBLK_F_USER_RECOVERY</span></code> set, after one ubq_daemon(ublk server’s io
+handler) is dying, ublk does not delete <code class="docutils literal notranslate"><span class="pre">/dev/ublkb*</span></code> during the whole
+recovery stage and ublk device ID is kept. It is ublk server’s
+responsibility to recover the device context by its own knowledge.
+Requests which have not been issued to userspace are requeued. Requests
+which have been issued to userspace are aborted.</p>
+<p>With <code class="docutils literal notranslate"><span class="pre">UBLK_F_USER_RECOVERY_REISSUE</span></code> set, after one ubq_daemon(ublk
+server’s io handler) is dying, contrary to <code class="docutils literal notranslate"><span class="pre">UBLK_F_USER_RECOVERY</span></code>,
+requests which have been issued to userspace are requeued and will be
+re-issued to the new process after handling <code class="docutils literal notranslate"><span class="pre">UBLK_CMD_END_USER_RECOVERY</span></code>.
+<code class="docutils literal notranslate"><span class="pre">UBLK_F_USER_RECOVERY_REISSUE</span></code> is designed for backends who tolerate
+double-write since the driver may issue the same I/O request twice. It
+might be useful to a read-only FS or a VM backend.</p>
+</li>
+</ul>
+</section>
+<section id="data-plane">
+<h3>Data plane<a class="headerlink" href="#data-plane" title="Permalink to this headline">¶</a></h3>
+<p>ublk server needs to create per-queue IO pthread &amp; io_uring for handling IO
+commands via io_uring passthrough. The per-queue IO pthread
+focuses on IO handling and shouldn’t handle any control &amp; management
+tasks.</p>
+<p>The’s IO is assigned by a unique tag, which is 1:1 mapping with IO
+request of <code class="docutils literal notranslate"><span class="pre">/dev/ublkb*</span></code>.</p>
+<p>UAPI structure of <code class="docutils literal notranslate"><span class="pre">ublksrv_io_desc</span></code> is defined for describing each IO from
+the driver. A fixed mmaped area (array) on <code class="docutils literal notranslate"><span class="pre">/dev/ublkc*</span></code> is provided for
+exporting IO info to the server; such as IO offset, length, OP/flags and
+buffer address. Each <code class="docutils literal notranslate"><span class="pre">ublksrv_io_desc</span></code> instance can be indexed via queue id
+and IO tag directly.</p>
+<p>The following IO commands are communicated via io_uring passthrough command,
+and each command is only for forwarding the IO and committing the result
+with specified IO tag in the command data:</p>
+<ul>
+<li><p><code class="docutils literal notranslate"><span class="pre">UBLK_IO_FETCH_REQ</span></code></p>
+<p>Sent from the server IO pthread for fetching future incoming IO requests
+destined to <code class="docutils literal notranslate"><span class="pre">/dev/ublkb*</span></code>. This command is sent only once from the server
+IO pthread for ublk driver to setup IO forward environment.</p>
+</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">UBLK_IO_COMMIT_AND_FETCH_REQ</span></code></p>
+<p>When an IO request is destined to <code class="docutils literal notranslate"><span class="pre">/dev/ublkb*</span></code>, the driver stores
+the IO’s <code class="docutils literal notranslate"><span class="pre">ublksrv_io_desc</span></code> to the specified mapped area; then the
+previous received IO command of this IO tag (either <code class="docutils literal notranslate"><span class="pre">UBLK_IO_FETCH_REQ</span></code>
+or <code class="docutils literal notranslate"><span class="pre">UBLK_IO_COMMIT_AND_FETCH_REQ)</span></code> is completed, so the server gets
+the IO notification via io_uring.</p>
+<p>After the server handles the IO, its result is committed back to the
+driver by sending <code class="docutils literal notranslate"><span class="pre">UBLK_IO_COMMIT_AND_FETCH_REQ</span></code> back. Once ublkdrv
+received this command, it parses the result and complete the request to
+<code class="docutils literal notranslate"><span class="pre">/dev/ublkb*</span></code>. In the meantime setup environment for fetching future
+requests with the same IO tag. That is, <code class="docutils literal notranslate"><span class="pre">UBLK_IO_COMMIT_AND_FETCH_REQ</span></code>
+is reused for both fetching request and committing back IO result.</p>
+</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">UBLK_IO_NEED_GET_DATA</span></code></p>
+<p>With <code class="docutils literal notranslate"><span class="pre">UBLK_F_NEED_GET_DATA</span></code> enabled, the WRITE request will be firstly
+issued to ublk server without data copy. Then, IO backend of ublk server
+receives the request and it can allocate data buffer and embed its addr
+inside this new io command. After the kernel driver gets the command,
+data copy is done from request pages to this backend’s buffer. Finally,
+backend receives the request again with data to be written and it can
+truly handle the request.</p>
+<p><code class="docutils literal notranslate"><span class="pre">UBLK_IO_NEED_GET_DATA</span></code> adds one additional round-trip and one
+io_uring_enter() syscall. Any user thinks that it may lower performance
+should not enable UBLK_F_NEED_GET_DATA. ublk server pre-allocates IO
+buffer for each IO by default. Any new project should try to use this
+buffer to communicate with ublk driver. However, existing project may
+break or not able to consume the new buffer interface; that’s why this
+command is added for backwards compatibility so that existing projects
+can still consume existing buffers.</p>
+</li>
+<li><p>data copy between ublk server IO buffer and ublk block IO request</p>
+<p>The driver needs to copy the block IO request pages into the server buffer
+(pages) first for WRITE before notifying the server of the coming IO, so
+that the server can handle WRITE request.</p>
+<p>When the server handles READ request and sends
+<code class="docutils literal notranslate"><span class="pre">UBLK_IO_COMMIT_AND_FETCH_REQ</span></code> to the server, ublkdrv needs to copy
+the server buffer (pages) read to the IO request pages.</p>
+</li>
+</ul>
+</section>
+</section>
+<section id="future-development">
+<h2>Future development<a class="headerlink" href="#future-development" title="Permalink to this headline">¶</a></h2>
+<section id="container-aware-ublk-deivice">
+<h3>Container-aware ublk deivice<a class="headerlink" href="#container-aware-ublk-deivice" title="Permalink to this headline">¶</a></h3>
+<p>ublk driver doesn’t handle any IO logic. Its function is well defined
+for now and very limited userspace interfaces are needed, which is also
+well defined too. It is possible to make ublk devices container-aware block
+devices in future as Stefan Hajnoczi suggested <a class="footnote-reference brackets" href="#stefan" id="id6">5</a>, by removing
+ADMIN privilege.</p>
+</section>
+<section id="zero-copy">
+<h3>Zero copy<a class="headerlink" href="#zero-copy" title="Permalink to this headline">¶</a></h3>
+<p>Zero copy is a generic requirement for nbd, fuse or similar drivers. A
+problem <a class="footnote-reference brackets" href="#xiaoguang" id="id7">6</a> Xiaoguang mentioned is that pages mapped to userspace
+can’t be remapped any more in kernel with existing mm interfaces. This can
+occurs when destining direct IO to <code class="docutils literal notranslate"><span class="pre">/dev/ublkb*</span></code>. Also, he reported that
+big requests (IO size &gt;= 256 KB) may benefit a lot from zero copy.</p>
+</section>
+</section>
+<section id="references">
+<h2>References<a class="headerlink" href="#references" title="Permalink to this headline">¶</a></h2>
+<dl class="footnote brackets">
+<dt class="label" id="userspace"><span class="brackets"><a class="fn-backref" href="#id1">1</a></span></dt>
+<dd><p><a class="reference external" href="https://github.com/ming1/ubdsrv">https://github.com/ming1/ubdsrv</a></p>
+</dd>
+<dt class="label" id="userspace-lib"><span class="brackets">2</span><span class="fn-backref">(<a href="#id2">1</a>,<a href="#id4">2</a>)</span></dt>
+<dd><p><a class="reference external" href="https://github.com/ming1/ubdsrv/tree/master/lib">https://github.com/ming1/ubdsrv/tree/master/lib</a></p>
+</dd>
+<dt class="label" id="userspace-nbdublk"><span class="brackets"><a class="fn-backref" href="#id3">3</a></span></dt>
+<dd><p><a class="reference external" href="https://gitlab.com/rwmjones/libnbd/-/tree/nbdublk">https://gitlab.com/rwmjones/libnbd/-/tree/nbdublk</a></p>
+</dd>
+<dt class="label" id="userspace-readme"><span class="brackets"><a class="fn-backref" href="#id5">4</a></span></dt>
+<dd><p><a class="reference external" href="https://github.com/ming1/ubdsrv/blob/master/README">https://github.com/ming1/ubdsrv/blob/master/README</a></p>
+</dd>
+<dt class="label" id="stefan"><span class="brackets"><a class="fn-backref" href="#id6">5</a></span></dt>
+<dd><p><a class="reference external" href="https://lore.kernel.org/linux-block/YoOr6jBfgVm8GvWg&#64;stefanha-x1.localdomain/">https://lore.kernel.org/linux-block/YoOr6jBfgVm8GvWg&#64;stefanha-x1.localdomain/</a></p>
+</dd>
+<dt class="label" id="xiaoguang"><span class="brackets"><a class="fn-backref" href="#id7">6</a></span></dt>
+<dd><p><a class="reference external" href="https://lore.kernel.org/linux-block/YoOr6jBfgVm8GvWg&#64;stefanha-x1.localdomain/">https://lore.kernel.org/linux-block/YoOr6jBfgVm8GvWg&#64;stefanha-x1.localdomain/</a></p>
+</dd>
+</dl>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Userspace block device driver (ublk driver)</a><ul>
+<li><a class="reference internal" href="#overview">Overview</a></li>
+<li><a class="reference internal" href="#using-ublk">Using ublk</a></li>
+<li><a class="reference internal" href="#design">Design</a><ul>
+<li><a class="reference internal" href="#control-plane">Control plane</a></li>
+<li><a class="reference internal" href="#data-plane">Data plane</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#future-development">Future development</a><ul>
+<li><a class="reference internal" href="#container-aware-ublk-deivice">Container-aware ublk deivice</a></li>
+<li><a class="reference internal" href="#zero-copy">Zero copy</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#references">References</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/block/ublk.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/block/ublk.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

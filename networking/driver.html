@@ -1,0 +1,185 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Softnet Driver Issues &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="EQL Driver: Serial IP Load Balancing HOWTO" href="eql.html" />
+    <link rel="prev" title="DNS Resolver Module" href="dns_resolver.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="softnet-driver-issues">
+<h1>Softnet Driver Issues<a class="headerlink" href="#softnet-driver-issues" title="Permalink to this headline">¶</a></h1>
+<p>Transmit path guidelines:</p>
+<ol class="arabic">
+<li><p>The ndo_start_xmit method must not return NETDEV_TX_BUSY under
+any normal circumstances.  It is considered a hard error unless
+there is no way your device can tell ahead of time when its
+transmit function will become busy.</p>
+<p>Instead it must maintain the queue properly.  For example,
+for a driver implementing scatter-gather this means:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>static netdev_tx_t drv_hard_start_xmit(struct sk_buff *skb,
+                                       struct net_device *dev)
+{
+        struct drv *dp = netdev_priv(dev);
+
+        lock_tx(dp);
+        ...
+        /* This is a hard error log it. */
+        if (TX_BUFFS_AVAIL(dp) &lt;= (skb_shinfo(skb)-&gt;nr_frags + 1)) {
+                netif_stop_queue(dev);
+                unlock_tx(dp);
+                printk(KERN_ERR PFX &quot;%s: BUG! Tx Ring full when queue awake!\n&quot;,
+                       dev-&gt;name);
+                return NETDEV_TX_BUSY;
+        }
+
+        ... queue packet to card ...
+        ... update tx consumer index ...
+
+        if (TX_BUFFS_AVAIL(dp) &lt;= (MAX_SKB_FRAGS + 1))
+                netif_stop_queue(dev);
+
+        ...
+        unlock_tx(dp);
+        ...
+        return NETDEV_TX_OK;
+}
+</pre></div>
+</div>
+<p>And then at the end of your TX reclamation event handling:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>if (netif_queue_stopped(dp-&gt;dev) &amp;&amp;
+    TX_BUFFS_AVAIL(dp) &gt; (MAX_SKB_FRAGS + 1))
+        netif_wake_queue(dp-&gt;dev);
+</pre></div>
+</div>
+<p>For a non-scatter-gather supporting card, the three tests simply become:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/* This is a hard error log it. */
+if (TX_BUFFS_AVAIL(dp) &lt;= 0)
+</pre></div>
+</div>
+<p>and:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>if (TX_BUFFS_AVAIL(dp) == 0)
+</pre></div>
+</div>
+<p>and:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>if (netif_queue_stopped(dp-&gt;dev) &amp;&amp;
+    TX_BUFFS_AVAIL(dp) &gt; 0)
+        netif_wake_queue(dp-&gt;dev);
+</pre></div>
+</div>
+</li>
+<li><p>An ndo_start_xmit method must not modify the shared parts of a
+cloned SKB.</p></li>
+<li><p>Do not forget that once you return NETDEV_TX_OK from your
+ndo_start_xmit method, it is your driver’s responsibility to free
+up the SKB and in some finite amount of time.</p>
+<p>For example, this means that it is not allowed for your TX
+mitigation scheme to let TX packets “hang out” in the TX
+ring unreclaimed forever if no new TX packets are sent.
+This error can deadlock sockets waiting for send buffer room
+to be freed up.</p>
+<p>If you return NETDEV_TX_BUSY from the ndo_start_xmit method, you
+must not keep any reference to that SKB and you must not attempt
+to free it up.</p>
+</li>
+</ol>
+<p>Probing guidelines:</p>
+<ol class="arabic simple">
+<li><p>Any hardware layer address you obtain for your device should
+be verified.  For example, for ethernet check it with
+linux/etherdevice.h:<a class="reference internal" href="kapi.html#c.is_valid_ether_addr" title="is_valid_ether_addr"><code class="xref c c-func docutils literal notranslate"><span class="pre">is_valid_ether_addr()</span></code></a></p></li>
+</ol>
+<p>Close/stop guidelines:</p>
+<ol class="arabic simple">
+<li><p>After the ndo_stop routine has been called, the hardware must
+not receive or transmit any data.  All in flight packets must
+be aborted. If necessary, poll or wait for completion of
+any reset commands.</p></li>
+<li><p>The ndo_stop routine will be called by unregister_netdevice
+if device is still UP.</p></li>
+</ol>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/networking/driver.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/networking/driver.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

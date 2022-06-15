@@ -1,0 +1,321 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Regulator Consumer Driver Interface &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Regulator API design notes" href="design.html" />
+    <link rel="prev" title="Dynamic Thermal Power Management framework" href="../powercap/dtpm.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="regulator-consumer-driver-interface">
+<h1>Regulator Consumer Driver Interface<a class="headerlink" href="#regulator-consumer-driver-interface" title="Permalink to this headline">¶</a></h1>
+<p>This text describes the regulator interface for consumer device drivers.
+Please see <a class="reference internal" href="overview.html"><span class="doc">Linux voltage and current regulator framework</span></a> for a description of the terms used in this text.</p>
+<section id="consumer-regulator-access-static-dynamic-drivers">
+<h2>1. Consumer Regulator Access (static &amp; dynamic drivers)<a class="headerlink" href="#consumer-regulator-access-static-dynamic-drivers" title="Permalink to this headline">¶</a></h2>
+<p>A consumer driver can get access to its supply regulator by calling</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>regulator = regulator_get(dev, &quot;Vcc&quot;);
+</pre></div>
+</div>
+<p>The consumer passes in its <a class="reference internal" href="../../driver-api/infrastructure.html#c.device" title="device"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span></code></a> pointer and power supply ID. The core
+then finds the correct regulator by consulting a machine specific lookup table.
+If the lookup is successful then this call will return a pointer to the struct
+regulator that supplies this consumer.</p>
+<p>To release the regulator the consumer driver should call</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>regulator_put(regulator);
+</pre></div>
+</div>
+<p>Consumers can be supplied by more than one regulator e.g. codec consumer with
+analog and digital supplies</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>digital = regulator_get(dev, &quot;Vcc&quot;);  /* digital core */
+analog = regulator_get(dev, &quot;Avdd&quot;);  /* analog */
+</pre></div>
+</div>
+<p>The regulator access functions <a class="reference internal" href="../../driver-api/regulator.html#c.regulator_get" title="regulator_get"><code class="xref c c-func docutils literal notranslate"><span class="pre">regulator_get()</span></code></a> and <a class="reference internal" href="../../driver-api/regulator.html#c.regulator_put" title="regulator_put"><code class="xref c c-func docutils literal notranslate"><span class="pre">regulator_put()</span></code></a> will
+usually be called in your device drivers probe() and remove() respectively.</p>
+</section>
+<section id="regulator-output-enable-disable-static-dynamic-drivers">
+<h2>2. Regulator Output Enable &amp; Disable (static &amp; dynamic drivers)<a class="headerlink" href="#regulator-output-enable-disable-static-dynamic-drivers" title="Permalink to this headline">¶</a></h2>
+<p>A consumer can enable its power supply by calling:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int regulator_enable(regulator);
+</pre></div>
+</div>
+<dl class="simple">
+<dt>NOTE:</dt><dd><p>The supply may already be enabled before regulator_enabled() is called.
+This may happen if the consumer shares the regulator or the regulator has been
+previously enabled by bootloader or kernel board initialization code.</p>
+</dd>
+</dl>
+<p>A consumer can determine if a regulator is enabled by calling:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int regulator_is_enabled(regulator);
+</pre></div>
+</div>
+<p>This will return &gt; zero when the regulator is enabled.</p>
+<p>A consumer can disable its supply when no longer needed by calling:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int regulator_disable(regulator);
+</pre></div>
+</div>
+<dl class="simple">
+<dt>NOTE:</dt><dd><p>This may not disable the supply if it’s shared with other consumers. The
+regulator will only be disabled when the enabled reference count is zero.</p>
+</dd>
+</dl>
+<p>Finally, a regulator can be forcefully disabled in the case of an emergency:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int regulator_force_disable(regulator);
+</pre></div>
+</div>
+<dl class="simple">
+<dt>NOTE:</dt><dd><p>this will immediately and forcefully shutdown the regulator output. All
+consumers will be powered off.</p>
+</dd>
+</dl>
+</section>
+<section id="regulator-voltage-control-status-dynamic-drivers">
+<h2>3. Regulator Voltage Control &amp; Status (dynamic drivers)<a class="headerlink" href="#regulator-voltage-control-status-dynamic-drivers" title="Permalink to this headline">¶</a></h2>
+<p>Some consumer drivers need to be able to dynamically change their supply
+voltage to match system operating points. e.g. CPUfreq drivers can scale
+voltage along with frequency to save power, SD drivers may need to select the
+correct card voltage, etc.</p>
+<p>Consumers can control their supply voltage by calling:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int regulator_set_voltage(regulator, min_uV, max_uV);
+</pre></div>
+</div>
+<p>Where min_uV and max_uV are the minimum and maximum acceptable voltages in
+microvolts.</p>
+<p>NOTE: this can be called when the regulator is enabled or disabled. If called
+when enabled, then the voltage changes instantly, otherwise the voltage
+configuration changes and the voltage is physically set when the regulator is
+next enabled.</p>
+<p>The regulators configured voltage output can be found by calling:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int regulator_get_voltage(regulator);
+</pre></div>
+</div>
+<dl class="simple">
+<dt>NOTE:</dt><dd><p>get_voltage() will return the configured output voltage whether the
+regulator is enabled or disabled and should NOT be used to determine regulator
+output state. However this can be used in conjunction with is_enabled() to
+determine the regulator physical output voltage.</p>
+</dd>
+</dl>
+</section>
+<section id="regulator-current-limit-control-status-dynamic-drivers">
+<h2>4. Regulator Current Limit Control &amp; Status (dynamic drivers)<a class="headerlink" href="#regulator-current-limit-control-status-dynamic-drivers" title="Permalink to this headline">¶</a></h2>
+<p>Some consumer drivers need to be able to dynamically change their supply
+current limit to match system operating points. e.g. LCD backlight driver can
+change the current limit to vary the backlight brightness, USB drivers may want
+to set the limit to 500mA when supplying power.</p>
+<p>Consumers can control their supply current limit by calling:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int regulator_set_current_limit(regulator, min_uA, max_uA);
+</pre></div>
+</div>
+<p>Where min_uA and max_uA are the minimum and maximum acceptable current limit in
+microamps.</p>
+<dl class="simple">
+<dt>NOTE:</dt><dd><p>this can be called when the regulator is enabled or disabled. If called
+when enabled, then the current limit changes instantly, otherwise the current
+limit configuration changes and the current limit is physically set when the
+regulator is next enabled.</p>
+</dd>
+</dl>
+<p>A regulators current limit can be found by calling:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int regulator_get_current_limit(regulator);
+</pre></div>
+</div>
+<dl class="simple">
+<dt>NOTE:</dt><dd><p>get_current_limit() will return the current limit whether the regulator
+is enabled or disabled and should not be used to determine regulator current
+load.</p>
+</dd>
+</dl>
+</section>
+<section id="regulator-operating-mode-control-status-dynamic-drivers">
+<h2>5. Regulator Operating Mode Control &amp; Status (dynamic drivers)<a class="headerlink" href="#regulator-operating-mode-control-status-dynamic-drivers" title="Permalink to this headline">¶</a></h2>
+<p>Some consumers can further save system power by changing the operating mode of
+their supply regulator to be more efficient when the consumers operating state
+changes. e.g. consumer driver is idle and subsequently draws less current</p>
+<p>Regulator operating mode can be changed indirectly or directly.</p>
+<section id="indirect-operating-mode-control">
+<h3>Indirect operating mode control.<a class="headerlink" href="#indirect-operating-mode-control" title="Permalink to this headline">¶</a></h3>
+<p>Consumer drivers can request a change in their supply regulator operating mode
+by calling:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int regulator_set_load(struct regulator *regulator, int load_uA);
+</pre></div>
+</div>
+<p>This will cause the core to recalculate the total load on the regulator (based
+on all its consumers) and change operating mode (if necessary and permitted)
+to best match the current operating load.</p>
+<p>The load_uA value can be determined from the consumer’s datasheet. e.g. most
+datasheets have tables showing the maximum current consumed in certain
+situations.</p>
+<p>Most consumers will use indirect operating mode control since they have no
+knowledge of the regulator or whether the regulator is shared with other
+consumers.</p>
+</section>
+<section id="direct-operating-mode-control">
+<h3>Direct operating mode control.<a class="headerlink" href="#direct-operating-mode-control" title="Permalink to this headline">¶</a></h3>
+<p>Bespoke or tightly coupled drivers may want to directly control regulator
+operating mode depending on their operating point. This can be achieved by
+calling:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int regulator_set_mode(struct regulator *regulator, unsigned int mode);
+unsigned int regulator_get_mode(struct regulator *regulator);
+</pre></div>
+</div>
+<p>Direct mode will only be used by consumers that <em>know</em> about the regulator and
+are not sharing the regulator with other consumers.</p>
+</section>
+</section>
+<section id="regulator-events">
+<h2>6. Regulator Events<a class="headerlink" href="#regulator-events" title="Permalink to this headline">¶</a></h2>
+<p>Regulators can notify consumers of external events. Events could be received by
+consumers under regulator stress or failure conditions.</p>
+<p>Consumers can register interest in regulator events by calling:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int regulator_register_notifier(struct regulator *regulator,
+                                struct notifier_block *nb);
+</pre></div>
+</div>
+<p>Consumers can unregister interest by calling:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int regulator_unregister_notifier(struct regulator *regulator,
+                                  struct notifier_block *nb);
+</pre></div>
+</div>
+<p>Regulators use the kernel notifier framework to send event to their interested
+consumers.</p>
+</section>
+<section id="regulator-direct-register-access">
+<h2>7. Regulator Direct Register Access<a class="headerlink" href="#regulator-direct-register-access" title="Permalink to this headline">¶</a></h2>
+<p>Some kinds of power management hardware or firmware are designed such that
+they need to do low-level hardware access to regulators, with no involvement
+from the kernel. Examples of such devices are:</p>
+<ul class="simple">
+<li><p>clocksource with a voltage-controlled oscillator and control logic to change
+the supply voltage over I2C to achieve a desired output clock rate</p></li>
+<li><p>thermal management firmware that can issue an arbitrary I2C transaction to
+perform system poweroff during overtemperature conditions</p></li>
+</ul>
+<p>To set up such a device/firmware, various parameters like I2C address of the
+regulator, addresses of various regulator registers etc. need to be configured
+to it. The regulator framework provides the following helpers for querying
+these details.</p>
+<p>Bus-specific details, like I2C addresses or transfer rates are handled by the
+regmap framework. To get the regulator’s regmap (if supported), use:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct regmap *regulator_get_regmap(struct regulator *regulator);
+</pre></div>
+</div>
+<p>To obtain the hardware register offset and bitmask for the regulator’s voltage
+selector register, use:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int regulator_get_hardware_vsel_register(struct regulator *regulator,
+                                         unsigned *vsel_reg,
+                                         unsigned *vsel_mask);
+</pre></div>
+</div>
+<p>To convert a regulator framework voltage selector code (used by
+regulator_list_voltage) to a hardware-specific voltage selector that can be
+directly written to the voltage selector register, use:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int regulator_list_hardware_vsel(struct regulator *regulator,
+                                 unsigned selector);
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Regulator Consumer Driver Interface</a><ul>
+<li><a class="reference internal" href="#consumer-regulator-access-static-dynamic-drivers">1. Consumer Regulator Access (static &amp; dynamic drivers)</a></li>
+<li><a class="reference internal" href="#regulator-output-enable-disable-static-dynamic-drivers">2. Regulator Output Enable &amp; Disable (static &amp; dynamic drivers)</a></li>
+<li><a class="reference internal" href="#regulator-voltage-control-status-dynamic-drivers">3. Regulator Voltage Control &amp; Status (dynamic drivers)</a></li>
+<li><a class="reference internal" href="#regulator-current-limit-control-status-dynamic-drivers">4. Regulator Current Limit Control &amp; Status (dynamic drivers)</a></li>
+<li><a class="reference internal" href="#regulator-operating-mode-control-status-dynamic-drivers">5. Regulator Operating Mode Control &amp; Status (dynamic drivers)</a><ul>
+<li><a class="reference internal" href="#indirect-operating-mode-control">Indirect operating mode control.</a></li>
+<li><a class="reference internal" href="#direct-operating-mode-control">Direct operating mode control.</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#regulator-events">6. Regulator Events</a></li>
+<li><a class="reference internal" href="#regulator-direct-register-access">7. Regulator Direct Register Access</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/power/regulator/consumer.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/power/regulator/consumer.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

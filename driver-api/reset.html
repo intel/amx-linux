@@ -1,0 +1,1374 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Reset controller API &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Industrial I/O" href="iio/index.html" />
+    <link rel="prev" title="Voltage and current regulator API" href="regulator.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="reset-controller-api">
+<h1>Reset controller API<a class="headerlink" href="#reset-controller-api" title="Permalink to this headline">¶</a></h1>
+<section id="introduction">
+<h2>Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>Reset controllers are central units that control the reset signals to multiple
+peripherals.
+The reset controller API is split into two parts:
+the <a class="reference external" href="#consumer-driver-interface">consumer driver interface</a> (<a class="reference external" href="#reset-consumer-api">API reference</a>), which allows peripheral drivers to request control
+over their reset input signals, and the <a class="reference external" href="#reset-controller-driver-interface">reset controller driver interface</a> (<a class="reference external" href="#reset-controller-driver-api">API reference</a>), which is used by drivers for reset
+controller devices to register their reset controls to provide them to the
+consumers.</p>
+<p>While some reset controller hardware units also implement system restart
+functionality, restart handlers are out of scope for the reset controller API.</p>
+<section id="glossary">
+<h3>Glossary<a class="headerlink" href="#glossary" title="Permalink to this headline">¶</a></h3>
+<p>The reset controller API uses these terms with a specific meaning:</p>
+<p>Reset line</p>
+<blockquote>
+<div><p>Physical reset line carrying a reset signal from a reset controller
+hardware unit to a peripheral module.</p>
+</div></blockquote>
+<p>Reset control</p>
+<blockquote>
+<div><p>Control method that determines the state of one or multiple reset lines.
+Most commonly this is a single bit in reset controller register space that
+either allows direct control over the physical state of the reset line, or
+is self-clearing and can be used to trigger a predetermined pulse on the
+reset line.
+In more complicated reset controls, a single trigger action can launch a
+carefully timed sequence of pulses on multiple reset lines.</p>
+</div></blockquote>
+<p>Reset controller</p>
+<blockquote>
+<div><p>A hardware module that provides a number of reset controls to control a
+number of reset lines.</p>
+</div></blockquote>
+<p>Reset consumer</p>
+<blockquote>
+<div><p>Peripheral module or external IC that is put into reset by the signal on a
+reset line.</p>
+</div></blockquote>
+</section>
+</section>
+<section id="consumer-driver-interface">
+<h2>Consumer driver interface<a class="headerlink" href="#consumer-driver-interface" title="Permalink to this headline">¶</a></h2>
+<p>This interface provides an API that is similar to the kernel clock framework.
+Consumer drivers use get and put operations to acquire and release reset
+controls.
+Functions are provided to assert and deassert the controlled reset lines,
+trigger reset pulses, or to query reset line status.</p>
+<p>When requesting reset controls, consumers can use symbolic names for their
+reset inputs, which are mapped to an actual reset control on an existing reset
+controller device by the core.</p>
+<p>A stub version of this API is provided when the reset controller framework is
+not in use in order to minimize the need to use ifdefs.</p>
+<section id="shared-and-exclusive-resets">
+<h3>Shared and exclusive resets<a class="headerlink" href="#shared-and-exclusive-resets" title="Permalink to this headline">¶</a></h3>
+<p>The reset controller API provides either reference counted deassertion and
+assertion or direct, exclusive control.
+The distinction between shared and exclusive reset controls is made at the time
+the reset control is requested, either via <a class="reference internal" href="#c.devm_reset_control_get_shared" title="devm_reset_control_get_shared"><code class="xref c c-func docutils literal notranslate"><span class="pre">devm_reset_control_get_shared()</span></code></a> or
+via <a class="reference internal" href="#c.devm_reset_control_get_exclusive" title="devm_reset_control_get_exclusive"><code class="xref c c-func docutils literal notranslate"><span class="pre">devm_reset_control_get_exclusive()</span></code></a>.
+This choice determines the behavior of the API calls made with the reset
+control.</p>
+<p>Shared resets behave similarly to clocks in the kernel clock framework.
+They provide reference counted deassertion, where only the first deassert,
+which increments the deassertion reference count to one, and the last assert
+which decrements the deassertion reference count back to zero, have a physical
+effect on the reset line.</p>
+<p>Exclusive resets on the other hand guarantee direct control.
+That is, an assert causes the reset line to be asserted immediately, and a
+deassert causes the reset line to be deasserted immediately.</p>
+</section>
+<section id="assertion-and-deassertion">
+<h3>Assertion and deassertion<a class="headerlink" href="#assertion-and-deassertion" title="Permalink to this headline">¶</a></h3>
+<p>Consumer drivers use the <a class="reference internal" href="#c.reset_control_assert" title="reset_control_assert"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_assert()</span></code></a> and <a class="reference internal" href="#c.reset_control_deassert" title="reset_control_deassert"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_deassert()</span></code></a>
+functions to assert and deassert reset lines.
+For shared reset controls, calls to the two functions must be balanced.</p>
+<p>Note that since multiple consumers may be using a shared reset control, there
+is no guarantee that calling <a class="reference internal" href="#c.reset_control_assert" title="reset_control_assert"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_assert()</span></code></a> on a shared reset control
+will actually cause the reset line to be asserted.
+Consumer drivers using shared reset controls should assume that the reset line
+may be kept deasserted at all times.
+The API only guarantees that the reset line can not be asserted as long as any
+consumer has requested it to be deasserted.</p>
+</section>
+<section id="triggering">
+<h3>Triggering<a class="headerlink" href="#triggering" title="Permalink to this headline">¶</a></h3>
+<p>Consumer drivers use <a class="reference internal" href="#c.reset_control_reset" title="reset_control_reset"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_reset()</span></code></a> to trigger a reset pulse on a
+self-deasserting reset control.
+In general, these resets can not be shared between multiple consumers, since
+requesting a pulse from any consumer driver will reset all connected
+peripherals.</p>
+<p>The reset controller API allows requesting self-deasserting reset controls as
+shared, but for those only the first trigger request causes an actual pulse to
+be issued on the reset line.
+All further calls to this function have no effect until all consumers have
+called <a class="reference internal" href="#c.reset_control_rearm" title="reset_control_rearm"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_rearm()</span></code></a>.
+For shared reset controls, calls to the two functions must be balanced.
+This allows devices that only require an initial reset at any point before the
+driver is probed or resumed to share a pulsed reset line.</p>
+</section>
+<section id="querying">
+<h3>Querying<a class="headerlink" href="#querying" title="Permalink to this headline">¶</a></h3>
+<p>Only some reset controllers support querying the current status of a reset
+line, via <a class="reference internal" href="#c.reset_control_status" title="reset_control_status"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_status()</span></code></a>.
+If supported, this function returns a positive non-zero value if the given
+reset line is asserted.
+The <a class="reference internal" href="#c.reset_control_status" title="reset_control_status"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_status()</span></code></a> function does not accept a
+<a class="reference external" href="#reset-control-arrays">reset control array</a> handle as its input parameter.</p>
+</section>
+<section id="optional-resets">
+<h3>Optional resets<a class="headerlink" href="#optional-resets" title="Permalink to this headline">¶</a></h3>
+<p>Often peripherals require a reset line on some platforms but not on others.
+For this, reset controls can be requested as optional using
+<a class="reference internal" href="#c.devm_reset_control_get_optional_exclusive" title="devm_reset_control_get_optional_exclusive"><code class="xref c c-func docutils literal notranslate"><span class="pre">devm_reset_control_get_optional_exclusive()</span></code></a> or
+<a class="reference internal" href="#c.devm_reset_control_get_optional_shared" title="devm_reset_control_get_optional_shared"><code class="xref c c-func docutils literal notranslate"><span class="pre">devm_reset_control_get_optional_shared()</span></code></a>.
+These functions return a NULL pointer instead of an error when the requested
+reset control is not specified in the device tree.
+Passing a NULL pointer to the reset_control functions causes them to return
+quietly without an error.</p>
+</section>
+<section id="reset-control-arrays">
+<h3>Reset control arrays<a class="headerlink" href="#reset-control-arrays" title="Permalink to this headline">¶</a></h3>
+<p>Some drivers need to assert a bunch of reset lines in no particular order.
+<a class="reference internal" href="#c.devm_reset_control_array_get" title="devm_reset_control_array_get"><code class="xref c c-func docutils literal notranslate"><span class="pre">devm_reset_control_array_get()</span></code></a> returns an opaque reset control handle that can
+be used to assert, deassert, or trigger all specified reset controls at once.
+The reset control API does not guarantee the order in which the individual
+controls therein are handled.</p>
+</section>
+</section>
+<section id="reset-controller-driver-interface">
+<h2>Reset controller driver interface<a class="headerlink" href="#reset-controller-driver-interface" title="Permalink to this headline">¶</a></h2>
+<p>Drivers for reset controller modules provide the functionality necessary to
+assert or deassert reset signals, to trigger a reset pulse on a reset line, or
+to query its current state.
+All functions are optional.</p>
+<section id="initialization">
+<h3>Initialization<a class="headerlink" href="#initialization" title="Permalink to this headline">¶</a></h3>
+<p>Drivers fill a struct <a class="reference internal" href="#c.reset_controller_dev" title="reset_controller_dev"><code class="xref c c-type docutils literal notranslate"><span class="pre">reset_controller_dev</span></code></a> and register it with
+<a class="reference internal" href="#c.reset_controller_register" title="reset_controller_register"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_controller_register()</span></code></a> in their probe function.
+The actual functionality is implemented in callback functions via a struct
+<a class="reference internal" href="#c.reset_control_ops" title="reset_control_ops"><code class="xref c c-type docutils literal notranslate"><span class="pre">reset_control_ops</span></code></a>.</p>
+</section>
+</section>
+<section id="api-reference">
+<h2>API reference<a class="headerlink" href="#api-reference" title="Permalink to this headline">¶</a></h2>
+<p>The reset controller API is documented here in two parts:
+the <a class="reference external" href="#reset-consumer-api">reset consumer API</a> and the <a class="reference external" href="#reset-controller-driver-api">reset controller
+driver API</a>.</p>
+<section id="reset-consumer-api">
+<h3>Reset consumer API<a class="headerlink" href="#reset-consumer-api" title="Permalink to this headline">¶</a></h3>
+<p>Reset consumers can control a reset line using an opaque reset control handle,
+which can be obtained from <a class="reference internal" href="#c.devm_reset_control_get_exclusive" title="devm_reset_control_get_exclusive"><code class="xref c c-func docutils literal notranslate"><span class="pre">devm_reset_control_get_exclusive()</span></code></a> or
+<a class="reference internal" href="#c.devm_reset_control_get_shared" title="devm_reset_control_get_shared"><code class="xref c c-func docutils literal notranslate"><span class="pre">devm_reset_control_get_shared()</span></code></a>.
+Given the reset control, consumers can call <a class="reference internal" href="#c.reset_control_assert" title="reset_control_assert"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_assert()</span></code></a> and
+<a class="reference internal" href="#c.reset_control_deassert" title="reset_control_deassert"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_deassert()</span></code></a>, trigger a reset pulse using <a class="reference internal" href="#c.reset_control_reset" title="reset_control_reset"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_reset()</span></code></a>, or
+query the reset line status using <a class="reference internal" href="#c.reset_control_status" title="reset_control_status"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_status()</span></code></a>.</p>
+<dl class="type">
+<dt id="c.reset_control_bulk_data">
+struct <code class="sig-name descname">reset_control_bulk_data</code><a class="headerlink" href="#c.reset_control_bulk_data" title="Permalink to this definition">¶</a></dt>
+<dd><p>Data used for bulk reset control operations.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct reset_control_bulk_data {
+    const char                      *id;
+    struct reset_control            *rstc;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">id</span></code></dt><dd><p>reset control consumer ID</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">rstc</span></code></dt><dd><p>struct reset_control * to store the associated reset control</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>The reset APIs provide a series of reset_control_bulk_*() API calls as
+a convenience to consumers which require multiple reset controls.
+This structure is used to manage data for these calls.</p>
+<dl class="function">
+<dt id="c.reset_control_get_exclusive">
+struct reset_control * <code class="sig-name descname">reset_control_get_exclusive</code><span class="sig-paren">(</span>struct <a class="reference internal" href="infrastructure.html#c.device" title="device">device</a><em> *dev</em>, const char<em> *id</em><span class="sig-paren">)</span><a class="headerlink" href="#c.reset_control_get_exclusive" title="Permalink to this definition">¶</a></dt>
+<dd><p>Lookup and obtain an exclusive reference to a reset controller.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>device to be reset by the controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*id</span></code></dt><dd><p>reset line name</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Returns a struct reset_control or IS_ERR() condition containing errno.
+If this function is called more than once for the same reset_control it will
+return -EBUSY.</p>
+<p>See <a class="reference internal" href="#c.reset_control_get_shared" title="reset_control_get_shared"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_get_shared()</span></code></a> for details on shared references to
+reset-controls.</p>
+<p>Use of id names is optional.</p>
+</div>
+<dl class="function">
+<dt id="c.reset_control_bulk_get_exclusive">
+int <code class="sig-name descname">reset_control_bulk_get_exclusive</code><span class="sig-paren">(</span>struct <a class="reference internal" href="infrastructure.html#c.device" title="device">device</a><em> *dev</em>, int<em> num_rstcs</em>, struct <a class="reference internal" href="#c.reset_control_bulk_data" title="reset_control_bulk_data">reset_control_bulk_data</a><em> *rstcs</em><span class="sig-paren">)</span><a class="headerlink" href="#c.reset_control_bulk_get_exclusive" title="Permalink to this definition">¶</a></dt>
+<dd><p>Lookup and obtain exclusive references to multiple reset controllers.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>device to be reset by the controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">num_rstcs</span></code></dt><dd><p>number of entries in rstcs array</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control_bulk_data</span> <span class="pre">*rstcs</span></code></dt><dd><p>array of <a class="reference internal" href="#c.reset_control_bulk_data" title="reset_control_bulk_data"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control_bulk_data</span></code></a> with reset line names set</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Fills the rstcs array with pointers to exclusive reset controls and
+returns 0, or an IS_ERR() condition containing errno.</p>
+</div>
+<dl class="function">
+<dt id="c.reset_control_get_exclusive_released">
+struct reset_control * <code class="sig-name descname">reset_control_get_exclusive_released</code><span class="sig-paren">(</span>struct <a class="reference internal" href="infrastructure.html#c.device" title="device">device</a><em> *dev</em>, const char<em> *id</em><span class="sig-paren">)</span><a class="headerlink" href="#c.reset_control_get_exclusive_released" title="Permalink to this definition">¶</a></dt>
+<dd><p>Lookup and obtain a temoprarily exclusive reference to a reset controller.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>device to be reset by the controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*id</span></code></dt><dd><p>reset line name</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Returns a struct reset_control or IS_ERR() condition containing errno.
+reset-controls returned by this function must be acquired via
+<a class="reference internal" href="#c.reset_control_acquire" title="reset_control_acquire"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_acquire()</span></code></a> before they can be used and should be released
+via <a class="reference internal" href="#c.reset_control_release" title="reset_control_release"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_release()</span></code></a> afterwards.</p>
+<p>Use of id names is optional.</p>
+</div>
+<dl class="function">
+<dt id="c.reset_control_bulk_get_exclusive_released">
+int <code class="sig-name descname">reset_control_bulk_get_exclusive_released</code><span class="sig-paren">(</span>struct <a class="reference internal" href="infrastructure.html#c.device" title="device">device</a><em> *dev</em>, int<em> num_rstcs</em>, struct <a class="reference internal" href="#c.reset_control_bulk_data" title="reset_control_bulk_data">reset_control_bulk_data</a><em> *rstcs</em><span class="sig-paren">)</span><a class="headerlink" href="#c.reset_control_bulk_get_exclusive_released" title="Permalink to this definition">¶</a></dt>
+<dd><p>Lookup and obtain temporarily exclusive references to multiple reset controllers.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>device to be reset by the controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">num_rstcs</span></code></dt><dd><p>number of entries in rstcs array</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control_bulk_data</span> <span class="pre">*rstcs</span></code></dt><dd><p>array of <a class="reference internal" href="#c.reset_control_bulk_data" title="reset_control_bulk_data"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control_bulk_data</span></code></a> with reset line names set</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Fills the rstcs array with pointers to exclusive reset controls and
+returns 0, or an IS_ERR() condition containing errno.
+reset-controls returned by this function must be acquired via
+reset_control_bulk_acquire() before they can be used and should be released
+via reset_control_bulk_release() afterwards.</p>
+</div>
+<dl class="function">
+<dt id="c.reset_control_bulk_get_optional_exclusive_released">
+int <code class="sig-name descname">reset_control_bulk_get_optional_exclusive_released</code><span class="sig-paren">(</span>struct <a class="reference internal" href="infrastructure.html#c.device" title="device">device</a><em> *dev</em>, int<em> num_rstcs</em>, struct <a class="reference internal" href="#c.reset_control_bulk_data" title="reset_control_bulk_data">reset_control_bulk_data</a><em> *rstcs</em><span class="sig-paren">)</span><a class="headerlink" href="#c.reset_control_bulk_get_optional_exclusive_released" title="Permalink to this definition">¶</a></dt>
+<dd><p>Lookup and obtain optional temporarily exclusive references to multiple reset controllers.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>device to be reset by the controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">num_rstcs</span></code></dt><dd><p>number of entries in rstcs array</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control_bulk_data</span> <span class="pre">*rstcs</span></code></dt><dd><p>array of <a class="reference internal" href="#c.reset_control_bulk_data" title="reset_control_bulk_data"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control_bulk_data</span></code></a> with reset line names set</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Optional variant of <a class="reference internal" href="#c.reset_control_bulk_get_exclusive_released" title="reset_control_bulk_get_exclusive_released"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_bulk_get_exclusive_released()</span></code></a>. If the
+requested reset is not specified in the device tree, this function returns 0
+instead of an error and missing rtsc is set to NULL.</p>
+<p>See <a class="reference internal" href="#c.reset_control_bulk_get_exclusive_released" title="reset_control_bulk_get_exclusive_released"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_bulk_get_exclusive_released()</span></code></a> for more information.</p>
+</div>
+<dl class="function">
+<dt id="c.reset_control_get_shared">
+struct reset_control * <code class="sig-name descname">reset_control_get_shared</code><span class="sig-paren">(</span>struct <a class="reference internal" href="infrastructure.html#c.device" title="device">device</a><em> *dev</em>, const char<em> *id</em><span class="sig-paren">)</span><a class="headerlink" href="#c.reset_control_get_shared" title="Permalink to this definition">¶</a></dt>
+<dd><p>Lookup and obtain a shared reference to a reset controller.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>device to be reset by the controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*id</span></code></dt><dd><p>reset line name</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Returns a struct reset_control or IS_ERR() condition containing errno.
+This function is intended for use with reset-controls which are shared
+between hardware blocks.</p>
+<p>When a reset-control is shared, the behavior of reset_control_assert /
+deassert is changed, the reset-core will keep track of a deassert_count
+and only (re-)assert the reset after reset_control_assert has been called
+as many times as reset_control_deassert was called. Also see the remark
+about shared reset-controls in the reset_control_assert docs.</p>
+<p>Calling reset_control_assert without first calling reset_control_deassert
+is not allowed on a shared reset control. Calling reset_control_reset is
+also not allowed on a shared reset control.</p>
+<p>Use of id names is optional.</p>
+</div>
+<dl class="function">
+<dt id="c.reset_control_bulk_get_shared">
+int <code class="sig-name descname">reset_control_bulk_get_shared</code><span class="sig-paren">(</span>struct <a class="reference internal" href="infrastructure.html#c.device" title="device">device</a><em> *dev</em>, int<em> num_rstcs</em>, struct <a class="reference internal" href="#c.reset_control_bulk_data" title="reset_control_bulk_data">reset_control_bulk_data</a><em> *rstcs</em><span class="sig-paren">)</span><a class="headerlink" href="#c.reset_control_bulk_get_shared" title="Permalink to this definition">¶</a></dt>
+<dd><p>Lookup and obtain shared references to multiple reset controllers.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>device to be reset by the controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">num_rstcs</span></code></dt><dd><p>number of entries in rstcs array</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control_bulk_data</span> <span class="pre">*rstcs</span></code></dt><dd><p>array of <a class="reference internal" href="#c.reset_control_bulk_data" title="reset_control_bulk_data"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control_bulk_data</span></code></a> with reset line names set</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Fills the rstcs array with pointers to shared reset controls and
+returns 0, or an IS_ERR() condition containing errno.</p>
+</div>
+<dl class="function">
+<dt id="c.reset_control_get_optional_exclusive">
+struct reset_control * <code class="sig-name descname">reset_control_get_optional_exclusive</code><span class="sig-paren">(</span>struct <a class="reference internal" href="infrastructure.html#c.device" title="device">device</a><em> *dev</em>, const char<em> *id</em><span class="sig-paren">)</span><a class="headerlink" href="#c.reset_control_get_optional_exclusive" title="Permalink to this definition">¶</a></dt>
+<dd><p>optional <a class="reference internal" href="#c.reset_control_get_exclusive" title="reset_control_get_exclusive"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_get_exclusive()</span></code></a></p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>device to be reset by the controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*id</span></code></dt><dd><p>reset line name</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Optional variant of <a class="reference internal" href="#c.reset_control_get_exclusive" title="reset_control_get_exclusive"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_get_exclusive()</span></code></a>. If the requested reset
+is not specified in the device tree, this function returns NULL instead of
+an error.</p>
+<p>See <a class="reference internal" href="#c.reset_control_get_exclusive" title="reset_control_get_exclusive"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_get_exclusive()</span></code></a> for more information.</p>
+</div>
+<dl class="function">
+<dt id="c.reset_control_bulk_get_optional_exclusive">
+int <code class="sig-name descname">reset_control_bulk_get_optional_exclusive</code><span class="sig-paren">(</span>struct <a class="reference internal" href="infrastructure.html#c.device" title="device">device</a><em> *dev</em>, int<em> num_rstcs</em>, struct <a class="reference internal" href="#c.reset_control_bulk_data" title="reset_control_bulk_data">reset_control_bulk_data</a><em> *rstcs</em><span class="sig-paren">)</span><a class="headerlink" href="#c.reset_control_bulk_get_optional_exclusive" title="Permalink to this definition">¶</a></dt>
+<dd><p>optional <a class="reference internal" href="#c.reset_control_bulk_get_exclusive" title="reset_control_bulk_get_exclusive"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_bulk_get_exclusive()</span></code></a></p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>device to be reset by the controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">num_rstcs</span></code></dt><dd><p>number of entries in rstcs array</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control_bulk_data</span> <span class="pre">*rstcs</span></code></dt><dd><p>array of <a class="reference internal" href="#c.reset_control_bulk_data" title="reset_control_bulk_data"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control_bulk_data</span></code></a> with reset line names set</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Optional variant of <a class="reference internal" href="#c.reset_control_bulk_get_exclusive" title="reset_control_bulk_get_exclusive"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_bulk_get_exclusive()</span></code></a>. If any of the
+requested resets are not specified in the device tree, this function sets
+them to NULL instead of returning an error.</p>
+<p>See <a class="reference internal" href="#c.reset_control_bulk_get_exclusive" title="reset_control_bulk_get_exclusive"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_bulk_get_exclusive()</span></code></a> for more information.</p>
+</div>
+<dl class="function">
+<dt id="c.reset_control_get_optional_shared">
+struct reset_control * <code class="sig-name descname">reset_control_get_optional_shared</code><span class="sig-paren">(</span>struct <a class="reference internal" href="infrastructure.html#c.device" title="device">device</a><em> *dev</em>, const char<em> *id</em><span class="sig-paren">)</span><a class="headerlink" href="#c.reset_control_get_optional_shared" title="Permalink to this definition">¶</a></dt>
+<dd><p>optional <a class="reference internal" href="#c.reset_control_get_shared" title="reset_control_get_shared"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_get_shared()</span></code></a></p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>device to be reset by the controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*id</span></code></dt><dd><p>reset line name</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Optional variant of <a class="reference internal" href="#c.reset_control_get_shared" title="reset_control_get_shared"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_get_shared()</span></code></a>. If the requested reset
+is not specified in the device tree, this function returns NULL instead of
+an error.</p>
+<p>See <a class="reference internal" href="#c.reset_control_get_shared" title="reset_control_get_shared"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_get_shared()</span></code></a> for more information.</p>
+</div>
+<dl class="function">
+<dt id="c.reset_control_bulk_get_optional_shared">
+int <code class="sig-name descname">reset_control_bulk_get_optional_shared</code><span class="sig-paren">(</span>struct <a class="reference internal" href="infrastructure.html#c.device" title="device">device</a><em> *dev</em>, int<em> num_rstcs</em>, struct <a class="reference internal" href="#c.reset_control_bulk_data" title="reset_control_bulk_data">reset_control_bulk_data</a><em> *rstcs</em><span class="sig-paren">)</span><a class="headerlink" href="#c.reset_control_bulk_get_optional_shared" title="Permalink to this definition">¶</a></dt>
+<dd><p>optional <a class="reference internal" href="#c.reset_control_bulk_get_shared" title="reset_control_bulk_get_shared"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_bulk_get_shared()</span></code></a></p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>device to be reset by the controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">num_rstcs</span></code></dt><dd><p>number of entries in rstcs array</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control_bulk_data</span> <span class="pre">*rstcs</span></code></dt><dd><p>array of <a class="reference internal" href="#c.reset_control_bulk_data" title="reset_control_bulk_data"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control_bulk_data</span></code></a> with reset line names set</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Optional variant of <a class="reference internal" href="#c.reset_control_bulk_get_shared" title="reset_control_bulk_get_shared"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_bulk_get_shared()</span></code></a>. If the requested resets
+are not specified in the device tree, this function sets them to NULL
+instead of returning an error.</p>
+<p>See <a class="reference internal" href="#c.reset_control_bulk_get_shared" title="reset_control_bulk_get_shared"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_bulk_get_shared()</span></code></a> for more information.</p>
+</div>
+<dl class="function">
+<dt id="c.of_reset_control_get_exclusive">
+struct reset_control * <code class="sig-name descname">of_reset_control_get_exclusive</code><span class="sig-paren">(</span>struct device_node<em> *node</em>, const char<em> *id</em><span class="sig-paren">)</span><a class="headerlink" href="#c.of_reset_control_get_exclusive" title="Permalink to this definition">¶</a></dt>
+<dd><p>Lookup and obtain an exclusive reference to a reset controller.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device_node</span> <span class="pre">*node</span></code></dt><dd><p>device to be reset by the controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*id</span></code></dt><dd><p>reset line name</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Returns a struct reset_control or IS_ERR() condition containing errno.</p>
+<p>Use of id names is optional.</p>
+</div>
+<dl class="function">
+<dt id="c.of_reset_control_get_optional_exclusive">
+struct reset_control * <code class="sig-name descname">of_reset_control_get_optional_exclusive</code><span class="sig-paren">(</span>struct device_node<em> *node</em>, const char<em> *id</em><span class="sig-paren">)</span><a class="headerlink" href="#c.of_reset_control_get_optional_exclusive" title="Permalink to this definition">¶</a></dt>
+<dd><p>Lookup and obtain an optional exclusive reference to a reset controller.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device_node</span> <span class="pre">*node</span></code></dt><dd><p>device to be reset by the controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*id</span></code></dt><dd><p>reset line name</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Optional variant of <a class="reference internal" href="#c.of_reset_control_get_exclusive" title="of_reset_control_get_exclusive"><code class="xref c c-func docutils literal notranslate"><span class="pre">of_reset_control_get_exclusive()</span></code></a>. If the requested reset
+is not specified in the device tree, this function returns NULL instead of
+an error.</p>
+<p>Returns a struct reset_control or IS_ERR() condition containing errno.</p>
+<p>Use of id names is optional.</p>
+</div>
+<dl class="function">
+<dt id="c.of_reset_control_get_shared">
+struct reset_control * <code class="sig-name descname">of_reset_control_get_shared</code><span class="sig-paren">(</span>struct device_node<em> *node</em>, const char<em> *id</em><span class="sig-paren">)</span><a class="headerlink" href="#c.of_reset_control_get_shared" title="Permalink to this definition">¶</a></dt>
+<dd><p>Lookup and obtain a shared reference to a reset controller.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device_node</span> <span class="pre">*node</span></code></dt><dd><p>device to be reset by the controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*id</span></code></dt><dd><p>reset line name</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>When a reset-control is shared, the behavior of reset_control_assert /
+deassert is changed, the reset-core will keep track of a deassert_count
+and only (re-)assert the reset after reset_control_assert has been called
+as many times as reset_control_deassert was called. Also see the remark
+about shared reset-controls in the reset_control_assert docs.</p>
+<p>Calling reset_control_assert without first calling reset_control_deassert
+is not allowed on a shared reset control. Calling reset_control_reset is
+also not allowed on a shared reset control.
+Returns a struct reset_control or IS_ERR() condition containing errno.</p>
+<p>Use of id names is optional.</p>
+</div>
+<dl class="function">
+<dt id="c.of_reset_control_get_exclusive_by_index">
+struct reset_control * <code class="sig-name descname">of_reset_control_get_exclusive_by_index</code><span class="sig-paren">(</span>struct device_node<em> *node</em>, int<em> index</em><span class="sig-paren">)</span><a class="headerlink" href="#c.of_reset_control_get_exclusive_by_index" title="Permalink to this definition">¶</a></dt>
+<dd><p>Lookup and obtain an exclusive reference to a reset controller by index.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device_node</span> <span class="pre">*node</span></code></dt><dd><p>device to be reset by the controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">index</span></code></dt><dd><p>index of the reset controller</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This is to be used to perform a list of resets for a device or power domain
+in whatever order. Returns a struct reset_control or IS_ERR() condition
+containing errno.</p>
+</div>
+<dl class="function">
+<dt id="c.of_reset_control_get_shared_by_index">
+struct reset_control * <code class="sig-name descname">of_reset_control_get_shared_by_index</code><span class="sig-paren">(</span>struct device_node<em> *node</em>, int<em> index</em><span class="sig-paren">)</span><a class="headerlink" href="#c.of_reset_control_get_shared_by_index" title="Permalink to this definition">¶</a></dt>
+<dd><p>Lookup and obtain a shared reference to a reset controller by index.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device_node</span> <span class="pre">*node</span></code></dt><dd><p>device to be reset by the controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">index</span></code></dt><dd><p>index of the reset controller</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>When a reset-control is shared, the behavior of reset_control_assert /
+deassert is changed, the reset-core will keep track of a deassert_count
+and only (re-)assert the reset after reset_control_assert has been called
+as many times as reset_control_deassert was called. Also see the remark
+about shared reset-controls in the reset_control_assert docs.</p>
+<p>Calling reset_control_assert without first calling reset_control_deassert
+is not allowed on a shared reset control. Calling reset_control_reset is
+also not allowed on a shared reset control.
+Returns a struct reset_control or IS_ERR() condition containing errno.</p>
+<p>This is to be used to perform a list of resets for a device or power domain
+in whatever order. Returns a struct reset_control or IS_ERR() condition
+containing errno.</p>
+</div>
+<dl class="function">
+<dt id="c.devm_reset_control_get_exclusive">
+struct reset_control * <code class="sig-name descname">devm_reset_control_get_exclusive</code><span class="sig-paren">(</span>struct <a class="reference internal" href="infrastructure.html#c.device" title="device">device</a><em> *dev</em>, const char<em> *id</em><span class="sig-paren">)</span><a class="headerlink" href="#c.devm_reset_control_get_exclusive" title="Permalink to this definition">¶</a></dt>
+<dd><p>resource managed <a class="reference internal" href="#c.reset_control_get_exclusive" title="reset_control_get_exclusive"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_get_exclusive()</span></code></a></p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>device to be reset by the controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*id</span></code></dt><dd><p>reset line name</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Managed <a class="reference internal" href="#c.reset_control_get_exclusive" title="reset_control_get_exclusive"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_get_exclusive()</span></code></a>. For reset controllers returned
+from this function, <a class="reference internal" href="#c.reset_control_put" title="reset_control_put"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_put()</span></code></a> is called automatically on driver
+detach.</p>
+<p>See <a class="reference internal" href="#c.reset_control_get_exclusive" title="reset_control_get_exclusive"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_get_exclusive()</span></code></a> for more information.</p>
+</div>
+<dl class="function">
+<dt id="c.devm_reset_control_bulk_get_exclusive">
+int <code class="sig-name descname">devm_reset_control_bulk_get_exclusive</code><span class="sig-paren">(</span>struct <a class="reference internal" href="infrastructure.html#c.device" title="device">device</a><em> *dev</em>, int<em> num_rstcs</em>, struct <a class="reference internal" href="#c.reset_control_bulk_data" title="reset_control_bulk_data">reset_control_bulk_data</a><em> *rstcs</em><span class="sig-paren">)</span><a class="headerlink" href="#c.devm_reset_control_bulk_get_exclusive" title="Permalink to this definition">¶</a></dt>
+<dd><p>resource managed <a class="reference internal" href="#c.reset_control_bulk_get_exclusive" title="reset_control_bulk_get_exclusive"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_bulk_get_exclusive()</span></code></a></p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>device to be reset by the controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">num_rstcs</span></code></dt><dd><p>number of entries in rstcs array</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control_bulk_data</span> <span class="pre">*rstcs</span></code></dt><dd><p>array of <a class="reference internal" href="#c.reset_control_bulk_data" title="reset_control_bulk_data"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control_bulk_data</span></code></a> with reset line names set</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Managed <a class="reference internal" href="#c.reset_control_bulk_get_exclusive" title="reset_control_bulk_get_exclusive"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_bulk_get_exclusive()</span></code></a>. For reset controllers returned
+from this function, <a class="reference internal" href="#c.reset_control_put" title="reset_control_put"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_put()</span></code></a> is called automatically on driver
+detach.</p>
+<p>See <a class="reference internal" href="#c.reset_control_bulk_get_exclusive" title="reset_control_bulk_get_exclusive"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_bulk_get_exclusive()</span></code></a> for more information.</p>
+</div>
+<dl class="function">
+<dt id="c.devm_reset_control_get_exclusive_released">
+struct reset_control * <code class="sig-name descname">devm_reset_control_get_exclusive_released</code><span class="sig-paren">(</span>struct <a class="reference internal" href="infrastructure.html#c.device" title="device">device</a><em> *dev</em>, const char<em> *id</em><span class="sig-paren">)</span><a class="headerlink" href="#c.devm_reset_control_get_exclusive_released" title="Permalink to this definition">¶</a></dt>
+<dd><p>resource managed <a class="reference internal" href="#c.reset_control_get_exclusive_released" title="reset_control_get_exclusive_released"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_get_exclusive_released()</span></code></a></p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>device to be reset by the controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*id</span></code></dt><dd><p>reset line name</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Managed <a class="reference internal" href="#c.reset_control_get_exclusive_released" title="reset_control_get_exclusive_released"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_get_exclusive_released()</span></code></a>. For reset controllers
+returned from this function, <a class="reference internal" href="#c.reset_control_put" title="reset_control_put"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_put()</span></code></a> is called automatically on
+driver detach.</p>
+<p>See <a class="reference internal" href="#c.reset_control_get_exclusive_released" title="reset_control_get_exclusive_released"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_get_exclusive_released()</span></code></a> for more information.</p>
+</div>
+<dl class="function">
+<dt id="c.devm_reset_control_bulk_get_exclusive_released">
+int <code class="sig-name descname">devm_reset_control_bulk_get_exclusive_released</code><span class="sig-paren">(</span>struct <a class="reference internal" href="infrastructure.html#c.device" title="device">device</a><em> *dev</em>, int<em> num_rstcs</em>, struct <a class="reference internal" href="#c.reset_control_bulk_data" title="reset_control_bulk_data">reset_control_bulk_data</a><em> *rstcs</em><span class="sig-paren">)</span><a class="headerlink" href="#c.devm_reset_control_bulk_get_exclusive_released" title="Permalink to this definition">¶</a></dt>
+<dd><p>resource managed <a class="reference internal" href="#c.reset_control_bulk_get_exclusive_released" title="reset_control_bulk_get_exclusive_released"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_bulk_get_exclusive_released()</span></code></a></p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>device to be reset by the controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">num_rstcs</span></code></dt><dd><p>number of entries in rstcs array</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control_bulk_data</span> <span class="pre">*rstcs</span></code></dt><dd><p>array of <a class="reference internal" href="#c.reset_control_bulk_data" title="reset_control_bulk_data"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control_bulk_data</span></code></a> with reset line names set</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Managed <a class="reference internal" href="#c.reset_control_bulk_get_exclusive_released" title="reset_control_bulk_get_exclusive_released"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_bulk_get_exclusive_released()</span></code></a>. For reset controllers
+returned from this function, <a class="reference internal" href="#c.reset_control_put" title="reset_control_put"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_put()</span></code></a> is called automatically on
+driver detach.</p>
+<p>See <a class="reference internal" href="#c.reset_control_bulk_get_exclusive_released" title="reset_control_bulk_get_exclusive_released"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_bulk_get_exclusive_released()</span></code></a> for more information.</p>
+</div>
+<dl class="function">
+<dt id="c.devm_reset_control_get_optional_exclusive_released">
+struct reset_control * <code class="sig-name descname">devm_reset_control_get_optional_exclusive_released</code><span class="sig-paren">(</span>struct <a class="reference internal" href="infrastructure.html#c.device" title="device">device</a><em> *dev</em>, const char<em> *id</em><span class="sig-paren">)</span><a class="headerlink" href="#c.devm_reset_control_get_optional_exclusive_released" title="Permalink to this definition">¶</a></dt>
+<dd><p>resource managed reset_control_get_optional_exclusive_released()</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>device to be reset by the controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*id</span></code></dt><dd><p>reset line name</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Managed-and-optional variant of <a class="reference internal" href="#c.reset_control_get_exclusive_released" title="reset_control_get_exclusive_released"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_get_exclusive_released()</span></code></a>. For
+reset controllers returned from this function, <a class="reference internal" href="#c.reset_control_put" title="reset_control_put"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_put()</span></code></a> is called
+automatically on driver detach.</p>
+<p>See <a class="reference internal" href="#c.reset_control_get_exclusive_released" title="reset_control_get_exclusive_released"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_get_exclusive_released()</span></code></a> for more information.</p>
+</div>
+<dl class="function">
+<dt id="c.devm_reset_control_bulk_get_optional_exclusive_released">
+int <code class="sig-name descname">devm_reset_control_bulk_get_optional_exclusive_released</code><span class="sig-paren">(</span>struct <a class="reference internal" href="infrastructure.html#c.device" title="device">device</a><em> *dev</em>, int<em> num_rstcs</em>, struct <a class="reference internal" href="#c.reset_control_bulk_data" title="reset_control_bulk_data">reset_control_bulk_data</a><em> *rstcs</em><span class="sig-paren">)</span><a class="headerlink" href="#c.devm_reset_control_bulk_get_optional_exclusive_released" title="Permalink to this definition">¶</a></dt>
+<dd><p>resource managed reset_control_bulk_optional_get_exclusive_released()</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>device to be reset by the controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">num_rstcs</span></code></dt><dd><p>number of entries in rstcs array</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control_bulk_data</span> <span class="pre">*rstcs</span></code></dt><dd><p>array of <a class="reference internal" href="#c.reset_control_bulk_data" title="reset_control_bulk_data"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control_bulk_data</span></code></a> with reset line names set</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Managed reset_control_bulk_optional_get_exclusive_released(). For reset
+controllers returned from this function, <a class="reference internal" href="#c.reset_control_put" title="reset_control_put"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_put()</span></code></a> is called
+automatically on driver detach.</p>
+<p>See reset_control_bulk_optional_get_exclusive_released() for more information.</p>
+</div>
+<dl class="function">
+<dt id="c.devm_reset_control_get_shared">
+struct reset_control * <code class="sig-name descname">devm_reset_control_get_shared</code><span class="sig-paren">(</span>struct <a class="reference internal" href="infrastructure.html#c.device" title="device">device</a><em> *dev</em>, const char<em> *id</em><span class="sig-paren">)</span><a class="headerlink" href="#c.devm_reset_control_get_shared" title="Permalink to this definition">¶</a></dt>
+<dd><p>resource managed <a class="reference internal" href="#c.reset_control_get_shared" title="reset_control_get_shared"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_get_shared()</span></code></a></p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>device to be reset by the controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*id</span></code></dt><dd><p>reset line name</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Managed <a class="reference internal" href="#c.reset_control_get_shared" title="reset_control_get_shared"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_get_shared()</span></code></a>. For reset controllers returned from
+this function, <a class="reference internal" href="#c.reset_control_put" title="reset_control_put"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_put()</span></code></a> is called automatically on driver detach.
+See <a class="reference internal" href="#c.reset_control_get_shared" title="reset_control_get_shared"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_get_shared()</span></code></a> for more information.</p>
+</div>
+<dl class="function">
+<dt id="c.devm_reset_control_bulk_get_shared">
+int <code class="sig-name descname">devm_reset_control_bulk_get_shared</code><span class="sig-paren">(</span>struct <a class="reference internal" href="infrastructure.html#c.device" title="device">device</a><em> *dev</em>, int<em> num_rstcs</em>, struct <a class="reference internal" href="#c.reset_control_bulk_data" title="reset_control_bulk_data">reset_control_bulk_data</a><em> *rstcs</em><span class="sig-paren">)</span><a class="headerlink" href="#c.devm_reset_control_bulk_get_shared" title="Permalink to this definition">¶</a></dt>
+<dd><p>resource managed <a class="reference internal" href="#c.reset_control_bulk_get_shared" title="reset_control_bulk_get_shared"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_bulk_get_shared()</span></code></a></p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>device to be reset by the controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">num_rstcs</span></code></dt><dd><p>number of entries in rstcs array</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control_bulk_data</span> <span class="pre">*rstcs</span></code></dt><dd><p>array of <a class="reference internal" href="#c.reset_control_bulk_data" title="reset_control_bulk_data"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control_bulk_data</span></code></a> with reset line names set</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Managed <a class="reference internal" href="#c.reset_control_bulk_get_shared" title="reset_control_bulk_get_shared"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_bulk_get_shared()</span></code></a>. For reset controllers returned
+from this function, <a class="reference internal" href="#c.reset_control_put" title="reset_control_put"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_put()</span></code></a> is called automatically on driver
+detach.</p>
+<p>See <a class="reference internal" href="#c.reset_control_bulk_get_shared" title="reset_control_bulk_get_shared"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_bulk_get_shared()</span></code></a> for more information.</p>
+</div>
+<dl class="function">
+<dt id="c.devm_reset_control_get_optional_exclusive">
+struct reset_control * <code class="sig-name descname">devm_reset_control_get_optional_exclusive</code><span class="sig-paren">(</span>struct <a class="reference internal" href="infrastructure.html#c.device" title="device">device</a><em> *dev</em>, const char<em> *id</em><span class="sig-paren">)</span><a class="headerlink" href="#c.devm_reset_control_get_optional_exclusive" title="Permalink to this definition">¶</a></dt>
+<dd><p>resource managed <a class="reference internal" href="#c.reset_control_get_optional_exclusive" title="reset_control_get_optional_exclusive"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_get_optional_exclusive()</span></code></a></p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>device to be reset by the controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*id</span></code></dt><dd><p>reset line name</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Managed <a class="reference internal" href="#c.reset_control_get_optional_exclusive" title="reset_control_get_optional_exclusive"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_get_optional_exclusive()</span></code></a>. For reset controllers
+returned from this function, <a class="reference internal" href="#c.reset_control_put" title="reset_control_put"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_put()</span></code></a> is called automatically on
+driver detach.</p>
+<p>See <a class="reference internal" href="#c.reset_control_get_optional_exclusive" title="reset_control_get_optional_exclusive"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_get_optional_exclusive()</span></code></a> for more information.</p>
+</div>
+<dl class="function">
+<dt id="c.devm_reset_control_bulk_get_optional_exclusive">
+int <code class="sig-name descname">devm_reset_control_bulk_get_optional_exclusive</code><span class="sig-paren">(</span>struct <a class="reference internal" href="infrastructure.html#c.device" title="device">device</a><em> *dev</em>, int<em> num_rstcs</em>, struct <a class="reference internal" href="#c.reset_control_bulk_data" title="reset_control_bulk_data">reset_control_bulk_data</a><em> *rstcs</em><span class="sig-paren">)</span><a class="headerlink" href="#c.devm_reset_control_bulk_get_optional_exclusive" title="Permalink to this definition">¶</a></dt>
+<dd><p>resource managed <a class="reference internal" href="#c.reset_control_bulk_get_optional_exclusive" title="reset_control_bulk_get_optional_exclusive"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_bulk_get_optional_exclusive()</span></code></a></p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>device to be reset by the controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">num_rstcs</span></code></dt><dd><p>number of entries in rstcs array</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control_bulk_data</span> <span class="pre">*rstcs</span></code></dt><dd><p>array of <a class="reference internal" href="#c.reset_control_bulk_data" title="reset_control_bulk_data"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control_bulk_data</span></code></a> with reset line names set</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Managed <a class="reference internal" href="#c.reset_control_bulk_get_optional_exclusive" title="reset_control_bulk_get_optional_exclusive"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_bulk_get_optional_exclusive()</span></code></a>. For reset controllers
+returned from this function, <a class="reference internal" href="#c.reset_control_put" title="reset_control_put"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_put()</span></code></a> is called automatically on
+driver detach.</p>
+<p>See <a class="reference internal" href="#c.reset_control_bulk_get_optional_exclusive" title="reset_control_bulk_get_optional_exclusive"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_bulk_get_optional_exclusive()</span></code></a> for more information.</p>
+</div>
+<dl class="function">
+<dt id="c.devm_reset_control_get_optional_shared">
+struct reset_control * <code class="sig-name descname">devm_reset_control_get_optional_shared</code><span class="sig-paren">(</span>struct <a class="reference internal" href="infrastructure.html#c.device" title="device">device</a><em> *dev</em>, const char<em> *id</em><span class="sig-paren">)</span><a class="headerlink" href="#c.devm_reset_control_get_optional_shared" title="Permalink to this definition">¶</a></dt>
+<dd><p>resource managed <a class="reference internal" href="#c.reset_control_get_optional_shared" title="reset_control_get_optional_shared"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_get_optional_shared()</span></code></a></p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>device to be reset by the controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*id</span></code></dt><dd><p>reset line name</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Managed <a class="reference internal" href="#c.reset_control_get_optional_shared" title="reset_control_get_optional_shared"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_get_optional_shared()</span></code></a>. For reset controllers returned
+from this function, <a class="reference internal" href="#c.reset_control_put" title="reset_control_put"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_put()</span></code></a> is called automatically on driver
+detach.</p>
+<p>See <a class="reference internal" href="#c.reset_control_get_optional_shared" title="reset_control_get_optional_shared"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_get_optional_shared()</span></code></a> for more information.</p>
+</div>
+<dl class="function">
+<dt id="c.devm_reset_control_bulk_get_optional_shared">
+int <code class="sig-name descname">devm_reset_control_bulk_get_optional_shared</code><span class="sig-paren">(</span>struct <a class="reference internal" href="infrastructure.html#c.device" title="device">device</a><em> *dev</em>, int<em> num_rstcs</em>, struct <a class="reference internal" href="#c.reset_control_bulk_data" title="reset_control_bulk_data">reset_control_bulk_data</a><em> *rstcs</em><span class="sig-paren">)</span><a class="headerlink" href="#c.devm_reset_control_bulk_get_optional_shared" title="Permalink to this definition">¶</a></dt>
+<dd><p>resource managed <a class="reference internal" href="#c.reset_control_bulk_get_optional_shared" title="reset_control_bulk_get_optional_shared"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_bulk_get_optional_shared()</span></code></a></p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>device to be reset by the controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">num_rstcs</span></code></dt><dd><p>number of entries in rstcs array</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control_bulk_data</span> <span class="pre">*rstcs</span></code></dt><dd><p>array of <a class="reference internal" href="#c.reset_control_bulk_data" title="reset_control_bulk_data"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control_bulk_data</span></code></a> with reset line names set</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Managed <a class="reference internal" href="#c.reset_control_bulk_get_optional_shared" title="reset_control_bulk_get_optional_shared"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_bulk_get_optional_shared()</span></code></a>. For reset controllers
+returned from this function, <a class="reference internal" href="#c.reset_control_put" title="reset_control_put"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_put()</span></code></a> is called automatically on
+driver detach.</p>
+<p>See <a class="reference internal" href="#c.reset_control_bulk_get_optional_shared" title="reset_control_bulk_get_optional_shared"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_bulk_get_optional_shared()</span></code></a> for more information.</p>
+</div>
+<dl class="function">
+<dt id="c.devm_reset_control_get_exclusive_by_index">
+struct reset_control * <code class="sig-name descname">devm_reset_control_get_exclusive_by_index</code><span class="sig-paren">(</span>struct <a class="reference internal" href="infrastructure.html#c.device" title="device">device</a><em> *dev</em>, int<em> index</em><span class="sig-paren">)</span><a class="headerlink" href="#c.devm_reset_control_get_exclusive_by_index" title="Permalink to this definition">¶</a></dt>
+<dd><p>resource managed <a class="reference internal" href="#c.reset_control_get_exclusive" title="reset_control_get_exclusive"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_get_exclusive()</span></code></a></p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>device to be reset by the controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">index</span></code></dt><dd><p>index of the reset controller</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Managed <a class="reference internal" href="#c.reset_control_get_exclusive" title="reset_control_get_exclusive"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_get_exclusive()</span></code></a>. For reset controllers returned from
+this function, <a class="reference internal" href="#c.reset_control_put" title="reset_control_put"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_put()</span></code></a> is called automatically on driver
+detach.</p>
+<p>See <a class="reference internal" href="#c.reset_control_get_exclusive" title="reset_control_get_exclusive"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_get_exclusive()</span></code></a> for more information.</p>
+</div>
+<dl class="function">
+<dt id="c.devm_reset_control_get_shared_by_index">
+struct reset_control * <code class="sig-name descname">devm_reset_control_get_shared_by_index</code><span class="sig-paren">(</span>struct <a class="reference internal" href="infrastructure.html#c.device" title="device">device</a><em> *dev</em>, int<em> index</em><span class="sig-paren">)</span><a class="headerlink" href="#c.devm_reset_control_get_shared_by_index" title="Permalink to this definition">¶</a></dt>
+<dd><p>resource managed reset_control_get_shared</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>device to be reset by the controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">index</span></code></dt><dd><p>index of the reset controller</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Managed <a class="reference internal" href="#c.reset_control_get_shared" title="reset_control_get_shared"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_get_shared()</span></code></a>. For reset controllers returned from
+this function, <a class="reference internal" href="#c.reset_control_put" title="reset_control_put"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_put()</span></code></a> is called automatically on driver detach.
+See <a class="reference internal" href="#c.reset_control_get_shared" title="reset_control_get_shared"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_get_shared()</span></code></a> for more information.</p>
+</div>
+<dl class="function">
+<dt id="c.reset_control_reset">
+int <code class="sig-name descname">reset_control_reset</code><span class="sig-paren">(</span>struct reset_control<em> *rstc</em><span class="sig-paren">)</span><a class="headerlink" href="#c.reset_control_reset" title="Permalink to this definition">¶</a></dt>
+<dd><p>reset the controlled device</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control</span> <span class="pre">*rstc</span></code></dt><dd><p>reset controller</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>On a shared reset line the actual reset pulse is only triggered once for the
+lifetime of the reset_control instance: for all but the first caller this is
+a no-op.
+Consumers must not use reset_control_(de)assert on shared reset lines when
+reset_control_reset has been used.</p>
+<p>If rstc is NULL it is an optional reset and the function will just
+return 0.</p>
+</div>
+<dl class="function">
+<dt id="c.reset_control_rearm">
+int <code class="sig-name descname">reset_control_rearm</code><span class="sig-paren">(</span>struct reset_control<em> *rstc</em><span class="sig-paren">)</span><a class="headerlink" href="#c.reset_control_rearm" title="Permalink to this definition">¶</a></dt>
+<dd><p>allow shared reset line to be re-triggered”</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control</span> <span class="pre">*rstc</span></code></dt><dd><p>reset controller</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>On a shared reset line the actual reset pulse is only triggered once for the
+lifetime of the reset_control instance, except if this call is used.</p>
+<p>Calls to this function must be balanced with calls to reset_control_reset,
+a warning is thrown in case triggered_count ever dips below 0.</p>
+<p>Consumers must not use reset_control_(de)assert on shared reset lines when
+reset_control_reset or reset_control_rearm have been used.</p>
+<p>If rstc is NULL the function will just return 0.</p>
+</div>
+<dl class="function">
+<dt id="c.reset_control_assert">
+int <code class="sig-name descname">reset_control_assert</code><span class="sig-paren">(</span>struct reset_control<em> *rstc</em><span class="sig-paren">)</span><a class="headerlink" href="#c.reset_control_assert" title="Permalink to this definition">¶</a></dt>
+<dd><p>asserts the reset line</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control</span> <span class="pre">*rstc</span></code></dt><dd><p>reset controller</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Calling this on an exclusive reset controller guarantees that the reset
+will be asserted. When called on a shared reset controller the line may
+still be deasserted, as long as other users keep it so.</p>
+<p>For shared reset controls a driver cannot expect the hw’s registers and
+internal state to be reset, but must be prepared for this to happen.
+Consumers must not use reset_control_reset on shared reset lines when
+reset_control_(de)assert has been used.</p>
+<p>If rstc is NULL it is an optional reset and the function will just
+return 0.</p>
+</div>
+<dl class="function">
+<dt id="c.reset_control_deassert">
+int <code class="sig-name descname">reset_control_deassert</code><span class="sig-paren">(</span>struct reset_control<em> *rstc</em><span class="sig-paren">)</span><a class="headerlink" href="#c.reset_control_deassert" title="Permalink to this definition">¶</a></dt>
+<dd><p>deasserts the reset line</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control</span> <span class="pre">*rstc</span></code></dt><dd><p>reset controller</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>After calling this function, the reset is guaranteed to be deasserted.
+Consumers must not use reset_control_reset on shared reset lines when
+reset_control_(de)assert has been used.</p>
+<p>If rstc is NULL it is an optional reset and the function will just
+return 0.</p>
+</div>
+<dl class="function">
+<dt id="c.reset_control_status">
+int <code class="sig-name descname">reset_control_status</code><span class="sig-paren">(</span>struct reset_control<em> *rstc</em><span class="sig-paren">)</span><a class="headerlink" href="#c.reset_control_status" title="Permalink to this definition">¶</a></dt>
+<dd><p>returns a negative errno if not supported, a positive value if the reset line is asserted, or zero if the reset line is not asserted or if the desc is NULL (optional reset).</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control</span> <span class="pre">*rstc</span></code></dt><dd><p>reset controller</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.reset_control_acquire">
+int <code class="sig-name descname">reset_control_acquire</code><span class="sig-paren">(</span>struct reset_control<em> *rstc</em><span class="sig-paren">)</span><a class="headerlink" href="#c.reset_control_acquire" title="Permalink to this definition">¶</a></dt>
+<dd><p>acquires a reset control for exclusive use</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control</span> <span class="pre">*rstc</span></code></dt><dd><p>reset control</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This is used to explicitly acquire a reset control for exclusive use. Note
+that exclusive resets are requested as acquired by default. In order for a
+second consumer to be able to control the reset, the first consumer has to
+release it first. Typically the easiest way to achieve this is to call the
+<a class="reference internal" href="#c.reset_control_get_exclusive_released" title="reset_control_get_exclusive_released"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_get_exclusive_released()</span></code></a> to obtain an instance of the reset
+control. Such reset controls are not acquired by default.</p>
+<p>Consumers implementing shared access to an exclusive reset need to follow
+a specific protocol in order to work together. Before consumers can change
+a reset they must acquire exclusive access using <a class="reference internal" href="#c.reset_control_acquire" title="reset_control_acquire"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_acquire()</span></code></a>.
+After they are done operating the reset, they must release exclusive access
+with a call to <a class="reference internal" href="#c.reset_control_release" title="reset_control_release"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_release()</span></code></a>. Consumers are not granted exclusive
+access to the reset as long as another consumer hasn’t released a reset.</p>
+<p>See also: <a class="reference internal" href="#c.reset_control_release" title="reset_control_release"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_release()</span></code></a></p>
+</div>
+<dl class="function">
+<dt id="c.reset_control_release">
+void <code class="sig-name descname">reset_control_release</code><span class="sig-paren">(</span>struct reset_control<em> *rstc</em><span class="sig-paren">)</span><a class="headerlink" href="#c.reset_control_release" title="Permalink to this definition">¶</a></dt>
+<dd><p>releases exclusive access to a reset control</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control</span> <span class="pre">*rstc</span></code></dt><dd><p>reset control</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Releases exclusive access right to a reset control previously obtained by a
+call to <a class="reference internal" href="#c.reset_control_acquire" title="reset_control_acquire"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_acquire()</span></code></a>. Until a consumer calls this function, no
+other consumers will be granted exclusive access.</p>
+<p>See also: <a class="reference internal" href="#c.reset_control_acquire" title="reset_control_acquire"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_control_acquire()</span></code></a></p>
+</div>
+<dl class="function">
+<dt id="c.reset_control_put">
+void <code class="sig-name descname">reset_control_put</code><span class="sig-paren">(</span>struct reset_control<em> *rstc</em><span class="sig-paren">)</span><a class="headerlink" href="#c.reset_control_put" title="Permalink to this definition">¶</a></dt>
+<dd><p>free the reset controller</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control</span> <span class="pre">*rstc</span></code></dt><dd><p>reset controller</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.of_reset_control_get_count">
+int <code class="sig-name descname">of_reset_control_get_count</code><span class="sig-paren">(</span>struct device_node<em> *node</em><span class="sig-paren">)</span><a class="headerlink" href="#c.of_reset_control_get_count" title="Permalink to this definition">¶</a></dt>
+<dd><p>Count number of resets available with a device</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device_node</span> <span class="pre">*node</span></code></dt><dd><p>device node that contains ‘resets’.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Returns positive reset count on success, or error number on failure and
+on count being zero.</p>
+</div>
+<dl class="function">
+<dt id="c.of_reset_control_array_get">
+struct reset_control * <code class="sig-name descname">of_reset_control_array_get</code><span class="sig-paren">(</span>struct device_node<em> *np</em>, bool<em> shared</em>, bool<em> optional</em>, bool<em> acquired</em><span class="sig-paren">)</span><a class="headerlink" href="#c.of_reset_control_array_get" title="Permalink to this definition">¶</a></dt>
+<dd><p>Get a list of reset controls using device node.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device_node</span> <span class="pre">*np</span></code></dt><dd><p>device node for the device that requests the reset controls array</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">bool</span> <span class="pre">shared</span></code></dt><dd><p>whether reset controls are shared or not</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">bool</span> <span class="pre">optional</span></code></dt><dd><p>whether it is optional to get the reset controls</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">bool</span> <span class="pre">acquired</span></code></dt><dd><p>only one reset control may be acquired for a given controller
+and ID</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Returns pointer to allocated reset_control on success or error on failure</p>
+</div>
+<dl class="function">
+<dt id="c.devm_reset_control_array_get">
+struct reset_control * <code class="sig-name descname">devm_reset_control_array_get</code><span class="sig-paren">(</span>struct <a class="reference internal" href="infrastructure.html#c.device" title="device">device</a><em> *dev</em>, bool<em> shared</em>, bool<em> optional</em><span class="sig-paren">)</span><a class="headerlink" href="#c.devm_reset_control_array_get" title="Permalink to this definition">¶</a></dt>
+<dd><p>Resource managed reset control array get</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>device that requests the list of reset controls</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">bool</span> <span class="pre">shared</span></code></dt><dd><p>whether reset controls are shared or not</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">bool</span> <span class="pre">optional</span></code></dt><dd><p>whether it is optional to get the reset controls</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>The reset control array APIs are intended for a list of resets
+that just have to be asserted or deasserted, without any
+requirements on the order.</p>
+<p>Returns pointer to allocated reset_control on success or error on failure</p>
+</div>
+<dl class="function">
+<dt id="c.reset_control_get_count">
+int <code class="sig-name descname">reset_control_get_count</code><span class="sig-paren">(</span>struct <a class="reference internal" href="infrastructure.html#c.device" title="device">device</a><em> *dev</em><span class="sig-paren">)</span><a class="headerlink" href="#c.reset_control_get_count" title="Permalink to this definition">¶</a></dt>
+<dd><p>Count number of resets available with a device</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>device for which to return the number of resets</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Returns positive reset count on success, or error number on failure and
+on count being zero.</p>
+</div>
+</section>
+<section id="reset-controller-driver-api">
+<h3>Reset controller driver API<a class="headerlink" href="#reset-controller-driver-api" title="Permalink to this headline">¶</a></h3>
+<p>Reset controller drivers are supposed to implement the necessary functions in
+a static constant structure <a class="reference internal" href="#c.reset_control_ops" title="reset_control_ops"><code class="xref c c-type docutils literal notranslate"><span class="pre">reset_control_ops</span></code></a>, allocate and fill out
+a struct <a class="reference internal" href="#c.reset_controller_dev" title="reset_controller_dev"><code class="xref c c-type docutils literal notranslate"><span class="pre">reset_controller_dev</span></code></a>, and register it using
+<a class="reference internal" href="#c.devm_reset_controller_register" title="devm_reset_controller_register"><code class="xref c c-func docutils literal notranslate"><span class="pre">devm_reset_controller_register()</span></code></a>.</p>
+<dl class="type">
+<dt id="c.reset_control_ops">
+struct <code class="sig-name descname">reset_control_ops</code><a class="headerlink" href="#c.reset_control_ops" title="Permalink to this definition">¶</a></dt>
+<dd><p>reset controller driver callbacks</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct reset_control_ops {
+    int (*reset)(struct reset_controller_dev *rcdev, unsigned long id);
+    int (*assert)(struct reset_controller_dev *rcdev, unsigned long id);
+    int (*deassert)(struct reset_controller_dev *rcdev, unsigned long id);
+    int (*status)(struct reset_controller_dev *rcdev, unsigned long id);
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">reset</span></code></dt><dd><p>for self-deasserting resets, does all necessary
+things to reset the device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">assert</span></code></dt><dd><p>manually assert the reset line, if supported</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">deassert</span></code></dt><dd><p>manually deassert the reset line, if supported</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">status</span></code></dt><dd><p>return the status of the reset line, if supported</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.reset_control_lookup">
+struct <code class="sig-name descname">reset_control_lookup</code><a class="headerlink" href="#c.reset_control_lookup" title="Permalink to this definition">¶</a></dt>
+<dd><p>represents a single lookup entry</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct reset_control_lookup {
+    struct list_head list;
+    const char *provider;
+    unsigned int index;
+    const char *dev_id;
+    const char *con_id;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">list</span></code></dt><dd><p>internal list of all reset lookup entries</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">provider</span></code></dt><dd><p>name of the reset controller device controlling this reset line</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">index</span></code></dt><dd><p>ID of the reset controller in the reset controller device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dev_id</span></code></dt><dd><p>name of the device associated with this reset line</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">con_id</span></code></dt><dd><p>name of the reset line (can be NULL)</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.reset_controller_dev">
+struct <code class="sig-name descname">reset_controller_dev</code><a class="headerlink" href="#c.reset_controller_dev" title="Permalink to this definition">¶</a></dt>
+<dd><p>reset controller entity that might provide multiple reset controls</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct reset_controller_dev {
+    const struct reset_control_ops *ops;
+    struct module *owner;
+    struct list_head list;
+    struct list_head reset_control_head;
+    struct device *dev;
+    struct device_node *of_node;
+    int of_reset_n_cells;
+    int (*of_xlate)(struct reset_controller_dev *rcdev, const struct of_phandle_args *reset_spec);
+    unsigned int nr_resets;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">ops</span></code></dt><dd><p>a pointer to device specific <a class="reference internal" href="#c.reset_control_ops" title="reset_control_ops"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control_ops</span></code></a></p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">owner</span></code></dt><dd><p>kernel module of the reset controller driver</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">list</span></code></dt><dd><p>internal list of reset controller devices</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">reset_control_head</span></code></dt><dd><p>head of internal list of requested reset controls</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dev</span></code></dt><dd><p>corresponding driver model device struct</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">of_node</span></code></dt><dd><p>corresponding device tree node as phandle target</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">of_reset_n_cells</span></code></dt><dd><p>number of cells in reset line specifiers</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">of_xlate</span></code></dt><dd><p>translation function to translate from specifier as found in the
+device tree to id as given to the reset control ops, defaults
+to <a class="reference internal" href="#c.of_reset_simple_xlate" title="of_reset_simple_xlate"><code class="xref c c-func docutils literal notranslate"><span class="pre">of_reset_simple_xlate()</span></code></a>.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">nr_resets</span></code></dt><dd><p>number of reset controls in this reset controller device</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.of_reset_simple_xlate">
+int <code class="sig-name descname">of_reset_simple_xlate</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.reset_controller_dev" title="reset_controller_dev">reset_controller_dev</a><em> *rcdev</em>, const struct of_phandle_args<em> *reset_spec</em><span class="sig-paren">)</span><a class="headerlink" href="#c.of_reset_simple_xlate" title="Permalink to this definition">¶</a></dt>
+<dd><p>translate reset_spec to the reset line number</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_controller_dev</span> <span class="pre">*rcdev</span></code></dt><dd><p>a pointer to the reset controller device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">struct</span> <span class="pre">of_phandle_args</span> <span class="pre">*reset_spec</span></code></dt><dd><p>reset line specifier as found in the device tree</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This static translation function is used by default if of_xlate in
+<a class="reference internal" href="#c.reset_controller_dev" title="reset_controller_dev"><code class="xref c c-type docutils literal notranslate"><span class="pre">reset_controller_dev</span></code></a> is not set. It is useful for all reset
+controllers with 1:1 mapping, where reset lines can be indexed by number
+without gaps.</p>
+</div>
+<dl class="function">
+<dt id="c.reset_controller_register">
+int <code class="sig-name descname">reset_controller_register</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.reset_controller_dev" title="reset_controller_dev">reset_controller_dev</a><em> *rcdev</em><span class="sig-paren">)</span><a class="headerlink" href="#c.reset_controller_register" title="Permalink to this definition">¶</a></dt>
+<dd><p>register a reset controller device</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_controller_dev</span> <span class="pre">*rcdev</span></code></dt><dd><p>a pointer to the initialized reset controller device</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.reset_controller_unregister">
+void <code class="sig-name descname">reset_controller_unregister</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.reset_controller_dev" title="reset_controller_dev">reset_controller_dev</a><em> *rcdev</em><span class="sig-paren">)</span><a class="headerlink" href="#c.reset_controller_unregister" title="Permalink to this definition">¶</a></dt>
+<dd><p>unregister a reset controller device</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_controller_dev</span> <span class="pre">*rcdev</span></code></dt><dd><p>a pointer to the reset controller device</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.devm_reset_controller_register">
+int <code class="sig-name descname">devm_reset_controller_register</code><span class="sig-paren">(</span>struct <a class="reference internal" href="infrastructure.html#c.device" title="device">device</a><em> *dev</em>, struct <a class="reference internal" href="#c.reset_controller_dev" title="reset_controller_dev">reset_controller_dev</a><em> *rcdev</em><span class="sig-paren">)</span><a class="headerlink" href="#c.devm_reset_controller_register" title="Permalink to this definition">¶</a></dt>
+<dd><p>resource managed <a class="reference internal" href="#c.reset_controller_register" title="reset_controller_register"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_controller_register()</span></code></a></p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>device that is registering this reset controller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_controller_dev</span> <span class="pre">*rcdev</span></code></dt><dd><p>a pointer to the initialized reset controller device</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Managed <a class="reference internal" href="#c.reset_controller_register" title="reset_controller_register"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_controller_register()</span></code></a>. For reset controllers registered by
+this function, <a class="reference internal" href="#c.reset_controller_unregister" title="reset_controller_unregister"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_controller_unregister()</span></code></a> is automatically called on
+driver detach. See <a class="reference internal" href="#c.reset_controller_register" title="reset_controller_register"><code class="xref c c-func docutils literal notranslate"><span class="pre">reset_controller_register()</span></code></a> for more information.</p>
+</div>
+<dl class="function">
+<dt id="c.reset_controller_add_lookup">
+void <code class="sig-name descname">reset_controller_add_lookup</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.reset_control_lookup" title="reset_control_lookup">reset_control_lookup</a><em> *lookup</em>, unsigned int<em> num_entries</em><span class="sig-paren">)</span><a class="headerlink" href="#c.reset_controller_add_lookup" title="Permalink to this definition">¶</a></dt>
+<dd><p>register a set of lookup entries</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">reset_control_lookup</span> <span class="pre">*lookup</span></code></dt><dd><p>array of reset lookup entries</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">num_entries</span></code></dt><dd><p>number of entries in the lookup array</p>
+</dd>
+</dl>
+</div>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Reset controller API</a><ul>
+<li><a class="reference internal" href="#introduction">Introduction</a><ul>
+<li><a class="reference internal" href="#glossary">Glossary</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#consumer-driver-interface">Consumer driver interface</a><ul>
+<li><a class="reference internal" href="#shared-and-exclusive-resets">Shared and exclusive resets</a></li>
+<li><a class="reference internal" href="#assertion-and-deassertion">Assertion and deassertion</a></li>
+<li><a class="reference internal" href="#triggering">Triggering</a></li>
+<li><a class="reference internal" href="#querying">Querying</a></li>
+<li><a class="reference internal" href="#optional-resets">Optional resets</a></li>
+<li><a class="reference internal" href="#reset-control-arrays">Reset control arrays</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#reset-controller-driver-interface">Reset controller driver interface</a><ul>
+<li><a class="reference internal" href="#initialization">Initialization</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#api-reference">API reference</a><ul>
+<li><a class="reference internal" href="#reset-consumer-api">Reset consumer API</a></li>
+<li><a class="reference internal" href="#reset-controller-driver-api">Reset controller driver API</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/driver-api/reset.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/driver-api/reset.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

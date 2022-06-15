@@ -1,0 +1,208 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>BPF_PROG_TYPE_CGROUP_SOCKOPT &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="BPF_PROG_TYPE_CGROUP_SYSCTL" href="prog_cgroup_sysctl.html" />
+    <link rel="prev" title="Program Types" href="programs.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="bpf-prog-type-cgroup-sockopt">
+<h1>BPF_PROG_TYPE_CGROUP_SOCKOPT<a class="headerlink" href="#bpf-prog-type-cgroup-sockopt" title="Permalink to this headline">¶</a></h1>
+<p><code class="docutils literal notranslate"><span class="pre">BPF_PROG_TYPE_CGROUP_SOCKOPT</span></code> program type can be attached to two
+cgroup hooks:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">BPF_CGROUP_GETSOCKOPT</span></code> - called every time process executes <code class="docutils literal notranslate"><span class="pre">getsockopt</span></code>
+system call.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">BPF_CGROUP_SETSOCKOPT</span></code> - called every time process executes <code class="docutils literal notranslate"><span class="pre">setsockopt</span></code>
+system call.</p></li>
+</ul>
+<p>The context (<code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">bpf_sockopt</span></code>) has associated socket (<code class="docutils literal notranslate"><span class="pre">sk</span></code>) and
+all input arguments: <code class="docutils literal notranslate"><span class="pre">level</span></code>, <code class="docutils literal notranslate"><span class="pre">optname</span></code>, <code class="docutils literal notranslate"><span class="pre">optval</span></code> and <code class="docutils literal notranslate"><span class="pre">optlen</span></code>.</p>
+<section id="bpf-cgroup-setsockopt">
+<h2>BPF_CGROUP_SETSOCKOPT<a class="headerlink" href="#bpf-cgroup-setsockopt" title="Permalink to this headline">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">BPF_CGROUP_SETSOCKOPT</span></code> is triggered <em>before</em> the kernel handling of
+sockopt and it has writable context: it can modify the supplied arguments
+before passing them down to the kernel. This hook has access to the cgroup
+and socket local storage.</p>
+<p>If BPF program sets <code class="docutils literal notranslate"><span class="pre">optlen</span></code> to -1, the control will be returned
+back to the userspace after all other BPF programs in the cgroup
+chain finish (i.e. kernel <code class="docutils literal notranslate"><span class="pre">setsockopt</span></code> handling will <em>not</em> be executed).</p>
+<p>Note, that <code class="docutils literal notranslate"><span class="pre">optlen</span></code> can not be increased beyond the user-supplied
+value. It can only be decreased or set to -1. Any other value will
+trigger <code class="docutils literal notranslate"><span class="pre">EFAULT</span></code>.</p>
+<section id="return-type">
+<h3>Return Type<a class="headerlink" href="#return-type" title="Permalink to this headline">¶</a></h3>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">0</span></code> - reject the syscall, <code class="docutils literal notranslate"><span class="pre">EPERM</span></code> will be returned to the userspace.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">1</span></code> - success, continue with next BPF program in the cgroup chain.</p></li>
+</ul>
+</section>
+</section>
+<section id="bpf-cgroup-getsockopt">
+<h2>BPF_CGROUP_GETSOCKOPT<a class="headerlink" href="#bpf-cgroup-getsockopt" title="Permalink to this headline">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">BPF_CGROUP_GETSOCKOPT</span></code> is triggered <em>after</em> the kernel handing of
+sockopt. The BPF hook can observe <code class="docutils literal notranslate"><span class="pre">optval</span></code>, <code class="docutils literal notranslate"><span class="pre">optlen</span></code> and <code class="docutils literal notranslate"><span class="pre">retval</span></code>
+if it’s interested in whatever kernel has returned. BPF hook can override
+the values above, adjust <code class="docutils literal notranslate"><span class="pre">optlen</span></code> and reset <code class="docutils literal notranslate"><span class="pre">retval</span></code> to 0. If <code class="docutils literal notranslate"><span class="pre">optlen</span></code>
+has been increased above initial <code class="docutils literal notranslate"><span class="pre">getsockopt</span></code> value (i.e. userspace
+buffer is too small), <code class="docutils literal notranslate"><span class="pre">EFAULT</span></code> is returned.</p>
+<p>This hook has access to the cgroup and socket local storage.</p>
+<p>Note, that the only acceptable value to set to <code class="docutils literal notranslate"><span class="pre">retval</span></code> is 0 and the
+original value that the kernel returned. Any other value will trigger
+<code class="docutils literal notranslate"><span class="pre">EFAULT</span></code>.</p>
+<section id="id1">
+<h3>Return Type<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h3>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">0</span></code> - reject the syscall, <code class="docutils literal notranslate"><span class="pre">EPERM</span></code> will be returned to the userspace.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">1</span></code> - success: copy <code class="docutils literal notranslate"><span class="pre">optval</span></code> and <code class="docutils literal notranslate"><span class="pre">optlen</span></code> to userspace, return
+<code class="docutils literal notranslate"><span class="pre">retval</span></code> from the syscall (note that this can be overwritten by
+the BPF program from the parent cgroup).</p></li>
+</ul>
+</section>
+</section>
+<section id="cgroup-inheritance">
+<h2>Cgroup Inheritance<a class="headerlink" href="#cgroup-inheritance" title="Permalink to this headline">¶</a></h2>
+<p>Suppose, there is the following cgroup hierarchy where each cgroup
+has <code class="docutils literal notranslate"><span class="pre">BPF_CGROUP_GETSOCKOPT</span></code> attached at each level with
+<code class="docutils literal notranslate"><span class="pre">BPF_F_ALLOW_MULTI</span></code> flag:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>A (root, parent)
+ \
+  B (child)
+</pre></div>
+</div>
+<p>When the application calls <code class="docutils literal notranslate"><span class="pre">getsockopt</span></code> syscall from the cgroup B,
+the programs are executed from the bottom up: B, A. First program
+(B) sees the result of kernel’s <code class="docutils literal notranslate"><span class="pre">getsockopt</span></code>. It can optionally
+adjust <code class="docutils literal notranslate"><span class="pre">optval</span></code>, <code class="docutils literal notranslate"><span class="pre">optlen</span></code> and reset <code class="docutils literal notranslate"><span class="pre">retval</span></code> to 0. After that
+control will be passed to the second (A) program which will see the
+same context as B including any potential modifications.</p>
+<p>Same for <code class="docutils literal notranslate"><span class="pre">BPF_CGROUP_SETSOCKOPT</span></code>: if the program is attached to
+A and B, the trigger order is B, then A. If B does any changes
+to the input arguments (<code class="docutils literal notranslate"><span class="pre">level</span></code>, <code class="docutils literal notranslate"><span class="pre">optname</span></code>, <code class="docutils literal notranslate"><span class="pre">optval</span></code>, <code class="docutils literal notranslate"><span class="pre">optlen</span></code>),
+then the next program in the chain (A) will see those changes,
+<em>not</em> the original input <code class="docutils literal notranslate"><span class="pre">setsockopt</span></code> arguments. The potentially
+modified values will be then passed down to the kernel.</p>
+</section>
+<section id="large-optval">
+<h2>Large optval<a class="headerlink" href="#large-optval" title="Permalink to this headline">¶</a></h2>
+<p>When the <code class="docutils literal notranslate"><span class="pre">optval</span></code> is greater than the <code class="docutils literal notranslate"><span class="pre">PAGE_SIZE</span></code>, the BPF program
+can access only the first <code class="docutils literal notranslate"><span class="pre">PAGE_SIZE</span></code> of that data. So it has to options:</p>
+<ul class="simple">
+<li><p>Set <code class="docutils literal notranslate"><span class="pre">optlen</span></code> to zero, which indicates that the kernel should
+use the original buffer from the userspace. Any modifications
+done by the BPF program to the <code class="docutils literal notranslate"><span class="pre">optval</span></code> are ignored.</p></li>
+<li><p>Set <code class="docutils literal notranslate"><span class="pre">optlen</span></code> to the value less than <code class="docutils literal notranslate"><span class="pre">PAGE_SIZE</span></code>, which
+indicates that the kernel should use BPF’s trimmed <code class="docutils literal notranslate"><span class="pre">optval</span></code>.</p></li>
+</ul>
+<p>When the BPF program returns with the <code class="docutils literal notranslate"><span class="pre">optlen</span></code> greater than
+<code class="docutils literal notranslate"><span class="pre">PAGE_SIZE</span></code>, the userspace will receive <code class="docutils literal notranslate"><span class="pre">EFAULT</span></code> errno.</p>
+</section>
+<section id="example">
+<h2>Example<a class="headerlink" href="#example" title="Permalink to this headline">¶</a></h2>
+<p>See <code class="docutils literal notranslate"><span class="pre">tools/testing/selftests/bpf/progs/sockopt_sk.c</span></code> for an example
+of BPF program that handles socket options.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">BPF_PROG_TYPE_CGROUP_SOCKOPT</a><ul>
+<li><a class="reference internal" href="#bpf-cgroup-setsockopt">BPF_CGROUP_SETSOCKOPT</a><ul>
+<li><a class="reference internal" href="#return-type">Return Type</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#bpf-cgroup-getsockopt">BPF_CGROUP_GETSOCKOPT</a><ul>
+<li><a class="reference internal" href="#id1">Return Type</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#cgroup-inheritance">Cgroup Inheritance</a></li>
+<li><a class="reference internal" href="#large-optval">Large optval</a></li>
+<li><a class="reference internal" href="#example">Example</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/bpf/prog_cgroup_sockopt.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/bpf/prog_cgroup_sockopt.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

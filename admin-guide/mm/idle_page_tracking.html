@@ -1,0 +1,204 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Idle Page Tracking &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Kernel Samepage Merging" href="ksm.html" />
+    <link rel="prev" title="HugeTLB Pages" href="hugetlbpage.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="idle-page-tracking">
+<span id="id1"></span><h1>Idle Page Tracking<a class="headerlink" href="#idle-page-tracking" title="Permalink to this headline">¶</a></h1>
+<section id="motivation">
+<h2>Motivation<a class="headerlink" href="#motivation" title="Permalink to this headline">¶</a></h2>
+<p>The idle page tracking feature allows to track which memory pages are being
+accessed by a workload and which are idle. This information can be useful for
+estimating the workload’s working set size, which, in turn, can be taken into
+account when configuring the workload parameters, setting memory cgroup limits,
+or deciding where to place the workload within a compute cluster.</p>
+<p>It is enabled by CONFIG_IDLE_PAGE_TRACKING=y.</p>
+</section>
+<section id="user-api">
+<span id="id2"></span><h2>User API<a class="headerlink" href="#user-api" title="Permalink to this headline">¶</a></h2>
+<p>The idle page tracking API is located at <code class="docutils literal notranslate"><span class="pre">/sys/kernel/mm/page_idle</span></code>.
+Currently, it consists of the only read-write file,
+<code class="docutils literal notranslate"><span class="pre">/sys/kernel/mm/page_idle/bitmap</span></code>.</p>
+<p>The file implements a bitmap where each bit corresponds to a memory page. The
+bitmap is represented by an array of 8-byte integers, and the page at PFN #i is
+mapped to bit #i%64 of array element #i/64, byte order is native. When a bit is
+set, the corresponding page is idle.</p>
+<p>A page is considered idle if it has not been accessed since it was marked idle
+(for more details on what “accessed” actually means see the <a class="reference internal" href="#impl-details"><span class="std std-ref">Implementation
+Details</span></a> section).
+To mark a page idle one has to set the bit corresponding to
+the page by writing to the file. A value written to the file is OR-ed with the
+current bitmap value.</p>
+<p>Only accesses to user memory pages are tracked. These are pages mapped to a
+process address space, page cache and buffer pages, swap cache pages. For other
+page types (e.g. SLAB pages) an attempt to mark a page idle is silently ignored,
+and hence such pages are never reported idle.</p>
+<p>For huge pages the idle flag is set only on the head page, so one has to read
+<code class="docutils literal notranslate"><span class="pre">/proc/kpageflags</span></code> in order to correctly count idle huge pages.</p>
+<p>Reading from or writing to <code class="docutils literal notranslate"><span class="pre">/sys/kernel/mm/page_idle/bitmap</span></code> will return
+-EINVAL if you are not starting the read/write on an 8-byte boundary, or
+if the size of the read/write is not a multiple of 8 bytes. Writing to
+this file beyond max PFN will return -ENXIO.</p>
+<p>That said, in order to estimate the amount of pages that are not used by a
+workload one should:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>Mark all the workload’s pages as idle by setting corresponding bits in
+<code class="docutils literal notranslate"><span class="pre">/sys/kernel/mm/page_idle/bitmap</span></code>. The pages can be found by reading
+<code class="docutils literal notranslate"><span class="pre">/proc/pid/pagemap</span></code> if the workload is represented by a process, or by
+filtering out alien pages using <code class="docutils literal notranslate"><span class="pre">/proc/kpagecgroup</span></code> in case the workload
+is placed in a memory cgroup.</p></li>
+<li><p>Wait until the workload accesses its working set.</p></li>
+<li><p>Read <code class="docutils literal notranslate"><span class="pre">/sys/kernel/mm/page_idle/bitmap</span></code> and count the number of bits set.
+If one wants to ignore certain types of pages, e.g. mlocked pages since they
+are not reclaimable, he or she can filter them out using
+<code class="docutils literal notranslate"><span class="pre">/proc/kpageflags</span></code>.</p></li>
+</ol>
+</div></blockquote>
+<p>The page-types tool in the tools/vm directory can be used to assist in this.
+If the tool is run initially with the appropriate option, it will mark all the
+queried pages as idle.  Subsequent runs of the tool can then show which pages have
+their idle flag cleared in the interim.</p>
+<p>See <a class="reference internal" href="pagemap.html#pagemap"><span class="std std-ref">Documentation/admin-guide/mm/pagemap.rst</span></a> for more
+information about <code class="docutils literal notranslate"><span class="pre">/proc/pid/pagemap</span></code>, <code class="docutils literal notranslate"><span class="pre">/proc/kpageflags</span></code>, and
+<code class="docutils literal notranslate"><span class="pre">/proc/kpagecgroup</span></code>.</p>
+</section>
+<section id="implementation-details">
+<span id="impl-details"></span><h2>Implementation Details<a class="headerlink" href="#implementation-details" title="Permalink to this headline">¶</a></h2>
+<p>The kernel internally keeps track of accesses to user memory pages in order to
+reclaim unreferenced pages first on memory shortage conditions. A page is
+considered referenced if it has been recently accessed via a process address
+space, in which case one or more PTEs it is mapped to will have the Accessed bit
+set, or marked accessed explicitly by the kernel (see mark_page_accessed()). The
+latter happens when:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>a userspace process reads or writes a page using a system call (e.g. read(2)
+or write(2))</p></li>
+<li><p>a page that is used for storing filesystem buffers is read or written,
+because a process needs filesystem metadata stored in it (e.g. lists a
+directory tree)</p></li>
+<li><p>a page is accessed by a device driver using get_user_pages()</p></li>
+</ul>
+</div></blockquote>
+<p>When a dirty page is written to swap or disk as a result of memory reclaim or
+exceeding the dirty memory limit, it is not marked referenced.</p>
+<p>The idle memory tracking feature adds a new page flag, the Idle flag. This flag
+is set manually, by writing to <code class="docutils literal notranslate"><span class="pre">/sys/kernel/mm/page_idle/bitmap</span></code> (see the
+<a class="reference internal" href="#user-api"><span class="std std-ref">User API</span></a>
+section), and cleared automatically whenever a page is referenced as defined
+above.</p>
+<p>When a page is marked idle, the Accessed bit must be cleared in all PTEs it is
+mapped to, otherwise we will not be able to detect accesses to the page coming
+from a process address space. To avoid interference with the reclaimer, which,
+as noted above, uses the Accessed bit to promote actively referenced pages, one
+more page flag is introduced, the Young flag. When the PTE Accessed bit is
+cleared as a result of setting or updating a page’s Idle flag, the Young flag
+is set on the page. The reclaimer treats the Young flag as an extra PTE
+Accessed bit and therefore will consider such a page as referenced.</p>
+<p>Since the idle memory tracking feature is based on the memory reclaimer logic,
+it only works with pages that are on an LRU list, other pages are silently
+ignored. That means it will ignore a user memory page if it is isolated, but
+since there are usually not many of them, it should not affect the overall
+result noticeably. In order not to stall scanning of the idle page bitmap,
+locked pages may be skipped too.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Idle Page Tracking</a><ul>
+<li><a class="reference internal" href="#motivation">Motivation</a></li>
+<li><a class="reference internal" href="#user-api">User API</a></li>
+<li><a class="reference internal" href="#implementation-details">Implementation Details</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/admin-guide/mm/idle_page_tracking.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/admin-guide/mm/idle_page_tracking.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

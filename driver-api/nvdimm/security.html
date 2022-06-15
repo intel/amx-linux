@@ -1,0 +1,235 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>NVDIMM Security &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="NVDIMM Runtime Firmware Activation" href="firmware-activate.html" />
+    <link rel="prev" title="BTT - Block Translation Table" href="btt.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="nvdimm-security">
+<h1>NVDIMM Security<a class="headerlink" href="#nvdimm-security" title="Permalink to this headline">¶</a></h1>
+<section id="introduction">
+<h2>1. Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>With the introduction of Intel Device Specific Methods (DSM) v1.8
+specification [1], security DSMs are introduced. The spec added the following
+security DSMs: “get security state”, “set passphrase”, “disable passphrase”,
+“unlock unit”, “freeze lock”, “secure erase”, and “overwrite”. A security_ops
+data structure has been added to struct dimm in order to support the security
+operations and generic APIs are exposed to allow vendor neutral operations.</p>
+</section>
+<section id="sysfs-interface">
+<h2>2. Sysfs Interface<a class="headerlink" href="#sysfs-interface" title="Permalink to this headline">¶</a></h2>
+<p>The “security” sysfs attribute is provided in the nvdimm sysfs directory. For
+example:
+/sys/devices/LNXSYSTM:00/LNXSYBUS:00/ACPI0012:00/ndbus0/nmem0/security</p>
+<p>The “show” attribute of that attribute will display the security state for
+that DIMM. The following states are available: disabled, unlocked, locked,
+frozen, and overwrite. If security is not supported, the sysfs attribute
+will not be visible.</p>
+<p>The “store” attribute takes several commands when it is being written to
+in order to support some of the security functionalities:
+update &lt;old_keyid&gt; &lt;new_keyid&gt; - enable or update passphrase.
+disable &lt;keyid&gt; - disable enabled security and remove key.
+freeze - freeze changing of security states.
+erase &lt;keyid&gt; - delete existing user encryption key.
+overwrite &lt;keyid&gt; - wipe the entire nvdimm.
+master_update &lt;keyid&gt; &lt;new_keyid&gt; - enable or update master passphrase.
+master_erase &lt;keyid&gt; - delete existing user encryption key.</p>
+</section>
+<section id="key-management">
+<h2>3. Key Management<a class="headerlink" href="#key-management" title="Permalink to this headline">¶</a></h2>
+<p>The key is associated to the payload by the DIMM id. For example:
+# cat /sys/devices/LNXSYSTM:00/LNXSYBUS:00/ACPI0012:00/ndbus0/nmem0/nfit/id
+8089-a2-1740-00000133
+The DIMM id would be provided along with the key payload (passphrase) to
+the kernel.</p>
+<p>The security keys are managed on the basis of a single key per DIMM. The
+key “passphrase” is expected to be 32bytes long. This is similar to the ATA
+security specification [2]. A key is initially acquired via the request_key()
+kernel API call during nvdimm unlock. It is up to the user to make sure that
+all the keys are in the kernel user keyring for unlock.</p>
+<p>A nvdimm encrypted-key of format enc32 has the description format of:
+nvdimm:&lt;bus-provider-specific-unique-id&gt;</p>
+<p>See file <code class="docutils literal notranslate"><span class="pre">Documentation/security/keys/trusted-encrypted.rst</span></code> for creating
+encrypted-keys of enc32 format. TPM usage with a master trusted key is
+preferred for sealing the encrypted-keys.</p>
+</section>
+<section id="unlocking">
+<h2>4. Unlocking<a class="headerlink" href="#unlocking" title="Permalink to this headline">¶</a></h2>
+<p>When the DIMMs are being enumerated by the kernel, the kernel will attempt to
+retrieve the key from the kernel user keyring. This is the only time
+a locked DIMM can be unlocked. Once unlocked, the DIMM will remain unlocked
+until reboot. Typically an entity (i.e. shell script) will inject all the
+relevant encrypted-keys into the kernel user keyring during the initramfs phase.
+This provides the unlock function access to all the related keys that contain
+the passphrase for the respective nvdimms.  It is also recommended that the
+keys are injected before libnvdimm is loaded by modprobe.</p>
+</section>
+<section id="update">
+<h2>5. Update<a class="headerlink" href="#update" title="Permalink to this headline">¶</a></h2>
+<p>When doing an update, it is expected that the existing key is removed from
+the kernel user keyring and reinjected as different (old) key. It’s irrelevant
+what the key description is for the old key since we are only interested in the
+keyid when doing the update operation. It is also expected that the new key
+is injected with the description format described from earlier in this
+document.  The update command written to the sysfs attribute will be with
+the format:
+update &lt;old keyid&gt; &lt;new keyid&gt;</p>
+<p>If there is no old keyid due to a security enabling, then a 0 should be
+passed in.</p>
+</section>
+<section id="freeze">
+<h2>6. Freeze<a class="headerlink" href="#freeze" title="Permalink to this headline">¶</a></h2>
+<p>The freeze operation does not require any keys. The security config can be
+frozen by a user with root privelege.</p>
+</section>
+<section id="disable">
+<h2>7. Disable<a class="headerlink" href="#disable" title="Permalink to this headline">¶</a></h2>
+<p>The security disable command format is:
+disable &lt;keyid&gt;</p>
+<p>An key with the current passphrase payload that is tied to the nvdimm should be
+in the kernel user keyring.</p>
+</section>
+<section id="secure-erase">
+<h2>8. Secure Erase<a class="headerlink" href="#secure-erase" title="Permalink to this headline">¶</a></h2>
+<p>The command format for doing a secure erase is:
+erase &lt;keyid&gt;</p>
+<p>An key with the current passphrase payload that is tied to the nvdimm should be
+in the kernel user keyring.</p>
+</section>
+<section id="overwrite">
+<h2>9. Overwrite<a class="headerlink" href="#overwrite" title="Permalink to this headline">¶</a></h2>
+<p>The command format for doing an overwrite is:
+overwrite &lt;keyid&gt;</p>
+<p>Overwrite can be done without a key if security is not enabled. A key serial
+of 0 can be passed in to indicate no key.</p>
+<p>The sysfs attribute “security” can be polled to wait on overwrite completion.
+Overwrite can last tens of minutes or more depending on nvdimm size.</p>
+<p>An encrypted-key with the current user passphrase that is tied to the nvdimm
+should be injected and its keyid should be passed in via sysfs.</p>
+</section>
+<section id="master-update">
+<h2>10. Master Update<a class="headerlink" href="#master-update" title="Permalink to this headline">¶</a></h2>
+<p>The command format for doing a master update is:
+update &lt;old keyid&gt; &lt;new keyid&gt;</p>
+<p>The operating mechanism for master update is identical to update except the
+master passphrase key is passed to the kernel. The master passphrase key
+is just another encrypted-key.</p>
+<p>This command is only available when security is disabled.</p>
+</section>
+<section id="master-erase">
+<h2>11. Master Erase<a class="headerlink" href="#master-erase" title="Permalink to this headline">¶</a></h2>
+<p>The command format for doing a master erase is:
+master_erase &lt;current keyid&gt;</p>
+<p>This command has the same operating mechanism as erase except the master
+passphrase key is passed to the kernel. The master passphrase key is just
+another encrypted-key.</p>
+<p>This command is only available when the master security is enabled, indicated
+by the extended security status.</p>
+<p>[1]: <a class="reference external" href="https://pmem.io/documents/NVDIMM_DSM_Interface-V1.8.pdf">https://pmem.io/documents/NVDIMM_DSM_Interface-V1.8.pdf</a></p>
+<p>[2]: <a class="reference external" href="http://www.t13.org/documents/UploadedDocuments/docs2006/e05179r4-ACS-SecurityClarifications.pdf">http://www.t13.org/documents/UploadedDocuments/docs2006/e05179r4-ACS-SecurityClarifications.pdf</a></p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">NVDIMM Security</a><ul>
+<li><a class="reference internal" href="#introduction">1. Introduction</a></li>
+<li><a class="reference internal" href="#sysfs-interface">2. Sysfs Interface</a></li>
+<li><a class="reference internal" href="#key-management">3. Key Management</a></li>
+<li><a class="reference internal" href="#unlocking">4. Unlocking</a></li>
+<li><a class="reference internal" href="#update">5. Update</a></li>
+<li><a class="reference internal" href="#freeze">6. Freeze</a></li>
+<li><a class="reference internal" href="#disable">7. Disable</a></li>
+<li><a class="reference internal" href="#secure-erase">8. Secure Erase</a></li>
+<li><a class="reference internal" href="#overwrite">9. Overwrite</a></li>
+<li><a class="reference internal" href="#master-update">10. Master Update</a></li>
+<li><a class="reference internal" href="#master-erase">11. Master Erase</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/nvdimm/security.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/nvdimm/security.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

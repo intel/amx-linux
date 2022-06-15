@@ -1,0 +1,265 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>29. In-Field Scan &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="30. Shared Virtual Addressing (SVA) with ENQCMD" href="sva.html" />
+    <link rel="prev" title="28.8. Using FS and GS segments in user space applications" href="x86_64/fsgs.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <p id="in-field-scan"><strong>In-Field Scan</strong></p>
+<section id="id1">
+<h1><span class="section-number">29. </span>In-Field Scan<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h1>
+<section id="introduction">
+<h2><span class="section-number">29.1. </span>Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>In Field Scan (IFS) is a hardware feature to run circuit level tests on
+a CPU core to detect problems that are not caught by parity or ECC checks.
+Future CPUs will support more than one type of test which will show up
+with a new platform-device instance-id, for now only .0 is exposed.</p>
+</section>
+<section id="ifs-image">
+<h2><span class="section-number">29.2. </span>IFS Image<a class="headerlink" href="#ifs-image" title="Permalink to this headline">¶</a></h2>
+<p>Intel provides a firmware file containing the scan tests via
+github <a class="footnote-reference brackets" href="#f1" id="id2">1</a>.  Similar to microcode there is a separate file for each
+family-model-stepping.</p>
+</section>
+<section id="ifs-image-loading">
+<h2><span class="section-number">29.3. </span>IFS Image Loading<a class="headerlink" href="#ifs-image-loading" title="Permalink to this headline">¶</a></h2>
+<p>The driver loads the tests into memory reserved BIOS local to each CPU
+socket in a two step process using writes to MSRs to first load the
+SHA hashes for the test. Then the tests themselves. Status MSRs provide
+feedback on the success/failure of these steps.</p>
+<p>The test files are kept in a fixed location: /lib/firmware/intel/ifs_0/
+For e.g if there are 3 test files, they would be named in the following
+fashion:
+ff-mm-ss-01.scan
+ff-mm-ss-02.scan
+ff-mm-ss-03.scan
+(where ff refers to family, mm indicates model and ss indicates stepping)</p>
+<p>A different test file can be loaded by writing the numerical portion
+(e.g 1, 2 or 3 in the above scenario) into the curent_batch file.
+To load ff-mm-ss-02.scan, the following command can be used:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># echo 2 &gt; /sys/devices/virtual/misc/intel_ifs_0/current_batch
+</pre></div>
+</div>
+<p>The above file can also be read to know the currently loaded image.</p>
+</section>
+<section id="running-tests">
+<h2><span class="section-number">29.4. </span>Running tests<a class="headerlink" href="#running-tests" title="Permalink to this headline">¶</a></h2>
+<p>Tests are run by the driver synchronizing execution of all threads on a
+core and then writing to the ACTIVATE_SCAN MSR on all threads. Instruction
+execution continues when:</p>
+<ol class="arabic simple">
+<li><p>All tests have completed.</p></li>
+<li><p>Execution was interrupted.</p></li>
+<li><p>A test detected a problem.</p></li>
+</ol>
+<p>Note that ALL THREADS ON THE CORE ARE EFFECTIVELY OFFLINE FOR THE
+DURATION OF THE TEST. This can be up to 200 milliseconds. If the system
+is running latency sensitive applications that cannot tolerate an
+interruption of this magnitude, the system administrator must arrange
+to migrate those applications to other cores before running a core test.
+It may also be necessary to redirect interrupts to other CPUs.</p>
+<p>In all cases reading the SCAN_STATUS MSR provides details on what
+happened. The driver makes the value of this MSR visible to applications
+via the “details” file (see below). Interrupted tests may be restarted.</p>
+<p>The IFS driver provides sysfs interfaces via /sys/devices/virtual/misc/intel_ifs_0/
+to control execution:</p>
+<p>Test a specific core:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># echo &lt;cpu#&gt; &gt; /sys/devices/virtual/misc/intel_ifs_0/run_test
+</pre></div>
+</div>
+<p>when HT is enabled any of the sibling cpu# can be specified to test
+its corresponding physical core. Since the tests are per physical core,
+the result of testing any thread is same. All siblings must be online
+to run a core test. It is only necessary to test one thread.</p>
+<p>For e.g. to test core corresponding to cpu5</p>
+<blockquote>
+<div><p># echo 5 &gt; /sys/devices/virtual/misc/intel_ifs_0/run_test</p>
+</div></blockquote>
+<p>Results of the last test is provided in /sys:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ cat /sys/devices/virtual/misc/intel_ifs_0/status
+pass
+</pre></div>
+</div>
+<p>Status can be one of pass, fail, untested</p>
+<p>Additional details of the last test is provided by the details file:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ cat /sys/devices/virtual/misc/intel_ifs_0/details
+0x8081
+</pre></div>
+</div>
+<p>The details file reports the hex value of the SCAN_STATUS MSR.
+Hardware defined error codes are documented in volume 4 of the Intel
+Software Developer’s Manual but the error_code field may contain one of
+the following driver defined software codes:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 23%" />
+<col style="width: 77%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>0xFD</p></td>
+<td><p>Software timeout</p></td>
+</tr>
+<tr class="row-even"><td><p>0xFE</p></td>
+<td><p>Partial completion</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="driver-design-choices">
+<h2><span class="section-number">29.5. </span>Driver design choices<a class="headerlink" href="#driver-design-choices" title="Permalink to this headline">¶</a></h2>
+<p>1) The ACTIVATE_SCAN MSR allows for running any consecutive subrange of
+available tests. But the driver always tries to run all tests and only
+uses the subrange feature to restart an interrupted test.</p>
+<p>2) Hardware allows for some number of cores to be tested in parallel.
+The driver does not make use of this, it only tests one core at a time.</p>
+<dl class="footnote brackets">
+<dt class="label" id="f1"><span class="brackets"><a class="fn-backref" href="#id2">1</a></span></dt>
+<dd><p><a class="reference external" href="https://github.com/intel/TBD">https://github.com/intel/TBD</a></p>
+</dd>
+</dl>
+<dl class="type">
+<dt id="c.ifs_data">
+struct <code class="sig-name descname">ifs_data</code><a class="headerlink" href="#c.ifs_data" title="Permalink to this definition">¶</a></dt>
+<dd><p>attributes related to intel IFS driver</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct ifs_data {
+    int integrity_cap_bit;
+    bool *pkg_auth;
+    int loaded_version;
+    bool loaded;
+    bool loading_error;
+    int valid_chunks;
+    int status;
+    u64 scan_details;
+    u32 cur_batch;
+    int test_num;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">integrity_cap_bit</span></code></dt><dd><p>MSR_INTEGRITY_CAPS bit enumerating this test</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">pkg_auth</span></code></dt><dd><p>array of bool storing per package auth status</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">loaded_version</span></code></dt><dd><p>stores the currently loaded ifs image version.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">loaded</span></code></dt><dd><p>If a valid test binary has been loaded into the memory</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">loading_error</span></code></dt><dd><p>Error occurred on another CPU while loading image</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">valid_chunks</span></code></dt><dd><p>number of chunks which could be validated.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">status</span></code></dt><dd><p>it holds simple status pass/fail/untested</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">scan_details</span></code></dt><dd><p>opaque scan status code from h/w</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">cur_batch</span></code></dt><dd><p>number indicating the currently loaded test file</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">test_num</span></code></dt><dd><p>number indicating the test type</p>
+</dd>
+</dl>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">29. In-Field Scan</a><ul>
+<li><a class="reference internal" href="#introduction">29.1. Introduction</a></li>
+<li><a class="reference internal" href="#ifs-image">29.2. IFS Image</a></li>
+<li><a class="reference internal" href="#ifs-image-loading">29.3. IFS Image Loading</a></li>
+<li><a class="reference internal" href="#running-tests">29.4. Running tests</a></li>
+<li><a class="reference internal" href="#driver-design-choices">29.5. Driver design choices</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/x86/ifs.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/x86/ifs.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

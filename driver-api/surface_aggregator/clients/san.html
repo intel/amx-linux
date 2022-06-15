@@ -1,0 +1,216 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Surface ACPI Notify &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="Surface Serial Hub Protocol" href="../ssh.html" />
+    <link rel="prev" title="User-Space DTX (Clipboard Detachment System) Interface" href="dtx.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="surface-acpi-notify">
+<h1>Surface ACPI Notify<a class="headerlink" href="#surface-acpi-notify" title="Permalink to this headline">¶</a></h1>
+<p>The Surface ACPI Notify (SAN) device provides the bridge between ACPI and
+SAM controller. Specifically, ACPI code can execute requests and handle
+battery and thermal events via this interface. In addition to this, events
+relating to the discrete GPU (dGPU) of the Surface Book 2 can be sent from
+ACPI code (note: the Surface Book 3 uses a different method for this). The
+only currently known event sent via this interface is a dGPU power-on
+notification. While this driver handles the former part internally, it only
+relays the dGPU events to any other driver interested via its public API and
+does not handle them.</p>
+<p>The public interface of this driver is split into two parts: Client
+registration and notifier-block registration.</p>
+<p>A client to the SAN interface can be linked as consumer to the SAN device
+via <a class="reference internal" href="#c.san_client_link" title="san_client_link"><code class="xref c c-func docutils literal notranslate"><span class="pre">san_client_link()</span></code></a>. This can be used to ensure that the a client
+receiving dGPU events does not miss any events due to the SAN interface not
+being set up as this forces the client driver to unbind once the SAN driver
+is unbound.</p>
+<p>Notifier-blocks can be registered by any device for as long as the module is
+loaded, regardless of being linked as client or not. Registration is done
+with <a class="reference internal" href="#c.san_dgpu_notifier_register" title="san_dgpu_notifier_register"><code class="xref c c-func docutils literal notranslate"><span class="pre">san_dgpu_notifier_register()</span></code></a>. If the notifier is not needed any more, it
+should be unregistered via <a class="reference internal" href="#c.san_dgpu_notifier_unregister" title="san_dgpu_notifier_unregister"><code class="xref c c-func docutils literal notranslate"><span class="pre">san_dgpu_notifier_unregister()</span></code></a>.</p>
+<p>Consult the API documentation below for more details.</p>
+<section id="api-documentation">
+<h2>API Documentation<a class="headerlink" href="#api-documentation" title="Permalink to this headline">¶</a></h2>
+<dl class="type">
+<dt id="c.san_dgpu_event">
+struct <code class="sig-name descname">san_dgpu_event</code><a class="headerlink" href="#c.san_dgpu_event" title="Permalink to this definition">¶</a></dt>
+<dd><p>Discrete GPU ACPI event.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct san_dgpu_event {
+    u8 category;
+    u8 target;
+    u8 command;
+    u8 instance;
+    u16 length;
+    u8 *payload;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">category</span></code></dt><dd><p>Category of the event.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">target</span></code></dt><dd><p>Target ID of the event source.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">command</span></code></dt><dd><p>Command ID of the event.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">instance</span></code></dt><dd><p>Instance ID of the event source.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">length</span></code></dt><dd><p>Length of the event’s payload data (in bytes).</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">payload</span></code></dt><dd><p>Pointer to the event’s payload data.</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.san_client_link">
+int <code class="sig-name descname">san_client_link</code><span class="sig-paren">(</span>struct <a class="reference internal" href="../../infrastructure.html#c.device" title="device">device</a><em> *client</em><span class="sig-paren">)</span><a class="headerlink" href="#c.san_client_link" title="Permalink to this definition">¶</a></dt>
+<dd><p>Link client as consumer to SAN device.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*client</span></code></dt><dd><p>The client to link.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Sets up a device link between the provided client device as consumer and
+the SAN device as provider. This function can be used to ensure that the
+SAN interface has been set up and will be set up for as long as the driver
+of the client device is bound. This guarantees that, during that time, all
+dGPU events will be received by any registered notifier.</p>
+<p>The link will be automatically removed once the client device’s driver is
+unbound.</p>
+<p><strong>Return</strong></p>
+<p>Returns zero on success, <code class="docutils literal notranslate"><span class="pre">-ENXIO</span></code> if the SAN interface has not been
+set up yet, and <code class="docutils literal notranslate"><span class="pre">-ENOMEM</span></code> if device link creation failed.</p>
+</div>
+<dl class="function">
+<dt id="c.san_dgpu_notifier_register">
+int <code class="sig-name descname">san_dgpu_notifier_register</code><span class="sig-paren">(</span>struct notifier_block<em> *nb</em><span class="sig-paren">)</span><a class="headerlink" href="#c.san_dgpu_notifier_register" title="Permalink to this definition">¶</a></dt>
+<dd><p>Register a SAN dGPU notifier.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">notifier_block</span> <span class="pre">*nb</span></code></dt><dd><p>The notifier-block to register.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Registers a SAN dGPU notifier, receiving any new SAN dGPU events sent from
+ACPI. The registered notifier will be called with <a class="reference internal" href="#c.san_dgpu_event" title="san_dgpu_event"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">san_dgpu_event</span></code></a>
+as notifier data and the command ID of that event as notifier action.</p>
+</div>
+<dl class="function">
+<dt id="c.san_dgpu_notifier_unregister">
+int <code class="sig-name descname">san_dgpu_notifier_unregister</code><span class="sig-paren">(</span>struct notifier_block<em> *nb</em><span class="sig-paren">)</span><a class="headerlink" href="#c.san_dgpu_notifier_unregister" title="Permalink to this definition">¶</a></dt>
+<dd><p>Unregister a SAN dGPU notifier.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">notifier_block</span> <span class="pre">*nb</span></code></dt><dd><p>The notifier-block to unregister.</p>
+</dd>
+</dl>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Surface ACPI Notify</a><ul>
+<li><a class="reference internal" href="#api-documentation">API Documentation</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/driver-api/surface_aggregator/clients/san.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/driver-api/surface_aggregator/clients/san.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

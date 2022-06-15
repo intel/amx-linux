@@ -1,0 +1,162 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Tag matching logic &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Userspace MAD access" href="user_mad.html" />
+    <link rel="prev" title="Sysfs files" href="sysfs.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="tag-matching-logic">
+<h1>Tag matching logic<a class="headerlink" href="#tag-matching-logic" title="Permalink to this headline">¶</a></h1>
+<p>The MPI standard defines a set of rules, known as tag-matching, for matching
+source send operations to destination receives.  The following parameters must
+match the following source and destination parameters:</p>
+<ul class="simple">
+<li><p>Communicator</p></li>
+<li><p>User tag - wild card may be specified by the receiver</p></li>
+<li><p>Source rank – wild car may be specified by the receiver</p></li>
+<li><p>Destination rank – wild</p></li>
+</ul>
+<p>The ordering rules require that when more than one pair of send and receive
+message envelopes may match, the pair that includes the earliest posted-send
+and the earliest posted-receive is the pair that must be used to satisfy the
+matching operation. However, this doesn’t imply that tags are consumed in
+the order they are created, e.g., a later generated tag may be consumed, if
+earlier tags can’t be used to satisfy the matching rules.</p>
+<p>When a message is sent from the sender to the receiver, the communication
+library may attempt to process the operation either after or before the
+corresponding matching receive is posted.  If a matching receive is posted,
+this is an expected message, otherwise it is called an unexpected message.
+Implementations frequently use different matching schemes for these two
+different matching instances.</p>
+<p>To keep MPI library memory footprint down, MPI implementations typically use
+two different protocols for this purpose:</p>
+<p>1.      The Eager protocol- the complete message is sent when the send is
+processed by the sender. A completion send is received in the send_cq
+notifying that the buffer can be reused.</p>
+<p>2.      The Rendezvous Protocol - the sender sends the tag-matching header,
+and perhaps a portion of data when first notifying the receiver. When the
+corresponding buffer is posted, the responder will use the information from
+the header to initiate an RDMA READ operation directly to the matching buffer.
+A fin message needs to be received in order for the buffer to be reused.</p>
+<section id="tag-matching-implementation">
+<h2>Tag matching implementation<a class="headerlink" href="#tag-matching-implementation" title="Permalink to this headline">¶</a></h2>
+<p>There are two types of matching objects used, the posted receive list and the
+unexpected message list. The application posts receive buffers through calls
+to the MPI receive routines in the posted receive list and posts send messages
+using the MPI send routines. The head of the posted receive list may be
+maintained by the hardware, with the software expected to shadow this list.</p>
+<p>When send is initiated and arrives at the receive side, if there is no
+pre-posted receive for this arriving message, it is passed to the software and
+placed in the unexpected message list. Otherwise the match is processed,
+including rendezvous processing, if appropriate, delivering the data to the
+specified receive buffer. This allows overlapping receive-side MPI tag
+matching with computation.</p>
+<p>When a receive-message is posted, the communication library will first check
+the software unexpected message list for a matching receive. If a match is
+found, data is delivered to the user buffer, using a software controlled
+protocol. The UCX implementation uses either an eager or rendezvous protocol,
+depending on data size. If no match is found, the entire pre-posted receive
+list is maintained by the hardware, and there is space to add one more
+pre-posted receive to this list, this receive is passed to the hardware.
+Software is expected to shadow this list, to help with processing MPI cancel
+operations. In addition, because hardware and software are not expected to be
+tightly synchronized with respect to the tag-matching operation, this shadow
+list is used to detect the case that a pre-posted receive is passed to the
+hardware, as the matching unexpected message is being passed from the hardware
+to the software.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Tag matching logic</a><ul>
+<li><a class="reference internal" href="#tag-matching-implementation">Tag matching implementation</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/infiniband/tag_matching.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/infiniband/tag_matching.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

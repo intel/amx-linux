@@ -1,0 +1,215 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Kernel driver apds990x &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Kernel driver bh1770glc" href="bh1770glc.html" />
+    <link rel="prev" title="AD525x Digital Potentiometers" href="ad525x_dpot.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="kernel-driver-apds990x">
+<h1>Kernel driver apds990x<a class="headerlink" href="#kernel-driver-apds990x" title="Permalink to this headline">¶</a></h1>
+<p>Supported chips:
+Avago APDS990X</p>
+<p>Data sheet:
+Not freely available</p>
+<p>Author:
+Samu Onkalo &lt;<a class="reference external" href="mailto:samu&#46;p&#46;onkalo&#37;&#52;&#48;nokia&#46;com">samu<span>&#46;</span>p<span>&#46;</span>onkalo<span>&#64;</span>nokia<span>&#46;</span>com</a>&gt;</p>
+<section id="description">
+<h2>Description<a class="headerlink" href="#description" title="Permalink to this headline">¶</a></h2>
+<p>APDS990x is a combined ambient light and proximity sensor. ALS and proximity
+functionality are highly connected. ALS measurement path must be running
+while the proximity functionality is enabled.</p>
+<p>ALS produces raw measurement values for two channels: Clear channel
+(infrared + visible light) and IR only. However, threshold comparisons happen
+using clear channel only. Lux value and the threshold level on the HW
+might vary quite much depending the spectrum of the light source.</p>
+<p>Driver makes necessary conversions to both directions so that user handles
+only lux values. Lux value is calculated using information from the both
+channels. HW threshold level is calculated from the given lux value to match
+with current type of the lightning. Sometimes inaccuracy of the estimations
+lead to false interrupt, but that doesn’t harm.</p>
+<p>ALS contains 4 different gain steps. Driver automatically
+selects suitable gain step. After each measurement, reliability of the results
+is estimated and new measurement is triggered if necessary.</p>
+<p>Platform data can provide tuned values to the conversion formulas if
+values are known. Otherwise plain sensor default values are used.</p>
+<p>Proximity side is little bit simpler. There is no need for complex conversions.
+It produces directly usable values.</p>
+<p>Driver controls chip operational state using pm_runtime framework.
+Voltage regulators are controlled based on chip operational state.</p>
+</section>
+<section id="sysfs">
+<h2>SYSFS<a class="headerlink" href="#sysfs" title="Permalink to this headline">¶</a></h2>
+<dl>
+<dt>chip_id</dt><dd><p>RO - shows detected chip type and version</p>
+</dd>
+<dt>power_state</dt><dd><p>RW - enable / disable chip. Uses counting logic</p>
+<blockquote>
+<div><p>1 enables the chip
+0 disables the chip</p>
+</div></blockquote>
+</dd>
+<dt>lux0_input</dt><dd><p>RO - measured lux value</p>
+<blockquote>
+<div><p>sysfs_notify called when threshold interrupt occurs</p>
+</div></blockquote>
+</dd>
+<dt>lux0_sensor_range</dt><dd><p>RO - lux0_input max value.</p>
+<blockquote>
+<div><p>Actually never reaches since sensor tends
+to saturate much before that. Real max value varies depending
+on the light spectrum etc.</p>
+</div></blockquote>
+</dd>
+<dt>lux0_rate</dt><dd><p>RW - measurement rate in Hz</p>
+</dd>
+<dt>lux0_rate_avail</dt><dd><p>RO - supported measurement rates</p>
+</dd>
+<dt>lux0_calibscale</dt><dd><p>RW - calibration value.</p>
+<blockquote>
+<div><p>Set to neutral value by default.
+Output results are multiplied with calibscale / calibscale_default
+value.</p>
+</div></blockquote>
+</dd>
+<dt>lux0_calibscale_default</dt><dd><p>RO - neutral calibration value</p>
+</dd>
+<dt>lux0_thresh_above_value</dt><dd><p>RW - HI level threshold value.</p>
+<blockquote>
+<div><p>All results above the value
+trigs an interrupt. 65535 (i.e. sensor_range) disables the above
+interrupt.</p>
+</div></blockquote>
+</dd>
+<dt>lux0_thresh_below_value</dt><dd><p>RW - LO level threshold value.</p>
+<blockquote>
+<div><p>All results below the value
+trigs an interrupt. 0 disables the below interrupt.</p>
+</div></blockquote>
+</dd>
+<dt>prox0_raw</dt><dd><p>RO - measured proximity value</p>
+<blockquote>
+<div><p>sysfs_notify called when threshold interrupt occurs</p>
+</div></blockquote>
+</dd>
+<dt>prox0_sensor_range</dt><dd><p>RO - prox0_raw max value (1023)</p>
+</dd>
+<dt>prox0_raw_en</dt><dd><p>RW - enable / disable proximity - uses counting logic</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>1 enables the proximity</p></li>
+<li><p>0 disables the proximity</p></li>
+</ul>
+</div></blockquote>
+</dd>
+<dt>prox0_reporting_mode</dt><dd><p>RW - trigger / periodic.</p>
+<blockquote>
+<div><p>In “trigger” mode the driver tells two possible
+values: 0 or prox0_sensor_range value. 0 means no proximity,
+1023 means proximity. This causes minimal number of interrupts.
+In “periodic” mode the driver reports all values above
+prox0_thresh_above. This causes more interrupts, but it can give
+_rough_ estimate about the distance.</p>
+</div></blockquote>
+</dd>
+<dt>prox0_reporting_mode_avail</dt><dd><p>RO - accepted values to prox0_reporting_mode (trigger, periodic)</p>
+</dd>
+<dt>prox0_thresh_above_value</dt><dd><p>RW - threshold level which trigs proximity events.</p>
+</dd>
+</dl>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Kernel driver apds990x</a><ul>
+<li><a class="reference internal" href="#description">Description</a></li>
+<li><a class="reference internal" href="#sysfs">SYSFS</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/misc-devices/apds990x.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/misc-devices/apds990x.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

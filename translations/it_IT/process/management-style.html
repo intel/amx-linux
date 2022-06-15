@@ -1,0 +1,377 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Il modello di gestione del kernel Linux &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="Tutto quello che volevate sapere sui rilasci -stable di Linux" href="stable-kernel-rules.html" />
+    <link rel="prev" title="L’interfaccia dei driver per il kernel Linux" href="stable-api-nonsense.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>In caso di dubbi sulla correttezza del contenuto di questa traduzione,
+l’unico riferimento valido è la documentazione ufficiale in inglese.
+Per maggiori informazioni consultate le <a class="reference internal" href="../index.html#it-disclaimer"><span class="std std-ref">avvertenze</span></a>.</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../process/management-style.html"><span class="doc">Linux kernel management style</span></a></p>
+</dd>
+<dt class="field-even">Translator</dt>
+<dd class="field-even"><p>Alessia Mantegazza &lt;<a class="reference external" href="mailto:amantegazza&#37;&#52;&#48;vaga&#46;pv&#46;it">amantegazza<span>&#64;</span>vaga<span>&#46;</span>pv<span>&#46;</span>it</a>&gt;</p>
+</dd>
+</dl>
+<section id="il-modello-di-gestione-del-kernel-linux">
+<span id="it-managementstyle"></span><h1>Il modello di gestione del kernel Linux<a class="headerlink" href="#il-modello-di-gestione-del-kernel-linux" title="Permalink to this headline">¶</a></h1>
+<p>Questo breve documento descrive il modello di gestione del kernel Linux.
+Per certi versi, esso rispecchia il documento
+<a class="reference internal" href="coding-style.html#it-codingstyle"><span class="std std-ref">translations/it_IT/process/coding-style.rst</span></a>,
+ed è principalmente scritto per evitare di rispondere <a class="footnote-reference brackets" href="#f1" id="id1">1</a> in continuazione
+alle stesse identiche (o quasi) domande.</p>
+<p>Il modello di gestione è qualcosa di molto personale e molto più difficile da
+qualificare rispetto a delle semplici regole di codifica, quindi questo
+documento potrebbe avere più o meno a che fare con la realtà.  È cominciato
+come un gioco, ma ciò non significa che non possa essere vero.
+Lo dovrete decidere voi stessi.</p>
+<p>In ogni caso, quando si parla del “dirigente del kernel”, ci si riferisce
+sempre alla persona che dirige tecnicamente, e non a coloro che
+tradizionalmente hanno un ruolo direttivo all’interno delle aziende.  Se vi
+occupate di convalidare acquisti o avete una qualche idea sul budget del vostro
+gruppo, probabilmente non siete un dirigente del kernel.  Quindi i suggerimenti
+qui indicati potrebbero fare al caso vostro, oppure no.</p>
+<p>Prima di tutto, suggerirei di acquistare “Le sette regole per avere successo”,
+e di non leggerlo. Bruciatelo, è un grande gesto simbolico.</p>
+<dl class="footnote brackets">
+<dt class="label" id="f1"><span class="brackets"><a class="fn-backref" href="#id1">1</a></span></dt>
+<dd><p>Questo documento non fa molto per risponde alla domanda, ma rende
+così dannatamente ovvio a chi la pone che non abbiamo la minima idea
+di come rispondere.</p>
+</dd>
+</dl>
+<p>Comunque, partiamo:</p>
+<section id="le-decisioni">
+<span id="it-decisions"></span><h2>1) Le decisioni<a class="headerlink" href="#le-decisioni" title="Permalink to this headline">¶</a></h2>
+<p>Tutti pensano che i dirigenti decidano, e che questo prendere decisioni
+sia importante.  Più grande e dolorosa è la decisione, più importante deve
+essere il dirigente che la prende.  Questo è molto profondo ed ovvio, ma non è
+del tutto vero.</p>
+<p>Il gioco consiste nell‘“evitare” di dover prendere decisioni.  In particolare
+se qualcuno vi chiede di “Decidere” tra (a) o (b), e vi dice che ha
+davvero bisogno di voi per questo, come dirigenti siete nei guai.
+Le persone che gestite devono conoscere i dettagli più di quanto li conosciate
+voi, quindi se vengono da voi per una decisione tecnica, siete fottuti.
+Non sarete chiaramente competente per prendere quella decisione per loro.</p>
+<p>(Corollario: se le persone che gestite non conoscono i dettagli meglio di voi,
+anche in questo caso sarete fregati, tuttavia per altre ragioni.  Ossia state
+facendo il lavoro sbagliato, e che invece dovrebbero essere “loro” a gestirvi)</p>
+<p>Quindi il gioco si chiama “evitare” decisioni, almeno le più grandi e
+difficili.  Prendere decisioni piccoli e senza conseguenze va bene, e vi fa
+sembrare competenti in quello che state facendo, quindi quello che un dirigente
+del kernel ha bisogno di fare è trasformare le decisioni grandi e difficili
+in minuzie delle quali nessuno importa.</p>
+<p>Ciò aiuta a capire che la differenza chiave tra una grande decisione ed una
+piccola sta nella possibilità di modificare tale decisione in seguito.
+Qualsiasi decisione importante può essere ridotta in decisioni meno importanti,
+ma dovete assicurarvi che possano essere reversibili in caso di errori
+(presenti o futuri).  Improvvisamente, dovrete essere doppiamente dirigenti
+per <strong>due</strong> decisioni non sequenziali - quella sbagliata <strong>e</strong> quella giusta.</p>
+<p>E le persone vedranno tutto ciò come prova di vera capacità di comando
+(<em>cough</em> cavolata <em>cough</em>)</p>
+<p>Così la chiave per evitare le decisioni difficili diviene l’evitare
+di fare cose che non possono essere disfatte.  Non infilatevi in un angolo
+dal quale non potrete sfuggire.  Un topo messo all’angolo può rivelarsi
+pericoloso - un dirigente messo all’angolo è solo pietoso.</p>
+<p><strong>In ogni caso</strong> dato che nessuno è stupido al punto da lasciare veramente ad
+un dirigente del kernel un enorme responsabilità, solitamente è facile fare
+marcia indietro. Annullare una decisione è molto facile: semplicemente dite a
+tutti che siete stati degli scemi incompetenti, dite che siete dispiaciuti, ed
+annullate tutto l’inutile lavoro sul quale gli altri hanno lavorato nell’ultimo
+anno.  Improvvisamente la decisione che avevate preso un anno fa non era poi
+così grossa, dato che può essere facilmente annullata.</p>
+<p>È emerso che alcune persone hanno dei problemi con questo tipo di approccio,
+questo per due ragioni:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>ammettere di essere degli idioti è più difficile di quanto sembri.  A tutti
+noi piace mantenere le apparenze, ed uscire allo scoperto in pubblico per
+ammettere che ci si è sbagliati è qualcosa di davvero impegnativo.</p></li>
+<li><p>avere qualcuno che ti dice che ciò su cui hai lavorato nell’ultimo anno
+non era del tutto valido, può rivelarsi difficile anche per un povero ed
+umile ingegnere, e mentre il <strong>lavoro</strong> vero era abbastanza facile da
+cancellare, dall’altro canto potreste aver irrimediabilmente perso la
+fiducia di quell’ingegnere.  E ricordate che l‘“irrevocabile” era quello
+che avevamo cercato di evitare fin dall’inizio, e la vostra decisione
+ha finito per esserlo.</p></li>
+</ul>
+</div></blockquote>
+<p>Fortunatamente, entrambe queste ragioni posso essere mitigate semplicemente
+ammettendo fin dal principio che non avete una cavolo di idea, dicendo
+agli altri in anticipo che la vostra decisione è puramente ipotetica, e che
+potrebbe essere sbagliata.  Dovreste sempre riservarvi il diritto di cambiare
+la vostra opinione, e rendere gli altri ben <strong>consapevoli</strong> di ciò.
+Ed è molto più facile ammettere di essere stupidi quando non avete <strong>ancora</strong>
+fatto quella cosa stupida.</p>
+<p>Poi, quando è realmente emersa la vostra stupidità, le persone semplicemente
+roteeranno gli occhi e diranno “Uffa, no, ancora”.</p>
+<p>Questa ammissione preventiva di incompetenza potrebbe anche portare le persone
+che stanno facendo il vero lavoro, a pensarci due volte.  Dopo tutto, se
+<strong>loro</strong> non sono certi se sia una buona idea, voi, sicuro come la morte,
+non dovreste incoraggiarli promettendogli che ciò su cui stanno lavorando
+verrà incluso.  Fate si che ci pensino due volte prima che si imbarchino in un
+grosso lavoro.</p>
+<p>Ricordate: loro devono sapere più cose sui dettagli rispetto a voi, e
+solitamente pensano di avere già la risposta a tutto. La miglior cosa che
+potete fare in qualità di dirigente è di non instillare troppa fiducia, ma
+invece fornire una salutare dose di pensiero critico su quanto stanno facendo.</p>
+<p>Comunque, un altro modo di evitare una decisione è quello di lamentarsi
+malinconicamente dicendo : “non possiamo farli entrambi e basta?” e con uno
+sguardo pietoso.  Fidatevi, funziona.  Se non è chiaro quale sia il miglior
+approccio, lo scopriranno.  La risposta potrebbe essere data dal fatto che
+entrambe i gruppi di lavoro diventano frustati al punto di rinunciarvi.</p>
+<p>Questo può suonare come un fallimento, ma di solito questo è un segno che
+c’era qualcosa che non andava in entrambe i progetti, e il motivo per
+il quale le persone coinvolte non abbiano potuto decidere era che entrambe
+sbagliavano.  Voi ne uscirete freschi come una rosa, e avrete evitato un’altra
+decisione con la quale avreste potuto fregarvi.</p>
+</section>
+<section id="le-persone">
+<h2>2) Le persone<a class="headerlink" href="#le-persone" title="Permalink to this headline">¶</a></h2>
+<p>Ci sono molte persone stupide, ed essere un dirigente significa che dovrete
+scendere a patti con questo, e molto più importate, che <strong>loro</strong> devono avere
+a che fare con <strong>voi</strong>.</p>
+<p>Ne emerge che mentre è facile annullare degli errori tecnici, non è invece
+così facile rimuovere i disordini della personalità.  Dovrete semplicemente
+convivere con i loro, ed i vostri, problemi.</p>
+<p>Comunque, al fine di preparavi in qualità di dirigenti del kernel, è meglio
+ricordare di non abbattere alcun ponte, bombardare alcun paesano innocente,
+o escludere troppi sviluppatori kernel. Ne emerge che escludere le persone
+è piuttosto facile, mentre includerle nuovamente è difficile. Così
+“l’esclusione” immediatamente cade sotto il titolo di “non reversibile”, e
+diviene un no-no secondo la sezione <a class="reference internal" href="#it-decisions"><span class="std std-ref">1) Le decisioni</span></a>.</p>
+<p>Esistono alcune semplici regole qui:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>non chiamate le persone teste di c*** (al meno, non in pubblico)</p></li>
+<li><p>imparate a scusarvi quando dimenticate la regola (1)</p></li>
+</ol>
+</div></blockquote>
+<p>Il problema del punto numero 1 è che è molto facile da rispettare, dato che
+è possibile dire “sei una testa di c***” in milioni di modi differenti <a class="footnote-reference brackets" href="#f2" id="id2">2</a>,
+a volte senza nemmeno pensarci, e praticamente sempre con la calda convinzione
+di essere nel giusto.</p>
+<p>E più convinti sarete che avete ragione (e diciamolo, potete chiamare
+praticamente <strong>tutti</strong> testa di c**, e spesso <strong>sarete</strong> nel giusto), più
+difficile sarà scusarvi successivamente.</p>
+<p>Per risolvere questo problema, avete due possibilità:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>diventare davvero bravi nello scusarsi</p></li>
+<li><p>essere amabili così che nessuno finirà col sentirsi preso di mira.  Siate
+creativi abbastanza, e potrebbero esserne divertiti.</p></li>
+</ul>
+</div></blockquote>
+<p>L’opzione dell’essere immancabilmente educati non esiste proprio. Nessuno
+si fiderà di qualcuno che chiaramente sta nascondendo il suo vero carattere.</p>
+<dl class="footnote brackets">
+<dt class="label" id="f2"><span class="brackets"><a class="fn-backref" href="#id2">2</a></span></dt>
+<dd><p>Paul Simon cantava: “50 modi per lasciare il vostro amante”, perché,
+molto francamente, “Un milione di modi per dire ad uno sviluppatore
+Testa di c***” non avrebbe funzionato. Ma sono sicuro che ci abbia
+pensato.</p>
+</dd>
+</dl>
+</section>
+<section id="le-persone-ii-quelle-buone">
+<h2>3) Le persone II - quelle buone<a class="headerlink" href="#le-persone-ii-quelle-buone" title="Permalink to this headline">¶</a></h2>
+<p>Mentre emerge che la maggior parte delle persone sono stupide, il corollario
+a questo è il triste fatto che anche voi siete fra queste, e che mentre
+possiamo tutti crogiolarci nella sicurezza di essere migliori della media
+delle persone (diciamocelo, nessuno crede di essere nelle media o sotto di
+essa), dovremmo anche ammettere che non siamo il “coltello più affilato” del
+circondario, e che ci saranno altre persone che sono meno stupide di quanto
+lo siete voi.</p>
+<p>Molti reagiscono male davanti alle persone intelligenti. Altri le usano a
+proprio vantaggio.</p>
+<p>Assicuratevi che voi, in qualità di manutentori del kernel, siate nel secondo
+gruppo. Inchinatevi dinanzi a loro perché saranno le persone che vi renderanno
+il lavoro più facile.  In particolare, prenderanno le decisioni per voi, che è
+l’oggetto di questo gioco.</p>
+<p>Quindi quando trovate qualcuno più sveglio di voi, prendetevela comoda.
+Le vostre responsabilità dirigenziali si ridurranno in gran parte nel dire
+“Sembra una buona idea - Vai”, oppure “Sembra buono, ma invece circa questo e
+quello?”.  La seconda versione in particolare è una gran modo per imparare
+qualcosa di nuovo circa “questo e quello” o di sembrare <strong>extra</strong> dirigenziali
+sottolineando qualcosa alla quale i più svegli non avevano pensato.  In
+entrambe i casi, vincete.</p>
+<p>Una cosa alla quale dovete fare attenzione è che l’essere grandi in qualcosa
+non si traduce automaticamente nell’essere grandi anche in altre cose.  Quindi
+dovreste dare una spintarella alle persone in una specifica direzione, ma
+diciamocelo, potrebbero essere bravi in ciò che fanno e far schifo in tutto
+il resto.  La buona notizia è che le persone tendono a gravitare attorno a ciò
+in cui sono bravi, quindi non state facendo nulla di irreversibile quando li
+spingete verso una certa direzione, solo non spingete troppo.</p>
+</section>
+<section id="addossare-le-colpe">
+<h2>4) Addossare le colpe<a class="headerlink" href="#addossare-le-colpe" title="Permalink to this headline">¶</a></h2>
+<p>Le cose andranno male, e le persone vogliono qualcuno da incolpare. Sarete voi.</p>
+<p>Non è poi così difficile accettare la colpa, specialmente se le persone
+riescono a capire che non era <strong>tutta</strong> colpa vostra.  Il che ci porta
+sulla miglior strada per assumersi la colpa: fatelo per qualcun’altro.
+Vi sentirete bene nel assumervi la responsabilità, e loro si sentiranno
+bene nel non essere incolpati, e coloro che hanno perso i loro 36GB di
+pornografia a causa della vostra incompetenza ammetteranno a malincuore che
+almeno non avete cercato di fare il furbetto.</p>
+<p>Successivamente fate in modo che gli sviluppatori che in realtà hanno fallito
+(se riuscite a trovarli) sappiano <strong>in privato</strong> che sono “fottuti”.
+Questo non per fargli sapere che la prossima volta possono evitarselo ma per
+fargli capire che sono in debito.  E, forse cosa più importante, sono loro che
+devono sistemare la cosa.  Perché, ammettiamolo, è sicuro non sarete voi a
+farlo.</p>
+<p>Assumersi la colpa è anche ciò che vi rendere dirigenti in prima battuta.
+È parte di ciò che spinge gli altri a fidarsi di voi, e vi garantisce
+la gloria potenziale, perché siete gli unici a dire “Ho fatto una cavolata”.
+E se avete seguito le regole precedenti, sarete decisamente bravi nel dirlo.</p>
+</section>
+<section id="le-cose-da-evitare">
+<h2>5) Le cose da evitare<a class="headerlink" href="#le-cose-da-evitare" title="Permalink to this headline">¶</a></h2>
+<p>Esiste una cosa che le persone odiano più che essere chiamate “teste di c****”,
+ed è essere chiamate “teste di c****” con fare da bigotto.  Se per il primo
+caso potrete comunque scusarvi, per il secondo non ve ne verrà data nemmeno
+l’opportunità.  Probabilmente smetteranno di ascoltarvi anche se tutto sommato
+state svolgendo un buon lavoro.</p>
+<p>Tutti crediamo di essere migliori degli altri, il che significa che quando
+qualcuno inizia a darsi delle arie, ci da <strong>davvero</strong> fastidio.  Potreste anche
+essere moralmente ed intellettualmente superiore a tutti quelli attorno a voi,
+ma non cercate di renderlo ovvio per gli altri a meno che non <strong>vogliate</strong>
+veramente far arrabbiare qualcuno <a class="footnote-reference brackets" href="#f3" id="id3">3</a>.</p>
+<p>Allo stesso modo evitate di essere troppo gentili e pacati.  Le buone maniere
+facilmente finiscono per strabordare e nascondere i problemi, e come si usa
+dire, “su internet nessuno può sentire la vostra pacatezza”.  Usate argomenti
+diretti per farvi capire, non potete sperare che la gente capisca in altro
+modo.</p>
+<p>Un po’ di umorismo può aiutare a smorzare sia la franchezza che la moralità.
+Andare oltre i limiti al punto d’essere ridicolo può portare dei punti a casa
+senza renderlo spiacevole per i riceventi, i quali penseranno che stavate
+facendo gli scemi.  Può anche aiutare a lasciare andare quei blocchi mentali
+che abbiamo nei confronti delle critiche.</p>
+<dl class="footnote brackets">
+<dt class="label" id="f3"><span class="brackets"><a class="fn-backref" href="#id3">3</a></span></dt>
+<dd><p>Suggerimento: i forum di discussione su internet, che non sono
+collegati col vostro lavoro, sono ottimi modi per sfogare la frustrazione
+verso altre persone. Di tanto in tanto scrivete messaggi offensivi col ghigno
+in faccia per infiammare qualche discussione: vi sentirete purificati. Solo
+cercate di non cagare troppo vicino a casa.</p>
+</dd>
+</dl>
+</section>
+<section id="perche-io">
+<h2>6) Perché io?<a class="headerlink" href="#perche-io" title="Permalink to this headline">¶</a></h2>
+<p>Dato che la vostra responsabilità principale è quella di prendervi le colpe
+d’altri, e rendere dolorosamente ovvio a tutti che siete degli incompetenti,
+la domanda naturale che ne segue sarà : perché dovrei fare tutto ciò?</p>
+<p>Innanzitutto, potreste diventare o no popolari al punto da avere la fila di
+ragazzine (o ragazzini, evitiamo pregiudizi o sessismo) che gridano e bussano
+alla porta del vostro camerino, ma comunque <strong>proverete</strong> un immenso senso di
+realizzazione personale dall’essere “in carica”.  Dimenticate il fatto che voi
+state discutendo con tutti e che cercate di inseguirli il più velocemente che
+potete. Tutti continueranno a pensare che voi siete la persona in carica.</p>
+<p>È un bel lavoro se riuscite ad adattarlo a voi.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Il modello di gestione del kernel Linux</a><ul>
+<li><a class="reference internal" href="#le-decisioni">1) Le decisioni</a></li>
+<li><a class="reference internal" href="#le-persone">2) Le persone</a></li>
+<li><a class="reference internal" href="#le-persone-ii-quelle-buone">3) Le persone II - quelle buone</a></li>
+<li><a class="reference internal" href="#addossare-le-colpe">4) Addossare le colpe</a></li>
+<li><a class="reference internal" href="#le-cose-da-evitare">5) Le cose da evitare</a></li>
+<li><a class="reference internal" href="#perche-io">6) Perché io?</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/it_IT/process/management-style.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/it_IT/process/management-style.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

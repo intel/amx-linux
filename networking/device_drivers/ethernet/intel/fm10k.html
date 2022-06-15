@@ -1,0 +1,242 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Linux Base Driver for Intel(R) Ethernet Multi-host Controller &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../../" src="../../../../_static/documentation_options.js"></script>
+    <script src="../../../../_static/jquery.js"></script>
+    <script src="../../../../_static/underscore.js"></script>
+    <script src="../../../../_static/doctools.js"></script>
+    <script src="../../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" />
+    <link rel="next" title="Linux Base Driver for Intel(R) Ethernet Network Connection" href="igb.html" />
+    <link rel="prev" title="Linux Driver for Intel(R) Ethernet Network Connection" href="e1000e.html" />
+   
+  <link rel="stylesheet" href="../../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="linux-base-driver-for-intel-r-ethernet-multi-host-controller">
+<h1>Linux Base Driver for Intel(R) Ethernet Multi-host Controller<a class="headerlink" href="#linux-base-driver-for-intel-r-ethernet-multi-host-controller" title="Permalink to this headline">¶</a></h1>
+<p>August 20, 2018
+Copyright(c) 2015-2018 Intel Corporation.</p>
+<section id="contents">
+<h2>Contents<a class="headerlink" href="#contents" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p>Identifying Your Adapter</p></li>
+<li><p>Additional Configurations</p></li>
+<li><p>Performance Tuning</p></li>
+<li><p>Known Issues</p></li>
+<li><p>Support</p></li>
+</ul>
+</section>
+<section id="identifying-your-adapter">
+<h2>Identifying Your Adapter<a class="headerlink" href="#identifying-your-adapter" title="Permalink to this headline">¶</a></h2>
+<p>The driver in this release is compatible with devices based on the Intel(R)
+Ethernet Multi-host Controller.</p>
+<p>For information on how to identify your adapter, and for the latest Intel
+network drivers, refer to the Intel Support website:
+<a class="reference external" href="https://www.intel.com/support">https://www.intel.com/support</a></p>
+<section id="flow-control">
+<h3>Flow Control<a class="headerlink" href="#flow-control" title="Permalink to this headline">¶</a></h3>
+<p>The Intel(R) Ethernet Switch Host Interface Driver does not support Flow
+Control. It will not send pause frames. This may result in dropped frames.</p>
+</section>
+<section id="virtual-functions-vfs">
+<h3>Virtual Functions (VFs)<a class="headerlink" href="#virtual-functions-vfs" title="Permalink to this headline">¶</a></h3>
+<p>Use sysfs to enable VFs.
+Valid Range: 0-64</p>
+<p>For example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>echo $num_vf_enabled &gt; /sys/class/net/$dev/device/sriov_numvfs //enable VFs
+echo 0 &gt; /sys/class/net/$dev/device/sriov_numvfs //disable VFs
+</pre></div>
+</div>
+<p>NOTE: Neither the device nor the driver control how VFs are mapped into config
+space. Bus layout will vary by operating system. On operating systems that
+support it, you can check sysfs to find the mapping.</p>
+<p>NOTE: When SR-IOV mode is enabled, hardware VLAN filtering and VLAN tag
+stripping/insertion will remain enabled. Please remove the old VLAN filter
+before the new VLAN filter is added. For example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ip link set eth0 vf 0 vlan 100      // set vlan 100 for VF 0
+ip link set eth0 vf 0 vlan 0        // Delete vlan 100
+ip link set eth0 vf 0 vlan 200      // set a new vlan 200 for VF 0
+</pre></div>
+</div>
+</section>
+</section>
+<section id="additional-features-and-configurations">
+<h2>Additional Features and Configurations<a class="headerlink" href="#additional-features-and-configurations" title="Permalink to this headline">¶</a></h2>
+<section id="jumbo-frames">
+<h3>Jumbo Frames<a class="headerlink" href="#jumbo-frames" title="Permalink to this headline">¶</a></h3>
+<p>Jumbo Frames support is enabled by changing the Maximum Transmission Unit (MTU)
+to a value larger than the default value of 1500.</p>
+<p>Use the ifconfig command to increase the MTU size. For example, enter the
+following where &lt;x&gt; is the interface number:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ifconfig eth&lt;x&gt; mtu 9000 up
+</pre></div>
+</div>
+<p>Alternatively, you can use the ip command as follows:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ip link set mtu 9000 dev eth&lt;x&gt;
+ip link set up dev eth&lt;x&gt;
+</pre></div>
+</div>
+<p>This setting is not saved across reboots. The setting change can be made
+permanent by adding ‘MTU=9000’ to the file:</p>
+<ul class="simple">
+<li><p>For RHEL: /etc/sysconfig/network-scripts/ifcfg-eth&lt;x&gt;</p></li>
+<li><p>For SLES: /etc/sysconfig/network/&lt;config_file&gt;</p></li>
+</ul>
+<p>NOTE: The maximum MTU setting for Jumbo Frames is 15342. This value coincides
+with the maximum Jumbo Frames size of 15364 bytes.</p>
+<p>NOTE: This driver will attempt to use multiple page sized buffers to receive
+each jumbo packet. This should help to avoid buffer starvation issues when
+allocating receive packets.</p>
+</section>
+<section id="generic-receive-offload-aka-gro">
+<h3>Generic Receive Offload, aka GRO<a class="headerlink" href="#generic-receive-offload-aka-gro" title="Permalink to this headline">¶</a></h3>
+<p>The driver supports the in-kernel software implementation of GRO. GRO has
+shown that by coalescing Rx traffic into larger chunks of data, CPU
+utilization can be significantly reduced when under large Rx load. GRO is an
+evolution of the previously-used LRO interface. GRO is able to coalesce
+other protocols besides TCP. It’s also safe to use with configurations that
+are problematic for LRO, namely bridging and iSCSI.</p>
+</section>
+<section id="supported-ethtool-commands-and-options-for-filtering">
+<h3>Supported ethtool Commands and Options for Filtering<a class="headerlink" href="#supported-ethtool-commands-and-options-for-filtering" title="Permalink to this headline">¶</a></h3>
+<dl class="simple">
+<dt>-n –show-nfc</dt><dd><p>Retrieves the receive network flow classification configurations.</p>
+</dd>
+<dt>rx-flow-hash tcp4|udp4|ah4|esp4|sctp4|tcp6|udp6|ah6|esp6|sctp6</dt><dd><p>Retrieves the hash options for the specified network traffic type.</p>
+</dd>
+<dt>-N –config-nfc</dt><dd><p>Configures the receive network flow classification.</p>
+</dd>
+<dt>rx-flow-hash tcp4|udp4|ah4|esp4|sctp4|tcp6|udp6|ah6|esp6|sctp6 m|v|t|s|d|f|n|r</dt><dd><p>Configures the hash options for the specified network traffic type.</p>
+</dd>
+</dl>
+<ul class="simple">
+<li><p>udp4: UDP over IPv4</p></li>
+<li><p>udp6: UDP over IPv6</p></li>
+<li><p>f Hash on bytes 0 and 1 of the Layer 4 header of the rx packet.</p></li>
+<li><p>n Hash on bytes 2 and 3 of the Layer 4 header of the rx packet.</p></li>
+</ul>
+</section>
+</section>
+<section id="known-issues-troubleshooting">
+<h2>Known Issues/Troubleshooting<a class="headerlink" href="#known-issues-troubleshooting" title="Permalink to this headline">¶</a></h2>
+<section id="enabling-sr-iov-in-a-64-bit-microsoft-windows-server-2012-r2-guest-os-under-linux-kvm">
+<h3>Enabling SR-IOV in a 64-bit Microsoft Windows Server 2012/R2 guest OS under Linux KVM<a class="headerlink" href="#enabling-sr-iov-in-a-64-bit-microsoft-windows-server-2012-r2-guest-os-under-linux-kvm" title="Permalink to this headline">¶</a></h3>
+<p>KVM Hypervisor/VMM supports direct assignment of a PCIe device to a VM. This
+includes traditional PCIe devices, as well as SR-IOV-capable devices based on
+the Intel Ethernet Controller XL710.</p>
+</section>
+</section>
+<section id="support">
+<h2>Support<a class="headerlink" href="#support" title="Permalink to this headline">¶</a></h2>
+<p>For general information, go to the Intel support website at:</p>
+<p><a class="reference external" href="https://www.intel.com/support/">https://www.intel.com/support/</a></p>
+<p>or the Intel Wired Networking project hosted by Sourceforge at:</p>
+<p><a class="reference external" href="https://sourceforge.net/projects/e1000">https://sourceforge.net/projects/e1000</a></p>
+<p>If an issue is identified with the released source code on a supported kernel
+with a supported adapter, email the specific information related to the issue
+to <a class="reference external" href="mailto:e1000-devel&#37;&#52;&#48;lists&#46;sf&#46;net">e1000-devel<span>&#64;</span>lists<span>&#46;</span>sf<span>&#46;</span>net</a>.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Linux Base Driver for Intel(R) Ethernet Multi-host Controller</a><ul>
+<li><a class="reference internal" href="#contents">Contents</a></li>
+<li><a class="reference internal" href="#identifying-your-adapter">Identifying Your Adapter</a><ul>
+<li><a class="reference internal" href="#flow-control">Flow Control</a></li>
+<li><a class="reference internal" href="#virtual-functions-vfs">Virtual Functions (VFs)</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#additional-features-and-configurations">Additional Features and Configurations</a><ul>
+<li><a class="reference internal" href="#jumbo-frames">Jumbo Frames</a></li>
+<li><a class="reference internal" href="#generic-receive-offload-aka-gro">Generic Receive Offload, aka GRO</a></li>
+<li><a class="reference internal" href="#supported-ethtool-commands-and-options-for-filtering">Supported ethtool Commands and Options for Filtering</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#known-issues-troubleshooting">Known Issues/Troubleshooting</a><ul>
+<li><a class="reference internal" href="#enabling-sr-iov-in-a-64-bit-microsoft-windows-server-2012-r2-guest-os-under-linux-kvm">Enabling SR-IOV in a 64-bit Microsoft Windows Server 2012/R2 guest OS under Linux KVM</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#support">Support</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../../_sources/networking/device_drivers/ethernet/intel/fm10k.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../../_sources/networking/device_drivers/ethernet/intel/fm10k.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,185 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>客户机停机轮询机制（Guest halt polling） &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../virt/guest-halt-polling.html"><span class="doc">Guest halt polling</span></a></p>
+</dd>
+<dt class="field-even">翻译</dt>
+<dd class="field-even"><p>司延腾 Yanteng Si &lt;<a class="reference external" href="mailto:siyanteng&#37;&#52;&#48;loongson&#46;cn">siyanteng<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+<dt class="field-odd">校译</dt>
+<dd class="field-odd"><p>时奎亮 Alex Shi &lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;</p>
+</dd>
+</dl>
+<section id="guest-halt-polling">
+<span id="cn-virt-guest-halt-polling"></span><h1>客户机停机轮询机制（Guest halt polling）<a class="headerlink" href="#guest-halt-polling" title="Permalink to this headline">¶</a></h1>
+<p>cpuidle_haltpoll驱动，与haltpoll管理器一起，允许客户机vcpus在停机前轮询
+一定的时间。</p>
+<p>这为物理机侧的轮询提供了以下好处:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>在执行轮询时，POLL标志被设置，这允许远程vCPU在执行唤醒时避免发送
+IPI（以及处理IPI的相关成本）。</p></li>
+<li><p>可以避免虚拟机退出的成本。</p></li>
+</ol>
+</div></blockquote>
+<p>客户机侧轮询的缺点是，即使在物理机中的其他可运行任务中也会进行轮询。</p>
+<p>其基本逻辑如下。一个全局值，即guest_halt_poll_ns，是由用户配置的，表示允
+许轮询的最大时间量。这个值是固定的。</p>
+<p>每个vcpu都有一个可调整的guest_halt_poll_ns（”per-cpu guest_halt_poll_ns”），
+它由算法响应事件进行调整（解释如下）。</p>
+<section id="id1">
+<h2>模块参数<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>haltpoll管理器有5个可调整的模块参数:</p>
+<ol class="arabic simple">
+<li><p>guest_halt_poll_ns:</p></li>
+</ol>
+<p>轮询停机前执行的最大时间，以纳秒为单位。</p>
+<p>默认值: 200000</p>
+<ol class="arabic simple" start="2">
+<li><p>guest_halt_poll_shrink:</p></li>
+</ol>
+<p>当唤醒事件发生在全局的guest_halt_poll_ns之后，用于缩减每个CPU的guest_halt_poll_ns
+的划分系数。</p>
+<p>默认值: 2</p>
+<ol class="arabic simple" start="3">
+<li><p>guest_halt_poll_grow:</p></li>
+</ol>
+<p>当事件发生在per-cpu guest_halt_poll_ns之后但在global guest_halt_poll_ns之前，
+用于增长per-cpu guest_halt_poll_ns的乘法系数。</p>
+<p>默认值: 2</p>
+<ol class="arabic simple" start="4">
+<li><p>guest_halt_poll_grow_start:</p></li>
+</ol>
+<p>在系统空闲的情况下，每个cpu guest_halt_poll_ns最终达到零。这个值设置了增长时的
+初始每cpu guest_halt_poll_ns。这个值可以从10000开始增加，以避免在最初的增长阶
+段出现失误。:</p>
+<p>10k, 20k, 40k, … (例如，假设guest_halt_poll_grow=2).</p>
+<p>默认值: 50000</p>
+<ol class="arabic simple" start="5">
+<li><p>guest_halt_poll_allow_shrink:</p></li>
+</ol>
+<p>允许缩减的Bool参数。设置为N以避免它（一旦达到全局的guest_halt_poll_ns值，每CPU的
+guest_halt_poll_ns将保持高位）。</p>
+<p>默认值: Y</p>
+<p>模块参数可以从Debugfs文件中设置，在:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/sys/module/haltpoll/parameters/
+</pre></div>
+</div>
+</section>
+<section id="id2">
+<h2>进一步说明<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p>在设置guest_halt_poll_ns参数时应该小心，因为一个大的值有可能使几乎是完全空闲机
+器上的cpu使用率达到100%。</p></li>
+</ul>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">客户机停机轮询机制（Guest halt polling）</a><ul>
+<li><a class="reference internal" href="#id1">模块参数</a></li>
+<li><a class="reference internal" href="#id2">进一步说明</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/virt/guest-halt-polling.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/virt/guest-halt-polling.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

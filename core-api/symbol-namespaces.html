@@ -1,0 +1,244 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Symbol Namespaces &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Assembler Annotations" href="asm-annotations.html" />
+    <link rel="prev" title="Printk Index" href="printk-index.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="symbol-namespaces">
+<h1>Symbol Namespaces<a class="headerlink" href="#symbol-namespaces" title="Permalink to this headline">¶</a></h1>
+<p>The following document describes how to use Symbol Namespaces to structure the
+export surface of in-kernel symbols exported through the family of
+EXPORT_SYMBOL() macros.</p>
+<section id="introduction">
+<h2>1. Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>Symbol Namespaces have been introduced as a means to structure the export
+surface of the in-kernel API. It allows subsystem maintainers to partition
+their exported symbols into separate namespaces. That is useful for
+documentation purposes (think of the SUBSYSTEM_DEBUG namespace) as well as for
+limiting the availability of a set of symbols for use in other parts of the
+kernel. As of today, modules that make use of symbols exported into namespaces,
+are required to import the namespace. Otherwise the kernel will, depending on
+its configuration, reject loading the module or warn about a missing import.</p>
+</section>
+<section id="how-to-define-symbol-namespaces">
+<h2>2. How to define Symbol Namespaces<a class="headerlink" href="#how-to-define-symbol-namespaces" title="Permalink to this headline">¶</a></h2>
+<p>Symbols can be exported into namespace using different methods. All of them are
+changing the way EXPORT_SYMBOL and friends are instrumented to create ksymtab
+entries.</p>
+</section>
+<section id="using-the-export-symbol-macros">
+<h2>2.1 Using the EXPORT_SYMBOL macros<a class="headerlink" href="#using-the-export-symbol-macros" title="Permalink to this headline">¶</a></h2>
+<p>In addition to the macros EXPORT_SYMBOL() and EXPORT_SYMBOL_GPL(), that allow
+exporting of kernel symbols to the kernel symbol table, variants of these are
+available to export symbols into a certain namespace: EXPORT_SYMBOL_NS() and
+EXPORT_SYMBOL_NS_GPL(). They take one additional argument: the namespace.
+Please note that due to macro expansion that argument needs to be a
+preprocessor symbol. E.g. to export the symbol <code class="docutils literal notranslate"><span class="pre">usb_stor_suspend</span></code> into the
+namespace <code class="docutils literal notranslate"><span class="pre">USB_STORAGE</span></code>, use:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>EXPORT_SYMBOL_NS(usb_stor_suspend, USB_STORAGE);
+</pre></div>
+</div>
+<p>The corresponding ksymtab entry struct <code class="docutils literal notranslate"><span class="pre">kernel_symbol</span></code> will have the member
+<code class="docutils literal notranslate"><span class="pre">namespace</span></code> set accordingly. A symbol that is exported without a namespace will
+refer to <code class="docutils literal notranslate"><span class="pre">NULL</span></code>. There is no default namespace if none is defined. <code class="docutils literal notranslate"><span class="pre">modpost</span></code>
+and kernel/module/main.c make use the namespace at build time or module load
+time, respectively.</p>
+</section>
+<section id="using-the-default-symbol-namespace-define">
+<h2>2.2 Using the DEFAULT_SYMBOL_NAMESPACE define<a class="headerlink" href="#using-the-default-symbol-namespace-define" title="Permalink to this headline">¶</a></h2>
+<p>Defining namespaces for all symbols of a subsystem can be very verbose and may
+become hard to maintain. Therefore a default define (DEFAULT_SYMBOL_NAMESPACE)
+is been provided, that, if set, will become the default for all EXPORT_SYMBOL()
+and EXPORT_SYMBOL_GPL() macro expansions that do not specify a namespace.</p>
+<p>There are multiple ways of specifying this define and it depends on the
+subsystem and the maintainer’s preference, which one to use. The first option
+is to define the default namespace in the <code class="docutils literal notranslate"><span class="pre">Makefile</span></code> of the subsystem. E.g. to
+export all symbols defined in usb-common into the namespace USB_COMMON, add a
+line like this to drivers/usb/common/Makefile:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ccflags-y += -DDEFAULT_SYMBOL_NAMESPACE=USB_COMMON
+</pre></div>
+</div>
+<p>That will affect all EXPORT_SYMBOL() and EXPORT_SYMBOL_GPL() statements. A
+symbol exported with EXPORT_SYMBOL_NS() while this definition is present, will
+still be exported into the namespace that is passed as the namespace argument
+as this argument has preference over a default symbol namespace.</p>
+<p>A second option to define the default namespace is directly in the compilation
+unit as preprocessor statement. The above example would then read:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#undef  DEFAULT_SYMBOL_NAMESPACE
+#define DEFAULT_SYMBOL_NAMESPACE USB_COMMON
+</pre></div>
+</div>
+<p>within the corresponding compilation unit before any EXPORT_SYMBOL macro is
+used.</p>
+</section>
+<section id="how-to-use-symbols-exported-in-namespaces">
+<h2>3. How to use Symbols exported in Namespaces<a class="headerlink" href="#how-to-use-symbols-exported-in-namespaces" title="Permalink to this headline">¶</a></h2>
+<p>In order to use symbols that are exported into namespaces, kernel modules need
+to explicitly import these namespaces. Otherwise the kernel might reject to
+load the module. The module code is required to use the macro MODULE_IMPORT_NS
+for the namespaces it uses symbols from. E.g. a module using the
+usb_stor_suspend symbol from above, needs to import the namespace USB_STORAGE
+using a statement like:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>MODULE_IMPORT_NS(USB_STORAGE);
+</pre></div>
+</div>
+<p>This will create a <code class="docutils literal notranslate"><span class="pre">modinfo</span></code> tag in the module for each imported namespace.
+This has the side effect, that the imported namespaces of a module can be
+inspected with modinfo:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ modinfo drivers/usb/storage/ums-karma.ko
+[...]
+import_ns:      USB_STORAGE
+[...]
+</pre></div>
+</div>
+<p>It is advisable to add the MODULE_IMPORT_NS() statement close to other module
+metadata definitions like MODULE_AUTHOR() or MODULE_LICENSE(). Refer to section
+5. for a way to create missing import statements automatically.</p>
+</section>
+<section id="loading-modules-that-use-namespaced-symbols">
+<h2>4. Loading Modules that use namespaced Symbols<a class="headerlink" href="#loading-modules-that-use-namespaced-symbols" title="Permalink to this headline">¶</a></h2>
+<p>At module loading time (e.g. <code class="docutils literal notranslate"><span class="pre">insmod</span></code>), the kernel will check each symbol
+referenced from the module for its availability and whether the namespace it
+might be exported to has been imported by the module. The default behaviour of
+the kernel is to reject loading modules that don’t specify sufficient imports.
+An error will be logged and loading will be failed with EINVAL. In order to
+allow loading of modules that don’t satisfy this precondition, a configuration
+option is available: Setting MODULE_ALLOW_MISSING_NAMESPACE_IMPORTS=y will
+enable loading regardless, but will emit a warning.</p>
+</section>
+<section id="automatically-creating-module-import-ns-statements">
+<h2>5. Automatically creating MODULE_IMPORT_NS statements<a class="headerlink" href="#automatically-creating-module-import-ns-statements" title="Permalink to this headline">¶</a></h2>
+<p>Missing namespaces imports can easily be detected at build time. In fact,
+modpost will emit a warning if a module uses a symbol from a namespace
+without importing it.
+MODULE_IMPORT_NS() statements will usually be added at a definite location
+(along with other module meta data). To make the life of module authors (and
+subsystem maintainers) easier, a script and make target is available to fixup
+missing imports. Fixing missing imports can be done with:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ make nsdeps
+</pre></div>
+</div>
+<p>A typical scenario for module authors would be:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>- write code that depends on a symbol from a not imported namespace
+- ``make``
+- notice the warning of modpost telling about a missing import
+- run ``make nsdeps`` to add the import to the correct code location
+</pre></div>
+</div>
+<p>For subsystem maintainers introducing a namespace, the steps are very similar.
+Again, <code class="docutils literal notranslate"><span class="pre">make</span> <span class="pre">nsdeps</span></code> will eventually add the missing namespace imports for
+in-tree modules:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>- move or add symbols to a namespace (e.g. with EXPORT_SYMBOL_NS())
+- ``make`` (preferably with an allmodconfig to cover all in-kernel
+  modules)
+- notice the warning of modpost telling about a missing import
+- run ``make nsdeps`` to add the import to the correct code location
+</pre></div>
+</div>
+<p>You can also run nsdeps for external module builds. A typical usage is:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ make -C &lt;path_to_kernel_src&gt; M=$PWD nsdeps
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Symbol Namespaces</a><ul>
+<li><a class="reference internal" href="#introduction">1. Introduction</a></li>
+<li><a class="reference internal" href="#how-to-define-symbol-namespaces">2. How to define Symbol Namespaces</a></li>
+<li><a class="reference internal" href="#using-the-export-symbol-macros">2.1 Using the EXPORT_SYMBOL macros</a></li>
+<li><a class="reference internal" href="#using-the-default-symbol-namespace-define">2.2 Using the DEFAULT_SYMBOL_NAMESPACE define</a></li>
+<li><a class="reference internal" href="#how-to-use-symbols-exported-in-namespaces">3. How to use Symbols exported in Namespaces</a></li>
+<li><a class="reference internal" href="#loading-modules-that-use-namespaced-symbols">4. Loading Modules that use namespaced Symbols</a></li>
+<li><a class="reference internal" href="#automatically-creating-module-import-ns-statements">5. Automatically creating MODULE_IMPORT_NS statements</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/core-api/symbol-namespaces.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/core-api/symbol-namespaces.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

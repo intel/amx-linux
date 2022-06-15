@@ -1,0 +1,358 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Buffers &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Triggers" href="triggers.html" />
+    <link rel="prev" title="Core elements" href="core.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="buffers">
+<h1>Buffers<a class="headerlink" href="#buffers" title="Permalink to this headline">¶</a></h1>
+<ul class="simple">
+<li><p>struct iio_buffer — general buffer structure</p></li>
+<li><p><a class="reference internal" href="#c.iio_validate_scan_mask_onehot" title="iio_validate_scan_mask_onehot"><code class="xref c c-func docutils literal notranslate"><span class="pre">iio_validate_scan_mask_onehot()</span></code></a> — Validates that exactly one channel
+is selected</p></li>
+<li><p><a class="reference internal" href="#c.iio_buffer_get" title="iio_buffer_get"><code class="xref c c-func docutils literal notranslate"><span class="pre">iio_buffer_get()</span></code></a> — Grab a reference to the buffer</p></li>
+<li><p><a class="reference internal" href="#c.iio_buffer_put" title="iio_buffer_put"><code class="xref c c-func docutils literal notranslate"><span class="pre">iio_buffer_put()</span></code></a> — Release the reference to the buffer</p></li>
+</ul>
+<p>The Industrial I/O core offers a way for continuous data capture based on a
+trigger source. Multiple data channels can be read at once from
+<code class="file docutils literal notranslate"><span class="pre">/dev/iio:device</span><em><span class="pre">X</span></em></code> character device node, thus reducing the CPU load.</p>
+<section id="iio-buffer-sysfs-interface">
+<h2>IIO buffer sysfs interface<a class="headerlink" href="#iio-buffer-sysfs-interface" title="Permalink to this headline">¶</a></h2>
+<p>An IIO buffer has an associated attributes directory under
+<code class="file docutils literal notranslate"><span class="pre">/sys/bus/iio/iio:device</span><em><span class="pre">X</span></em><span class="pre">/buffer/*</span></code>. Here are some of the existing
+attributes:</p>
+<ul class="simple">
+<li><p><code class="file docutils literal notranslate"><span class="pre">length</span></code>, the total number of data samples (capacity) that can be
+stored by the buffer.</p></li>
+<li><p><code class="file docutils literal notranslate"><span class="pre">enable</span></code>, activate buffer capture.</p></li>
+</ul>
+</section>
+<section id="iio-buffer-setup">
+<h2>IIO buffer setup<a class="headerlink" href="#iio-buffer-setup" title="Permalink to this headline">¶</a></h2>
+<p>The meta information associated with a channel reading placed in a buffer is
+called a scan element. The important bits configuring scan elements are
+exposed to userspace applications via the
+<code class="file docutils literal notranslate"><span class="pre">/sys/bus/iio/iio:device</span><em><span class="pre">X</span></em><span class="pre">/scan_elements/</span></code> directory. This directory contains
+attributes of the following form:</p>
+<ul class="simple">
+<li><p><code class="file docutils literal notranslate"><span class="pre">enable</span></code>, used for enabling a channel. If and only if its attribute
+is non <em>zero</em>, then a triggered capture will contain data samples for this
+channel.</p></li>
+<li><p><code class="file docutils literal notranslate"><span class="pre">index</span></code>, the scan_index of the channel.</p></li>
+<li><p><code class="file docutils literal notranslate"><span class="pre">type</span></code>, description of the scan element data storage within the buffer
+and hence the form in which it is read from user space.
+Format is [be|le]:[s|u]bits/storagebits[Xrepeat][&gt;&gt;shift] .</p>
+<ul>
+<li><p><em>be</em> or <em>le</em>, specifies big or little endian.</p></li>
+<li><p><em>s</em> or <em>u</em>, specifies if signed (2’s complement) or unsigned.</p></li>
+<li><p><em>bits</em>, is the number of valid data bits.</p></li>
+<li><p><em>storagebits</em>, is the number of bits (after padding) that it occupies in the
+buffer.</p></li>
+<li><p><em>repeat</em>, specifies the number of bits/storagebits repetitions. When the
+repeat element is 0 or 1, then the repeat value is omitted.</p></li>
+<li><p><em>shift</em>, if specified, is the shift that needs to be applied prior to
+masking out unused bits.</p></li>
+</ul>
+</li>
+</ul>
+<p>For example, a driver for a 3-axis accelerometer with 12 bit resolution where
+data is stored in two 8-bits registers as follows:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>  7   6   5   4   3   2   1   0
++---+---+---+---+---+---+---+---+
+|D3 |D2 |D1 |D0 | X | X | X | X | (LOW byte, address 0x06)
++---+---+---+---+---+---+---+---+
+
+  7   6   5   4   3   2   1   0
++---+---+---+---+---+---+---+---+
+|D11|D10|D9 |D8 |D7 |D6 |D5 |D4 | (HIGH byte, address 0x07)
++---+---+---+---+---+---+---+---+
+</pre></div>
+</div>
+<p>will have the following scan element type for each axis:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ cat /sys/bus/iio/devices/iio:device0/scan_elements/in_accel_y_type
+le:s12/16&gt;&gt;4
+</pre></div>
+</div>
+<p>A user space application will interpret data samples read from the buffer as
+two byte little endian signed data, that needs a 4 bits right shift before
+masking out the 12 valid bits of data.</p>
+<p>For implementing buffer support a driver should initialize the following
+fields in iio_chan_spec definition:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct iio_chan_spec {
+/* other members */
+        int scan_index
+        struct {
+                char sign;
+                u8 realbits;
+                u8 storagebits;
+                u8 shift;
+                u8 repeat;
+                enum iio_endian endianness;
+               } scan_type;
+       };
+</pre></div>
+</div>
+<p>The driver implementing the accelerometer described above will have the
+following channel definition:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct iio_chan_spec accel_channels[] = {
+        {
+                .type = IIO_ACCEL,
+                .modified = 1,
+                .channel2 = IIO_MOD_X,
+                /* other stuff here */
+                .scan_index = 0,
+                .scan_type = {
+                        .sign = &#39;s&#39;,
+                        .realbits = 12,
+                        .storagebits = 16,
+                        .shift = 4,
+                        .endianness = IIO_LE,
+                },
+        }
+        /* similar for Y (with channel2 = IIO_MOD_Y, scan_index = 1)
+         * and Z (with channel2 = IIO_MOD_Z, scan_index = 2) axis
+         */
+ }
+</pre></div>
+</div>
+<p>Here <strong>scan_index</strong> defines the order in which the enabled channels are placed
+inside the buffer. Channels with a lower <strong>scan_index</strong> will be placed before
+channels with a higher index. Each channel needs to have a unique
+<strong>scan_index</strong>.</p>
+<p>Setting <strong>scan_index</strong> to -1 can be used to indicate that the specific channel
+does not support buffered capture. In this case no entries will be created for
+the channel in the scan_elements directory.</p>
+</section>
+<section id="more-details">
+<h2>More details<a class="headerlink" href="#more-details" title="Permalink to this headline">¶</a></h2>
+<dl class="function">
+<dt id="c.iio_push_to_buffers_with_timestamp">
+int <code class="sig-name descname">iio_push_to_buffers_with_timestamp</code><span class="sig-paren">(</span>struct <a class="reference internal" href="core.html#c.iio_dev" title="iio_dev">iio_dev</a><em> *indio_dev</em>, void<em> *data</em>, int64_t<em> timestamp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.iio_push_to_buffers_with_timestamp" title="Permalink to this definition">¶</a></dt>
+<dd><p>push data and timestamp to buffers</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iio_dev</span> <span class="pre">*indio_dev</span></code></dt><dd><p>iio_dev structure for device.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*data</span></code></dt><dd><p>sample data</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int64_t</span> <span class="pre">timestamp</span></code></dt><dd><p>timestamp for the sample data</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Pushes data to the IIO device’s buffers. If timestamps are enabled for the
+device the function will store the supplied timestamp as the last element in
+the sample data buffer before pushing it to the device buffers. The sample
+data buffer needs to be large enough to hold the additional timestamp
+(usually the buffer should be indio-&gt;scan_bytes bytes large).</p>
+<p>Returns 0 on success, a negative error code otherwise.</p>
+</div>
+<dl class="function">
+<dt id="c.iio_validate_scan_mask_onehot">
+bool <code class="sig-name descname">iio_validate_scan_mask_onehot</code><span class="sig-paren">(</span>struct <a class="reference internal" href="core.html#c.iio_dev" title="iio_dev">iio_dev</a><em> *indio_dev</em>, const unsigned long<em> *mask</em><span class="sig-paren">)</span><a class="headerlink" href="#c.iio_validate_scan_mask_onehot" title="Permalink to this definition">¶</a></dt>
+<dd><p>Validates that exactly one channel is selected</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iio_dev</span> <span class="pre">*indio_dev</span></code></dt><dd><p>the iio device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">*mask</span></code></dt><dd><p>scan mask to be checked</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Return true if exactly one bit is set in the scan mask, false otherwise. It
+can be used for devices where only one channel can be active for sampling at
+a time.</p>
+</div>
+<dl class="function">
+<dt id="c.iio_push_to_buffers">
+int <code class="sig-name descname">iio_push_to_buffers</code><span class="sig-paren">(</span>struct <a class="reference internal" href="core.html#c.iio_dev" title="iio_dev">iio_dev</a><em> *indio_dev</em>, const void<em> *data</em><span class="sig-paren">)</span><a class="headerlink" href="#c.iio_push_to_buffers" title="Permalink to this definition">¶</a></dt>
+<dd><p>push to a registered buffer.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iio_dev</span> <span class="pre">*indio_dev</span></code></dt><dd><p>iio_dev structure for device.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">void</span> <span class="pre">*data</span></code></dt><dd><p>Full scan.</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.iio_push_to_buffers_with_ts_unaligned">
+int <code class="sig-name descname">iio_push_to_buffers_with_ts_unaligned</code><span class="sig-paren">(</span>struct <a class="reference internal" href="core.html#c.iio_dev" title="iio_dev">iio_dev</a><em> *indio_dev</em>, const void<em> *data</em>, size_t<em> data_sz</em>, int64_t<em> timestamp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.iio_push_to_buffers_with_ts_unaligned" title="Permalink to this definition">¶</a></dt>
+<dd><p>push to registered buffer, no alignment or space requirements.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iio_dev</span> <span class="pre">*indio_dev</span></code></dt><dd><p>iio_dev structure for device.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">void</span> <span class="pre">*data</span></code></dt><dd><p>channel data excluding the timestamp.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">size_t</span> <span class="pre">data_sz</span></code></dt><dd><p>size of data.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int64_t</span> <span class="pre">timestamp</span></code></dt><dd><p>timestamp for the sample data.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This special variant of <a class="reference internal" href="#c.iio_push_to_buffers_with_timestamp" title="iio_push_to_buffers_with_timestamp"><code class="xref c c-func docutils literal notranslate"><span class="pre">iio_push_to_buffers_with_timestamp()</span></code></a> does
+not require space for the timestamp, or 8 byte alignment of data.
+It does however require an allocation on first call and additional
+copies on all calls, so should be avoided if possible.</p>
+</div>
+<dl class="function">
+<dt id="c.iio_buffer_get">
+struct iio_buffer * <code class="sig-name descname">iio_buffer_get</code><span class="sig-paren">(</span>struct iio_buffer<em> *buffer</em><span class="sig-paren">)</span><a class="headerlink" href="#c.iio_buffer_get" title="Permalink to this definition">¶</a></dt>
+<dd><p>Grab a reference to the buffer</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iio_buffer</span> <span class="pre">*buffer</span></code></dt><dd><p>The buffer to grab a reference for, may be NULL</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Returns the pointer to the buffer that was passed into the function.</p>
+</div>
+<dl class="function">
+<dt id="c.iio_buffer_put">
+void <code class="sig-name descname">iio_buffer_put</code><span class="sig-paren">(</span>struct iio_buffer<em> *buffer</em><span class="sig-paren">)</span><a class="headerlink" href="#c.iio_buffer_put" title="Permalink to this definition">¶</a></dt>
+<dd><p>Release the reference to the buffer</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iio_buffer</span> <span class="pre">*buffer</span></code></dt><dd><p>The buffer to release the reference for, may be NULL</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.iio_device_attach_buffer">
+int <code class="sig-name descname">iio_device_attach_buffer</code><span class="sig-paren">(</span>struct <a class="reference internal" href="core.html#c.iio_dev" title="iio_dev">iio_dev</a><em> *indio_dev</em>, struct iio_buffer<em> *buffer</em><span class="sig-paren">)</span><a class="headerlink" href="#c.iio_device_attach_buffer" title="Permalink to this definition">¶</a></dt>
+<dd><p>Attach a buffer to a IIO device</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iio_dev</span> <span class="pre">*indio_dev</span></code></dt><dd><p>The device the buffer should be attached to</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iio_buffer</span> <span class="pre">*buffer</span></code></dt><dd><p>The buffer to attach to the device</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Return 0 if successful, negative if error.</p>
+<p>This function attaches a buffer to a IIO device. The buffer stays attached to
+the device until the device is freed. For legacy reasons, the first attached
+buffer will also be assigned to ‘indio_dev-&gt;buffer’.
+The array allocated here, will be free’d via the iio_device_detach_buffers()
+call which is handled by the <a class="reference internal" href="core.html#c.iio_device_free" title="iio_device_free"><code class="xref c c-func docutils literal notranslate"><span class="pre">iio_device_free()</span></code></a>.</p>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Buffers</a><ul>
+<li><a class="reference internal" href="#iio-buffer-sysfs-interface">IIO buffer sysfs interface</a></li>
+<li><a class="reference internal" href="#iio-buffer-setup">IIO buffer setup</a></li>
+<li><a class="reference internal" href="#more-details">More details</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/iio/buffers.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/iio/buffers.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

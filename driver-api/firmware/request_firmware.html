@@ -1,0 +1,360 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>request_firmware API &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Firmware Upload API" href="fw_upload.html" />
+    <link rel="prev" title="UEFI Support" href="efi/index.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="request-firmware-api">
+<h1>request_firmware API<a class="headerlink" href="#request-firmware-api" title="Permalink to this headline">¶</a></h1>
+<p>You would typically load firmware and then load it into your device somehow.
+The typical firmware work flow is reflected below:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>if(request_firmware(&amp;fw_entry, $FIRMWARE, device) == 0)
+       copy_fw_to_device(fw_entry-&gt;data, fw_entry-&gt;size);
+release_firmware(fw_entry);
+</pre></div>
+</div>
+<section id="synchronous-firmware-requests">
+<h2>Synchronous firmware requests<a class="headerlink" href="#synchronous-firmware-requests" title="Permalink to this headline">¶</a></h2>
+<p>Synchronous firmware requests will wait until the firmware is found or until
+an error is returned.</p>
+<section id="request-firmware">
+<h3>request_firmware<a class="headerlink" href="#request-firmware" title="Permalink to this headline">¶</a></h3>
+<dl class="function">
+<dt id="c.request_firmware">
+int <code class="sig-name descname">request_firmware</code><span class="sig-paren">(</span>const struct firmware<em> **firmware_p</em>, const char<em> *name</em>, struct <a class="reference internal" href="../infrastructure.html#c.device" title="device">device</a><em> *device</em><span class="sig-paren">)</span><a class="headerlink" href="#c.request_firmware" title="Permalink to this definition">¶</a></dt>
+<dd><p>send firmware request and wait for it</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">struct</span> <span class="pre">firmware</span> <span class="pre">**firmware_p</span></code></dt><dd><p>pointer to firmware image</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*name</span></code></dt><dd><p>name of firmware file</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*device</span></code></dt><dd><p>device for which firmware is being loaded</p>
+<p><strong>firmware_p</strong> will be used to return a firmware image by the name
+of <strong>name</strong> for device <strong>device</strong>.</p>
+<p>Should be called from user context where sleeping is allowed.</p>
+<p><strong>name</strong> will be used as $FIRMWARE in the uevent environment and
+should be distinctive enough not to be confused with any other
+firmware image for this or any other device.</p>
+<p>Caller must hold the reference count of <strong>device</strong>.</p>
+<p>The function can be called safely inside device’s suspend and
+resume callback.</p>
+</dd>
+</dl>
+</div>
+</section>
+<section id="firmware-request-nowarn">
+<h3>firmware_request_nowarn<a class="headerlink" href="#firmware-request-nowarn" title="Permalink to this headline">¶</a></h3>
+<dl class="function">
+<dt id="c.firmware_request_nowarn">
+int <code class="sig-name descname">firmware_request_nowarn</code><span class="sig-paren">(</span>const struct firmware<em> **firmware</em>, const char<em> *name</em>, struct <a class="reference internal" href="../infrastructure.html#c.device" title="device">device</a><em> *device</em><span class="sig-paren">)</span><a class="headerlink" href="#c.firmware_request_nowarn" title="Permalink to this definition">¶</a></dt>
+<dd><p>request for an optional fw module</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">struct</span> <span class="pre">firmware</span> <span class="pre">**firmware</span></code></dt><dd><p>pointer to firmware image</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*name</span></code></dt><dd><p>name of firmware file</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*device</span></code></dt><dd><p>device for which firmware is being loaded</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This function is similar in behaviour to <a class="reference internal" href="#c.request_firmware" title="request_firmware"><code class="xref c c-func docutils literal notranslate"><span class="pre">request_firmware()</span></code></a>, except it
+doesn’t produce warning messages when the file is not found. The sysfs
+fallback mechanism is enabled if direct filesystem lookup fails. However,
+failures to find the firmware file with it are still suppressed. It is
+therefore up to the driver to check for the return value of this call and to
+decide when to inform the users of errors.</p>
+</div>
+</section>
+<section id="firmware-request-platform">
+<h3>firmware_request_platform<a class="headerlink" href="#firmware-request-platform" title="Permalink to this headline">¶</a></h3>
+<dl class="function">
+<dt id="c.firmware_request_platform">
+int <code class="sig-name descname">firmware_request_platform</code><span class="sig-paren">(</span>const struct firmware<em> **firmware</em>, const char<em> *name</em>, struct <a class="reference internal" href="../infrastructure.html#c.device" title="device">device</a><em> *device</em><span class="sig-paren">)</span><a class="headerlink" href="#c.firmware_request_platform" title="Permalink to this definition">¶</a></dt>
+<dd><p>request firmware with platform-fw fallback</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">struct</span> <span class="pre">firmware</span> <span class="pre">**firmware</span></code></dt><dd><p>pointer to firmware image</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*name</span></code></dt><dd><p>name of firmware file</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*device</span></code></dt><dd><p>device for which firmware is being loaded</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This function is similar in behaviour to request_firmware, except that if
+direct filesystem lookup fails, it will fallback to looking for a copy of the
+requested firmware embedded in the platform’s main (e.g. UEFI) firmware.</p>
+</div>
+</section>
+<section id="request-firmware-direct">
+<h3>request_firmware_direct<a class="headerlink" href="#request-firmware-direct" title="Permalink to this headline">¶</a></h3>
+<dl class="function">
+<dt id="c.request_firmware_direct">
+int <code class="sig-name descname">request_firmware_direct</code><span class="sig-paren">(</span>const struct firmware<em> **firmware_p</em>, const char<em> *name</em>, struct <a class="reference internal" href="../infrastructure.html#c.device" title="device">device</a><em> *device</em><span class="sig-paren">)</span><a class="headerlink" href="#c.request_firmware_direct" title="Permalink to this definition">¶</a></dt>
+<dd><p>load firmware directly without usermode helper</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">struct</span> <span class="pre">firmware</span> <span class="pre">**firmware_p</span></code></dt><dd><p>pointer to firmware image</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*name</span></code></dt><dd><p>name of firmware file</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*device</span></code></dt><dd><p>device for which firmware is being loaded</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This function works pretty much like <a class="reference internal" href="#c.request_firmware" title="request_firmware"><code class="xref c c-func docutils literal notranslate"><span class="pre">request_firmware()</span></code></a>, but this doesn’t
+fall back to usermode helper even if the firmware couldn’t be loaded
+directly from fs.  Hence it’s useful for loading optional firmwares, which
+aren’t always present, without extra long timeouts of udev.</p>
+</div>
+</section>
+<section id="request-firmware-into-buf">
+<h3>request_firmware_into_buf<a class="headerlink" href="#request-firmware-into-buf" title="Permalink to this headline">¶</a></h3>
+<dl class="function">
+<dt id="c.request_firmware_into_buf">
+int <code class="sig-name descname">request_firmware_into_buf</code><span class="sig-paren">(</span>const struct firmware<em> **firmware_p</em>, const char<em> *name</em>, struct <a class="reference internal" href="../infrastructure.html#c.device" title="device">device</a><em> *device</em>, void<em> *buf</em>, size_t<em> size</em><span class="sig-paren">)</span><a class="headerlink" href="#c.request_firmware_into_buf" title="Permalink to this definition">¶</a></dt>
+<dd><p>load firmware into a previously allocated buffer</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">struct</span> <span class="pre">firmware</span> <span class="pre">**firmware_p</span></code></dt><dd><p>pointer to firmware image</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*name</span></code></dt><dd><p>name of firmware file</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*device</span></code></dt><dd><p>device for which firmware is being loaded and DMA region allocated</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*buf</span></code></dt><dd><p>address of buffer to load firmware into</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">size_t</span> <span class="pre">size</span></code></dt><dd><p>size of buffer</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This function works pretty much like <a class="reference internal" href="#c.request_firmware" title="request_firmware"><code class="xref c c-func docutils literal notranslate"><span class="pre">request_firmware()</span></code></a>, but it doesn’t
+allocate a buffer to hold the firmware data. Instead, the firmware
+is loaded directly into the buffer pointed to by <strong>buf</strong> and the <strong>firmware_p</strong>
+data member is pointed at <strong>buf</strong>.</p>
+<p>This function doesn’t cache firmware either.</p>
+</div>
+</section>
+</section>
+<section id="asynchronous-firmware-requests">
+<h2>Asynchronous firmware requests<a class="headerlink" href="#asynchronous-firmware-requests" title="Permalink to this headline">¶</a></h2>
+<p>Asynchronous firmware requests allow driver code to not have to wait
+until the firmware or an error is returned. Function callbacks are
+provided so that when the firmware or an error is found the driver is
+informed through the callback. <a class="reference internal" href="#c.request_firmware_nowait" title="request_firmware_nowait"><code class="xref c c-func docutils literal notranslate"><span class="pre">request_firmware_nowait()</span></code></a> cannot be called
+in atomic contexts.</p>
+<section id="request-firmware-nowait">
+<h3>request_firmware_nowait<a class="headerlink" href="#request-firmware-nowait" title="Permalink to this headline">¶</a></h3>
+<dl class="function">
+<dt id="c.request_firmware_nowait">
+int <code class="sig-name descname">request_firmware_nowait</code><span class="sig-paren">(</span>struct module<em> *module</em>, bool<em> uevent</em>, const char<em> *name</em>, struct <a class="reference internal" href="../infrastructure.html#c.device" title="device">device</a><em> *device</em>, gfp_t<em> gfp</em>, void<em> *context</em>, void (<em>*cont</em>)(const struct firmware *fw, void *context)<span class="sig-paren">)</span><a class="headerlink" href="#c.request_firmware_nowait" title="Permalink to this definition">¶</a></dt>
+<dd><p>asynchronous version of request_firmware</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">module</span> <span class="pre">*module</span></code></dt><dd><p>module requesting the firmware</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">bool</span> <span class="pre">uevent</span></code></dt><dd><p>sends uevent to copy the firmware image if this flag
+is non-zero else the firmware copy must be done manually.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*name</span></code></dt><dd><p>name of firmware file</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*device</span></code></dt><dd><p>device for which firmware is being loaded</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">gfp_t</span> <span class="pre">gfp</span></code></dt><dd><p>allocation flags</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*context</span></code></dt><dd><p>will be passed over to <strong>cont</strong>, and
+<strong>fw</strong> may be <code class="docutils literal notranslate"><span class="pre">NULL</span></code> if firmware request fails.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">(*cont)(const</span> <span class="pre">struct</span> <span class="pre">firmware</span> <span class="pre">*fw,</span> <span class="pre">void</span> <span class="pre">*context)</span></code></dt><dd><p>function will be called asynchronously when the firmware
+request is over.</p>
+<p>Caller must hold the reference count of <strong>device</strong>.</p>
+<dl class="simple">
+<dt>Asynchronous variant of request_firmware() for user contexts:</dt><dd><ul class="simple">
+<li><p>sleep for as small periods as possible since it may
+increase kernel boot time of built-in device drivers
+requesting firmware in their -&gt;probe() methods, if
+<strong>gfp</strong> is GFP_KERNEL.</p></li>
+<li><p>can’t sleep at all if <strong>gfp</strong> is GFP_ATOMIC.</p></li>
+</ul>
+</dd>
+</dl>
+</dd>
+</dl>
+</div>
+</section>
+</section>
+<section id="special-optimizations-on-reboot">
+<h2>Special optimizations on reboot<a class="headerlink" href="#special-optimizations-on-reboot" title="Permalink to this headline">¶</a></h2>
+<p>Some devices have an optimization in place to enable the firmware to be
+retained during system reboot. When such optimizations are used the driver
+author must ensure the firmware is still available on resume from suspend,
+this can be done with <a class="reference internal" href="#c.firmware_request_cache" title="firmware_request_cache"><code class="xref c c-func docutils literal notranslate"><span class="pre">firmware_request_cache()</span></code></a> instead of requesting for the
+firmware to be loaded.</p>
+<section id="firmware-request-cache">
+<h3>firmware_request_cache()<a class="headerlink" href="#firmware-request-cache" title="Permalink to this headline">¶</a></h3>
+<dl class="function">
+<dt id="c.firmware_request_cache">
+int <code class="sig-name descname">firmware_request_cache</code><span class="sig-paren">(</span>struct <a class="reference internal" href="../infrastructure.html#c.device" title="device">device</a><em> *device</em>, const char<em> *name</em><span class="sig-paren">)</span><a class="headerlink" href="#c.firmware_request_cache" title="Permalink to this definition">¶</a></dt>
+<dd><p>cache firmware for suspend so resume can use it</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*device</span></code></dt><dd><p>device for which firmware should be cached for</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*name</span></code></dt><dd><p>name of firmware file</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>There are some devices with an optimization that enables the device to not
+require loading firmware on system reboot. This optimization may still
+require the firmware present on resume from suspend. This routine can be
+used to ensure the firmware is present on resume from suspend in these
+situations. This helper is not compatible with drivers which use
+<a class="reference internal" href="#c.request_firmware_into_buf" title="request_firmware_into_buf"><code class="xref c c-func docutils literal notranslate"><span class="pre">request_firmware_into_buf()</span></code></a> or <a class="reference internal" href="#c.request_firmware_nowait" title="request_firmware_nowait"><code class="xref c c-func docutils literal notranslate"><span class="pre">request_firmware_nowait()</span></code></a> with no uevent set.</p>
+</div>
+</section>
+</section>
+<section id="request-firmware-api-expected-driver-use">
+<h2>request firmware API expected driver use<a class="headerlink" href="#request-firmware-api-expected-driver-use" title="Permalink to this headline">¶</a></h2>
+<p>Once an API call returns you process the firmware and then release the
+firmware. For example if you used <a class="reference internal" href="#c.request_firmware" title="request_firmware"><code class="xref c c-func docutils literal notranslate"><span class="pre">request_firmware()</span></code></a> and it returns,
+the driver has the firmware image accessible in fw_entry-&gt;{data,size}.
+If something went wrong <a class="reference internal" href="#c.request_firmware" title="request_firmware"><code class="xref c c-func docutils literal notranslate"><span class="pre">request_firmware()</span></code></a> returns non-zero and fw_entry
+is set to NULL. Once your driver is done with processing the firmware it
+can call release_firmware(fw_entry) to release the firmware image
+and any related resource.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">request_firmware API</a><ul>
+<li><a class="reference internal" href="#synchronous-firmware-requests">Synchronous firmware requests</a><ul>
+<li><a class="reference internal" href="#request-firmware">request_firmware</a></li>
+<li><a class="reference internal" href="#firmware-request-nowarn">firmware_request_nowarn</a></li>
+<li><a class="reference internal" href="#firmware-request-platform">firmware_request_platform</a></li>
+<li><a class="reference internal" href="#request-firmware-direct">request_firmware_direct</a></li>
+<li><a class="reference internal" href="#request-firmware-into-buf">request_firmware_into_buf</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#asynchronous-firmware-requests">Asynchronous firmware requests</a><ul>
+<li><a class="reference internal" href="#request-firmware-nowait">request_firmware_nowait</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#special-optimizations-on-reboot">Special optimizations on reboot</a><ul>
+<li><a class="reference internal" href="#firmware-request-cache">firmware_request_cache()</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#request-firmware-api-expected-driver-use">request firmware API expected driver use</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/firmware/request_firmware.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/firmware/request_firmware.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,189 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Kernel driver via686a &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Kernel driver vt1211" href="vt1211.html" />
+    <link rel="prev" title="Kernel driver vexpress" href="vexpress.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="kernel-driver-via686a">
+<h1>Kernel driver via686a<a class="headerlink" href="#kernel-driver-via686a" title="Permalink to this headline">¶</a></h1>
+<p>Supported chips:</p>
+<blockquote>
+<div><ul>
+<li><p>Via VT82C686A, VT82C686B  Southbridge Integrated Hardware Monitor</p>
+<p>Prefix: ‘via686a’</p>
+<p>Addresses scanned: ISA in PCI-space encoded address</p>
+<p>Datasheet: On request through web form (<a class="reference external" href="http://www.via.com.tw/en/resources/download-center/">http://www.via.com.tw/en/resources/download-center/</a>)</p>
+</li>
+</ul>
+</div></blockquote>
+<dl class="simple">
+<dt>Authors:</dt><dd><ul class="simple">
+<li><p>Kyösti Mälkki &lt;<a class="reference external" href="mailto:kmalkki&#37;&#52;&#48;cc&#46;hut&#46;fi">kmalkki<span>&#64;</span>cc<span>&#46;</span>hut<span>&#46;</span>fi</a>&gt;,</p></li>
+<li><p>Mark D. Studebaker &lt;<a class="reference external" href="mailto:mdsxyz123&#37;&#52;&#48;yahoo&#46;com">mdsxyz123<span>&#64;</span>yahoo<span>&#46;</span>com</a>&gt;</p></li>
+<li><p>Bob Dougherty &lt;<a class="reference external" href="mailto:bobd&#37;&#52;&#48;stanford&#46;edu">bobd<span>&#64;</span>stanford<span>&#46;</span>edu</a>&gt;</p></li>
+<li><p>(Some conversion-factor data were contributed by</p></li>
+<li><p>Jonathan Teh Soon Yew &lt;<a class="reference external" href="mailto:j&#46;teh&#37;&#52;&#48;iname&#46;com">j<span>&#46;</span>teh<span>&#64;</span>iname<span>&#46;</span>com</a>&gt;</p></li>
+<li><p>and Alex van Kaam &lt;<a class="reference external" href="mailto:darkside&#37;&#52;&#48;chello&#46;nl">darkside<span>&#64;</span>chello<span>&#46;</span>nl</a>&gt;.)</p></li>
+</ul>
+</dd>
+</dl>
+<section id="module-parameters">
+<h2>Module Parameters<a class="headerlink" href="#module-parameters" title="Permalink to this headline">¶</a></h2>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 29%" />
+<col style="width: 71%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>force_addr=0xaddr</p></td>
+<td><p>Set the I/O base address. Useful for boards that
+don’t set the address in the BIOS. Look for a BIOS
+upgrade before resorting to this. Does not do a
+PCI force; the via686a must still be present in lspci.
+Don’t use this unless the driver complains that the
+base address is not set.
+Example: ‘modprobe via686a force_addr=0x6000’</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="description">
+<h2>Description<a class="headerlink" href="#description" title="Permalink to this headline">¶</a></h2>
+<p>The driver does not distinguish between the chips and reports
+all as a 686A.</p>
+<p>The Via 686a southbridge has integrated hardware monitor functionality.
+It also has an I2C bus, but this driver only supports the hardware monitor.
+For the I2C bus driver, see &lt;<a class="reference external" href="file:Documentation/i2c/busses/i2c-viapro.rst">file:Documentation/i2c/busses/i2c-viapro.rst</a>&gt;</p>
+<p>The Via 686a implements three temperature sensors, two fan rotation speed
+sensors, five voltage sensors and alarms.</p>
+<p>Temperatures are measured in degrees Celsius. An alarm is triggered once
+when the Overtemperature Shutdown limit is crossed; it is triggered again
+as soon as it drops below the hysteresis value.</p>
+<p>Fan rotation speeds are reported in RPM (rotations per minute). An alarm is
+triggered if the rotation speed has dropped below a programmable limit. Fan
+readings can be divided by a programmable divider (1, 2, 4 or 8) to give
+the readings more range or accuracy. Not all RPM values can accurately be
+represented, so some rounding is done. With a divider of 2, the lowest
+representable value is around 2600 RPM.</p>
+<p>Voltage sensors (also known as IN sensors) report their values in volts.
+An alarm is triggered if the voltage has crossed a programmable minimum
+or maximum limit. Voltages are internally scalled, so each voltage channel
+has a different resolution and range.</p>
+<p>If an alarm triggers, it will remain triggered until the hardware register
+is read at least once. This means that the cause for the alarm may
+already have disappeared! Note that in the current implementation, all
+hardware registers are read whenever any data is read (unless it is less
+than 1.5 seconds since the last update). This means that you can easily
+miss once-only alarms.</p>
+<p>The driver only updates its values each 1.5 seconds; reading it more often
+will do no harm, but will return ‘old’ values.</p>
+</section>
+<section id="known-issues">
+<h2>Known Issues<a class="headerlink" href="#known-issues" title="Permalink to this headline">¶</a></h2>
+<p>This driver handles sensors integrated in some VIA south bridges. It is
+possible that a motherboard maker used a VT82C686A/B chip as part of a
+product design but was not interested in its hardware monitoring features,
+in which case the sensor inputs will not be wired. This is the case of
+the Asus K7V, A7V and A7V133 motherboards, to name only a few of them.
+So, if you need the force_addr parameter, and end up with values which
+don’t seem to make any sense, don’t look any further: your chip is simply
+not wired for hardware monitoring.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Kernel driver via686a</a><ul>
+<li><a class="reference internal" href="#module-parameters">Module Parameters</a></li>
+<li><a class="reference internal" href="#description">Description</a></li>
+<li><a class="reference internal" href="#known-issues">Known Issues</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/hwmon/via686a.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/hwmon/via686a.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

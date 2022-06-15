@@ -1,0 +1,292 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Semantics and Behavior of Local Atomic Operations &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="The padata parallel execution mechanism" href="padata.html" />
+    <link rel="prev" title="IRQ-flags state tracing" href="irq/irqflags-tracing.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="semantics-and-behavior-of-local-atomic-operations">
+<span id="local-ops"></span><h1>Semantics and Behavior of Local Atomic Operations<a class="headerlink" href="#semantics-and-behavior-of-local-atomic-operations" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">Author</dt>
+<dd class="field-odd"><p>Mathieu Desnoyers</p>
+</dd>
+</dl>
+<p>This document explains the purpose of the local atomic operations, how
+to implement them for any given architecture and shows how they can be used
+properly. It also stresses on the precautions that must be taken when reading
+those local variables across CPUs when the order of memory writes matters.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Note that <code class="docutils literal notranslate"><span class="pre">local_t</span></code> based operations are not recommended for general
+kernel use. Please use the <code class="docutils literal notranslate"><span class="pre">this_cpu</span></code> operations instead unless there is
+really a special purpose. Most uses of <code class="docutils literal notranslate"><span class="pre">local_t</span></code> in the kernel have been
+replaced by <code class="docutils literal notranslate"><span class="pre">this_cpu</span></code> operations. <code class="docutils literal notranslate"><span class="pre">this_cpu</span></code> operations combine the
+relocation with the <code class="docutils literal notranslate"><span class="pre">local_t</span></code> like semantics in a single instruction and
+yield more compact and faster executing code.</p>
+</div>
+<section id="purpose-of-local-atomic-operations">
+<h2>Purpose of local atomic operations<a class="headerlink" href="#purpose-of-local-atomic-operations" title="Permalink to this headline">¶</a></h2>
+<p>Local atomic operations are meant to provide fast and highly reentrant per CPU
+counters. They minimize the performance cost of standard atomic operations by
+removing the LOCK prefix and memory barriers normally required to synchronize
+across CPUs.</p>
+<p>Having fast per CPU atomic counters is interesting in many cases: it does not
+require disabling interrupts to protect from interrupt handlers and it permits
+coherent counters in NMI handlers. It is especially useful for tracing purposes
+and for various performance monitoring counters.</p>
+<p>Local atomic operations only guarantee variable modification atomicity wrt the
+CPU which owns the data. Therefore, care must taken to make sure that only one
+CPU writes to the <code class="docutils literal notranslate"><span class="pre">local_t</span></code> data. This is done by using per cpu data and
+making sure that we modify it from within a preemption safe context. It is
+however permitted to read <code class="docutils literal notranslate"><span class="pre">local_t</span></code> data from any CPU: it will then appear to
+be written out of order wrt other memory writes by the owner CPU.</p>
+</section>
+<section id="implementation-for-a-given-architecture">
+<h2>Implementation for a given architecture<a class="headerlink" href="#implementation-for-a-given-architecture" title="Permalink to this headline">¶</a></h2>
+<p>It can be done by slightly modifying the standard atomic operations: only
+their UP variant must be kept. It typically means removing LOCK prefix (on
+i386 and x86_64) and any SMP synchronization barrier. If the architecture does
+not have a different behavior between SMP and UP, including
+<code class="docutils literal notranslate"><span class="pre">asm-generic/local.h</span></code> in your architecture’s <code class="docutils literal notranslate"><span class="pre">local.h</span></code> is sufficient.</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">local_t</span></code> type is defined as an opaque <code class="docutils literal notranslate"><span class="pre">signed</span> <span class="pre">long</span></code> by embedding an
+<code class="docutils literal notranslate"><span class="pre">atomic_long_t</span></code> inside a structure. This is made so a cast from this type to
+a <code class="docutils literal notranslate"><span class="pre">long</span></code> fails. The definition looks like:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>typedef struct { atomic_long_t a; } local_t;
+</pre></div>
+</div>
+</section>
+<section id="rules-to-follow-when-using-local-atomic-operations">
+<h2>Rules to follow when using local atomic operations<a class="headerlink" href="#rules-to-follow-when-using-local-atomic-operations" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p>Variables touched by local ops must be per cpu variables.</p></li>
+<li><p><em>Only</em> the CPU owner of these variables must write to them.</p></li>
+<li><p>This CPU can use local ops from any context (process, irq, softirq, nmi, …)
+to update its <code class="docutils literal notranslate"><span class="pre">local_t</span></code> variables.</p></li>
+<li><p>Preemption (or interrupts) must be disabled when using local ops in
+process context to make sure the process won’t be migrated to a
+different CPU between getting the per-cpu variable and doing the
+actual local op.</p></li>
+<li><p>When using local ops in interrupt context, no special care must be
+taken on a mainline kernel, since they will run on the local CPU with
+preemption already disabled. I suggest, however, to explicitly
+disable preemption anyway to make sure it will still work correctly on
+-rt kernels.</p></li>
+<li><p>Reading the local cpu variable will provide the current copy of the
+variable.</p></li>
+<li><p>Reads of these variables can be done from any CPU, because updates to
+“<code class="docutils literal notranslate"><span class="pre">long</span></code>”, aligned, variables are always atomic. Since no memory
+synchronization is done by the writer CPU, an outdated copy of the
+variable can be read when reading some <em>other</em> cpu’s variables.</p></li>
+</ul>
+</section>
+<section id="how-to-use-local-atomic-operations">
+<h2>How to use local atomic operations<a class="headerlink" href="#how-to-use-local-atomic-operations" title="Permalink to this headline">¶</a></h2>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#include &lt;linux/percpu.h&gt;
+#include &lt;asm/local.h&gt;
+
+static DEFINE_PER_CPU(local_t, counters) = LOCAL_INIT(0);
+</pre></div>
+</div>
+</section>
+<section id="counting">
+<h2>Counting<a class="headerlink" href="#counting" title="Permalink to this headline">¶</a></h2>
+<p>Counting is done on all the bits of a signed long.</p>
+<p>In preemptible context, use <code class="docutils literal notranslate"><span class="pre">get_cpu_var()</span></code> and <code class="docutils literal notranslate"><span class="pre">put_cpu_var()</span></code> around
+local atomic operations: it makes sure that preemption is disabled around write
+access to the per cpu variable. For instance:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>local_inc(&amp;get_cpu_var(counters));
+put_cpu_var(counters);
+</pre></div>
+</div>
+<p>If you are already in a preemption-safe context, you can use
+<code class="docutils literal notranslate"><span class="pre">this_cpu_ptr()</span></code> instead:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>local_inc(this_cpu_ptr(&amp;counters));
+</pre></div>
+</div>
+</section>
+<section id="reading-the-counters">
+<h2>Reading the counters<a class="headerlink" href="#reading-the-counters" title="Permalink to this headline">¶</a></h2>
+<p>Those local counters can be read from foreign CPUs to sum the count. Note that
+the data seen by local_read across CPUs must be considered to be out of order
+relatively to other memory writes happening on the CPU that owns the data:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>long sum = 0;
+for_each_online_cpu(cpu)
+        sum += local_read(&amp;per_cpu(counters, cpu));
+</pre></div>
+</div>
+<p>If you want to use a remote local_read to synchronize access to a resource
+between CPUs, explicit <code class="docutils literal notranslate"><span class="pre">smp_wmb()</span></code> and <code class="docutils literal notranslate"><span class="pre">smp_rmb()</span></code> memory barriers must be used
+respectively on the writer and the reader CPUs. It would be the case if you use
+the <code class="docutils literal notranslate"><span class="pre">local_t</span></code> variable as a counter of bytes written in a buffer: there should
+be a <code class="docutils literal notranslate"><span class="pre">smp_wmb()</span></code> between the buffer write and the counter increment and also a
+<code class="docutils literal notranslate"><span class="pre">smp_rmb()</span></code> between the counter read and the buffer read.</p>
+<p>Here is a sample module which implements a basic per cpu counter using
+<code class="docutils literal notranslate"><span class="pre">local.h</span></code>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/* test-local.c
+ *
+ * Sample module for local.h usage.
+ */
+
+
+#include &lt;asm/local.h&gt;
+#include &lt;linux/module.h&gt;
+#include &lt;linux/timer.h&gt;
+
+static DEFINE_PER_CPU(local_t, counters) = LOCAL_INIT(0);
+
+static struct timer_list test_timer;
+
+/* IPI called on each CPU. */
+static void test_each(void *info)
+{
+        /* Increment the counter from a non preemptible context */
+        printk(&quot;Increment on cpu %d\n&quot;, smp_processor_id());
+        local_inc(this_cpu_ptr(&amp;counters));
+
+        /* This is what incrementing the variable would look like within a
+         * preemptible context (it disables preemption) :
+         *
+         * local_inc(&amp;get_cpu_var(counters));
+         * put_cpu_var(counters);
+         */
+}
+
+static void do_test_timer(unsigned long data)
+{
+        int cpu;
+
+        /* Increment the counters */
+        on_each_cpu(test_each, NULL, 1);
+        /* Read all the counters */
+        printk(&quot;Counters read from CPU %d\n&quot;, smp_processor_id());
+        for_each_online_cpu(cpu) {
+                printk(&quot;Read : CPU %d, count %ld\n&quot;, cpu,
+                        local_read(&amp;per_cpu(counters, cpu)));
+        }
+        mod_timer(&amp;test_timer, jiffies + 1000);
+}
+
+static int __init test_init(void)
+{
+        /* initialize the timer that will increment the counter */
+        timer_setup(&amp;test_timer, do_test_timer, 0);
+        mod_timer(&amp;test_timer, jiffies + 1);
+
+        return 0;
+}
+
+static void __exit test_exit(void)
+{
+        timer_shutdown_sync(&amp;test_timer);
+}
+
+module_init(test_init);
+module_exit(test_exit);
+
+MODULE_LICENSE(&quot;GPL&quot;);
+MODULE_AUTHOR(&quot;Mathieu Desnoyers&quot;);
+MODULE_DESCRIPTION(&quot;Local Atomic Ops&quot;);
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Semantics and Behavior of Local Atomic Operations</a><ul>
+<li><a class="reference internal" href="#purpose-of-local-atomic-operations">Purpose of local atomic operations</a></li>
+<li><a class="reference internal" href="#implementation-for-a-given-architecture">Implementation for a given architecture</a></li>
+<li><a class="reference internal" href="#rules-to-follow-when-using-local-atomic-operations">Rules to follow when using local atomic operations</a></li>
+<li><a class="reference internal" href="#how-to-use-local-atomic-operations">How to use local atomic operations</a></li>
+<li><a class="reference internal" href="#counting">Counting</a></li>
+<li><a class="reference internal" href="#reading-the-counters">Reading the counters</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/core-api/local_ops.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/core-api/local_ops.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

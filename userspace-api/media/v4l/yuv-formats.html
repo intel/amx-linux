@@ -1,0 +1,433 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>2.7. YUV Formats &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="2.7.1.1. Packed YUV formats" href="pixfmt-packed-yuv.html" />
+    <link rel="prev" title="2.6.1.11. V4L2_PIX_FMT_SRGGB16 (‘RG16’), V4L2_PIX_FMT_SGRBG16 (‘GR16’), V4L2_PIX_FMT_SGBRG16 (‘GB16’), V4L2_PIX_FMT_SBGGR16 (‘BYR2’)," href="pixfmt-srggb16.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="yuv-formats">
+<span id="id1"></span><h1><span class="section-number">2.7. </span>YUV Formats<a class="headerlink" href="#yuv-formats" title="Permalink to this headline">¶</a></h1>
+<p>YUV is the format native to TV broadcast and composite video signals. It
+separates the brightness information (Y) from the color information (U
+and V or Cb and Cr). The color information consists of red and blue
+<em>color difference</em> signals, this way the green component can be
+reconstructed by subtracting from the brightness component. See
+<a class="reference internal" href="colorspaces.html#colorspaces"><span class="std std-ref">Colorspaces</span></a> for conversion examples. YUV was chosen because
+early television would only transmit brightness information. To add
+color in a way compatible with existing receivers a new signal carrier
+was added to transmit the color difference signals.</p>
+<section id="subsampling">
+<h2><span class="section-number">2.7.1. </span>Subsampling<a class="headerlink" href="#subsampling" title="Permalink to this headline">¶</a></h2>
+<p>YUV formats commonly encode images with a lower resolution for the chroma
+components than for the luma component. This compression technique, taking
+advantage of the human eye being more sensitive to luminance than color
+differences, is called chroma subsampling.</p>
+<p>While many combinations of subsampling factors in the horizontal and vertical
+direction are possible, common factors are 1 (no subsampling), 2 and 4, with
+horizontal subsampling always larger than or equal to vertical subsampling.
+Common combinations are named as follows.</p>
+<ul class="simple">
+<li><p><cite>4:4:4</cite>: No subsampling</p></li>
+<li><p><cite>4:2:2</cite>: Horizontal subsampling by 2, no vertical subsampling</p></li>
+<li><p><cite>4:2:0</cite>: Horizontal subsampling by 2, vertical subsampling by 2</p></li>
+<li><p><cite>4:1:1</cite>: Horizontal subsampling by 4, no vertical subsampling</p></li>
+<li><p><cite>4:1:0</cite>: Horizontal subsampling by 4, vertical subsampling by 4</p></li>
+</ul>
+<p>Subsampling the chroma component effectively creates chroma values that can be
+located in different spatial locations:</p>
+<ul class="simple">
+<li><p id="yuv-chroma-centered">The subsampled chroma value may be calculated by simply averaging the chroma
+value of two consecutive pixels. It effectively models the chroma of a pixel
+sited between the two original pixels. This is referred to as centered or
+interstitially sited chroma.</p>
+</li>
+<li><p id="yuv-chroma-cosited">The other option is to subsample chroma values in a way that place them in
+the same spatial sites as the pixels. This may be performed by skipping every
+other chroma sample (creating aliasing artifacts), or with filters using an
+odd number of taps. This is referred to as co-sited chroma.</p>
+</li>
+</ul>
+<p>The following examples show different combination of chroma siting in a 4x4
+image.</p>
+<table class="docutils align-default" id="id2">
+<caption><span class="caption-text">4:2:2 subsampling, interstitially sited</span><a class="headerlink" href="#id2" title="Permalink to this table">¶</a></caption>
+<colgroup>
+<col style="width: 13%" />
+<col style="width: 13%" />
+<col style="width: 13%" />
+<col style="width: 13%" />
+<col style="width: 13%" />
+<col style="width: 13%" />
+<col style="width: 13%" />
+<col style="width: 13%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head stub"></th>
+<th class="head"><p>0</p></th>
+<th class="head"></th>
+<th class="head"><p>1</p></th>
+<th class="head"></th>
+<th class="head"><p>2</p></th>
+<th class="head"></th>
+<th class="head"><p>3</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><th class="stub"><p>0</p></th>
+<td><p>Y</p></td>
+<td><p>C</p></td>
+<td><p>Y</p></td>
+<td></td>
+<td><p>Y</p></td>
+<td><p>C</p></td>
+<td><p>Y</p></td>
+</tr>
+<tr class="row-odd"><th class="stub"><p>1</p></th>
+<td><p>Y</p></td>
+<td><p>C</p></td>
+<td><p>Y</p></td>
+<td></td>
+<td><p>Y</p></td>
+<td><p>C</p></td>
+<td><p>Y</p></td>
+</tr>
+<tr class="row-even"><th class="stub"><p>2</p></th>
+<td><p>Y</p></td>
+<td><p>C</p></td>
+<td><p>Y</p></td>
+<td></td>
+<td><p>Y</p></td>
+<td><p>C</p></td>
+<td><p>Y</p></td>
+</tr>
+<tr class="row-odd"><th class="stub"><p>3</p></th>
+<td><p>Y</p></td>
+<td><p>C</p></td>
+<td><p>Y</p></td>
+<td></td>
+<td><p>Y</p></td>
+<td><p>C</p></td>
+<td><p>Y</p></td>
+</tr>
+</tbody>
+</table>
+<table class="docutils align-default" id="id3">
+<caption><span class="caption-text">4:2:2 subsampling, co-sited</span><a class="headerlink" href="#id3" title="Permalink to this table">¶</a></caption>
+<colgroup>
+<col style="width: 13%" />
+<col style="width: 13%" />
+<col style="width: 13%" />
+<col style="width: 13%" />
+<col style="width: 13%" />
+<col style="width: 13%" />
+<col style="width: 13%" />
+<col style="width: 13%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head stub"></th>
+<th class="head"><p>0</p></th>
+<th class="head"></th>
+<th class="head"><p>1</p></th>
+<th class="head"></th>
+<th class="head"><p>2</p></th>
+<th class="head"></th>
+<th class="head"><p>3</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><th class="stub"><p>0</p></th>
+<td><p>Y/C</p></td>
+<td></td>
+<td><p>Y</p></td>
+<td></td>
+<td><p>Y/C</p></td>
+<td></td>
+<td><p>Y</p></td>
+</tr>
+<tr class="row-odd"><th class="stub"><p>1</p></th>
+<td><p>Y/C</p></td>
+<td></td>
+<td><p>Y</p></td>
+<td></td>
+<td><p>Y/C</p></td>
+<td></td>
+<td><p>Y</p></td>
+</tr>
+<tr class="row-even"><th class="stub"><p>2</p></th>
+<td><p>Y/C</p></td>
+<td></td>
+<td><p>Y</p></td>
+<td></td>
+<td><p>Y/C</p></td>
+<td></td>
+<td><p>Y</p></td>
+</tr>
+<tr class="row-odd"><th class="stub"><p>3</p></th>
+<td><p>Y/C</p></td>
+<td></td>
+<td><p>Y</p></td>
+<td></td>
+<td><p>Y/C</p></td>
+<td></td>
+<td><p>Y</p></td>
+</tr>
+</tbody>
+</table>
+<table class="docutils align-default" id="id4">
+<caption><span class="caption-text">4:2:0 subsampling, horizontally interstitially sited, vertically co-sited</span><a class="headerlink" href="#id4" title="Permalink to this table">¶</a></caption>
+<colgroup>
+<col style="width: 13%" />
+<col style="width: 13%" />
+<col style="width: 13%" />
+<col style="width: 13%" />
+<col style="width: 13%" />
+<col style="width: 13%" />
+<col style="width: 13%" />
+<col style="width: 13%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head stub"></th>
+<th class="head"><p>0</p></th>
+<th class="head"></th>
+<th class="head"><p>1</p></th>
+<th class="head"></th>
+<th class="head"><p>2</p></th>
+<th class="head"></th>
+<th class="head"><p>3</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><th class="stub"><p>0</p></th>
+<td><p>Y</p></td>
+<td><p>C</p></td>
+<td><p>Y</p></td>
+<td></td>
+<td><p>Y</p></td>
+<td><p>C</p></td>
+<td><p>Y</p></td>
+</tr>
+<tr class="row-odd"><th class="stub"><p>1</p></th>
+<td><p>Y</p></td>
+<td></td>
+<td><p>Y</p></td>
+<td></td>
+<td><p>Y</p></td>
+<td></td>
+<td><p>Y</p></td>
+</tr>
+<tr class="row-even"><th class="stub"><p>2</p></th>
+<td><p>Y</p></td>
+<td><p>C</p></td>
+<td><p>Y</p></td>
+<td></td>
+<td><p>Y</p></td>
+<td><p>C</p></td>
+<td><p>Y</p></td>
+</tr>
+<tr class="row-odd"><th class="stub"><p>3</p></th>
+<td><p>Y</p></td>
+<td></td>
+<td><p>Y</p></td>
+<td></td>
+<td><p>Y</p></td>
+<td></td>
+<td><p>Y</p></td>
+</tr>
+</tbody>
+</table>
+<table class="docutils align-default" id="id5">
+<caption><span class="caption-text">4:1:0 subsampling, horizontally and vertically interstitially sited</span><a class="headerlink" href="#id5" title="Permalink to this table">¶</a></caption>
+<colgroup>
+<col style="width: 13%" />
+<col style="width: 13%" />
+<col style="width: 13%" />
+<col style="width: 13%" />
+<col style="width: 13%" />
+<col style="width: 13%" />
+<col style="width: 13%" />
+<col style="width: 13%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head stub"></th>
+<th class="head"><p>0</p></th>
+<th class="head"></th>
+<th class="head"><p>1</p></th>
+<th class="head"></th>
+<th class="head"><p>2</p></th>
+<th class="head"></th>
+<th class="head"><p>3</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><th class="stub"><p>0</p></th>
+<td><p>Y</p></td>
+<td></td>
+<td><p>Y</p></td>
+<td></td>
+<td><p>Y</p></td>
+<td></td>
+<td><p>Y</p></td>
+</tr>
+<tr class="row-odd"><th class="stub"></th>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr class="row-even"><th class="stub"><p>1</p></th>
+<td><p>Y</p></td>
+<td></td>
+<td><p>Y</p></td>
+<td></td>
+<td><p>Y</p></td>
+<td></td>
+<td><p>Y</p></td>
+</tr>
+<tr class="row-odd"><th class="stub"></th>
+<td></td>
+<td></td>
+<td></td>
+<td><p>C</p></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr class="row-even"><th class="stub"><p>2</p></th>
+<td><p>Y</p></td>
+<td></td>
+<td><p>Y</p></td>
+<td></td>
+<td><p>Y</p></td>
+<td></td>
+<td><p>Y</p></td>
+</tr>
+<tr class="row-odd"><th class="stub"></th>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr class="row-even"><th class="stub"><p>3</p></th>
+<td><p>Y</p></td>
+<td></td>
+<td><p>Y</p></td>
+<td></td>
+<td><p>Y</p></td>
+<td></td>
+<td><p>Y</p></td>
+</tr>
+</tbody>
+</table>
+<div class="toctree-wrapper compound">
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="pixfmt-packed-yuv.html">2.7.1.1. Packed YUV formats</a></li>
+<li class="toctree-l1"><a class="reference internal" href="pixfmt-yuv-planar.html">2.7.1.2. Planar YUV formats</a></li>
+<li class="toctree-l1"><a class="reference internal" href="pixfmt-yuv-luma.html">2.7.1.3. Luma-Only Formats</a></li>
+<li class="toctree-l1"><a class="reference internal" href="pixfmt-y8i.html">2.7.1.4. V4L2_PIX_FMT_Y8I (‘Y8I ‘)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="pixfmt-y12i.html">2.7.1.5. V4L2_PIX_FMT_Y12I (‘Y12I’)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="pixfmt-uv8.html">2.7.1.6. V4L2_PIX_FMT_UV8 (‘UV8’)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="pixfmt-m420.html">2.7.1.7. V4L2_PIX_FMT_M420 (‘M420’)</a></li>
+</ul>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">2.7. YUV Formats</a><ul>
+<li><a class="reference internal" href="#subsampling">2.7.1. Subsampling</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/userspace-api/media/v4l/yuv-formats.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/userspace-api/media/v4l/yuv-formats.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

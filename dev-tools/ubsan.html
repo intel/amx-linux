@@ -1,0 +1,187 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>The Undefined Behavior Sanitizer - UBSAN &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Kernel Memory Leak Detector" href="kmemleak.html" />
+    <link rel="prev" title="The Kernel Memory Sanitizer (KMSAN)" href="kmsan.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="the-undefined-behavior-sanitizer-ubsan">
+<h1>The Undefined Behavior Sanitizer - UBSAN<a class="headerlink" href="#the-undefined-behavior-sanitizer-ubsan" title="Permalink to this headline">¶</a></h1>
+<p>UBSAN is a runtime undefined behaviour checker.</p>
+<p>UBSAN uses compile-time instrumentation to catch undefined behavior (UB).
+Compiler inserts code that perform certain kinds of checks before operations
+that may cause UB. If check fails (i.e. UB detected) __ubsan_handle_*
+function called to print error message.</p>
+<p>GCC has that feature since 4.9.x [<a class="reference external" href="https://gcc.gnu.org/onlinedocs/gcc-4.9.0/gcc/Debugging-Options.html">1</a>] (see <code class="docutils literal notranslate"><span class="pre">-fsanitize=undefined</span></code> option and
+its suboptions). GCC 5.x has more checkers implemented [<a class="reference external" href="https://gcc.gnu.org/onlinedocs/gcc/Debugging-Options.html">2</a>].</p>
+<section id="report-example">
+<h2>Report example<a class="headerlink" href="#report-example" title="Permalink to this headline">¶</a></h2>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>================================================================================
+UBSAN: Undefined behaviour in ../include/linux/bitops.h:110:33
+shift exponent 32 is to large for 32-bit type &#39;unsigned int&#39;
+CPU: 0 PID: 0 Comm: swapper Not tainted 4.4.0-rc1+ #26
+ 0000000000000000 ffffffff82403cc8 ffffffff815e6cd6 0000000000000001
+ ffffffff82403cf8 ffffffff82403ce0 ffffffff8163a5ed 0000000000000020
+ ffffffff82403d78 ffffffff8163ac2b ffffffff815f0001 0000000000000002
+Call Trace:
+ [&lt;ffffffff815e6cd6&gt;] dump_stack+0x45/0x5f
+ [&lt;ffffffff8163a5ed&gt;] ubsan_epilogue+0xd/0x40
+ [&lt;ffffffff8163ac2b&gt;] __ubsan_handle_shift_out_of_bounds+0xeb/0x130
+ [&lt;ffffffff815f0001&gt;] ? radix_tree_gang_lookup_slot+0x51/0x150
+ [&lt;ffffffff8173c586&gt;] _mix_pool_bytes+0x1e6/0x480
+ [&lt;ffffffff83105653&gt;] ? dmi_walk_early+0x48/0x5c
+ [&lt;ffffffff8173c881&gt;] add_device_randomness+0x61/0x130
+ [&lt;ffffffff83105b35&gt;] ? dmi_save_one_device+0xaa/0xaa
+ [&lt;ffffffff83105653&gt;] dmi_walk_early+0x48/0x5c
+ [&lt;ffffffff831066ae&gt;] dmi_scan_machine+0x278/0x4b4
+ [&lt;ffffffff8111d58a&gt;] ? vprintk_default+0x1a/0x20
+ [&lt;ffffffff830ad120&gt;] ? early_idt_handler_array+0x120/0x120
+ [&lt;ffffffff830b2240&gt;] setup_arch+0x405/0xc2c
+ [&lt;ffffffff830ad120&gt;] ? early_idt_handler_array+0x120/0x120
+ [&lt;ffffffff830ae053&gt;] start_kernel+0x83/0x49a
+ [&lt;ffffffff830ad120&gt;] ? early_idt_handler_array+0x120/0x120
+ [&lt;ffffffff830ad386&gt;] x86_64_start_reservations+0x2a/0x2c
+ [&lt;ffffffff830ad4f3&gt;] x86_64_start_kernel+0x16b/0x17a
+================================================================================
+</pre></div>
+</div>
+</section>
+<section id="usage">
+<h2>Usage<a class="headerlink" href="#usage" title="Permalink to this headline">¶</a></h2>
+<p>To enable UBSAN configure kernel with:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>CONFIG_UBSAN=y
+</pre></div>
+</div>
+<p>and to check the entire kernel:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>CONFIG_UBSAN_SANITIZE_ALL=y
+</pre></div>
+</div>
+<p>To enable instrumentation for specific files or directories, add a line
+similar to the following to the respective kernel Makefile:</p>
+<ul>
+<li><p>For a single file (e.g. main.o):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>UBSAN_SANITIZE_main.o := y
+</pre></div>
+</div>
+</li>
+<li><p>For all files in one directory:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>UBSAN_SANITIZE := y
+</pre></div>
+</div>
+</li>
+</ul>
+<p>To exclude files from being instrumented even if
+<code class="docutils literal notranslate"><span class="pre">CONFIG_UBSAN_SANITIZE_ALL=y</span></code>, use:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>UBSAN_SANITIZE_main.o := n
+</pre></div>
+</div>
+<p>and:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>UBSAN_SANITIZE := n
+</pre></div>
+</div>
+<p>Detection of unaligned accesses controlled through the separate option -
+CONFIG_UBSAN_ALIGNMENT. It’s off by default on architectures that support
+unaligned accesses (CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS=y). One could
+still enable it in config, just note that it will produce a lot of UBSAN
+reports.</p>
+</section>
+<section id="references">
+<h2>References<a class="headerlink" href="#references" title="Permalink to this headline">¶</a></h2>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">The Undefined Behavior Sanitizer - UBSAN</a><ul>
+<li><a class="reference internal" href="#report-example">Report example</a></li>
+<li><a class="reference internal" href="#usage">Usage</a></li>
+<li><a class="reference internal" href="#references">References</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/dev-tools/ubsan.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/dev-tools/ubsan.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

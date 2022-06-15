@@ -1,0 +1,454 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Dynamic PCM &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Creating codec to codec dai link for ALSA dapm" href="codec-to-codec.html" />
+    <link rel="prev" title="ASoC jack detection" href="jack.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="dynamic-pcm">
+<h1>Dynamic PCM<a class="headerlink" href="#dynamic-pcm" title="Permalink to this headline">¶</a></h1>
+<section id="description">
+<h2>Description<a class="headerlink" href="#description" title="Permalink to this headline">¶</a></h2>
+<p>Dynamic PCM allows an ALSA PCM device to digitally route its PCM audio to
+various digital endpoints during the PCM stream runtime. e.g. PCM0 can route
+digital audio to I2S DAI0, I2S DAI1 or PDM DAI2. This is useful for on SoC DSP
+drivers that expose several ALSA PCMs and can route to multiple DAIs.</p>
+<p>The DPCM runtime routing is determined by the ALSA mixer settings in the same
+way as the analog signal is routed in an ASoC codec driver. DPCM uses a DAPM
+graph representing the DSP internal audio paths and uses the mixer settings to
+determine the path used by each ALSA PCM.</p>
+<p>DPCM re-uses all the existing component codec, platform and DAI drivers without
+any modifications.</p>
+<section id="phone-audio-system-with-soc-based-dsp">
+<h3>Phone Audio System with SoC based DSP<a class="headerlink" href="#phone-audio-system-with-soc-based-dsp" title="Permalink to this headline">¶</a></h3>
+<p>Consider the following phone audio subsystem. This will be used in this
+document for all examples :-</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>| Front End PCMs    |  SoC DSP  | Back End DAIs | Audio devices |
+
+                    *************
+PCM0 &lt;------------&gt; *           * &lt;----DAI0-----&gt; Codec Headset
+                    *           *
+PCM1 &lt;------------&gt; *           * &lt;----DAI1-----&gt; Codec Speakers
+                    *   DSP     *
+PCM2 &lt;------------&gt; *           * &lt;----DAI2-----&gt; MODEM
+                    *           *
+PCM3 &lt;------------&gt; *           * &lt;----DAI3-----&gt; BT
+                    *           *
+                    *           * &lt;----DAI4-----&gt; DMIC
+                    *           *
+                    *           * &lt;----DAI5-----&gt; FM
+                    *************
+</pre></div>
+</div>
+<p>This diagram shows a simple smart phone audio subsystem. It supports Bluetooth,
+FM digital radio, Speakers, Headset Jack, digital microphones and cellular
+modem. This sound card exposes 4 DSP front end (FE) ALSA PCM devices and
+supports 6 back end (BE) DAIs. Each FE PCM can digitally route audio data to any
+of the BE DAIs. The FE PCM devices can also route audio to more than 1 BE DAI.</p>
+</section>
+<section id="example-dpcm-switching-playback-from-dai0-to-dai1">
+<h3>Example - DPCM Switching playback from DAI0 to DAI1<a class="headerlink" href="#example-dpcm-switching-playback-from-dai0-to-dai1" title="Permalink to this headline">¶</a></h3>
+<p>Audio is being played to the Headset. After a while the user removes the headset
+and audio continues playing on the speakers.</p>
+<p>Playback on PCM0 to Headset would look like :-</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>                    *************
+PCM0 &lt;============&gt; *           * &lt;====DAI0=====&gt; Codec Headset
+                    *           *
+PCM1 &lt;------------&gt; *           * &lt;----DAI1-----&gt; Codec Speakers
+                    *   DSP     *
+PCM2 &lt;------------&gt; *           * &lt;----DAI2-----&gt; MODEM
+                    *           *
+PCM3 &lt;------------&gt; *           * &lt;----DAI3-----&gt; BT
+                    *           *
+                    *           * &lt;----DAI4-----&gt; DMIC
+                    *           *
+                    *           * &lt;----DAI5-----&gt; FM
+                    *************
+</pre></div>
+</div>
+<p>The headset is removed from the jack by user so the speakers must now be used :-</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>                    *************
+PCM0 &lt;============&gt; *           * &lt;----DAI0-----&gt; Codec Headset
+                    *           *
+PCM1 &lt;------------&gt; *           * &lt;====DAI1=====&gt; Codec Speakers
+                    *   DSP     *
+PCM2 &lt;------------&gt; *           * &lt;----DAI2-----&gt; MODEM
+                    *           *
+PCM3 &lt;------------&gt; *           * &lt;----DAI3-----&gt; BT
+                    *           *
+                    *           * &lt;----DAI4-----&gt; DMIC
+                    *           *
+                    *           * &lt;----DAI5-----&gt; FM
+                    *************
+</pre></div>
+</div>
+<p>The audio driver processes this as follows :-</p>
+<ol class="arabic simple">
+<li><p>Machine driver receives Jack removal event.</p></li>
+<li><p>Machine driver OR audio HAL disables the Headset path.</p></li>
+<li><p>DPCM runs the PCM trigger(stop), hw_free(), shutdown() operations on DAI0
+for headset since the path is now disabled.</p></li>
+<li><p>Machine driver or audio HAL enables the speaker path.</p></li>
+<li><p>DPCM runs the PCM ops for startup(), hw_params(), prepare() and
+trigger(start) for DAI1 Speakers since the path is enabled.</p></li>
+</ol>
+<p>In this example, the machine driver or userspace audio HAL can alter the routing
+and then DPCM will take care of managing the DAI PCM operations to either bring
+the link up or down. Audio playback does not stop during this transition.</p>
+</section>
+</section>
+<section id="dpcm-machine-driver">
+<h2>DPCM machine driver<a class="headerlink" href="#dpcm-machine-driver" title="Permalink to this headline">¶</a></h2>
+<p>The DPCM enabled ASoC machine driver is similar to normal machine drivers
+except that we also have to :-</p>
+<ol class="arabic simple">
+<li><p>Define the FE and BE DAI links.</p></li>
+<li><p>Define any FE/BE PCM operations.</p></li>
+<li><p>Define widget graph connections.</p></li>
+</ol>
+<section id="fe-and-be-dai-links">
+<h3>FE and BE DAI links<a class="headerlink" href="#fe-and-be-dai-links" title="Permalink to this headline">¶</a></h3>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>| Front End PCMs    |  SoC DSP  | Back End DAIs | Audio devices |
+
+                    *************
+PCM0 &lt;------------&gt; *           * &lt;----DAI0-----&gt; Codec Headset
+                    *           *
+PCM1 &lt;------------&gt; *           * &lt;----DAI1-----&gt; Codec Speakers
+                    *   DSP     *
+PCM2 &lt;------------&gt; *           * &lt;----DAI2-----&gt; MODEM
+                    *           *
+PCM3 &lt;------------&gt; *           * &lt;----DAI3-----&gt; BT
+                    *           *
+                    *           * &lt;----DAI4-----&gt; DMIC
+                    *           *
+                    *           * &lt;----DAI5-----&gt; FM
+                    *************
+</pre></div>
+</div>
+<p>For the example above we have to define 4 FE DAI links and 6 BE DAI links. The
+FE DAI links are defined as follows :-</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>static struct snd_soc_dai_link machine_dais[] = {
+      {
+              .name = &quot;PCM0 System&quot;,
+              .stream_name = &quot;System Playback&quot;,
+              .cpu_dai_name = &quot;System Pin&quot;,
+              .platform_name = &quot;dsp-audio&quot;,
+              .codec_name = &quot;snd-soc-dummy&quot;,
+              .codec_dai_name = &quot;snd-soc-dummy-dai&quot;,
+              .dynamic = 1,
+              .trigger = {SND_SOC_DPCM_TRIGGER_POST, SND_SOC_DPCM_TRIGGER_POST},
+              .dpcm_playback = 1,
+      },
+      .....&lt; other FE and BE DAI links here &gt;
+};
+</pre></div>
+</div>
+<p>This FE DAI link is pretty similar to a regular DAI link except that we also
+set the DAI link to a DPCM FE with the <code class="docutils literal notranslate"><span class="pre">dynamic</span> <span class="pre">=</span> <span class="pre">1</span></code>. The supported FE stream
+directions should also be set with the <code class="docutils literal notranslate"><span class="pre">dpcm_playback</span></code> and <code class="docutils literal notranslate"><span class="pre">dpcm_capture</span></code>
+flags. There is also an option to specify the ordering of the trigger call for
+each FE. This allows the ASoC core to trigger the DSP before or after the other
+components (as some DSPs have strong requirements for the ordering DAI/DSP
+start and stop sequences).</p>
+<p>The FE DAI above sets the codec and code DAIs to dummy devices since the BE is
+dynamic and will change depending on runtime config.</p>
+<p>The BE DAIs are configured as follows :-</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>static struct snd_soc_dai_link machine_dais[] = {
+      .....&lt; FE DAI links here &gt;
+      {
+              .name = &quot;Codec Headset&quot;,
+              .cpu_dai_name = &quot;ssp-dai.0&quot;,
+              .platform_name = &quot;snd-soc-dummy&quot;,
+              .no_pcm = 1,
+              .codec_name = &quot;rt5640.0-001c&quot;,
+              .codec_dai_name = &quot;rt5640-aif1&quot;,
+              .ignore_suspend = 1,
+              .ignore_pmdown_time = 1,
+              .be_hw_params_fixup = hswult_ssp0_fixup,
+              .ops = &amp;haswell_ops,
+              .dpcm_playback = 1,
+              .dpcm_capture = 1,
+      },
+      .....&lt; other BE DAI links here &gt;
+};
+</pre></div>
+</div>
+<p>This BE DAI link connects DAI0 to the codec (in this case RT5460 AIF1). It sets
+the <code class="docutils literal notranslate"><span class="pre">no_pcm</span></code> flag to mark it has a BE and sets flags for supported stream
+directions using <code class="docutils literal notranslate"><span class="pre">dpcm_playback</span></code> and <code class="docutils literal notranslate"><span class="pre">dpcm_capture</span></code> above.</p>
+<p>The BE has also flags set for ignoring suspend and PM down time. This allows
+the BE to work in a hostless mode where the host CPU is not transferring data
+like a BT phone call :-</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>                    *************
+PCM0 &lt;------------&gt; *           * &lt;----DAI0-----&gt; Codec Headset
+                    *           *
+PCM1 &lt;------------&gt; *           * &lt;----DAI1-----&gt; Codec Speakers
+                    *   DSP     *
+PCM2 &lt;------------&gt; *           * &lt;====DAI2=====&gt; MODEM
+                    *           *
+PCM3 &lt;------------&gt; *           * &lt;====DAI3=====&gt; BT
+                    *           *
+                    *           * &lt;----DAI4-----&gt; DMIC
+                    *           *
+                    *           * &lt;----DAI5-----&gt; FM
+                    *************
+</pre></div>
+</div>
+<p>This allows the host CPU to sleep while the DSP, MODEM DAI and the BT DAI are
+still in operation.</p>
+<p>A BE DAI link can also set the codec to a dummy device if the codec is a device
+that is managed externally.</p>
+<p>Likewise a BE DAI can also set a dummy cpu DAI if the CPU DAI is managed by the
+DSP firmware.</p>
+</section>
+<section id="fe-be-pcm-operations">
+<h3>FE/BE PCM operations<a class="headerlink" href="#fe-be-pcm-operations" title="Permalink to this headline">¶</a></h3>
+<p>The BE above also exports some PCM operations and a <code class="docutils literal notranslate"><span class="pre">fixup</span></code> callback. The fixup
+callback is used by the machine driver to (re)configure the DAI based upon the
+FE hw params. i.e. the DSP may perform SRC or ASRC from the FE to BE.</p>
+<p>e.g. DSP converts all FE hw params to run at fixed rate of 48k, 16bit, stereo for
+DAI0. This means all FE hw_params have to be fixed in the machine driver for
+DAI0 so that the DAI is running at desired configuration regardless of the FE
+configuration.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>static int dai0_fixup(struct snd_soc_pcm_runtime *rtd,
+                      struct snd_pcm_hw_params *params)
+{
+      struct snd_interval *rate = hw_param_interval(params,
+                      SNDRV_PCM_HW_PARAM_RATE);
+      struct snd_interval *channels = hw_param_interval(params,
+                                              SNDRV_PCM_HW_PARAM_CHANNELS);
+
+      /* The DSP will convert the FE rate to 48k, stereo */
+      rate-&gt;min = rate-&gt;max = 48000;
+      channels-&gt;min = channels-&gt;max = 2;
+
+      /* set DAI0 to 16 bit */
+      params_set_format(params, SNDRV_PCM_FORMAT_S16_LE);
+      return 0;
+}
+</pre></div>
+</div>
+<p>The other PCM operation are the same as for regular DAI links. Use as necessary.</p>
+</section>
+<section id="widget-graph-connections">
+<h3>Widget graph connections<a class="headerlink" href="#widget-graph-connections" title="Permalink to this headline">¶</a></h3>
+<p>The BE DAI links will normally be connected to the graph at initialisation time
+by the ASoC DAPM core. However, if the BE codec or BE DAI is a dummy then this
+has to be set explicitly in the driver :-</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/* BE for codec Headset -  DAI0 is dummy and managed by DSP FW */
+{&quot;DAI0 CODEC IN&quot;, NULL, &quot;AIF1 Capture&quot;},
+{&quot;AIF1 Playback&quot;, NULL, &quot;DAI0 CODEC OUT&quot;},
+</pre></div>
+</div>
+</section>
+</section>
+<section id="writing-a-dpcm-dsp-driver">
+<h2>Writing a DPCM DSP driver<a class="headerlink" href="#writing-a-dpcm-dsp-driver" title="Permalink to this headline">¶</a></h2>
+<p>The DPCM DSP driver looks much like a standard platform class ASoC driver
+combined with elements from a codec class driver. A DSP platform driver must
+implement :-</p>
+<ol class="arabic simple">
+<li><p>Front End PCM DAIs - i.e. struct snd_soc_dai_driver.</p></li>
+<li><p>DAPM graph showing DSP audio routing from FE DAIs to BEs.</p></li>
+<li><p>DAPM widgets from DSP graph.</p></li>
+<li><p>Mixers for gains, routing, etc.</p></li>
+<li><p>DMA configuration.</p></li>
+<li><p>BE AIF widgets.</p></li>
+</ol>
+<p>Items 6 is important for routing the audio outside of the DSP. AIF need to be
+defined for each BE and each stream direction. e.g for BE DAI0 above we would
+have :-</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>SND_SOC_DAPM_AIF_IN(&quot;DAI0 RX&quot;, NULL, 0, SND_SOC_NOPM, 0, 0),
+SND_SOC_DAPM_AIF_OUT(&quot;DAI0 TX&quot;, NULL, 0, SND_SOC_NOPM, 0, 0),
+</pre></div>
+</div>
+<p>The BE AIF are used to connect the DSP graph to the graphs for the other
+component drivers (e.g. codec graph).</p>
+</section>
+<section id="hostless-pcm-streams">
+<h2>Hostless PCM streams<a class="headerlink" href="#hostless-pcm-streams" title="Permalink to this headline">¶</a></h2>
+<p>A hostless PCM stream is a stream that is not routed through the host CPU. An
+example of this would be a phone call from handset to modem.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>                    *************
+PCM0 &lt;------------&gt; *           * &lt;----DAI0-----&gt; Codec Headset
+                    *           *
+PCM1 &lt;------------&gt; *           * &lt;====DAI1=====&gt; Codec Speakers/Mic
+                    *   DSP     *
+PCM2 &lt;------------&gt; *           * &lt;====DAI2=====&gt; MODEM
+                    *           *
+PCM3 &lt;------------&gt; *           * &lt;----DAI3-----&gt; BT
+                    *           *
+                    *           * &lt;----DAI4-----&gt; DMIC
+                    *           *
+                    *           * &lt;----DAI5-----&gt; FM
+                    *************
+</pre></div>
+</div>
+<p>In this case the PCM data is routed via the DSP. The host CPU in this use case
+is only used for control and can sleep during the runtime of the stream.</p>
+<p>The host can control the hostless link either by :-</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>Configuring the link as a CODEC &lt;-&gt; CODEC style link. In this case the link
+is enabled or disabled by the state of the DAPM graph. This usually means
+there is a mixer control that can be used to connect or disconnect the path
+between both DAIs.</p></li>
+<li><p>Hostless FE. This FE has a virtual connection to the BE DAI links on the DAPM
+graph. Control is then carried out by the FE as regular PCM operations.
+This method gives more control over the DAI links, but requires much more
+userspace code to control the link. Its recommended to use CODEC&lt;-&gt;CODEC
+unless your HW needs more fine grained sequencing of the PCM ops.</p></li>
+</ol>
+</div></blockquote>
+<section id="codec-codec-link">
+<h3>CODEC &lt;-&gt; CODEC link<a class="headerlink" href="#codec-codec-link" title="Permalink to this headline">¶</a></h3>
+<p>This DAI link is enabled when DAPM detects a valid path within the DAPM graph.
+The machine driver sets some additional parameters to the DAI link i.e.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>static const struct snd_soc_pcm_stream dai_params = {
+      .formats = SNDRV_PCM_FMTBIT_S32_LE,
+      .rate_min = 8000,
+      .rate_max = 8000,
+      .channels_min = 2,
+      .channels_max = 2,
+};
+
+static struct snd_soc_dai_link dais[] = {
+      &lt; ... more DAI links above ... &gt;
+      {
+              .name = &quot;MODEM&quot;,
+              .stream_name = &quot;MODEM&quot;,
+              .cpu_dai_name = &quot;dai2&quot;,
+              .codec_dai_name = &quot;modem-aif1&quot;,
+              .codec_name = &quot;modem&quot;,
+              .dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF
+                              | SND_SOC_DAIFMT_CBM_CFM,
+              .params = &amp;dai_params,
+      }
+      &lt; ... more DAI links here ... &gt;
+</pre></div>
+</div>
+<p>These parameters are used to configure the DAI hw_params() when DAPM detects a
+valid path and then calls the PCM operations to start the link. DAPM will also
+call the appropriate PCM operations to disable the DAI when the path is no
+longer valid.</p>
+</section>
+<section id="hostless-fe">
+<h3>Hostless FE<a class="headerlink" href="#hostless-fe" title="Permalink to this headline">¶</a></h3>
+<p>The DAI link(s) are enabled by a FE that does not read or write any PCM data.
+This means creating a new FE that is connected with a virtual path to both
+DAI links. The DAI links will be started when the FE PCM is started and stopped
+when the FE PCM is stopped. Note that the FE PCM cannot read or write data in
+this configuration.</p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Dynamic PCM</a><ul>
+<li><a class="reference internal" href="#description">Description</a><ul>
+<li><a class="reference internal" href="#phone-audio-system-with-soc-based-dsp">Phone Audio System with SoC based DSP</a></li>
+<li><a class="reference internal" href="#example-dpcm-switching-playback-from-dai0-to-dai1">Example - DPCM Switching playback from DAI0 to DAI1</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#dpcm-machine-driver">DPCM machine driver</a><ul>
+<li><a class="reference internal" href="#fe-and-be-dai-links">FE and BE DAI links</a></li>
+<li><a class="reference internal" href="#fe-be-pcm-operations">FE/BE PCM operations</a></li>
+<li><a class="reference internal" href="#widget-graph-connections">Widget graph connections</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#writing-a-dpcm-dsp-driver">Writing a DPCM DSP driver</a></li>
+<li><a class="reference internal" href="#hostless-pcm-streams">Hostless PCM streams</a><ul>
+<li><a class="reference internal" href="#codec-codec-link">CODEC &lt;-&gt; CODEC link</a></li>
+<li><a class="reference internal" href="#hostless-fe">Hostless FE</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/sound/soc/dpcm.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/sound/soc/dpcm.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

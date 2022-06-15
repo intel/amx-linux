@@ -1,0 +1,194 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>I/O request handling &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="ACRN CPUID bits" href="cpuid.html" />
+    <link rel="prev" title="ACRN Hypervisor Introduction" href="introduction.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="i-o-request-handling">
+<h1>I/O request handling<a class="headerlink" href="#i-o-request-handling" title="Permalink to this headline">¶</a></h1>
+<p>An I/O request of a User VM, which is constructed by the hypervisor, is
+distributed by the ACRN Hypervisor Service Module to an I/O client
+corresponding to the address range of the I/O request. Details of I/O request
+handling are described in the following sections.</p>
+<section id="i-o-request">
+<h2>1. I/O request<a class="headerlink" href="#i-o-request" title="Permalink to this headline">¶</a></h2>
+<p>For each User VM, there is a shared 4-KByte memory region used for I/O requests
+communication between the hypervisor and Service VM. An I/O request is a
+256-byte structure buffer, which is ‘struct acrn_io_request’, that is filled by
+an I/O handler of the hypervisor when a trapped I/O access happens in a User
+VM. ACRN userspace in the Service VM first allocates a 4-KByte page and passes
+the GPA (Guest Physical Address) of the buffer to the hypervisor. The buffer is
+used as an array of 16 I/O request slots with each I/O request slot being 256
+bytes. This array is indexed by vCPU ID.</p>
+</section>
+<section id="i-o-clients">
+<h2>2. I/O clients<a class="headerlink" href="#i-o-clients" title="Permalink to this headline">¶</a></h2>
+<p>An I/O client is responsible for handling User VM I/O requests whose accessed
+GPA falls in a certain range. Multiple I/O clients can be associated with each
+User VM. There is a special client associated with each User VM, called the
+default client, that handles all I/O requests that do not fit into the range of
+any other clients. The ACRN userspace acts as the default client for each User
+VM.</p>
+<p>Below illustration shows the relationship between I/O requests shared buffer,
+I/O requests and I/O clients.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>+------------------------------------------------------+
+|                                       Service VM     |
+|+--------------------------------------------------+  |
+||      +----------------------------------------+  |  |
+||      | shared page            ACRN userspace  |  |  |
+||      |    +-----------------+  +------------+ |  |  |
+||   +----+-&gt;| acrn_io_request |&lt;-+  default   | |  |  |
+||   |  | |  +-----------------+  | I/O client | |  |  |
+||   |  | |  |       ...       |  +------------+ |  |  |
+||   |  | |  +-----------------+                 |  |  |
+||   |  +-|--------------------------------------+  |  |
+||---|----|-----------------------------------------|  |
+||   |    |                             kernel      |  |
+||   |    |            +----------------------+     |  |
+||   |    |            | +-------------+  HSM |     |  |
+||   |    +--------------+             |      |     |  |
+||   |                 | | I/O clients |      |     |  |
+||   |                 | |             |      |     |  |
+||   |                 | +-------------+      |     |  |
+||   |                 +----------------------+     |  |
+|+---|----------------------------------------------+  |
++----|-------------------------------------------------+
+     |
++----|-------------------------------------------------+
+|  +-+-----------+                                     |
+|  | I/O handler |              ACRN Hypervisor        |
+|  +-------------+                                     |
++------------------------------------------------------+
+</pre></div>
+</div>
+</section>
+<section id="i-o-request-state-transition">
+<h2>3. I/O request state transition<a class="headerlink" href="#i-o-request-state-transition" title="Permalink to this headline">¶</a></h2>
+<p>The state transitions of an ACRN I/O request are as follows.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>FREE -&gt; PENDING -&gt; PROCESSING -&gt; COMPLETE -&gt; FREE -&gt; ...
+</pre></div>
+</div>
+<ul class="simple">
+<li><p>FREE: this I/O request slot is empty</p></li>
+<li><p>PENDING: a valid I/O request is pending in this slot</p></li>
+<li><p>PROCESSING: the I/O request is being processed</p></li>
+<li><p>COMPLETE: the I/O request has been processed</p></li>
+</ul>
+<p>An I/O request in COMPLETE or FREE state is owned by the hypervisor. HSM and
+ACRN userspace are in charge of processing the others.</p>
+</section>
+<section id="processing-flow-of-i-o-requests">
+<h2>4. Processing flow of I/O requests<a class="headerlink" href="#processing-flow-of-i-o-requests" title="Permalink to this headline">¶</a></h2>
+<ol class="loweralpha simple">
+<li><p>The I/O handler of the hypervisor will fill an I/O request with PENDING
+state when a trapped I/O access happens in a User VM.</p></li>
+<li><p>The hypervisor makes an upcall, which is a notification interrupt, to
+the Service VM.</p></li>
+<li><p>The upcall handler schedules a worker to dispatch I/O requests.</p></li>
+<li><p>The worker looks for the PENDING I/O requests, assigns them to different
+registered clients based on the address of the I/O accesses, updates
+their state to PROCESSING, and notifies the corresponding client to handle.</p></li>
+<li><p>The notified client handles the assigned I/O requests.</p></li>
+<li><p>The HSM updates I/O requests states to COMPLETE and notifies the hypervisor
+of the completion via hypercalls.</p></li>
+</ol>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">I/O request handling</a><ul>
+<li><a class="reference internal" href="#i-o-request">1. I/O request</a></li>
+<li><a class="reference internal" href="#i-o-clients">2. I/O clients</a></li>
+<li><a class="reference internal" href="#i-o-request-state-transition">3. I/O request state transition</a></li>
+<li><a class="reference internal" href="#processing-flow-of-i-o-requests">4. Processing flow of I/O requests</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/virt/acrn/io-request.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/virt/acrn/io-request.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

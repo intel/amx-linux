@@ -1,0 +1,228 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>RCU on Uniprocessor Systems &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="A Tour Through TREE_RCU’s Grace-Period Memory Ordering" href="Design/Memory-Ordering/Tree-RCU-Memory-Ordering.html" />
+    <link rel="prev" title="Using RCU to Protect Dynamic NMI Handlers" href="NMI-RCU.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="rcu-on-uniprocessor-systems">
+<span id="up-doc"></span><h1>RCU on Uniprocessor Systems<a class="headerlink" href="#rcu-on-uniprocessor-systems" title="Permalink to this headline">¶</a></h1>
+<p>A common misconception is that, on UP systems, the <a class="reference internal" href="../core-api/kernel-api.html#c.call_rcu" title="call_rcu"><code class="xref c c-func docutils literal notranslate"><span class="pre">call_rcu()</span></code></a> primitive
+may immediately invoke its function.  The basis of this misconception
+is that since there is only one CPU, it should not be necessary to
+wait for anything else to get done, since there are no other CPUs for
+anything else to be happening on.  Although this approach will <em>sort of</em>
+work a surprising amount of the time, it is a very bad idea in general.
+This document presents three examples that demonstrate exactly how bad
+an idea this is.</p>
+<section id="example-1-softirq-suicide">
+<h2>Example 1: softirq Suicide<a class="headerlink" href="#example-1-softirq-suicide" title="Permalink to this headline">¶</a></h2>
+<p>Suppose that an RCU-based algorithm scans a linked list containing
+elements A, B, and C in process context, and can delete elements from
+this same list in softirq context.  Suppose that the process-context scan
+is referencing element B when it is interrupted by softirq processing,
+which deletes element B, and then invokes <a class="reference internal" href="../core-api/kernel-api.html#c.call_rcu" title="call_rcu"><code class="xref c c-func docutils literal notranslate"><span class="pre">call_rcu()</span></code></a> to free element B
+after a grace period.</p>
+<p>Now, if <a class="reference internal" href="../core-api/kernel-api.html#c.call_rcu" title="call_rcu"><code class="xref c c-func docutils literal notranslate"><span class="pre">call_rcu()</span></code></a> were to directly invoke its arguments, then upon return
+from softirq, the list scan would find itself referencing a newly freed
+element B.  This situation can greatly decrease the life expectancy of
+your kernel.</p>
+<p>This same problem can occur if <a class="reference internal" href="../core-api/kernel-api.html#c.call_rcu" title="call_rcu"><code class="xref c c-func docutils literal notranslate"><span class="pre">call_rcu()</span></code></a> is invoked from a hardware
+interrupt handler.</p>
+</section>
+<section id="example-2-function-call-fatality">
+<h2>Example 2: Function-Call Fatality<a class="headerlink" href="#example-2-function-call-fatality" title="Permalink to this headline">¶</a></h2>
+<p>Of course, one could avert the suicide described in the preceding example
+by having <a class="reference internal" href="../core-api/kernel-api.html#c.call_rcu" title="call_rcu"><code class="xref c c-func docutils literal notranslate"><span class="pre">call_rcu()</span></code></a> directly invoke its arguments only if it was called
+from process context.  However, this can fail in a similar manner.</p>
+<p>Suppose that an RCU-based algorithm again scans a linked list containing
+elements A, B, and C in process contexts, but that it invokes a function
+on each element as it is scanned.  Suppose further that this function
+deletes element B from the list, then passes it to <a class="reference internal" href="../core-api/kernel-api.html#c.call_rcu" title="call_rcu"><code class="xref c c-func docutils literal notranslate"><span class="pre">call_rcu()</span></code></a> for deferred
+freeing.  This may be a bit unconventional, but it is perfectly legal
+RCU usage, since <a class="reference internal" href="../core-api/kernel-api.html#c.call_rcu" title="call_rcu"><code class="xref c c-func docutils literal notranslate"><span class="pre">call_rcu()</span></code></a> must wait for a grace period to elapse.
+Therefore, in this case, allowing <a class="reference internal" href="../core-api/kernel-api.html#c.call_rcu" title="call_rcu"><code class="xref c c-func docutils literal notranslate"><span class="pre">call_rcu()</span></code></a> to immediately invoke
+its arguments would cause it to fail to make the fundamental guarantee
+underlying RCU, namely that <a class="reference internal" href="../core-api/kernel-api.html#c.call_rcu" title="call_rcu"><code class="xref c c-func docutils literal notranslate"><span class="pre">call_rcu()</span></code></a> defers invoking its arguments until
+all RCU read-side critical sections currently executing have completed.</p>
+<dl class="simple">
+<dt>Quick Quiz #1:</dt><dd><p>Why is it <em>not</em> legal to invoke <a class="reference internal" href="../core-api/kernel-api.html#c.synchronize_rcu" title="synchronize_rcu"><code class="xref c c-func docutils literal notranslate"><span class="pre">synchronize_rcu()</span></code></a> in this case?</p>
+</dd>
+</dl>
+<p><a class="reference internal" href="#answer-quick-quiz-up"><span class="std std-ref">Answers to Quick Quiz</span></a></p>
+</section>
+<section id="example-3-death-by-deadlock">
+<h2>Example 3: Death by Deadlock<a class="headerlink" href="#example-3-death-by-deadlock" title="Permalink to this headline">¶</a></h2>
+<p>Suppose that <a class="reference internal" href="../core-api/kernel-api.html#c.call_rcu" title="call_rcu"><code class="xref c c-func docutils literal notranslate"><span class="pre">call_rcu()</span></code></a> is invoked while holding a lock, and that the
+callback function must acquire this same lock.  In this case, if
+<a class="reference internal" href="../core-api/kernel-api.html#c.call_rcu" title="call_rcu"><code class="xref c c-func docutils literal notranslate"><span class="pre">call_rcu()</span></code></a> were to directly invoke the callback, the result would
+be self-deadlock.</p>
+<p>In some cases, it would possible to restructure to code so that
+the <a class="reference internal" href="../core-api/kernel-api.html#c.call_rcu" title="call_rcu"><code class="xref c c-func docutils literal notranslate"><span class="pre">call_rcu()</span></code></a> is delayed until after the lock is released.  However,
+there are cases where this can be quite ugly:</p>
+<ol class="arabic simple">
+<li><p>If a number of items need to be passed to <a class="reference internal" href="../core-api/kernel-api.html#c.call_rcu" title="call_rcu"><code class="xref c c-func docutils literal notranslate"><span class="pre">call_rcu()</span></code></a> within
+the same critical section, then the code would need to create
+a list of them, then traverse the list once the lock was
+released.</p></li>
+<li><p>In some cases, the lock will be held across some kernel API,
+so that delaying the <a class="reference internal" href="../core-api/kernel-api.html#c.call_rcu" title="call_rcu"><code class="xref c c-func docutils literal notranslate"><span class="pre">call_rcu()</span></code></a> until the lock is released
+requires that the data item be passed up via a common API.
+It is far better to guarantee that callbacks are invoked
+with no locks held than to have to modify such APIs to allow
+arbitrary data items to be passed back up through them.</p></li>
+</ol>
+<p>If <a class="reference internal" href="../core-api/kernel-api.html#c.call_rcu" title="call_rcu"><code class="xref c c-func docutils literal notranslate"><span class="pre">call_rcu()</span></code></a> directly invokes the callback, painful locking restrictions
+or API changes would be required.</p>
+<dl class="simple">
+<dt>Quick Quiz #2:</dt><dd><p>What locking restriction must RCU callbacks respect?</p>
+</dd>
+</dl>
+<p><a class="reference internal" href="#answer-quick-quiz-up"><span class="std std-ref">Answers to Quick Quiz</span></a></p>
+</section>
+<section id="summary">
+<h2>Summary<a class="headerlink" href="#summary" title="Permalink to this headline">¶</a></h2>
+<p>Permitting <a class="reference internal" href="../core-api/kernel-api.html#c.call_rcu" title="call_rcu"><code class="xref c c-func docutils literal notranslate"><span class="pre">call_rcu()</span></code></a> to immediately invoke its arguments breaks RCU,
+even on a UP system.  So do not do it!  Even on a UP system, the RCU
+infrastructure <em>must</em> respect grace periods, and <em>must</em> invoke callbacks
+from a known environment in which no locks are held.</p>
+<p>Note that it <em>is</em> safe for <a class="reference internal" href="../core-api/kernel-api.html#c.synchronize_rcu" title="synchronize_rcu"><code class="xref c c-func docutils literal notranslate"><span class="pre">synchronize_rcu()</span></code></a> to return immediately on
+UP systems, including PREEMPT SMP builds running on UP systems.</p>
+<dl class="simple">
+<dt>Quick Quiz #3:</dt><dd><p>Why can’t <a class="reference internal" href="../core-api/kernel-api.html#c.synchronize_rcu" title="synchronize_rcu"><code class="xref c c-func docutils literal notranslate"><span class="pre">synchronize_rcu()</span></code></a> return immediately on UP systems running
+preemptable RCU?</p>
+</dd>
+</dl>
+<dl id="answer-quick-quiz-up">
+<dt>Answer to Quick Quiz #1:</dt><dd><p>Why is it <em>not</em> legal to invoke <a class="reference internal" href="../core-api/kernel-api.html#c.synchronize_rcu" title="synchronize_rcu"><code class="xref c c-func docutils literal notranslate"><span class="pre">synchronize_rcu()</span></code></a> in this case?</p>
+<p>Because the calling function is scanning an RCU-protected linked
+list, and is therefore within an RCU read-side critical section.
+Therefore, the called function has been invoked within an RCU
+read-side critical section, and is not permitted to block.</p>
+</dd>
+<dt>Answer to Quick Quiz #2:</dt><dd><p>What locking restriction must RCU callbacks respect?</p>
+<p>Any lock that is acquired within an RCU callback must be acquired
+elsewhere using an _bh variant of the spinlock primitive.
+For example, if “mylock” is acquired by an RCU callback, then
+a process-context acquisition of this lock must use something
+like spin_lock_bh() to acquire the lock.  Please note that
+it is also OK to use _irq variants of spinlocks, for example,
+spin_lock_irqsave().</p>
+<p>If the process-context code were to simply use spin_lock(),
+then, since RCU callbacks can be invoked from softirq context,
+the callback might be called from a softirq that interrupted
+the process-context critical section.  This would result in
+self-deadlock.</p>
+<p>This restriction might seem gratuitous, since very few RCU
+callbacks acquire locks directly.  However, a great many RCU
+callbacks do acquire locks <em>indirectly</em>, for example, via
+the <a class="reference internal" href="../core-api/mm-api.html#c.kfree" title="kfree"><code class="xref c c-func docutils literal notranslate"><span class="pre">kfree()</span></code></a> primitive.</p>
+</dd>
+<dt>Answer to Quick Quiz #3:</dt><dd><p>Why can’t <a class="reference internal" href="../core-api/kernel-api.html#c.synchronize_rcu" title="synchronize_rcu"><code class="xref c c-func docutils literal notranslate"><span class="pre">synchronize_rcu()</span></code></a> return immediately on UP systems
+running preemptable RCU?</p>
+<p>Because some other task might have been preempted in the middle
+of an RCU read-side critical section.  If <a class="reference internal" href="../core-api/kernel-api.html#c.synchronize_rcu" title="synchronize_rcu"><code class="xref c c-func docutils literal notranslate"><span class="pre">synchronize_rcu()</span></code></a>
+simply immediately returned, it would prematurely signal the
+end of the grace period, which would come as a nasty shock to
+that other thread when it started running again.</p>
+</dd>
+</dl>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">RCU on Uniprocessor Systems</a><ul>
+<li><a class="reference internal" href="#example-1-softirq-suicide">Example 1: softirq Suicide</a></li>
+<li><a class="reference internal" href="#example-2-function-call-fatality">Example 2: Function-Call Fatality</a></li>
+<li><a class="reference internal" href="#example-3-death-by-deadlock">Example 3: Death by Deadlock</a></li>
+<li><a class="reference internal" href="#summary">Summary</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/RCU/UP.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/RCU/UP.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,199 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>GPIO Aggregator &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="GPIO Sysfs Interface for Userspace" href="sysfs.html" />
+    <link rel="prev" title="gpio" href="index.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="gpio-aggregator">
+<h1>GPIO Aggregator<a class="headerlink" href="#gpio-aggregator" title="Permalink to this headline">¶</a></h1>
+<p>The GPIO Aggregator provides a mechanism to aggregate GPIOs, and expose them as
+a new gpio_chip.  This supports the following use cases.</p>
+<section id="aggregating-gpios-using-sysfs">
+<h2>Aggregating GPIOs using Sysfs<a class="headerlink" href="#aggregating-gpios-using-sysfs" title="Permalink to this headline">¶</a></h2>
+<p>GPIO controllers are exported to userspace using /dev/gpiochip* character
+devices.  Access control to these devices is provided by standard UNIX file
+system permissions, on an all-or-nothing basis: either a GPIO controller is
+accessible for a user, or it is not.</p>
+<p>The GPIO Aggregator provides access control for a set of one or more GPIOs, by
+aggregating them into a new gpio_chip, which can be assigned to a group or user
+using standard UNIX file ownership and permissions.  Furthermore, this
+simplifies and hardens exporting GPIOs to a virtual machine, as the VM can just
+grab the full GPIO controller, and no longer needs to care about which GPIOs to
+grab and which not, reducing the attack surface.</p>
+<p>Aggregated GPIO controllers are instantiated and destroyed by writing to
+write-only attribute files in sysfs.</p>
+<blockquote>
+<div><p>/sys/bus/platform/drivers/gpio-aggregator/</p>
+<blockquote>
+<div><dl>
+<dt>“new_device” …</dt><dd><p>Userspace may ask the kernel to instantiate an aggregated GPIO
+controller by writing a string describing the GPIOs to
+aggregate to the “new_device” file, using the format</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[&lt;gpioA&gt;] [&lt;gpiochipB&gt; &lt;offsets&gt;] ...
+</pre></div>
+</div>
+<p>Where:</p>
+<blockquote>
+<div><dl class="simple">
+<dt>“&lt;gpioA&gt;” …</dt><dd><p>is a GPIO line name,</p>
+</dd>
+<dt>“&lt;gpiochipB&gt;” …</dt><dd><p>is a GPIO chip label, and</p>
+</dd>
+<dt>“&lt;offsets&gt;” …</dt><dd><p>is a comma-separated list of GPIO offsets and/or
+GPIO offset ranges denoted by dashes.</p>
+</dd>
+</dl>
+</div></blockquote>
+<p>Example: Instantiate a new GPIO aggregator by aggregating GPIO
+line 19 of “e6052000.gpio” and GPIO lines 20-21 of
+“e6050000.gpio” into a new gpio_chip:</p>
+<div class="highlight-sh notranslate"><div class="highlight"><pre><span></span>$ <span class="nb">echo</span> <span class="s1">&#39;e6052000.gpio 19 e6050000.gpio 20-21&#39;</span> &gt; new_device
+</pre></div>
+</div>
+</dd>
+<dt>“delete_device” …</dt><dd><p>Userspace may ask the kernel to destroy an aggregated GPIO
+controller after use by writing its device name to the
+“delete_device” file.</p>
+<p>Example: Destroy the previously-created aggregated GPIO
+controller, assumed to be “gpio-aggregator.0”:</p>
+<div class="highlight-sh notranslate"><div class="highlight"><pre><span></span>$ <span class="nb">echo</span> gpio-aggregator.0 &gt; delete_device
+</pre></div>
+</div>
+</dd>
+</dl>
+</div></blockquote>
+</div></blockquote>
+</section>
+<section id="generic-gpio-driver">
+<h2>Generic GPIO Driver<a class="headerlink" href="#generic-gpio-driver" title="Permalink to this headline">¶</a></h2>
+<p>The GPIO Aggregator can also be used as a generic driver for a simple
+GPIO-operated device described in DT, without a dedicated in-kernel driver.
+This is useful in industrial control, and is not unlike e.g. spidev, which
+allows the user to communicate with an SPI device from userspace.</p>
+<p>Binding a device to the GPIO Aggregator is performed either by modifying the
+gpio-aggregator driver, or by writing to the “driver_override” file in Sysfs.</p>
+<p>Example: If “door” is a GPIO-operated device described in DT, using its own
+compatible value:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>door {
+        compatible = &quot;myvendor,mydoor&quot;;
+
+        gpios = &lt;&amp;gpio2 19 GPIO_ACTIVE_HIGH&gt;,
+                &lt;&amp;gpio2 20 GPIO_ACTIVE_LOW&gt;;
+        gpio-line-names = &quot;open&quot;, &quot;lock&quot;;
+};
+</pre></div>
+</div>
+<p>it can be bound to the GPIO Aggregator by either:</p>
+<ol class="arabic simple">
+<li><p>Adding its compatible value to <code class="docutils literal notranslate"><span class="pre">gpio_aggregator_dt_ids[]</span></code>,</p></li>
+<li><p>Binding manually using “driver_override”:</p></li>
+</ol>
+<div class="highlight-sh notranslate"><div class="highlight"><pre><span></span>$ <span class="nb">echo</span> gpio-aggregator &gt; /sys/bus/platform/devices/door/driver_override
+$ <span class="nb">echo</span> door &gt; /sys/bus/platform/drivers/gpio-aggregator/bind
+</pre></div>
+</div>
+<p>After that, a new gpiochip “door” has been created:</p>
+<div class="highlight-sh notranslate"><div class="highlight"><pre><span></span>$ gpioinfo door
+gpiochip12 - <span class="m">2</span> lines:
+        line   <span class="m">0</span>:       <span class="s2">&quot;open&quot;</span>       unused   input  active-high
+        line   <span class="m">1</span>:       <span class="s2">&quot;lock&quot;</span>       unused   input  active-high
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">GPIO Aggregator</a><ul>
+<li><a class="reference internal" href="#aggregating-gpios-using-sysfs">Aggregating GPIOs using Sysfs</a></li>
+<li><a class="reference internal" href="#generic-gpio-driver">Generic GPIO Driver</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/admin-guide/gpio/gpio-aggregator.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/admin-guide/gpio/gpio-aggregator.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

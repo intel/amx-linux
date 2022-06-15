@@ -1,0 +1,263 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>XFRM &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="XFRM Syscall" href="xfrm_sysctl.html" />
+    <link rel="prev" title="XFRM proc - /proc/net/xfrm_* files" href="xfrm_proc.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="xfrm">
+<h1>XFRM<a class="headerlink" href="#xfrm" title="Permalink to this headline">¶</a></h1>
+<p>The sync patches work is based on initial patches from
+Krisztian &lt;<a class="reference external" href="mailto:hidden&#37;&#52;&#48;balabit&#46;hu">hidden<span>&#64;</span>balabit<span>&#46;</span>hu</a>&gt; and others and additional patches
+from Jamal &lt;<a class="reference external" href="mailto:hadi&#37;&#52;&#48;cyberus&#46;ca">hadi<span>&#64;</span>cyberus<span>&#46;</span>ca</a>&gt;.</p>
+<p>The end goal for syncing is to be able to insert attributes + generate
+events so that the SA can be safely moved from one machine to another
+for HA purposes.
+The idea is to synchronize the SA so that the takeover machine can do
+the processing of the SA as accurate as possible if it has access to it.</p>
+<p>We already have the ability to generate SA add/del/upd events.
+These patches add ability to sync and have accurate lifetime byte (to
+ensure proper decay of SAs) and replay counters to avoid replay attacks
+with as minimal loss at failover time.
+This way a backup stays as closely up-to-date as an active member.</p>
+<p>Because the above items change for every packet the SA receives,
+it is possible for a lot of the events to be generated.
+For this reason, we also add a nagle-like algorithm to restrict
+the events. i.e we are going to set thresholds to say “let me
+know if the replay sequence threshold is reached or 10 secs have passed”
+These thresholds are set system-wide via sysctls or can be updated
+per SA.</p>
+<p>The identified items that need to be synchronized are:
+- the lifetime byte counter
+note that: lifetime time limit is not important if you assume the failover
+machine is known ahead of time since the decay of the time countdown
+is not driven by packet arrival.
+- the replay sequence for both inbound and outbound</p>
+<section id="message-structure">
+<h2>1) Message Structure<a class="headerlink" href="#message-structure" title="Permalink to this headline">¶</a></h2>
+<p>nlmsghdr:aevent_id:optional-TLVs.</p>
+<p>The netlink message types are:</p>
+<p>XFRM_MSG_NEWAE and XFRM_MSG_GETAE.</p>
+<p>A XFRM_MSG_GETAE does not have TLVs.</p>
+<p>A XFRM_MSG_NEWAE will have at least two TLVs (as is
+discussed further below).</p>
+<p>aevent_id structure looks like:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct xfrm_aevent_id {
+          struct xfrm_usersa_id           sa_id;
+          xfrm_address_t                  saddr;
+          __u32                           flags;
+          __u32                           reqid;
+};
+</pre></div>
+</div>
+<p>The unique SA is identified by the combination of xfrm_usersa_id,
+reqid and saddr.</p>
+<p>flags are used to indicate different things. The possible
+flags are:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>XFRM_AE_RTHR=1, /* replay threshold*/
+XFRM_AE_RVAL=2, /* replay value */
+XFRM_AE_LVAL=4, /* lifetime value */
+XFRM_AE_ETHR=8, /* expiry timer threshold */
+XFRM_AE_CR=16, /* Event cause is replay update */
+XFRM_AE_CE=32, /* Event cause is timer expiry */
+XFRM_AE_CU=64, /* Event cause is policy update */
+</pre></div>
+</div>
+<p>How these flags are used is dependent on the direction of the
+message (kernel&lt;-&gt;user) as well the cause (config, query or event).
+This is described below in the different messages.</p>
+<p>The pid will be set appropriately in netlink to recognize direction
+(0 to the kernel and pid = processid that created the event
+when going from kernel to user space)</p>
+<p>A program needs to subscribe to multicast group XFRMNLGRP_AEVENTS
+to get notified of these events.</p>
+</section>
+<section id="tlvs-reflect-the-different-parameters">
+<h2>2) TLVS reflect the different parameters:<a class="headerlink" href="#tlvs-reflect-the-different-parameters" title="Permalink to this headline">¶</a></h2>
+<ol class="loweralpha simple">
+<li><p>byte value (XFRMA_LTIME_VAL)</p></li>
+</ol>
+<p>This TLV carries the running/current counter for byte lifetime since
+last event.</p>
+<p>b)replay value (XFRMA_REPLAY_VAL)</p>
+<p>This TLV carries the running/current counter for replay sequence since
+last event.</p>
+<p>c)replay threshold (XFRMA_REPLAY_THRESH)</p>
+<p>This TLV carries the threshold being used by the kernel to trigger events
+when the replay sequence is exceeded.</p>
+<ol class="loweralpha simple" start="4">
+<li><p>expiry timer (XFRMA_ETIMER_THRESH)</p></li>
+</ol>
+<p>This is a timer value in milliseconds which is used as the nagle
+value to rate limit the events.</p>
+</section>
+<section id="default-configurations-for-the-parameters">
+<h2>3) Default configurations for the parameters:<a class="headerlink" href="#default-configurations-for-the-parameters" title="Permalink to this headline">¶</a></h2>
+<p>By default these events should be turned off unless there is
+at least one listener registered to listen to the multicast
+group XFRMNLGRP_AEVENTS.</p>
+<p>Programs installing SAs will need to specify the two thresholds, however,
+in order to not change existing applications such as racoon
+we also provide default threshold values for these different parameters
+in case they are not specified.</p>
+<p>the two sysctls/proc entries are:</p>
+<p>a) /proc/sys/net/core/sysctl_xfrm_aevent_etime
+used to provide default values for the XFRMA_ETIMER_THRESH in incremental
+units of time of 100ms. The default is 10 (1 second)</p>
+<p>b) /proc/sys/net/core/sysctl_xfrm_aevent_rseqth
+used to provide default values for XFRMA_REPLAY_THRESH parameter
+in incremental packet count. The default is two packets.</p>
+</section>
+<section id="message-types">
+<h2>4) Message types<a class="headerlink" href="#message-types" title="Permalink to this headline">¶</a></h2>
+<ol class="loweralpha simple">
+<li><p>XFRM_MSG_GETAE issued by user–&gt;kernel.
+XFRM_MSG_GETAE does not carry any TLVs.</p></li>
+</ol>
+<p>The response is a XFRM_MSG_NEWAE which is formatted based on what
+XFRM_MSG_GETAE queried for.</p>
+<p>The response will always have XFRMA_LTIME_VAL and XFRMA_REPLAY_VAL TLVs.
+* if XFRM_AE_RTHR flag is set, then XFRMA_REPLAY_THRESH is also retrieved
+* if XFRM_AE_ETHR flag is set, then XFRMA_ETIMER_THRESH is also retrieved</p>
+<ol class="loweralpha simple" start="2">
+<li><p>XFRM_MSG_NEWAE is issued by either user space to configure
+or kernel to announce events or respond to a XFRM_MSG_GETAE.</p></li>
+</ol>
+<ol class="lowerroman simple">
+<li><p>user –&gt; kernel to configure a specific SA.</p></li>
+</ol>
+<p>any of the values or threshold parameters can be updated by passing the
+appropriate TLV.</p>
+<p>A response is issued back to the sender in user space to indicate success
+or failure.</p>
+<p>In the case of success, additionally an event with
+XFRM_MSG_NEWAE is also issued to any listeners as described in iii).</p>
+<ol class="lowerroman simple" start="2">
+<li><p>kernel-&gt;user direction as a response to XFRM_MSG_GETAE</p></li>
+</ol>
+<p>The response will always have XFRMA_LTIME_VAL and XFRMA_REPLAY_VAL TLVs.</p>
+<p>The threshold TLVs will be included if explicitly requested in
+the XFRM_MSG_GETAE message.</p>
+<ol class="lowerroman simple" start="3">
+<li><p>kernel-&gt;user to report as event if someone sets any values or
+thresholds for an SA using XFRM_MSG_NEWAE (as described in #i above).
+In such a case XFRM_AE_CU flag is set to inform the user that
+the change happened as a result of an update.
+The message will always have XFRMA_LTIME_VAL and XFRMA_REPLAY_VAL TLVs.</p></li>
+<li><p>kernel-&gt;user to report event when replay threshold or a timeout
+is exceeded.</p></li>
+</ol>
+<p>In such a case either XFRM_AE_CR (replay exceeded) or XFRM_AE_CE (timeout
+happened) is set to inform the user what happened.
+Note the two flags are mutually exclusive.
+The message will always have XFRMA_LTIME_VAL and XFRMA_REPLAY_VAL TLVs.</p>
+</section>
+<section id="exceptions-to-threshold-settings">
+<h2>Exceptions to threshold settings<a class="headerlink" href="#exceptions-to-threshold-settings" title="Permalink to this headline">¶</a></h2>
+<p>If you have an SA that is getting hit by traffic in bursts such that
+there is a period where the timer threshold expires with no packets
+seen, then an odd behavior is seen as follows:
+The first packet arrival after a timer expiry will trigger a timeout
+event; i.e we don’t wait for a timeout period or a packet threshold
+to be reached. This is done for simplicity and efficiency reasons.</p>
+<p>-JHS</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">XFRM</a><ul>
+<li><a class="reference internal" href="#message-structure">1) Message Structure</a></li>
+<li><a class="reference internal" href="#tlvs-reflect-the-different-parameters">2) TLVS reflect the different parameters:</a></li>
+<li><a class="reference internal" href="#default-configurations-for-the-parameters">3) Default configurations for the parameters:</a></li>
+<li><a class="reference internal" href="#message-types">4) Message types</a></li>
+<li><a class="reference internal" href="#exceptions-to-threshold-settings">Exceptions to threshold settings</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/networking/xfrm_sync.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/networking/xfrm_sync.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

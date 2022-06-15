@@ -1,0 +1,484 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Asymmetric Cipher Algorithm Definitions &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Key-agreement Protocol Primitives (KPP) Cipher Algorithm Definitions" href="api-kpp.html" />
+    <link rel="prev" title="Random Number Algorithm Definitions" href="api-rng.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="asymmetric-cipher-algorithm-definitions">
+<h1>Asymmetric Cipher Algorithm Definitions<a class="headerlink" href="#asymmetric-cipher-algorithm-definitions" title="Permalink to this headline">¶</a></h1>
+<dl class="type">
+<dt id="c.akcipher_request">
+struct <code class="sig-name descname">akcipher_request</code><a class="headerlink" href="#c.akcipher_request" title="Permalink to this definition">¶</a></dt>
+<dd><p>public key request</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct akcipher_request {
+    struct crypto_async_request base;
+    struct scatterlist *src;
+    struct scatterlist *dst;
+    unsigned int src_len;
+    unsigned int dst_len;
+    void *__ctx[] ;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">base</span></code></dt><dd><p>Common attributes for async crypto requests</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">src</span></code></dt><dd><p>Source data
+For verify op this is signature + digest, in that case
+total size of <strong>src</strong> is <strong>src_len</strong> + <strong>dst_len</strong>.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dst</span></code></dt><dd><p>Destination data (Should be NULL for verify op)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">src_len</span></code></dt><dd><p>Size of the input buffer
+For verify op it’s size of signature part of <strong>src</strong>, this part
+is supposed to be operated by cipher.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dst_len</span></code></dt><dd><p>Size of <strong>dst</strong> buffer (for all ops except verify).
+It needs to be at least as big as the expected result
+depending on the operation.
+After operation it will be updated with the actual size of the
+result.
+In case of error where the dst sgl size was insufficient,
+it will be updated to the size required for the operation.
+For verify op this is size of digest part in <strong>src</strong>.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">__ctx</span></code></dt><dd><p>Start of private context data</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.akcipher_alg">
+struct <code class="sig-name descname">akcipher_alg</code><a class="headerlink" href="#c.akcipher_alg" title="Permalink to this definition">¶</a></dt>
+<dd><p>generic public key algorithm</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct akcipher_alg {
+    int (*sign)(struct akcipher_request *req);
+    int (*verify)(struct akcipher_request *req);
+    int (*encrypt)(struct akcipher_request *req);
+    int (*decrypt)(struct akcipher_request *req);
+    int (*set_pub_key)(struct crypto_akcipher *tfm, const void *key, unsigned int keylen);
+    int (*set_priv_key)(struct crypto_akcipher *tfm, const void *key, unsigned int keylen);
+    unsigned int (*max_size)(struct crypto_akcipher *tfm);
+    int (*init)(struct crypto_akcipher *tfm);
+    void (*exit)(struct crypto_akcipher *tfm);
+    struct crypto_alg base;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">sign</span></code></dt><dd><p>Function performs a sign operation as defined by public key
+algorithm. In case of error, where the dst_len was insufficient,
+the req-&gt;dst_len will be updated to the size required for the
+operation</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">verify</span></code></dt><dd><p>Function performs a complete verify operation as defined by
+public key algorithm, returning verification status. Requires
+digest value as input parameter.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">encrypt</span></code></dt><dd><p>Function performs an encrypt operation as defined by public key
+algorithm. In case of error, where the dst_len was insufficient,
+the req-&gt;dst_len will be updated to the size required for the
+operation</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">decrypt</span></code></dt><dd><p>Function performs a decrypt operation as defined by public key
+algorithm. In case of error, where the dst_len was insufficient,
+the req-&gt;dst_len will be updated to the size required for the
+operation</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">set_pub_key</span></code></dt><dd><p>Function invokes the algorithm specific set public key
+function, which knows how to decode and interpret
+the BER encoded public key and parameters</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">set_priv_key</span></code></dt><dd><p>Function invokes the algorithm specific set private key
+function, which knows how to decode and interpret
+the BER encoded private key and parameters</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">max_size</span></code></dt><dd><p>Function returns dest buffer size required for a given key.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">init</span></code></dt><dd><p>Initialize the cryptographic transformation object.
+This function is used to initialize the cryptographic
+transformation object. This function is called only once at
+the instantiation time, right after the transformation context
+was allocated. In case the cryptographic hardware has some
+special requirements which need to be handled by software, this
+function shall check for the precise requirement of the
+transformation and put any software fallbacks in place.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">exit</span></code></dt><dd><p>Deinitialize the cryptographic transformation object. This is a
+counterpart to <strong>init</strong>, used to remove various changes set in
+<strong>init</strong>.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">base</span></code></dt><dd><p>Common crypto API algorithm data structure</p>
+</dd>
+</dl>
+</div>
+</section>
+<section id="asymmetric-cipher-api">
+<h1>Asymmetric Cipher API<a class="headerlink" href="#asymmetric-cipher-api" title="Permalink to this headline">¶</a></h1>
+<p>The Public Key API is used with the algorithms of type
+CRYPTO_ALG_TYPE_AKCIPHER (listed as type “akcipher” in /proc/crypto)</p>
+<dl class="function">
+<dt id="c.crypto_alloc_akcipher">
+struct crypto_akcipher * <code class="sig-name descname">crypto_alloc_akcipher</code><span class="sig-paren">(</span>const char<em> *alg_name</em>, u32<em> type</em>, u32<em> mask</em><span class="sig-paren">)</span><a class="headerlink" href="#c.crypto_alloc_akcipher" title="Permalink to this definition">¶</a></dt>
+<dd><p>allocate AKCIPHER tfm handle</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*alg_name</span></code></dt><dd><p>is the cra_name / name or cra_driver_name / driver name of the
+public key algorithm e.g. “rsa”</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">u32</span> <span class="pre">type</span></code></dt><dd><p>specifies the type of the algorithm</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">u32</span> <span class="pre">mask</span></code></dt><dd><p>specifies the mask for the algorithm</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Allocate a handle for public key algorithm. The returned struct
+crypto_akcipher is the handle that is required for any subsequent
+API invocation for the public key operations.</p>
+<p><strong>Return</strong></p>
+<dl class="simple">
+<dt>allocated handle in case of success; IS_ERR() is true in case</dt><dd><p>of an error, PTR_ERR() returns the error code.</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.crypto_free_akcipher">
+void <code class="sig-name descname">crypto_free_akcipher</code><span class="sig-paren">(</span>struct crypto_akcipher<em> *tfm</em><span class="sig-paren">)</span><a class="headerlink" href="#c.crypto_free_akcipher" title="Permalink to this definition">¶</a></dt>
+<dd><p>free AKCIPHER tfm handle</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">crypto_akcipher</span> <span class="pre">*tfm</span></code></dt><dd><p>AKCIPHER tfm handle allocated with <a class="reference internal" href="#c.crypto_alloc_akcipher" title="crypto_alloc_akcipher"><code class="xref c c-func docutils literal notranslate"><span class="pre">crypto_alloc_akcipher()</span></code></a></p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>If <strong>tfm</strong> is a NULL or error pointer, this function does nothing.</p>
+</div>
+<dl class="function">
+<dt id="c.crypto_akcipher_maxsize">
+unsigned int <code class="sig-name descname">crypto_akcipher_maxsize</code><span class="sig-paren">(</span>struct crypto_akcipher<em> *tfm</em><span class="sig-paren">)</span><a class="headerlink" href="#c.crypto_akcipher_maxsize" title="Permalink to this definition">¶</a></dt>
+<dd><p>Get len for output buffer</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">crypto_akcipher</span> <span class="pre">*tfm</span></code></dt><dd><p>AKCIPHER tfm handle allocated with <a class="reference internal" href="#c.crypto_alloc_akcipher" title="crypto_alloc_akcipher"><code class="xref c c-func docutils literal notranslate"><span class="pre">crypto_alloc_akcipher()</span></code></a></p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Function returns the dest buffer size required for a given key.
+Function assumes that the key is already set in the transformation. If this
+function is called without a setkey or with a failed setkey, you will end up
+in a NULL dereference.</p>
+</div>
+<dl class="function">
+<dt id="c.crypto_akcipher_encrypt">
+int <code class="sig-name descname">crypto_akcipher_encrypt</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.akcipher_request" title="akcipher_request">akcipher_request</a><em> *req</em><span class="sig-paren">)</span><a class="headerlink" href="#c.crypto_akcipher_encrypt" title="Permalink to this definition">¶</a></dt>
+<dd><p>Invoke public key encrypt operation</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">akcipher_request</span> <span class="pre">*req</span></code></dt><dd><p>asymmetric key request</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Function invokes the specific public key encrypt operation for a given
+public key algorithm</p>
+<p><strong>Return</strong></p>
+<p>zero on success; error code in case of error</p>
+</div>
+<dl class="function">
+<dt id="c.crypto_akcipher_decrypt">
+int <code class="sig-name descname">crypto_akcipher_decrypt</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.akcipher_request" title="akcipher_request">akcipher_request</a><em> *req</em><span class="sig-paren">)</span><a class="headerlink" href="#c.crypto_akcipher_decrypt" title="Permalink to this definition">¶</a></dt>
+<dd><p>Invoke public key decrypt operation</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">akcipher_request</span> <span class="pre">*req</span></code></dt><dd><p>asymmetric key request</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Function invokes the specific public key decrypt operation for a given
+public key algorithm</p>
+<p><strong>Return</strong></p>
+<p>zero on success; error code in case of error</p>
+</div>
+<dl class="function">
+<dt id="c.crypto_akcipher_sign">
+int <code class="sig-name descname">crypto_akcipher_sign</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.akcipher_request" title="akcipher_request">akcipher_request</a><em> *req</em><span class="sig-paren">)</span><a class="headerlink" href="#c.crypto_akcipher_sign" title="Permalink to this definition">¶</a></dt>
+<dd><p>Invoke public key sign operation</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">akcipher_request</span> <span class="pre">*req</span></code></dt><dd><p>asymmetric key request</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Function invokes the specific public key sign operation for a given
+public key algorithm</p>
+<p><strong>Return</strong></p>
+<p>zero on success; error code in case of error</p>
+</div>
+<dl class="function">
+<dt id="c.crypto_akcipher_verify">
+int <code class="sig-name descname">crypto_akcipher_verify</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.akcipher_request" title="akcipher_request">akcipher_request</a><em> *req</em><span class="sig-paren">)</span><a class="headerlink" href="#c.crypto_akcipher_verify" title="Permalink to this definition">¶</a></dt>
+<dd><p>Invoke public key signature verification</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">akcipher_request</span> <span class="pre">*req</span></code></dt><dd><p>asymmetric key request</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Function invokes the specific public key signature verification operation
+for a given public key algorithm.</p>
+<p><strong>Note</strong></p>
+<p>req-&gt;dst should be NULL, req-&gt;src should point to SG of size
+(req-&gt;src_size + req-&gt;dst_size), containing signature (of req-&gt;src_size
+length) with appended digest (of req-&gt;dst_size length).</p>
+<p><strong>Return</strong></p>
+<p>zero on verification success; error code in case of error.</p>
+</div>
+<dl class="function">
+<dt id="c.crypto_akcipher_set_pub_key">
+int <code class="sig-name descname">crypto_akcipher_set_pub_key</code><span class="sig-paren">(</span>struct crypto_akcipher<em> *tfm</em>, const void<em> *key</em>, unsigned int<em> keylen</em><span class="sig-paren">)</span><a class="headerlink" href="#c.crypto_akcipher_set_pub_key" title="Permalink to this definition">¶</a></dt>
+<dd><p>Invoke set public key operation</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">crypto_akcipher</span> <span class="pre">*tfm</span></code></dt><dd><p>tfm handle</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">void</span> <span class="pre">*key</span></code></dt><dd><p>BER encoded public key, algo OID, paramlen, BER encoded
+parameters</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">keylen</span></code></dt><dd><p>length of the key (not including other data)</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Function invokes the algorithm specific set key function, which knows
+how to decode and interpret the encoded key and parameters</p>
+<p><strong>Return</strong></p>
+<p>zero on success; error code in case of error</p>
+</div>
+<dl class="function">
+<dt id="c.crypto_akcipher_set_priv_key">
+int <code class="sig-name descname">crypto_akcipher_set_priv_key</code><span class="sig-paren">(</span>struct crypto_akcipher<em> *tfm</em>, const void<em> *key</em>, unsigned int<em> keylen</em><span class="sig-paren">)</span><a class="headerlink" href="#c.crypto_akcipher_set_priv_key" title="Permalink to this definition">¶</a></dt>
+<dd><p>Invoke set private key operation</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">crypto_akcipher</span> <span class="pre">*tfm</span></code></dt><dd><p>tfm handle</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">void</span> <span class="pre">*key</span></code></dt><dd><p>BER encoded private key, algo OID, paramlen, BER encoded
+parameters</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">keylen</span></code></dt><dd><p>length of the key (not including other data)</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Function invokes the algorithm specific set key function, which knows
+how to decode and interpret the encoded key and parameters</p>
+<p><strong>Return</strong></p>
+<p>zero on success; error code in case of error</p>
+</div>
+</section>
+<section id="asymmetric-cipher-request-handle">
+<h1>Asymmetric Cipher Request Handle<a class="headerlink" href="#asymmetric-cipher-request-handle" title="Permalink to this headline">¶</a></h1>
+<dl class="function">
+<dt id="c.akcipher_request_alloc">
+struct <a class="reference internal" href="#c.akcipher_request" title="akcipher_request">akcipher_request</a> * <code class="sig-name descname">akcipher_request_alloc</code><span class="sig-paren">(</span>struct crypto_akcipher<em> *tfm</em>, gfp_t<em> gfp</em><span class="sig-paren">)</span><a class="headerlink" href="#c.akcipher_request_alloc" title="Permalink to this definition">¶</a></dt>
+<dd><p>allocates public key request</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">crypto_akcipher</span> <span class="pre">*tfm</span></code></dt><dd><p>AKCIPHER tfm handle allocated with <a class="reference internal" href="#c.crypto_alloc_akcipher" title="crypto_alloc_akcipher"><code class="xref c c-func docutils literal notranslate"><span class="pre">crypto_alloc_akcipher()</span></code></a></p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">gfp_t</span> <span class="pre">gfp</span></code></dt><dd><p>allocation flags</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p>allocated handle in case of success or NULL in case of an error.</p>
+</div>
+<dl class="function">
+<dt id="c.akcipher_request_free">
+void <code class="sig-name descname">akcipher_request_free</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.akcipher_request" title="akcipher_request">akcipher_request</a><em> *req</em><span class="sig-paren">)</span><a class="headerlink" href="#c.akcipher_request_free" title="Permalink to this definition">¶</a></dt>
+<dd><p>zeroize and free public key request</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">akcipher_request</span> <span class="pre">*req</span></code></dt><dd><p>request to free</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.akcipher_request_set_callback">
+void <code class="sig-name descname">akcipher_request_set_callback</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.akcipher_request" title="akcipher_request">akcipher_request</a><em> *req</em>, u32<em> flgs</em>, crypto_completion_t<em> cmpl</em>, void<em> *data</em><span class="sig-paren">)</span><a class="headerlink" href="#c.akcipher_request_set_callback" title="Permalink to this definition">¶</a></dt>
+<dd><p>Sets an asynchronous callback.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">akcipher_request</span> <span class="pre">*req</span></code></dt><dd><p>request that the callback will be set for</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">u32</span> <span class="pre">flgs</span></code></dt><dd><p>specify for instance if the operation may backlog</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">crypto_completion_t</span> <span class="pre">cmpl</span></code></dt><dd><p>callback which will be called</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*data</span></code></dt><dd><p>private data used by the caller</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Callback will be called when an asynchronous operation on a given
+request is finished.</p>
+</div>
+<dl class="function">
+<dt id="c.akcipher_request_set_crypt">
+void <code class="sig-name descname">akcipher_request_set_crypt</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.akcipher_request" title="akcipher_request">akcipher_request</a><em> *req</em>, struct scatterlist<em> *src</em>, struct scatterlist<em> *dst</em>, unsigned int<em> src_len</em>, unsigned int<em> dst_len</em><span class="sig-paren">)</span><a class="headerlink" href="#c.akcipher_request_set_crypt" title="Permalink to this definition">¶</a></dt>
+<dd><p>Sets request parameters</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">akcipher_request</span> <span class="pre">*req</span></code></dt><dd><p>public key request</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">scatterlist</span> <span class="pre">*src</span></code></dt><dd><p>ptr to input scatter list</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">scatterlist</span> <span class="pre">*dst</span></code></dt><dd><p>ptr to output scatter list or NULL for verify op</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">src_len</span></code></dt><dd><p>size of the src input scatter list to be processed</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">dst_len</span></code></dt><dd><p>size of the dst output scatter list or size of signature
+portion in <strong>src</strong> for verify op</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Sets parameters required by crypto operation</p>
+</div>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Asymmetric Cipher Algorithm Definitions</a></li>
+<li><a class="reference internal" href="#asymmetric-cipher-api">Asymmetric Cipher API</a></li>
+<li><a class="reference internal" href="#asymmetric-cipher-request-handle">Asymmetric Cipher Request Handle</a></li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/crypto/api-akcipher.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/crypto/api-akcipher.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

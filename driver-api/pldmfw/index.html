@@ -1,0 +1,165 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>PLDM Firmware Flash Update Library &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="PLDM Firmware file format overview" href="file-format.html" />
+    <link rel="prev" title="Pulse Width Modulation (PWM) interface" href="../pwm.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="pldm-firmware-flash-update-library">
+<h1>PLDM Firmware Flash Update Library<a class="headerlink" href="#pldm-firmware-flash-update-library" title="Permalink to this headline">¶</a></h1>
+<p><code class="docutils literal notranslate"><span class="pre">pldmfw</span></code> implements functionality for updating the flash on a device using
+the PLDM for Firmware Update standard
+&lt;<a class="reference external" href="https://www.dmtf.org/documents/pmci/pldm-firmware-update-specification-100">https://www.dmtf.org/documents/pmci/pldm-firmware-update-specification-100</a>&gt;.</p>
+<div class="toctree-wrapper compound">
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="file-format.html">PLDM Firmware file format overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="driver-ops.html">Driver-specific callbacks</a></li>
+</ul>
+</div>
+</section>
+<section id="overview-of-the-pldmfw-library">
+<h1>Overview of the <code class="docutils literal notranslate"><span class="pre">pldmfw</span></code> library<a class="headerlink" href="#overview-of-the-pldmfw-library" title="Permalink to this headline">¶</a></h1>
+<p>The <code class="docutils literal notranslate"><span class="pre">pldmfw</span></code> library is intended to be used by device drivers for
+implementing device flash update based on firmware files following the PLDM
+firwmare file format.</p>
+<p>It is implemented using an ops table that allows device drivers to provide
+the underlying device specific functionality.</p>
+<p><code class="docutils literal notranslate"><span class="pre">pldmfw</span></code> implements logic to parse the packed binary format of the PLDM
+firmware file into data structures, and then uses the provided function
+operations to determine if the firmware file is a match for the device. If
+so, it sends the record and component data to the firmware using the device
+specific implementations provided by device drivers. Once the device
+firmware indicates that the update may be performed, the firmware data is
+sent to the device for programming.</p>
+<section id="parsing-the-pldm-file">
+<h2>Parsing the PLDM file<a class="headerlink" href="#parsing-the-pldm-file" title="Permalink to this headline">¶</a></h2>
+<p>The PLDM file format uses packed binary data, with most multi-byte fields
+stored in the Little Endian format. Several pieces of data are variable
+length, including version strings and the number of records and components.
+Due to this, it is not straight forward to index the record, record
+descriptors, or components.</p>
+<p>To avoid proliferating access to the packed binary data, the <code class="docutils literal notranslate"><span class="pre">pldmfw</span></code>
+library parses and extracts this data into simpler structures for ease of
+access.</p>
+<p>In order to safely process the firmware file, care is taken to avoid
+unaligned access of multi-byte fields, and to properly convert from Little
+Endian to CPU host format. Additionally the records, descriptors, and
+components are stored in linked lists.</p>
+</section>
+<section id="performing-a-flash-update">
+<h2>Performing a flash update<a class="headerlink" href="#performing-a-flash-update" title="Permalink to this headline">¶</a></h2>
+<p>To perform a flash update, the <code class="docutils literal notranslate"><span class="pre">pldmfw</span></code> module performs the following
+steps</p>
+<ol class="arabic simple">
+<li><p>Parse the firmware file for record and component information</p></li>
+<li><p>Scan through the records and determine if the device matches any record
+in the file. The first matched record will be used.</p></li>
+<li><p>If the matching record provides package data, send this package data to
+the device.</p></li>
+<li><p>For each component that the record indicates, send the component data to
+the device. For each component, the firmware may respond with an
+indication of whether the update is suitable or not. If any component is
+not suitable, the update is canceled.</p></li>
+<li><p>For each component, send the binary data to the device firmware for
+updating.</p></li>
+<li><p>After all components are programmed, perform any final device-specific
+actions to finalize the update.</p></li>
+</ol>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">PLDM Firmware Flash Update Library</a></li>
+<li><a class="reference internal" href="#overview-of-the-pldmfw-library">Overview of the <code class="docutils literal notranslate"><span class="pre">pldmfw</span></code> library</a><ul>
+<li><a class="reference internal" href="#parsing-the-pldm-file">Parsing the PLDM file</a></li>
+<li><a class="reference internal" href="#performing-a-flash-update">Performing a flash update</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/pldmfw/index.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/pldmfw/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

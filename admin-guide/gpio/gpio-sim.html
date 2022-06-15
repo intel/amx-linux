@@ -1,0 +1,211 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Configfs GPIO Simulator &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Notes on the change from 16-bit UIDs to 32-bit UIDs" href="../highuid.html" />
+    <link rel="prev" title="GPIO Testing Driver" href="gpio-mockup.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="configfs-gpio-simulator">
+<h1>Configfs GPIO Simulator<a class="headerlink" href="#configfs-gpio-simulator" title="Permalink to this headline">¶</a></h1>
+<p>The configfs GPIO Simulator (gpio-sim) provides a way to create simulated GPIO
+chips for testing purposes. The lines exposed by these chips can be accessed
+using the standard GPIO character device interface as well as manipulated
+using sysfs attributes.</p>
+<section id="creating-simulated-chips">
+<h2>Creating simulated chips<a class="headerlink" href="#creating-simulated-chips" title="Permalink to this headline">¶</a></h2>
+<p>The gpio-sim module registers a configfs subsystem called <code class="docutils literal notranslate"><span class="pre">'gpio-sim'</span></code>. For
+details of the configfs filesystem, please refer to the configfs documentation.</p>
+<p>The user can create a hierarchy of configfs groups and items as well as modify
+values of exposed attributes. Once the chip is instantiated, this hierarchy
+will be translated to appropriate device properties. The general structure is:</p>
+<p><strong>Group:</strong> <code class="docutils literal notranslate"><span class="pre">/config/gpio-sim</span></code></p>
+<p>This is the top directory of the gpio-sim configfs tree.</p>
+<p><strong>Group:</strong> <code class="docutils literal notranslate"><span class="pre">/config/gpio-sim/gpio-device</span></code></p>
+<p><strong>Attribute:</strong> <code class="docutils literal notranslate"><span class="pre">/config/gpio-sim/gpio-device/dev_name</span></code></p>
+<p><strong>Attribute:</strong> <code class="docutils literal notranslate"><span class="pre">/config/gpio-sim/gpio-device/live</span></code></p>
+<p>This is a directory representing a GPIO platform device. The <code class="docutils literal notranslate"><span class="pre">'dev_name'</span></code>
+attribute is read-only and allows the user-space to read the platform device
+name (e.g. <code class="docutils literal notranslate"><span class="pre">'gpio-sim.0'</span></code>). The <code class="docutils literal notranslate"><span class="pre">'live'</span></code> attribute allows to trigger the
+actual creation of the device once it’s fully configured. The accepted values
+are: <code class="docutils literal notranslate"><span class="pre">'1'</span></code> to enable the simulated device and <code class="docutils literal notranslate"><span class="pre">'0'</span></code> to disable and tear
+it down.</p>
+<p><strong>Group:</strong> <code class="docutils literal notranslate"><span class="pre">/config/gpio-sim/gpio-device/gpio-bankX</span></code></p>
+<p><strong>Attribute:</strong> <code class="docutils literal notranslate"><span class="pre">/config/gpio-sim/gpio-device/gpio-bankX/chip_name</span></code></p>
+<p><strong>Attribute:</strong> <code class="docutils literal notranslate"><span class="pre">/config/gpio-sim/gpio-device/gpio-bankX/num_lines</span></code></p>
+<p>This group represents a bank of GPIOs under the top platform device. The
+<code class="docutils literal notranslate"><span class="pre">'chip_name'</span></code> attribute is read-only and allows the user-space to read the
+device name of the bank device. The <code class="docutils literal notranslate"><span class="pre">'num_lines'</span></code> attribute allows to specify
+the number of lines exposed by this bank.</p>
+<p><strong>Group:</strong> <code class="docutils literal notranslate"><span class="pre">/config/gpio-sim/gpio-device/gpio-bankX/lineY</span></code></p>
+<p><strong>Attribute:</strong> <code class="docutils literal notranslate"><span class="pre">/config/gpio-sim/gpio-device/gpio-bankX/lineY/name</span></code></p>
+<p>This group represents a single line at the offset Y. The ‘name’ attribute
+allows to set the line name as represented by the ‘gpio-line-names’ property.</p>
+<p><strong>Item:</strong> <code class="docutils literal notranslate"><span class="pre">/config/gpio-sim/gpio-device/gpio-bankX/lineY/hog</span></code></p>
+<p><strong>Attribute:</strong> <code class="docutils literal notranslate"><span class="pre">/config/gpio-sim/gpio-device/gpio-bankX/lineY/hog/name</span></code></p>
+<p><strong>Attribute:</strong> <code class="docutils literal notranslate"><span class="pre">/config/gpio-sim/gpio-device/gpio-bankX/lineY/hog/direction</span></code></p>
+<p>This item makes the gpio-sim module hog the associated line. The <code class="docutils literal notranslate"><span class="pre">'name'</span></code>
+attribute specifies the in-kernel consumer name to use. The <code class="docutils literal notranslate"><span class="pre">'direction'</span></code>
+attribute specifies the hog direction and must be one of: <code class="docutils literal notranslate"><span class="pre">'input'</span></code>,
+<code class="docutils literal notranslate"><span class="pre">'output-high'</span></code> and <code class="docutils literal notranslate"><span class="pre">'output-low'</span></code>.</p>
+<p>Inside each bank directory, there’s a set of attributes that can be used to
+configure the new chip. Additionally the user can <code class="docutils literal notranslate"><span class="pre">mkdir()</span></code> subdirectories
+inside the chip’s directory that allow to pass additional configuration for
+specific lines. The name of those subdirectories must take the form of:
+<code class="docutils literal notranslate"><span class="pre">'line&lt;offset&gt;'</span></code> (e.g. <code class="docutils literal notranslate"><span class="pre">'line0'</span></code>, <code class="docutils literal notranslate"><span class="pre">'line20'</span></code>, etc.) as the name will be
+used by the module to assign the config to the specific line at given offset.</p>
+<p>Once the confiuration is complete, the <code class="docutils literal notranslate"><span class="pre">'live'</span></code> attribute must be set to 1 in
+order to instantiate the chip. It can be set back to 0 to destroy the simulated
+chip. The module will synchronously wait for the new simulated device to be
+successfully probed and if this doesn’t happen, writing to <code class="docutils literal notranslate"><span class="pre">'live'</span></code> will
+result in an error.</p>
+<p>Simulated GPIO chips can also be defined in device-tree. The compatible string
+must be: <code class="docutils literal notranslate"><span class="pre">&quot;gpio-simulator&quot;</span></code>. Supported properties are:</p>
+<blockquote>
+<div><p><code class="docutils literal notranslate"><span class="pre">&quot;gpio-sim,label&quot;</span></code> - chip label</p>
+</div></blockquote>
+<p>Other standard GPIO properties (like <code class="docutils literal notranslate"><span class="pre">&quot;gpio-line-names&quot;</span></code>, <code class="docutils literal notranslate"><span class="pre">&quot;ngpios&quot;</span></code> or
+<code class="docutils literal notranslate"><span class="pre">&quot;gpio-hog&quot;</span></code>) are also supported. Please refer to the GPIO documentation for
+details.</p>
+<p>An example device-tree code defining a GPIO simulator:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>gpio-sim {
+    compatible = &quot;gpio-simulator&quot;;
+
+    bank0 {
+        gpio-controller;
+        #gpio-cells = &lt;2&gt;;
+        ngpios = &lt;16&gt;;
+        gpio-sim,label = &quot;dt-bank0&quot;;
+        gpio-line-names = &quot;&quot;, &quot;sim-foo&quot;, &quot;&quot;, &quot;sim-bar&quot;;
+    };
+
+    bank1 {
+        gpio-controller;
+        #gpio-cells = &lt;2&gt;;
+        ngpios = &lt;8&gt;;
+        gpio-sim,label = &quot;dt-bank1&quot;;
+
+        line3 {
+            gpio-hog;
+            gpios = &lt;3 0&gt;;
+            output-high;
+            line-name = &quot;sim-hog-from-dt&quot;;
+        };
+    };
+};
+</pre></div>
+</div>
+</section>
+<section id="manipulating-simulated-lines">
+<h2>Manipulating simulated lines<a class="headerlink" href="#manipulating-simulated-lines" title="Permalink to this headline">¶</a></h2>
+<p>Each simulated GPIO chip creates a separate sysfs group under its device
+directory for each exposed line
+(e.g. <code class="docutils literal notranslate"><span class="pre">/sys/devices/platform/gpio-sim.X/gpiochipY/</span></code>). The name of each group
+is of the form: <code class="docutils literal notranslate"><span class="pre">'sim_gpioX'</span></code> where X is the offset of the line. Inside each
+group there are two attibutes:</p>
+<blockquote>
+<div><dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">pull</span></code> - allows to read and set the current simulated pull setting for</dt><dd><p>every line, when writing the value must be one of: <code class="docutils literal notranslate"><span class="pre">'pull-up'</span></code>,
+<code class="docutils literal notranslate"><span class="pre">'pull-down'</span></code></p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">value</span></code> - allows to read the current value of the line which may be</dt><dd><p>different from the pull if the line is being driven from
+user-space</p>
+</dd>
+</dl>
+</div></blockquote>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Configfs GPIO Simulator</a><ul>
+<li><a class="reference internal" href="#creating-simulated-chips">Creating simulated chips</a></li>
+<li><a class="reference internal" href="#manipulating-simulated-lines">Manipulating simulated lines</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/admin-guide/gpio/gpio-sim.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/admin-guide/gpio/gpio-sim.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

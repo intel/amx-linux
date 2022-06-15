@@ -1,0 +1,1017 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>IOMMUFD &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Linux Media Infrastructure userspace API" href="media/index.html" />
+    <link rel="prev" title="IOMMU Userspace API" href="iommu.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="iommufd">
+<h1>IOMMUFD<a class="headerlink" href="#iommufd" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">Author</dt>
+<dd class="field-odd"><p>Jason Gunthorpe</p>
+</dd>
+<dt class="field-even">Author</dt>
+<dd class="field-even"><p>Kevin Tian</p>
+</dd>
+</dl>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Permalink to this headline">¶</a></h2>
+<p>IOMMUFD is the user API to control the IOMMU subsystem as it relates to managing
+IO page tables from userspace using file descriptors. It intends to be general
+and consumable by any driver that wants to expose DMA to userspace. These
+drivers are eventually expected to deprecate any internal IOMMU logic
+they may already/historically implement (e.g. vfio_iommu_type1.c).</p>
+<p>At minimum iommufd provides universal support of managing I/O address spaces and
+I/O page tables for all IOMMUs, with room in the design to add non-generic
+features to cater to specific hardware functionality.</p>
+<p>In this context the capital letter (IOMMUFD) refers to the subsystem while the
+small letter (iommufd) refers to the file descriptors created via /dev/iommu for
+use by userspace.</p>
+</section>
+<section id="key-concepts">
+<h2>Key Concepts<a class="headerlink" href="#key-concepts" title="Permalink to this headline">¶</a></h2>
+<section id="user-visible-objects">
+<h3>User Visible Objects<a class="headerlink" href="#user-visible-objects" title="Permalink to this headline">¶</a></h3>
+<p>Following IOMMUFD objects are exposed to userspace:</p>
+<ul>
+<li><p>IOMMUFD_OBJ_IOAS, representing an I/O address space (IOAS), allowing map/unmap
+of user space memory into ranges of I/O Virtual Address (IOVA).</p>
+<p>The IOAS is a functional replacement for the VFIO container, and like the VFIO
+container it copies an IOVA map to a list of iommu_domains held within it.</p>
+</li>
+<li><p>IOMMUFD_OBJ_DEVICE, representing a device that is bound to iommufd by an
+external driver.</p></li>
+<li><p>IOMMUFD_OBJ_HW_PAGETABLE, representing an actual hardware I/O page table
+(i.e. a single struct iommu_domain) managed by the iommu driver.</p>
+<p>The IOAS has a list of HW_PAGETABLES that share the same IOVA mapping and
+it will synchronize its mapping with each member HW_PAGETABLE.</p>
+</li>
+</ul>
+<p>All user-visible objects are destroyed via the IOMMU_DESTROY uAPI.</p>
+<p>The diagram below shows relationship between user-visible objects and kernel
+datastructures (external to iommufd), with numbers referred to operations
+creating the objects and links:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span> _________________________________________________________
+|                         iommufd                         |
+|       [1]                                               |
+|  _________________                                      |
+| |                 |                                     |
+| |                 |                                     |
+| |                 |                                     |
+| |                 |                                     |
+| |                 |                                     |
+| |                 |                                     |
+| |                 |        [3]                 [2]      |
+| |                 |    ____________         __________  |
+| |      IOAS       |&lt;--|            |&lt;------|          | |
+| |                 |   |HW_PAGETABLE|       |  DEVICE  | |
+| |                 |   |____________|       |__________| |
+| |                 |         |                   |       |
+| |                 |         |                   |       |
+| |                 |         |                   |       |
+| |                 |         |                   |       |
+| |                 |         |                   |       |
+| |_________________|         |                   |       |
+|         |                   |                   |       |
+|_________|___________________|___________________|_______|
+          |                   |                   |
+          |              _____v______      _______v_____
+          | PFN storage |            |    |             |
+          |------------&gt;|iommu_domain|    |struct device|
+                        |____________|    |_____________|
+</pre></div>
+</div>
+<ol class="arabic">
+<li><p>IOMMUFD_OBJ_IOAS is created via the IOMMU_IOAS_ALLOC uAPI. An iommufd can
+hold multiple IOAS objects. IOAS is the most generic object and does not
+expose interfaces that are specific to single IOMMU drivers. All operations
+on the IOAS must operate equally on each of the iommu_domains inside of it.</p></li>
+<li><p>IOMMUFD_OBJ_DEVICE is created when an external driver calls the IOMMUFD kAPI
+to bind a device to an iommufd. The driver is expected to implement a set of
+ioctls to allow userspace to initiate the binding operation. Successful
+completion of this operation establishes the desired DMA ownership over the
+device. The driver must also set the driver_managed_dma flag and must not
+touch the device until this operation succeeds.</p></li>
+<li><p>IOMMUFD_OBJ_HW_PAGETABLE is created when an external driver calls the IOMMUFD
+kAPI to attach a bound device to an IOAS. Similarly the external driver uAPI
+allows userspace to initiate the attaching operation. If a compatible
+pagetable already exists then it is reused for the attachment. Otherwise a
+new pagetable object and iommu_domain is created. Successful completion of
+this operation sets up the linkages among IOAS, device and iommu_domain. Once
+this completes the device could do DMA.</p>
+<p>Every iommu_domain inside the IOAS is also represented to userspace as a
+HW_PAGETABLE object.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Future IOMMUFD updates will provide an API to create and manipulate the
+HW_PAGETABLE directly.</p>
+</div>
+</li>
+</ol>
+<p>A device can only bind to an iommufd due to DMA ownership claim and attach to at
+most one IOAS object (no support of PASID yet).</p>
+</section>
+<section id="kernel-datastructure">
+<h3>Kernel Datastructure<a class="headerlink" href="#kernel-datastructure" title="Permalink to this headline">¶</a></h3>
+<p>User visible objects are backed by following datastructures:</p>
+<ul class="simple">
+<li><p>iommufd_ioas for IOMMUFD_OBJ_IOAS.</p></li>
+<li><p>iommufd_device for IOMMUFD_OBJ_DEVICE.</p></li>
+<li><p>iommufd_hw_pagetable for IOMMUFD_OBJ_HW_PAGETABLE.</p></li>
+</ul>
+<p>Several terminologies when looking at these datastructures:</p>
+<ul class="simple">
+<li><p>Automatic domain - refers to an iommu domain created automatically when
+attaching a device to an IOAS object. This is compatible to the semantics of
+VFIO type1.</p></li>
+<li><p>Manual domain - refers to an iommu domain designated by the user as the
+target pagetable to be attached to by a device. Though currently there are
+no uAPIs to directly create such domain, the datastructure and algorithms
+are ready for handling that use case.</p></li>
+<li><p>In-kernel user - refers to something like a VFIO mdev that is using the
+IOMMUFD access interface to access the IOAS. This starts by creating an
+iommufd_access object that is similar to the domain binding a physical device
+would do. The access object will then allow converting IOVA ranges into struct
+page * lists, or doing direct read/write to an IOVA.</p></li>
+</ul>
+<p>iommufd_ioas serves as the metadata datastructure to manage how IOVA ranges are
+mapped to memory pages, composed of:</p>
+<ul class="simple">
+<li><p>struct io_pagetable holding the IOVA map</p></li>
+<li><p>struct iopt_area’s representing populated portions of IOVA</p></li>
+<li><p>struct iopt_pages representing the storage of PFNs</p></li>
+<li><p>struct iommu_domain representing the IO page table in the IOMMU</p></li>
+<li><p>struct iopt_pages_access representing in-kernel users of PFNs</p></li>
+<li><p><a class="reference internal" href="../core-api/xarray.html#c.xarray" title="xarray"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">xarray</span></code></a> pinned_pfns holding a list of pages pinned by in-kernel users</p></li>
+</ul>
+<p>Each iopt_pages represents a logical linear array of full PFNs. The PFNs are
+ultimately derived from userspace VAs via an mm_struct. Once they have been
+pinned the PFNs are stored in IOPTEs of an iommu_domain or inside the pinned_pfns
+xarray if they have been pinned through an iommufd_access.</p>
+<p>PFN have to be copied between all combinations of storage locations, depending
+on what domains are present and what kinds of in-kernel “software access” users
+exist. The mechanism ensures that a page is pinned only once.</p>
+<p>An io_pagetable is composed of iopt_areas pointing at iopt_pages, along with a
+list of iommu_domains that mirror the IOVA to PFN map.</p>
+<p>Multiple io_pagetable-s, through their iopt_area-s, can share a single
+iopt_pages which avoids multi-pinning and double accounting of page
+consumption.</p>
+<p>iommufd_ioas is sharable between subsystems, e.g. VFIO and VDPA, as long as
+devices managed by different subsystems are bound to a same iommufd.</p>
+</section>
+</section>
+<section id="iommufd-user-api">
+<h2>IOMMUFD User API<a class="headerlink" href="#iommufd-user-api" title="Permalink to this headline">¶</a></h2>
+<p id="general-ioctl-format"><strong>General ioctl format</strong></p>
+<p>The ioctl interface follows a general format to allow for extensibility. Each
+ioctl is passed in a structure pointer as the argument providing the size of
+the structure in the first u32. The kernel checks that any structure space
+beyond what it understands is 0. This allows userspace to use the backward
+compatible portion while consistently using the newer, larger, structures.</p>
+<p>ioctls use a standard meaning for common errnos:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>ENOTTY: The IOCTL number itself is not supported at all</p></li>
+<li><p>E2BIG: The IOCTL number is supported, but the provided structure has
+non-zero in a part the kernel does not understand.</p></li>
+<li><p>EOPNOTSUPP: The IOCTL number is supported, and the structure is
+understood, however a known field has a value the kernel does not
+understand or support.</p></li>
+<li><p>EINVAL: Everything about the IOCTL was understood, but a field is not
+correct.</p></li>
+<li><p>ENOENT: An ID or IOVA provided does not exist.</p></li>
+<li><p>ENOMEM: Out of memory.</p></li>
+<li><p>EOVERFLOW: Mathematics overflowed.</p></li>
+</ul>
+</div></blockquote>
+<p>As well as additional errnos, within specific ioctls.</p>
+<dl class="type">
+<dt id="c.iommu_destroy">
+struct <code class="sig-name descname">iommu_destroy</code><a class="headerlink" href="#c.iommu_destroy" title="Permalink to this definition">¶</a></dt>
+<dd><p>ioctl(IOMMU_DESTROY)</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct iommu_destroy {
+    __u32 size;
+    __u32 id;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">size</span></code></dt><dd><p>sizeof(<a class="reference internal" href="#c.iommu_destroy" title="iommu_destroy"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iommu_destroy</span></code></a>)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">id</span></code></dt><dd><p>iommufd object ID to destroy. Can be any destroyable object type.</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>Destroy any object held within iommufd.</p>
+<dl class="type">
+<dt id="c.iommu_ioas_alloc">
+struct <code class="sig-name descname">iommu_ioas_alloc</code><a class="headerlink" href="#c.iommu_ioas_alloc" title="Permalink to this definition">¶</a></dt>
+<dd><p>ioctl(IOMMU_IOAS_ALLOC)</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct iommu_ioas_alloc {
+    __u32 size;
+    __u32 flags;
+    __u32 out_ioas_id;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">size</span></code></dt><dd><p>sizeof(<a class="reference internal" href="#c.iommu_ioas_alloc" title="iommu_ioas_alloc"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iommu_ioas_alloc</span></code></a>)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">flags</span></code></dt><dd><p>Must be 0</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">out_ioas_id</span></code></dt><dd><p>Output IOAS ID for the allocated object</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>Allocate an IO Address Space (IOAS) which holds an IO Virtual Address (IOVA)
+to memory mapping.</p>
+<dl class="type">
+<dt id="c.iommu_iova_range">
+struct <code class="sig-name descname">iommu_iova_range</code><a class="headerlink" href="#c.iommu_iova_range" title="Permalink to this definition">¶</a></dt>
+<dd><p>ioctl(IOMMU_IOVA_RANGE)</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct iommu_iova_range {
+    __aligned_u64 start;
+    __aligned_u64 last;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">start</span></code></dt><dd><p>First IOVA</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">last</span></code></dt><dd><p>Inclusive last IOVA</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>An interval in IOVA space.</p>
+<dl class="type">
+<dt id="c.iommu_ioas_iova_ranges">
+struct <code class="sig-name descname">iommu_ioas_iova_ranges</code><a class="headerlink" href="#c.iommu_ioas_iova_ranges" title="Permalink to this definition">¶</a></dt>
+<dd><p>ioctl(IOMMU_IOAS_IOVA_RANGES)</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct iommu_ioas_iova_ranges {
+    __u32 size;
+    __u32 ioas_id;
+    __u32 num_iovas;
+    __u32 __reserved;
+    __aligned_u64 allowed_iovas;
+    __aligned_u64 out_iova_alignment;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">size</span></code></dt><dd><p>sizeof(<a class="reference internal" href="#c.iommu_ioas_iova_ranges" title="iommu_ioas_iova_ranges"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iommu_ioas_iova_ranges</span></code></a>)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">ioas_id</span></code></dt><dd><p>IOAS ID to read ranges from</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">num_iovas</span></code></dt><dd><p>Input/Output total number of ranges in the IOAS</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">__reserved</span></code></dt><dd><p>Must be 0</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">allowed_iovas</span></code></dt><dd><p>Pointer to the output array of <a class="reference internal" href="#c.iommu_iova_range" title="iommu_iova_range"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iommu_iova_range</span></code></a></p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">out_iova_alignment</span></code></dt><dd><p>Minimum alignment required for mapping IOVA</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>Query an IOAS for ranges of allowed IOVAs. Mapping IOVA outside these ranges
+is not allowed. num_iovas will be set to the total number of iovas and
+the allowed_iovas[] will be filled in as space permits.</p>
+<p>The allowed ranges are dependent on the HW path the DMA operation takes, and
+can change during the lifetime of the IOAS. A fresh empty IOAS will have a
+full range, and each attached device will narrow the ranges based on that
+device’s HW restrictions. Detaching a device can widen the ranges. Userspace
+should query ranges after every attach/detach to know what IOVAs are valid
+for mapping.</p>
+<p>On input num_iovas is the length of the allowed_iovas array. On output it is
+the total number of iovas filled in. The ioctl will return -EMSGSIZE and set
+num_iovas to the required value if num_iovas is too small. In this case the
+caller should allocate a larger output array and re-issue the ioctl.</p>
+<p>out_iova_alignment returns the minimum IOVA alignment that can be given
+to IOMMU_IOAS_MAP/COPY. IOVA’s must satisfy:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>starting_iova % out_iova_alignment == 0
+(starting_iova + length) % out_iova_alignment == 0
+</pre></div>
+</div>
+<p>out_iova_alignment can be 1 indicating any IOVA is allowed. It cannot
+be higher than the system PAGE_SIZE.</p>
+<dl class="type">
+<dt id="c.iommu_ioas_allow_iovas">
+struct <code class="sig-name descname">iommu_ioas_allow_iovas</code><a class="headerlink" href="#c.iommu_ioas_allow_iovas" title="Permalink to this definition">¶</a></dt>
+<dd><p>ioctl(IOMMU_IOAS_ALLOW_IOVAS)</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct iommu_ioas_allow_iovas {
+    __u32 size;
+    __u32 ioas_id;
+    __u32 num_iovas;
+    __u32 __reserved;
+    __aligned_u64 allowed_iovas;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">size</span></code></dt><dd><p>sizeof(<a class="reference internal" href="#c.iommu_ioas_allow_iovas" title="iommu_ioas_allow_iovas"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iommu_ioas_allow_iovas</span></code></a>)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">ioas_id</span></code></dt><dd><p>IOAS ID to allow IOVAs from</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">num_iovas</span></code></dt><dd><p>Input/Output total number of ranges in the IOAS</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">__reserved</span></code></dt><dd><p>Must be 0</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">allowed_iovas</span></code></dt><dd><p>Pointer to array of <a class="reference internal" href="#c.iommu_iova_range" title="iommu_iova_range"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iommu_iova_range</span></code></a></p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>Ensure a range of IOVAs are always available for allocation. If this call
+succeeds then IOMMU_IOAS_IOVA_RANGES will never return a list of IOVA ranges
+that are narrower than the ranges provided here. This call will fail if
+IOMMU_IOAS_IOVA_RANGES is currently narrower than the given ranges.</p>
+<p>When an IOAS is first created the IOVA_RANGES will be maximally sized, and as
+devices are attached the IOVA will narrow based on the device restrictions.
+When an allowed range is specified any narrowing will be refused, ie device
+attachment can fail if the device requires limiting within the allowed range.</p>
+<p>Automatic IOVA allocation is also impacted by this call. MAP will only
+allocate within the allowed IOVAs if they are present.</p>
+<p>This call replaces the entire allowed list with the given list.</p>
+<dl class="type">
+<dt id="c.iommufd_ioas_map_flags">
+enum <code class="sig-name descname">iommufd_ioas_map_flags</code><a class="headerlink" href="#c.iommufd_ioas_map_flags" title="Permalink to this definition">¶</a></dt>
+<dd><p>Flags for map and copy</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Constants</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">IOMMU_IOAS_MAP_FIXED_IOVA</span></code></dt><dd><p>If clear the kernel will compute an appropriate
+IOVA to place the mapping at</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">IOMMU_IOAS_MAP_WRITEABLE</span></code></dt><dd><p>DMA is allowed to write to this mapping</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">IOMMU_IOAS_MAP_READABLE</span></code></dt><dd><p>DMA is allowed to read from this mapping</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.iommu_ioas_map">
+struct <code class="sig-name descname">iommu_ioas_map</code><a class="headerlink" href="#c.iommu_ioas_map" title="Permalink to this definition">¶</a></dt>
+<dd><p>ioctl(IOMMU_IOAS_MAP)</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct iommu_ioas_map {
+    __u32 size;
+    __u32 flags;
+    __u32 ioas_id;
+    __u32 __reserved;
+    __aligned_u64 user_va;
+    __aligned_u64 length;
+    __aligned_u64 iova;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">size</span></code></dt><dd><p>sizeof(<a class="reference internal" href="#c.iommu_ioas_map" title="iommu_ioas_map"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iommu_ioas_map</span></code></a>)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">flags</span></code></dt><dd><p>Combination of <a class="reference internal" href="#c.iommufd_ioas_map_flags" title="iommufd_ioas_map_flags"><code class="xref c c-type docutils literal notranslate"><span class="pre">enum</span> <span class="pre">iommufd_ioas_map_flags</span></code></a></p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">ioas_id</span></code></dt><dd><p>IOAS ID to change the mapping of</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">__reserved</span></code></dt><dd><p>Must be 0</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">user_va</span></code></dt><dd><p>Userspace pointer to start mapping from</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">length</span></code></dt><dd><p>Number of bytes to map</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">iova</span></code></dt><dd><p>IOVA the mapping was placed at. If IOMMU_IOAS_MAP_FIXED_IOVA is set
+then this must be provided as input.</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>Set an IOVA mapping from a user pointer. If FIXED_IOVA is specified then the
+mapping will be established at iova, otherwise a suitable location based on
+the reserved and allowed lists will be automatically selected and returned in
+iova.</p>
+<p>If IOMMU_IOAS_MAP_FIXED_IOVA is specified then the iova range must currently
+be unused, existing IOVA cannot be replaced.</p>
+<dl class="type">
+<dt id="c.iommu_ioas_copy">
+struct <code class="sig-name descname">iommu_ioas_copy</code><a class="headerlink" href="#c.iommu_ioas_copy" title="Permalink to this definition">¶</a></dt>
+<dd><p>ioctl(IOMMU_IOAS_COPY)</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct iommu_ioas_copy {
+    __u32 size;
+    __u32 flags;
+    __u32 dst_ioas_id;
+    __u32 src_ioas_id;
+    __aligned_u64 length;
+    __aligned_u64 dst_iova;
+    __aligned_u64 src_iova;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">size</span></code></dt><dd><p>sizeof(<a class="reference internal" href="#c.iommu_ioas_copy" title="iommu_ioas_copy"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iommu_ioas_copy</span></code></a>)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">flags</span></code></dt><dd><p>Combination of <a class="reference internal" href="#c.iommufd_ioas_map_flags" title="iommufd_ioas_map_flags"><code class="xref c c-type docutils literal notranslate"><span class="pre">enum</span> <span class="pre">iommufd_ioas_map_flags</span></code></a></p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dst_ioas_id</span></code></dt><dd><p>IOAS ID to change the mapping of</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">src_ioas_id</span></code></dt><dd><p>IOAS ID to copy from</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">length</span></code></dt><dd><p>Number of bytes to copy and map</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dst_iova</span></code></dt><dd><p>IOVA the mapping was placed at. If IOMMU_IOAS_MAP_FIXED_IOVA is
+set then this must be provided as input.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">src_iova</span></code></dt><dd><p>IOVA to start the copy</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>Copy an already existing mapping from src_ioas_id and establish it in
+dst_ioas_id. The src iova/length must exactly match a range used with
+IOMMU_IOAS_MAP.</p>
+<p>This may be used to efficiently clone a subset of an IOAS to another, or as a
+kind of ‘cache’ to speed up mapping. Copy has an efficiency advantage over
+establishing equivalent new mappings, as internal resources are shared, and
+the kernel will pin the user memory only once.</p>
+<dl class="type">
+<dt id="c.iommu_ioas_unmap">
+struct <code class="sig-name descname">iommu_ioas_unmap</code><a class="headerlink" href="#c.iommu_ioas_unmap" title="Permalink to this definition">¶</a></dt>
+<dd><p>ioctl(IOMMU_IOAS_UNMAP)</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct iommu_ioas_unmap {
+    __u32 size;
+    __u32 ioas_id;
+    __aligned_u64 iova;
+    __aligned_u64 length;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">size</span></code></dt><dd><p>sizeof(<a class="reference internal" href="#c.iommu_ioas_unmap" title="iommu_ioas_unmap"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iommu_ioas_unmap</span></code></a>)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">ioas_id</span></code></dt><dd><p>IOAS ID to change the mapping of</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">iova</span></code></dt><dd><p>IOVA to start the unmapping at</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">length</span></code></dt><dd><p>Number of bytes to unmap, and return back the bytes unmapped</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>Unmap an IOVA range. The iova/length must be a superset of a previously
+mapped range used with IOMMU_IOAS_MAP or IOMMU_IOAS_COPY. Splitting or
+truncating ranges is not allowed. The values 0 to U64_MAX will unmap
+everything.</p>
+<dl class="type">
+<dt id="c.iommufd_option">
+enum <code class="sig-name descname">iommufd_option</code><a class="headerlink" href="#c.iommufd_option" title="Permalink to this definition">¶</a></dt>
+<dd><p>ioctl(IOMMU_OPTION_RLIMIT_MODE) and ioctl(IOMMU_OPTION_HUGE_PAGES)</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Constants</strong></p>
+<p><code class="docutils literal notranslate"><span class="pre">IOMMU_OPTION_RLIMIT_MODE</span></code></p>
+<blockquote>
+<div><p>Change how RLIMIT_MEMLOCK accounting works. The caller must have privilege
+to invoke this. Value 0 (default) is user based accouting, 1 uses process
+based accounting. Global option, object_id must be 0</p>
+</div></blockquote>
+<p><code class="docutils literal notranslate"><span class="pre">IOMMU_OPTION_HUGE_PAGES</span></code></p>
+<blockquote>
+<div><p>Value 1 (default) allows contiguous pages to be combined when generating
+iommu mappings. Value 0 disables combining, everything is mapped to
+PAGE_SIZE. This can be useful for benchmarking.  This is a per-IOAS
+option, the object_id must be the IOAS ID.</p>
+</div></blockquote>
+</div>
+<dl class="type">
+<dt id="c.iommufd_option_ops">
+enum <code class="sig-name descname">iommufd_option_ops</code><a class="headerlink" href="#c.iommufd_option_ops" title="Permalink to this definition">¶</a></dt>
+<dd><p>ioctl(IOMMU_OPTION_OP_SET) and ioctl(IOMMU_OPTION_OP_GET)</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Constants</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">IOMMU_OPTION_OP_SET</span></code></dt><dd><p>Set the option’s value</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">IOMMU_OPTION_OP_GET</span></code></dt><dd><p>Get the option’s value</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.iommu_option">
+struct <code class="sig-name descname">iommu_option</code><a class="headerlink" href="#c.iommu_option" title="Permalink to this definition">¶</a></dt>
+<dd><p>iommu option multiplexer</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct iommu_option {
+    __u32 size;
+    __u32 option_id;
+    __u16 op;
+    __u16 __reserved;
+    __u32 object_id;
+    __aligned_u64 val64;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">size</span></code></dt><dd><p>sizeof(<a class="reference internal" href="#c.iommu_option" title="iommu_option"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iommu_option</span></code></a>)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">option_id</span></code></dt><dd><p>One of <a class="reference internal" href="#c.iommufd_option" title="iommufd_option"><code class="xref c c-type docutils literal notranslate"><span class="pre">enum</span> <span class="pre">iommufd_option</span></code></a></p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">op</span></code></dt><dd><p>One of <a class="reference internal" href="#c.iommufd_option_ops" title="iommufd_option_ops"><code class="xref c c-type docutils literal notranslate"><span class="pre">enum</span> <span class="pre">iommufd_option_ops</span></code></a></p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">__reserved</span></code></dt><dd><p>Must be 0</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">object_id</span></code></dt><dd><p>ID of the object if required</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">val64</span></code></dt><dd><p>Option value to set or value returned on get</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>Change a simple option value. This multiplexor allows controlling options
+on objects. IOMMU_OPTION_OP_SET will load an option and IOMMU_OPTION_OP_GET
+will return the current value.</p>
+<dl class="type">
+<dt id="c.iommufd_vfio_ioas_op">
+enum <code class="sig-name descname">iommufd_vfio_ioas_op</code><a class="headerlink" href="#c.iommufd_vfio_ioas_op" title="Permalink to this definition">¶</a></dt>
+<dd><p>IOMMU_VFIO_IOAS_* ioctls</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Constants</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">IOMMU_VFIO_IOAS_GET</span></code></dt><dd><p>Get the current compatibility IOAS</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">IOMMU_VFIO_IOAS_SET</span></code></dt><dd><p>Change the current compatibility IOAS</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">IOMMU_VFIO_IOAS_CLEAR</span></code></dt><dd><p>Disable VFIO compatibility</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.iommu_vfio_ioas">
+struct <code class="sig-name descname">iommu_vfio_ioas</code><a class="headerlink" href="#c.iommu_vfio_ioas" title="Permalink to this definition">¶</a></dt>
+<dd><p>ioctl(IOMMU_VFIO_IOAS)</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct iommu_vfio_ioas {
+    __u32 size;
+    __u32 ioas_id;
+    __u16 op;
+    __u16 __reserved;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">size</span></code></dt><dd><p>sizeof(<a class="reference internal" href="#c.iommu_vfio_ioas" title="iommu_vfio_ioas"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iommu_vfio_ioas</span></code></a>)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">ioas_id</span></code></dt><dd><p>For IOMMU_VFIO_IOAS_SET the input IOAS ID to set
+For IOMMU_VFIO_IOAS_GET will output the IOAS ID</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">op</span></code></dt><dd><p>One of <a class="reference internal" href="#c.iommufd_vfio_ioas_op" title="iommufd_vfio_ioas_op"><code class="xref c c-type docutils literal notranslate"><span class="pre">enum</span> <span class="pre">iommufd_vfio_ioas_op</span></code></a></p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">__reserved</span></code></dt><dd><p>Must be 0</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>The VFIO compatibility support uses a single ioas because VFIO APIs do not
+support the ID field. Set or Get the IOAS that VFIO compatibility will use.
+When VFIO_GROUP_SET_CONTAINER is used on an iommufd it will get the
+compatibility ioas, either by taking what is already set, or auto creating
+one. From then on VFIO will continue to use that ioas and is not effected by
+this ioctl. SET or CLEAR does not destroy any auto-created IOAS.</p>
+</section>
+<section id="iommufd-kernel-api">
+<h2>IOMMUFD Kernel API<a class="headerlink" href="#iommufd-kernel-api" title="Permalink to this headline">¶</a></h2>
+<p>The IOMMUFD kAPI is device-centric with group-related tricks managed behind the
+scene. This allows the external drivers calling such kAPI to implement a simple
+device-centric uAPI for connecting its device to an iommufd, instead of
+explicitly imposing the group semantics in its uAPI as VFIO does.</p>
+<dl class="function">
+<dt id="c.iommufd_device_bind">
+struct iommufd_device * <code class="sig-name descname">iommufd_device_bind</code><span class="sig-paren">(</span>struct iommufd_ctx<em> *ictx</em>, struct <a class="reference internal" href="../driver-api/infrastructure.html#c.device" title="device">device</a><em> *dev</em>, u32<em> *id</em><span class="sig-paren">)</span><a class="headerlink" href="#c.iommufd_device_bind" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bind a physical device to an iommu fd</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iommufd_ctx</span> <span class="pre">*ictx</span></code></dt><dd><p>iommufd file descriptor</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>Pointer to a physical device struct</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">u32</span> <span class="pre">*id</span></code></dt><dd><p>Output ID number to return to userspace for this device</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>A successful bind establishes an ownership over the device and returns
+struct iommufd_device pointer, otherwise returns error pointer.</p>
+<p>A driver using this API must set driver_managed_dma and must not touch
+the device until this routine succeeds and establishes ownership.</p>
+<p>Binding a PCI device places the entire RID under iommufd control.</p>
+<p>The caller must undo this with <a class="reference internal" href="#c.iommufd_device_unbind" title="iommufd_device_unbind"><code class="xref c c-func docutils literal notranslate"><span class="pre">iommufd_device_unbind()</span></code></a></p>
+</div>
+<dl class="function">
+<dt id="c.iommufd_device_unbind">
+void <code class="sig-name descname">iommufd_device_unbind</code><span class="sig-paren">(</span>struct iommufd_device<em> *idev</em><span class="sig-paren">)</span><a class="headerlink" href="#c.iommufd_device_unbind" title="Permalink to this definition">¶</a></dt>
+<dd><p>Undo <a class="reference internal" href="#c.iommufd_device_bind" title="iommufd_device_bind"><code class="xref c c-func docutils literal notranslate"><span class="pre">iommufd_device_bind()</span></code></a></p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iommufd_device</span> <span class="pre">*idev</span></code></dt><dd><p>Device returned by <a class="reference internal" href="#c.iommufd_device_bind" title="iommufd_device_bind"><code class="xref c c-func docutils literal notranslate"><span class="pre">iommufd_device_bind()</span></code></a></p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Release the device from iommufd control. The DMA ownership will return back
+to unowned with DMA controlled by the DMA API. This invalidates the
+iommufd_device pointer, other APIs that consume it must not be called
+concurrently.</p>
+</div>
+<dl class="function">
+<dt id="c.iommufd_device_attach">
+int <code class="sig-name descname">iommufd_device_attach</code><span class="sig-paren">(</span>struct iommufd_device<em> *idev</em>, u32<em> *pt_id</em><span class="sig-paren">)</span><a class="headerlink" href="#c.iommufd_device_attach" title="Permalink to this definition">¶</a></dt>
+<dd><p>Connect a device from an iommu_domain</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iommufd_device</span> <span class="pre">*idev</span></code></dt><dd><p>device to attach</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">u32</span> <span class="pre">*pt_id</span></code></dt><dd><p>Input a IOMMUFD_OBJ_IOAS, or IOMMUFD_OBJ_HW_PAGETABLE
+Output the IOMMUFD_OBJ_HW_PAGETABLE ID</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This connects the device to an iommu_domain, either automatically or manually
+selected. Once this completes the device could do DMA.</p>
+<p>The caller should return the resulting pt_id back to userspace.
+This function is undone by calling <a class="reference internal" href="#c.iommufd_device_detach" title="iommufd_device_detach"><code class="xref c c-func docutils literal notranslate"><span class="pre">iommufd_device_detach()</span></code></a>.</p>
+</div>
+<dl class="function">
+<dt id="c.iommufd_device_detach">
+void <code class="sig-name descname">iommufd_device_detach</code><span class="sig-paren">(</span>struct iommufd_device<em> *idev</em><span class="sig-paren">)</span><a class="headerlink" href="#c.iommufd_device_detach" title="Permalink to this definition">¶</a></dt>
+<dd><p>Disconnect a device to an iommu_domain</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iommufd_device</span> <span class="pre">*idev</span></code></dt><dd><p>device to detach</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Undo <a class="reference internal" href="#c.iommufd_device_attach" title="iommufd_device_attach"><code class="xref c c-func docutils literal notranslate"><span class="pre">iommufd_device_attach()</span></code></a>. This disconnects the idev from the previously
+attached pt_id. The device returns back to a blocked DMA translation.</p>
+</div>
+<dl class="function">
+<dt id="c.iommufd_access_create">
+struct iommufd_access * <code class="sig-name descname">iommufd_access_create</code><span class="sig-paren">(</span>struct iommufd_ctx<em> *ictx</em>, u32<em> ioas_id</em>, const struct iommufd_access_ops<em> *ops</em>, void<em> *data</em><span class="sig-paren">)</span><a class="headerlink" href="#c.iommufd_access_create" title="Permalink to this definition">¶</a></dt>
+<dd><p>Create an iommufd_access</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iommufd_ctx</span> <span class="pre">*ictx</span></code></dt><dd><p>iommufd file descriptor</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">u32</span> <span class="pre">ioas_id</span></code></dt><dd><p>ID for a IOMMUFD_OBJ_IOAS</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">struct</span> <span class="pre">iommufd_access_ops</span> <span class="pre">*ops</span></code></dt><dd><p>Driver’s ops to associate with the access</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*data</span></code></dt><dd><p>Opaque data to pass into ops functions</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>An iommufd_access allows a driver to read/write to the IOAS without using
+DMA. The underlying CPU memory can be accessed using the
+<a class="reference internal" href="#c.iommufd_access_pin_pages" title="iommufd_access_pin_pages"><code class="xref c c-func docutils literal notranslate"><span class="pre">iommufd_access_pin_pages()</span></code></a> or <a class="reference internal" href="#c.iommufd_access_rw" title="iommufd_access_rw"><code class="xref c c-func docutils literal notranslate"><span class="pre">iommufd_access_rw()</span></code></a> functions.</p>
+<p>The provided ops are required to use <a class="reference internal" href="#c.iommufd_access_pin_pages" title="iommufd_access_pin_pages"><code class="xref c c-func docutils literal notranslate"><span class="pre">iommufd_access_pin_pages()</span></code></a>.</p>
+</div>
+<dl class="function">
+<dt id="c.iommufd_access_destroy">
+void <code class="sig-name descname">iommufd_access_destroy</code><span class="sig-paren">(</span>struct iommufd_access<em> *access</em><span class="sig-paren">)</span><a class="headerlink" href="#c.iommufd_access_destroy" title="Permalink to this definition">¶</a></dt>
+<dd><p>Destroy an iommufd_access</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iommufd_access</span> <span class="pre">*access</span></code></dt><dd><p>The access to destroy</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>The caller must stop using the access before destroying it.</p>
+</div>
+<dl class="function">
+<dt id="c.iommufd_access_unpin_pages">
+void <code class="sig-name descname">iommufd_access_unpin_pages</code><span class="sig-paren">(</span>struct iommufd_access<em> *access</em>, unsigned long<em> iova</em>, unsigned long<em> length</em><span class="sig-paren">)</span><a class="headerlink" href="#c.iommufd_access_unpin_pages" title="Permalink to this definition">¶</a></dt>
+<dd><p>Undo iommufd_access_pin_pages</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iommufd_access</span> <span class="pre">*access</span></code></dt><dd><p>IOAS access to act on</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">iova</span></code></dt><dd><p>Starting IOVA</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">length</span></code></dt><dd><p>Number of bytes to access</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Return the struct page’s. The caller must stop accessing them before calling
+this. The iova/length must exactly match the one provided to access_pages.</p>
+</div>
+<dl class="function">
+<dt id="c.iommufd_access_pin_pages">
+int <code class="sig-name descname">iommufd_access_pin_pages</code><span class="sig-paren">(</span>struct iommufd_access<em> *access</em>, unsigned long<em> iova</em>, unsigned long<em> length</em>, struct page<em> **out_pages</em>, unsigned int<em> flags</em><span class="sig-paren">)</span><a class="headerlink" href="#c.iommufd_access_pin_pages" title="Permalink to this definition">¶</a></dt>
+<dd><p>Return a list of pages under the iova</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iommufd_access</span> <span class="pre">*access</span></code></dt><dd><p>IOAS access to act on</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">iova</span></code></dt><dd><p>Starting IOVA</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">length</span></code></dt><dd><p>Number of bytes to access</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">page</span> <span class="pre">**out_pages</span></code></dt><dd><p>Output page list</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">flags</span></code></dt><dd><p>IOPMMUFD_ACCESS_RW_* flags</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Reads <strong>length</strong> bytes starting at iova and returns the struct page * pointers.
+These can be kmap’d by the caller for CPU access.</p>
+<p>The caller must perform <a class="reference internal" href="#c.iommufd_access_unpin_pages" title="iommufd_access_unpin_pages"><code class="xref c c-func docutils literal notranslate"><span class="pre">iommufd_access_unpin_pages()</span></code></a> when done to balance
+this.</p>
+<p>This API always requires a page aligned iova. This happens naturally if the
+ioas alignment is &gt;= PAGE_SIZE and the iova is PAGE_SIZE aligned. However
+smaller alignments have corner cases where this API can fail on otherwise
+aligned iova.</p>
+</div>
+<dl class="function">
+<dt id="c.iommufd_access_rw">
+int <code class="sig-name descname">iommufd_access_rw</code><span class="sig-paren">(</span>struct iommufd_access<em> *access</em>, unsigned long<em> iova</em>, void<em> *data</em>, size_t<em> length</em>, unsigned int<em> flags</em><span class="sig-paren">)</span><a class="headerlink" href="#c.iommufd_access_rw" title="Permalink to this definition">¶</a></dt>
+<dd><p>Read or write data under the iova</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iommufd_access</span> <span class="pre">*access</span></code></dt><dd><p>IOAS access to act on</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">iova</span></code></dt><dd><p>Starting IOVA</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*data</span></code></dt><dd><p>Kernel buffer to copy to/from</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">size_t</span> <span class="pre">length</span></code></dt><dd><p>Number of bytes to access</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">flags</span></code></dt><dd><p>IOMMUFD_ACCESS_RW_* flags</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Copy kernel to/from data into the range given by IOVA/length. If flags
+indicates IOMMUFD_ACCESS_RW_KTHREAD then a large copy can be optimized
+by changing it into copy_to/from_user().</p>
+</div>
+<dl class="function">
+<dt id="c.iommufd_ctx_get">
+void <code class="sig-name descname">iommufd_ctx_get</code><span class="sig-paren">(</span>struct iommufd_ctx<em> *ictx</em><span class="sig-paren">)</span><a class="headerlink" href="#c.iommufd_ctx_get" title="Permalink to this definition">¶</a></dt>
+<dd><p>Get a context reference</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iommufd_ctx</span> <span class="pre">*ictx</span></code></dt><dd><p>Context to get</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>The caller must already hold a valid reference to ictx.</p>
+</div>
+<dl class="function">
+<dt id="c.iommufd_ctx_from_file">
+struct iommufd_ctx * <code class="sig-name descname">iommufd_ctx_from_file</code><span class="sig-paren">(</span>struct file<em> *file</em><span class="sig-paren">)</span><a class="headerlink" href="#c.iommufd_ctx_from_file" title="Permalink to this definition">¶</a></dt>
+<dd><p>Acquires a reference to the iommufd context</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">file</span> <span class="pre">*file</span></code></dt><dd><p>File to obtain the reference from</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Returns a pointer to the iommufd_ctx, otherwise ERR_PTR. The struct file
+remains owned by the caller and the caller must still do fput. On success
+the caller is responsible to call <a class="reference internal" href="#c.iommufd_ctx_put" title="iommufd_ctx_put"><code class="xref c c-func docutils literal notranslate"><span class="pre">iommufd_ctx_put()</span></code></a>.</p>
+</div>
+<dl class="function">
+<dt id="c.iommufd_ctx_put">
+void <code class="sig-name descname">iommufd_ctx_put</code><span class="sig-paren">(</span>struct iommufd_ctx<em> *ictx</em><span class="sig-paren">)</span><a class="headerlink" href="#c.iommufd_ctx_put" title="Permalink to this definition">¶</a></dt>
+<dd><p>Put back a reference</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">iommufd_ctx</span> <span class="pre">*ictx</span></code></dt><dd><p>Context to put back</p>
+</dd>
+</dl>
+</div>
+<section id="vfio-and-iommufd">
+<h3>VFIO and IOMMUFD<a class="headerlink" href="#vfio-and-iommufd" title="Permalink to this headline">¶</a></h3>
+<p>Connecting a VFIO device to iommufd can be done in two ways.</p>
+<p>First is a VFIO compatible way by directly implementing the /dev/vfio/vfio
+container IOCTLs by mapping them into io_pagetable operations. Doing so allows
+the use of iommufd in legacy VFIO applications by symlinking /dev/vfio/vfio to
+/dev/iommufd or extending VFIO to SET_CONTAINER using an iommufd instead of a
+container fd.</p>
+<p>The second approach directly extends VFIO to support a new set of device-centric
+user API based on aforementioned IOMMUFD kernel API. It requires userspace
+change but better matches the IOMMUFD API semantics and easier to support new
+iommufd features when comparing it to the first approach.</p>
+<p>Currently both approaches are still work-in-progress.</p>
+<p>There are still a few gaps to be resolved to catch up with VFIO type1, as
+documented in iommufd_vfio_check_extension().</p>
+</section>
+</section>
+<section id="future-todos">
+<h2>Future TODOs<a class="headerlink" href="#future-todos" title="Permalink to this headline">¶</a></h2>
+<p>Currently IOMMUFD supports only kernel-managed I/O page table, similar to VFIO
+type1. New features on the radar include:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Binding iommu_domain’s to PASID/SSID</p></li>
+<li><p>Userspace page tables, for ARM, x86 and S390</p></li>
+<li><p>Kernel bypass’d invalidation of user page tables</p></li>
+<li><p>Re-use of the KVM page table in the IOMMU</p></li>
+<li><p>Dirty page tracking in the IOMMU</p></li>
+<li><p>Runtime Increase/Decrease of IOPTE size</p></li>
+<li><p>PRI support with faults resolved in userspace</p></li>
+</ul>
+</div></blockquote>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">IOMMUFD</a><ul>
+<li><a class="reference internal" href="#overview">Overview</a></li>
+<li><a class="reference internal" href="#key-concepts">Key Concepts</a><ul>
+<li><a class="reference internal" href="#user-visible-objects">User Visible Objects</a></li>
+<li><a class="reference internal" href="#kernel-datastructure">Kernel Datastructure</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#iommufd-user-api">IOMMUFD User API</a></li>
+<li><a class="reference internal" href="#iommufd-kernel-api">IOMMUFD Kernel API</a><ul>
+<li><a class="reference internal" href="#vfio-and-iommufd">VFIO and IOMMUFD</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#future-todos">Future TODOs</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/userspace-api/iommufd.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/userspace-api/iommufd.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

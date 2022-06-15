@@ -1,0 +1,505 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>ice devlink support &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="mlx4 devlink support" href="mlx4.html" />
+    <link rel="prev" title="ionic devlink support" href="ionic.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="ice-devlink-support">
+<h1>ice devlink support<a class="headerlink" href="#ice-devlink-support" title="Permalink to this headline">¶</a></h1>
+<p>This document describes the devlink features implemented by the <code class="docutils literal notranslate"><span class="pre">ice</span></code>
+device driver.</p>
+<section id="info-versions">
+<h2>Info versions<a class="headerlink" href="#info-versions" title="Permalink to this headline">¶</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">ice</span></code> driver reports the following versions</p>
+<table class="colwidths-given docutils align-default" id="id1">
+<caption><span class="caption-text">devlink info versions implemented</span><a class="headerlink" href="#id1" title="Permalink to this table">¶</a></caption>
+<colgroup>
+<col style="width: 5%" />
+<col style="width: 5%" />
+<col style="width: 5%" />
+<col style="width: 86%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>Name</p></td>
+<td><p>Type</p></td>
+<td><p>Example</p></td>
+<td><p>Description</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">board.id</span></code></p></td>
+<td><p>fixed</p></td>
+<td><p>K65390-000</p></td>
+<td><p>The Product Board Assembly (PBA) identifier of the board.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">fw.mgmt</span></code></p></td>
+<td><p>running</p></td>
+<td><p>2.1.7</p></td>
+<td><p>3-digit version number of the management firmware running on the
+Embedded Management Processor of the device. It controls the PHY,
+link, access to device resources, etc. Intel documentation refers to
+this as the EMP firmware.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">fw.mgmt.api</span></code></p></td>
+<td><p>running</p></td>
+<td><p>1.5.1</p></td>
+<td><p>3-digit version number (major.minor.patch) of the API exported over
+the AdminQ by the management firmware. Used by the driver to
+identify what commands are supported. Historical versions of the
+kernel only displayed a 2-digit version number (major.minor).</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">fw.mgmt.build</span></code></p></td>
+<td><p>running</p></td>
+<td><p>0x305d955f</p></td>
+<td><p>Unique identifier of the source for the management firmware.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">fw.undi</span></code></p></td>
+<td><p>running</p></td>
+<td><p>1.2581.0</p></td>
+<td><p>Version of the Option ROM containing the UEFI driver. The version is
+reported in <code class="docutils literal notranslate"><span class="pre">major.minor.patch</span></code> format. The major version is
+incremented whenever a major breaking change occurs, or when the
+minor version would overflow. The minor version is incremented for
+non-breaking changes and reset to 1 when the major version is
+incremented. The patch version is normally 0 but is incremented when
+a fix is delivered as a patch against an older base Option ROM.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">fw.psid.api</span></code></p></td>
+<td><p>running</p></td>
+<td><p>0.80</p></td>
+<td><p>Version defining the format of the flash contents.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">fw.bundle_id</span></code></p></td>
+<td><p>running</p></td>
+<td><p>0x80002ec0</p></td>
+<td><p>Unique identifier of the firmware image file that was loaded onto
+the device. Also referred to as the EETRACK identifier of the NVM.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">fw.app.name</span></code></p></td>
+<td><p>running</p></td>
+<td><p>ICE OS Default Package</p></td>
+<td><p>The name of the DDP package that is active in the device. The DDP
+package is loaded by the driver during initialization. Each
+variation of the DDP package has a unique name.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">fw.app</span></code></p></td>
+<td><p>running</p></td>
+<td><p>1.3.1.0</p></td>
+<td><p>The version of the DDP package that is active in the device. Note
+that both the name (as reported by <code class="docutils literal notranslate"><span class="pre">fw.app.name</span></code>) and version are
+required to uniquely identify the package.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">fw.app.bundle_id</span></code></p></td>
+<td><p>running</p></td>
+<td><p>0xc0000001</p></td>
+<td><p>Unique identifier for the DDP package loaded in the device. Also
+referred to as the DDP Track ID. Can be used to uniquely identify
+the specific DDP package.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">fw.netlist</span></code></p></td>
+<td><p>running</p></td>
+<td><p>1.1.2000-6.7.0</p></td>
+<td><p>The version of the netlist module. This module defines the device’s
+Ethernet capabilities and default settings, and is used by the
+management firmware as part of managing link and device
+connectivity.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">fw.netlist.build</span></code></p></td>
+<td><p>running</p></td>
+<td><p>0xee16ced7</p></td>
+<td><p>The first 4 bytes of the hash of the netlist module contents.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="flash-update">
+<h2>Flash Update<a class="headerlink" href="#flash-update" title="Permalink to this headline">¶</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">ice</span></code> driver implements support for flash update using the
+<code class="docutils literal notranslate"><span class="pre">devlink-flash</span></code> interface. It supports updating the device flash using a
+combined flash image that contains the <code class="docutils literal notranslate"><span class="pre">fw.mgmt</span></code>, <code class="docutils literal notranslate"><span class="pre">fw.undi</span></code>, and
+<code class="docutils literal notranslate"><span class="pre">fw.netlist</span></code> components.</p>
+<table class="colwidths-given docutils align-default" id="id2">
+<caption><span class="caption-text">List of supported overwrite modes</span><a class="headerlink" href="#id2" title="Permalink to this table">¶</a></caption>
+<colgroup>
+<col style="width: 5%" />
+<col style="width: 95%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>Bits</p></td>
+<td><p>Behavior</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">DEVLINK_FLASH_OVERWRITE_SETTINGS</span></code></p></td>
+<td><p>Do not preserve settings stored in the flash components being
+updated. This includes overwriting the port configuration that
+determines the number of physical functions the device will
+initialize with.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">DEVLINK_FLASH_OVERWRITE_SETTINGS</span></code> and <code class="docutils literal notranslate"><span class="pre">DEVLINK_FLASH_OVERWRITE_IDENTIFIERS</span></code></p></td>
+<td><p>Do not preserve either settings or identifiers. Overwrite everything
+in the flash with the contents from the provided image, without
+performing any preservation. This includes overwriting device
+identifying fields such as the MAC address, VPD area, and device
+serial number. It is expected that this combination be used with an
+image customized for the specific device.</p></td>
+</tr>
+</tbody>
+</table>
+<p>The ice hardware does not support overwriting only identifiers while
+preserving settings, and thus <code class="docutils literal notranslate"><span class="pre">DEVLINK_FLASH_OVERWRITE_IDENTIFIERS</span></code> on its
+own will be rejected. If no overwrite mask is provided, the firmware will be
+instructed to preserve all settings and identifying fields when updating.</p>
+</section>
+<section id="reload">
+<h2>Reload<a class="headerlink" href="#reload" title="Permalink to this headline">¶</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">ice</span></code> driver supports activating new firmware after a flash update
+using <code class="docutils literal notranslate"><span class="pre">DEVLINK_CMD_RELOAD</span></code> with the <code class="docutils literal notranslate"><span class="pre">DEVLINK_RELOAD_ACTION_FW_ACTIVATE</span></code>
+action.</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$ devlink dev reload pci/0000:01:00.0 reload action fw_activate
+</pre></div>
+</div>
+<p>The new firmware is activated by issuing a device specific Embedded
+Management Processor reset which requests the device to reset and reload the
+EMP firmware image.</p>
+<p>The driver does not currently support reloading the driver via
+<code class="docutils literal notranslate"><span class="pre">DEVLINK_RELOAD_ACTION_DRIVER_REINIT</span></code>.</p>
+</section>
+<section id="port-split">
+<h2>Port split<a class="headerlink" href="#port-split" title="Permalink to this headline">¶</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">ice</span></code> driver supports port splitting only for port 0, as the FW has
+a predefined set of available port split options for the whole device.</p>
+<p>A system reboot is required for port split to be applied.</p>
+<p>The following command will select the port split option with 4 ports:</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$ devlink port split pci/0000:16:00.0/0 count <span class="m">4</span>
+</pre></div>
+</div>
+<p>The list of all available port options will be printed to dynamic debug after
+each <code class="docutils literal notranslate"><span class="pre">split</span></code> and <code class="docutils literal notranslate"><span class="pre">unsplit</span></code> command. The first option is the default.</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>ice <span class="m">0000</span>:16:00.0: Available port split options and max port speeds <span class="o">(</span>Gbps<span class="o">)</span>:
+ice <span class="m">0000</span>:16:00.0: Status  Split      Quad <span class="m">0</span>          Quad <span class="m">1</span>
+ice <span class="m">0000</span>:16:00.0:         count  L0  L1  L2  L3  L4  L5  L6  L7
+ice <span class="m">0000</span>:16:00.0: Active  <span class="m">2</span>     <span class="m">100</span>   -   -   - <span class="m">100</span>   -   -   -
+ice <span class="m">0000</span>:16:00.0:         <span class="m">2</span>      <span class="m">50</span>   -  <span class="m">50</span>   -   -   -   -   -
+ice <span class="m">0000</span>:16:00.0: Pending <span class="m">4</span>      <span class="m">25</span>  <span class="m">25</span>  <span class="m">25</span>  <span class="m">25</span>   -   -   -   -
+ice <span class="m">0000</span>:16:00.0:         <span class="m">4</span>      <span class="m">25</span>  <span class="m">25</span>   -   -  <span class="m">25</span>  <span class="m">25</span>   -   -
+ice <span class="m">0000</span>:16:00.0:         <span class="m">8</span>      <span class="m">10</span>  <span class="m">10</span>  <span class="m">10</span>  <span class="m">10</span>  <span class="m">10</span>  <span class="m">10</span>  <span class="m">10</span>  <span class="m">10</span>
+ice <span class="m">0000</span>:16:00.0:         <span class="m">1</span>     <span class="m">100</span>   -   -   -   -   -   -   -
+</pre></div>
+</div>
+<p>There could be multiple FW port options with the same port split count. When
+the same port split count request is issued again, the next FW port option with
+the same port split count will be selected.</p>
+<p><code class="docutils literal notranslate"><span class="pre">devlink</span> <span class="pre">port</span> <span class="pre">unsplit</span></code> will select the option with a split count of 1. If
+there is no FW option available with split count 1, you will receive an error.</p>
+</section>
+<section id="regions">
+<h2>Regions<a class="headerlink" href="#regions" title="Permalink to this headline">¶</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">ice</span></code> driver implements the following regions for accessing internal
+device data.</p>
+<table class="colwidths-given docutils align-default" id="id3">
+<caption><span class="caption-text">regions implemented</span><a class="headerlink" href="#id3" title="Permalink to this table">¶</a></caption>
+<colgroup>
+<col style="width: 15%" />
+<col style="width: 85%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>Name</p></td>
+<td><p>Description</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">nvm-flash</span></code></p></td>
+<td><p>The contents of the entire flash chip, sometimes referred to as
+the device’s Non Volatile Memory.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">shadow-ram</span></code></p></td>
+<td><p>The contents of the Shadow RAM, which is loaded from the beginning
+of the flash. Although the contents are primarily from the flash,
+this area also contains data generated during device boot which is
+not stored in flash.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">device-caps</span></code></p></td>
+<td><p>The contents of the device firmware’s capabilities buffer. Useful to
+determine the current state and configuration of the device.</p></td>
+</tr>
+</tbody>
+</table>
+<p>Both the <code class="docutils literal notranslate"><span class="pre">nvm-flash</span></code> and <code class="docutils literal notranslate"><span class="pre">shadow-ram</span></code> regions can be accessed without a
+snapshot. The <code class="docutils literal notranslate"><span class="pre">device-caps</span></code> region requires a snapshot as the contents are
+sent by firmware and can’t be split into separate reads.</p>
+<p>Users can request an immediate capture of a snapshot for all three regions
+via the <code class="docutils literal notranslate"><span class="pre">DEVLINK_CMD_REGION_NEW</span></code> command.</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span>$ devlink region show
+pci/0000:01:00.0/nvm-flash: size <span class="m">10485760</span> snapshot <span class="o">[]</span> max <span class="m">1</span>
+pci/0000:01:00.0/device-caps: size <span class="m">4096</span> snapshot <span class="o">[]</span> max <span class="m">10</span>
+
+$ devlink region new pci/0000:01:00.0/nvm-flash snapshot <span class="m">1</span>
+$ devlink region dump pci/0000:01:00.0/nvm-flash snapshot <span class="m">1</span>
+
+$ devlink region dump pci/0000:01:00.0/nvm-flash snapshot <span class="m">1</span>
+<span class="m">0000000000000000</span> <span class="m">0014</span> 95dc <span class="m">0014</span> <span class="m">9514</span> <span class="m">0035</span> <span class="m">1670</span> <span class="m">0034</span> db30
+<span class="m">0000000000000010</span> <span class="m">0000</span> <span class="m">0000</span> ffff ff04 <span class="m">0029</span> 8c00 <span class="m">0028</span> 8cc8
+<span class="m">0000000000000020</span> <span class="m">0016</span> 0bb8 <span class="m">0016</span> <span class="m">1720</span> <span class="m">0000</span> <span class="m">0000</span> c00f 3ffc
+<span class="m">0000000000000030</span> bada cce5 bada cce5 bada cce5 bada cce5
+
+$ devlink region <span class="nb">read</span> pci/0000:01:00.0/nvm-flash snapshot <span class="m">1</span> address <span class="m">0</span> length <span class="m">16</span>
+<span class="m">0000000000000000</span> <span class="m">0014</span> 95dc <span class="m">0014</span> <span class="m">9514</span> <span class="m">0035</span> <span class="m">1670</span> <span class="m">0034</span> db30
+
+$ devlink region delete pci/0000:01:00.0/nvm-flash snapshot <span class="m">1</span>
+
+$ devlink region new pci/0000:01:00.0/device-caps snapshot <span class="m">1</span>
+$ devlink region dump pci/0000:01:00.0/device-caps snapshot <span class="m">1</span>
+<span class="m">0000000000000000</span> <span class="m">01</span> <span class="m">00</span> <span class="m">01</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">01</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+<span class="m">0000000000000010</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+<span class="m">0000000000000020</span> <span class="m">02</span> <span class="m">00</span> <span class="m">02</span> <span class="m">01</span> <span class="m">32</span> <span class="m">03</span> <span class="m">00</span> <span class="m">00</span> 0a <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">25</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+<span class="m">0000000000000030</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+<span class="m">0000000000000040</span> <span class="m">04</span> <span class="m">00</span> <span class="m">01</span> <span class="m">00</span> <span class="m">01</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+<span class="m">0000000000000050</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+<span class="m">0000000000000060</span> <span class="m">05</span> <span class="m">00</span> <span class="m">01</span> <span class="m">00</span> <span class="m">03</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+<span class="m">0000000000000070</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+<span class="m">0000000000000080</span> <span class="m">06</span> <span class="m">00</span> <span class="m">01</span> <span class="m">00</span> <span class="m">01</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+<span class="m">0000000000000090</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+00000000000000a0 <span class="m">08</span> <span class="m">00</span> <span class="m">01</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+00000000000000b0 <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+00000000000000c0 <span class="m">12</span> <span class="m">00</span> <span class="m">01</span> <span class="m">00</span> <span class="m">01</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">01</span> <span class="m">00</span> <span class="m">01</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+00000000000000d0 <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+00000000000000e0 <span class="m">13</span> <span class="m">00</span> <span class="m">01</span> <span class="m">00</span> <span class="m">00</span> <span class="m">01</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+00000000000000f0 <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+<span class="m">0000000000000100</span> <span class="m">14</span> <span class="m">00</span> <span class="m">01</span> <span class="m">00</span> <span class="m">01</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+<span class="m">0000000000000110</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+<span class="m">0000000000000120</span> <span class="m">15</span> <span class="m">00</span> <span class="m">01</span> <span class="m">00</span> <span class="m">01</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+<span class="m">0000000000000130</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+<span class="m">0000000000000140</span> <span class="m">16</span> <span class="m">00</span> <span class="m">01</span> <span class="m">00</span> <span class="m">01</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+<span class="m">0000000000000150</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+<span class="m">0000000000000160</span> <span class="m">17</span> <span class="m">00</span> <span class="m">01</span> <span class="m">00</span> <span class="m">06</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+<span class="m">0000000000000170</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+<span class="m">0000000000000180</span> <span class="m">18</span> <span class="m">00</span> <span class="m">01</span> <span class="m">00</span> <span class="m">01</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">01</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">08</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+<span class="m">0000000000000190</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+00000000000001a0 <span class="m">22</span> <span class="m">00</span> <span class="m">01</span> <span class="m">00</span> <span class="m">01</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+00000000000001b0 <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+00000000000001c0 <span class="m">40</span> <span class="m">00</span> <span class="m">01</span> <span class="m">00</span> <span class="m">00</span> <span class="m">08</span> <span class="m">00</span> <span class="m">00</span> <span class="m">08</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+00000000000001d0 <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+00000000000001e0 <span class="m">41</span> <span class="m">00</span> <span class="m">01</span> <span class="m">00</span> <span class="m">00</span> <span class="m">08</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+00000000000001f0 <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+<span class="m">0000000000000200</span> <span class="m">42</span> <span class="m">00</span> <span class="m">01</span> <span class="m">00</span> <span class="m">00</span> <span class="m">08</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+<span class="m">0000000000000210</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span>
+
+$ devlink region delete pci/0000:01:00.0/device-caps snapshot <span class="m">1</span>
+</pre></div>
+</div>
+</section>
+<section id="devlink-rate">
+<h2>Devlink Rate<a class="headerlink" href="#devlink-rate" title="Permalink to this headline">¶</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">ice</span></code> driver implements devlink-rate API. It allows for offload of
+the Hierarchical QoS to the hardware. It enables user to group Virtual
+Functions in a tree structure and assign supported parameters: tx_share,
+tx_max, tx_priority and tx_weight to each node in a tree. So effectively
+user gains an ability to control how much bandwidth is allocated for each
+VF group. This is later enforced by the HW.</p>
+<p>It is assumed that this feature is mutually exclusive with DCB performed
+in FW and ADQ, or any driver feature that would trigger changes in QoS,
+for example creation of the new traffic class. The driver will prevent DCB
+or ADQ configuration if user started making any changes to the nodes using
+devlink-rate API. To configure those features a driver reload is necessary.
+Correspondingly if ADQ or DCB will get configured the driver won’t export
+hierarchy at all, or will remove the untouched hierarchy if those
+features are enabled after the hierarchy is exported, but before any
+changes are made.</p>
+<p>This feature is also dependent on switchdev being enabled in the system.
+It’s required bacause devlink-rate requires devlink-port objects to be
+present, and those objects are only created in switchdev mode.</p>
+<p>If the driver is set to the switchdev mode, it will export internal
+hierarchy the moment VF’s are created. Root of the tree is always
+represented by the node_0. This node can’t be deleted by the user. Leaf
+nodes and nodes with children also can’t be deleted.</p>
+<table class="colwidths-given docutils align-default" id="id4">
+<caption><span class="caption-text">Attributes supported</span><a class="headerlink" href="#id4" title="Permalink to this table">¶</a></caption>
+<colgroup>
+<col style="width: 15%" />
+<col style="width: 85%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>Name</p></td>
+<td><p>Description</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">tx_max</span></code></p></td>
+<td><p>maximum bandwidth to be consumed by the tree Node. Rate Limit is
+an absolute number specifying a maximum amount of bytes a Node may
+consume during the course of one second. Rate limit guarantees
+that a link will not oversaturate the receiver on the remote end
+and also enforces an SLA between the subscriber and network
+provider.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">tx_share</span></code></p></td>
+<td><p>minimum bandwidth allocated to a tree node when it is not blocked.
+It specifies an absolute BW. While tx_max defines the maximum
+bandwidth the node may consume, the tx_share marks committed BW
+for the Node.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">tx_priority</span></code></p></td>
+<td><p>allows for usage of strict priority arbiter among siblings. This
+arbitration scheme attempts to schedule nodes based on their
+priority as long as the nodes remain within their bandwidth limit.
+Range 0-7. Nodes with priority 7 have the highest priority and are
+selected first, while nodes with priority 0 have the lowest
+priority. Nodes that have the same priority are treated equally.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">tx_weight</span></code></p></td>
+<td><p>allows for usage of Weighted Fair Queuing arbitration scheme among
+siblings. This arbitration scheme can be used simultaneously with
+the strict priority. Range 1-200. Only relative values mater for
+arbitration.</p></td>
+</tr>
+</tbody>
+</table>
+<p><code class="docutils literal notranslate"><span class="pre">tx_priority</span></code> and <code class="docutils literal notranslate"><span class="pre">tx_weight</span></code> can be used simultaneously. In that case
+nodes with the same priority form a WFQ subgroup in the sibling group
+and arbitration among them is based on assigned weights.</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span><span class="c1"># enable switchdev</span>
+$ devlink dev eswitch <span class="nb">set</span> pci/0000:4b:00.0 mode switchdev
+
+<span class="c1"># at this point driver should export internal hierarchy</span>
+$ <span class="nb">echo</span> <span class="m">2</span> &gt; /sys/class/net/ens785np0/device/sriov_numvfs
+
+$ devlink port <span class="k">function</span> rate show
+pci/0000:4b:00.0/node_25: <span class="nb">type</span> node parent node_24
+pci/0000:4b:00.0/node_24: <span class="nb">type</span> node parent node_0
+pci/0000:4b:00.0/node_32: <span class="nb">type</span> node parent node_31
+pci/0000:4b:00.0/node_31: <span class="nb">type</span> node parent node_30
+pci/0000:4b:00.0/node_30: <span class="nb">type</span> node parent node_16
+pci/0000:4b:00.0/node_19: <span class="nb">type</span> node parent node_18
+pci/0000:4b:00.0/node_18: <span class="nb">type</span> node parent node_17
+pci/0000:4b:00.0/node_17: <span class="nb">type</span> node parent node_16
+pci/0000:4b:00.0/node_14: <span class="nb">type</span> node parent node_5
+pci/0000:4b:00.0/node_5: <span class="nb">type</span> node parent node_3
+pci/0000:4b:00.0/node_13: <span class="nb">type</span> node parent node_4
+pci/0000:4b:00.0/node_12: <span class="nb">type</span> node parent node_4
+pci/0000:4b:00.0/node_11: <span class="nb">type</span> node parent node_4
+pci/0000:4b:00.0/node_10: <span class="nb">type</span> node parent node_4
+pci/0000:4b:00.0/node_9: <span class="nb">type</span> node parent node_4
+pci/0000:4b:00.0/node_8: <span class="nb">type</span> node parent node_4
+pci/0000:4b:00.0/node_7: <span class="nb">type</span> node parent node_4
+pci/0000:4b:00.0/node_6: <span class="nb">type</span> node parent node_4
+pci/0000:4b:00.0/node_4: <span class="nb">type</span> node parent node_3
+pci/0000:4b:00.0/node_3: <span class="nb">type</span> node parent node_16
+pci/0000:4b:00.0/node_16: <span class="nb">type</span> node parent node_15
+pci/0000:4b:00.0/node_15: <span class="nb">type</span> node parent node_0
+pci/0000:4b:00.0/node_2: <span class="nb">type</span> node parent node_1
+pci/0000:4b:00.0/node_1: <span class="nb">type</span> node parent node_0
+pci/0000:4b:00.0/node_0: <span class="nb">type</span> node
+pci/0000:4b:00.0/1: <span class="nb">type</span> leaf parent node_25
+pci/0000:4b:00.0/2: <span class="nb">type</span> leaf parent node_25
+
+<span class="c1"># let&#39;s create some custom node</span>
+$ devlink port <span class="k">function</span> rate add pci/0000:4b:00.0/node_custom parent node_0
+
+<span class="c1"># second custom node</span>
+$ devlink port <span class="k">function</span> rate add pci/0000:4b:00.0/node_custom_1 parent node_custom
+
+<span class="c1"># reassign second VF to newly created branch</span>
+$ devlink port <span class="k">function</span> rate <span class="nb">set</span> pci/0000:4b:00.0/2 parent node_custom_1
+
+<span class="c1"># assign tx_weight to the VF</span>
+$ devlink port <span class="k">function</span> rate <span class="nb">set</span> pci/0000:4b:00.0/2 tx_weight <span class="m">5</span>
+
+<span class="c1"># assign tx_share to the VF</span>
+$ devlink port <span class="k">function</span> rate <span class="nb">set</span> pci/0000:4b:00.0/2 tx_share 500Mbps
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">ice devlink support</a><ul>
+<li><a class="reference internal" href="#info-versions">Info versions</a></li>
+<li><a class="reference internal" href="#flash-update">Flash Update</a></li>
+<li><a class="reference internal" href="#reload">Reload</a></li>
+<li><a class="reference internal" href="#port-split">Port split</a></li>
+<li><a class="reference internal" href="#regions">Regions</a></li>
+<li><a class="reference internal" href="#devlink-rate">Devlink Rate</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/networking/devlink/ice.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/networking/devlink/ice.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

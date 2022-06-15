@@ -1,0 +1,371 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>KSMBD - SMB3 Kernel Server &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Mounting root file system via SMB (cifs.ko)" href="cifsroot.html" />
+    <link rel="prev" title="CIFS" href="index.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="ksmbd-smb3-kernel-server">
+<h1>KSMBD - SMB3 Kernel Server<a class="headerlink" href="#ksmbd-smb3-kernel-server" title="Permalink to this headline">¶</a></h1>
+<p>KSMBD is a linux kernel server which implements SMB3 protocol in kernel space
+for sharing files over network.</p>
+<section id="ksmbd-architecture">
+<h2>KSMBD architecture<a class="headerlink" href="#ksmbd-architecture" title="Permalink to this headline">¶</a></h2>
+<p>The subset of performance related operations belong in kernelspace and
+the other subset which belong to operations which are not really related with
+performance in userspace. So, DCE/RPC management that has historically resulted
+into number of buffer overflow issues and dangerous security bugs and user
+account management are implemented in user space as ksmbd.mountd.
+File operations that are related with performance (open/read/write/close etc.)
+in kernel space (ksmbd). This also allows for easier integration with VFS
+interface for all file operations.</p>
+<section id="ksmbd-kernel-daemon">
+<h3>ksmbd (kernel daemon)<a class="headerlink" href="#ksmbd-kernel-daemon" title="Permalink to this headline">¶</a></h3>
+<p>When the server daemon is started, It starts up a forker thread
+(ksmbd/interface name) at initialization time and open a dedicated port 445
+for listening to SMB requests. Whenever new clients make request, Forker
+thread will accept the client connection and fork a new thread for dedicated
+communication channel between the client and the server. It allows for parallel
+processing of SMB requests(commands) from clients as well as allowing for new
+clients to make new connections. Each instance is named ksmbd/1~n(port number)
+to indicate connected clients. Depending on the SMB request types, each new
+thread can decide to pass through the commands to the user space (ksmbd.mountd),
+currently DCE/RPC commands are identified to be handled through the user space.
+To further utilize the linux kernel, it has been chosen to process the commands
+as workitems and to be executed in the handlers of the ksmbd-io kworker threads.
+It allows for multiplexing of the handlers as the kernel take care of initiating
+extra worker threads if the load is increased and vice versa, if the load is
+decreased it destroys the extra worker threads. So, after connection is
+established with client. Dedicated ksmbd/1..n(port number) takes complete
+ownership of receiving/parsing of SMB commands. Each received command is worked
+in parallel i.e., There can be multiple clients commands which are worked in
+parallel. After receiving each command a separated kernel workitem is prepared
+for each command which is further queued to be handled by ksmbd-io kworkers.
+So, each SMB workitem is queued to the kworkers. This allows the benefit of load
+sharing to be managed optimally by the default kernel and optimizing client
+performance by handling client commands in parallel.</p>
+</section>
+<section id="ksmbd-mountd-user-space-daemon">
+<h3>ksmbd.mountd (user space daemon)<a class="headerlink" href="#ksmbd-mountd-user-space-daemon" title="Permalink to this headline">¶</a></h3>
+<p>ksmbd.mountd is userspace process to, transfer user account and password that
+are registered using ksmbd.adduser (part of utils for user space). Further it
+allows sharing information parameters that parsed from smb.conf to ksmbd in
+kernel. For the execution part it has a daemon which is continuously running
+and connected to the kernel interface using netlink socket, it waits for the
+requests (dcerpc and share/user info). It handles RPC calls (at a minimum few
+dozen) that are most important for file server from NetShareEnum and
+NetServerGetInfo. Complete DCE/RPC response is prepared from the user space
+and passed over to the associated kernel thread for the client.</p>
+</section>
+</section>
+<section id="ksmbd-feature-status">
+<h2>KSMBD Feature Status<a class="headerlink" href="#ksmbd-feature-status" title="Permalink to this headline">¶</a></h2>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 38%" />
+<col style="width: 62%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Feature name</p></th>
+<th class="head"><p>Status</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Dialects</p></td>
+<td><p>Supported. SMB2.1 SMB3.0, SMB3.1.1 dialects
+(intentionally excludes security vulnerable SMB1
+dialect).</p></td>
+</tr>
+<tr class="row-odd"><td><p>Auto Negotiation</p></td>
+<td><p>Supported.</p></td>
+</tr>
+<tr class="row-even"><td><p>Compound Request</p></td>
+<td><p>Supported.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Oplock Cache Mechanism</p></td>
+<td><p>Supported.</p></td>
+</tr>
+<tr class="row-even"><td><p>SMB2 leases(v1 lease)</p></td>
+<td><p>Supported.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Directory leases(v2 lease)</p></td>
+<td><p>Planned for future.</p></td>
+</tr>
+<tr class="row-even"><td><p>Multi-credits</p></td>
+<td><p>Supported.</p></td>
+</tr>
+<tr class="row-odd"><td><p>NTLM/NTLMv2</p></td>
+<td><p>Supported.</p></td>
+</tr>
+<tr class="row-even"><td><p>HMAC-SHA256 Signing</p></td>
+<td><p>Supported.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Secure negotiate</p></td>
+<td><p>Supported.</p></td>
+</tr>
+<tr class="row-even"><td><p>Signing Update</p></td>
+<td><p>Supported.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Pre-authentication integrity</p></td>
+<td><p>Supported.</p></td>
+</tr>
+<tr class="row-even"><td><p>SMB3 encryption(CCM, GCM)</p></td>
+<td><p>Supported. (CCM and GCM128 supported, GCM256 in
+progress)</p></td>
+</tr>
+<tr class="row-odd"><td><p>SMB direct(RDMA)</p></td>
+<td><p>Supported.</p></td>
+</tr>
+<tr class="row-even"><td><p>SMB3 Multi-channel</p></td>
+<td><p>Partially Supported. Planned to implement
+replay/retry mechanisms for future.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Receive Side Scaling mode</p></td>
+<td><p>Supported.</p></td>
+</tr>
+<tr class="row-even"><td><p>SMB3.1.1 POSIX extension</p></td>
+<td><p>Supported.</p></td>
+</tr>
+<tr class="row-odd"><td><p>ACLs</p></td>
+<td><p>Partially Supported. only DACLs available, SACLs
+(auditing) is planned for the future. For
+ownership (SIDs) ksmbd generates random subauth
+values(then store it to disk) and use uid/gid
+get from inode as RID for local domain SID.
+The current acl implementation is limited to
+standalone server, not a domain member.
+Integration with Samba tools is being worked on
+to allow future support for running as a domain
+member.</p></td>
+</tr>
+<tr class="row-even"><td><p>Kerberos</p></td>
+<td><p>Supported.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Durable handle v1,v2</p></td>
+<td><p>Planned for future.</p></td>
+</tr>
+<tr class="row-even"><td><p>Persistent handle</p></td>
+<td><p>Planned for future.</p></td>
+</tr>
+<tr class="row-odd"><td><p>SMB2 notify</p></td>
+<td><p>Planned for future.</p></td>
+</tr>
+<tr class="row-even"><td><p>Sparse file support</p></td>
+<td><p>Supported.</p></td>
+</tr>
+<tr class="row-odd"><td><p>DCE/RPC support</p></td>
+<td><p>Partially Supported. a few calls(NetShareEnumAll,
+NetServerGetInfo, SAMR, LSARPC) that are needed
+for file server handled via netlink interface
+from ksmbd.mountd. Additional integration with
+Samba tools and libraries via upcall is being
+investigated to allow support for additional
+DCE/RPC management calls (and future support
+for Witness protocol e.g.)</p></td>
+</tr>
+<tr class="row-even"><td><p>ksmbd/nfsd interoperability</p></td>
+<td><p>Planned for future. The features that ksmbd
+support are Leases, Notify, ACLs and Share modes.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="how-to-run">
+<h2>How to run<a class="headerlink" href="#how-to-run" title="Permalink to this headline">¶</a></h2>
+<ol class="arabic">
+<li><p>Download ksmbd-tools(<a class="reference external" href="https://github.com/cifsd-team/ksmbd-tools/releases">https://github.com/cifsd-team/ksmbd-tools/releases</a>) and
+compile them.</p>
+<ul>
+<li><p>Refer README(<a class="reference external" href="https://github.com/cifsd-team/ksmbd-tools/blob/master/README.md">https://github.com/cifsd-team/ksmbd-tools/blob/master/README.md</a>)
+to know how to use ksmbd.mountd/adduser/addshare/control utils</p>
+<p>$ ./autogen.sh
+$ ./configure –with-rundir=/run
+$ make &amp;&amp; sudo make install</p>
+</li>
+</ul>
+</li>
+<li><p>Create /usr/local/etc/ksmbd/ksmbd.conf file, add SMB share in ksmbd.conf file.</p>
+<ul>
+<li><p>Refer ksmbd.conf.example in ksmbd-utils, See ksmbd.conf manpage
+for details to configure shares.</p>
+<blockquote>
+<div><p>$ man ksmbd.conf</p>
+</div></blockquote>
+</li>
+</ul>
+</li>
+<li><p>Create user/password for SMB share.</p>
+<ul>
+<li><p>See ksmbd.adduser manpage.</p>
+<p>$ man ksmbd.adduser
+$ sudo ksmbd.adduser -a &lt;Enter USERNAME for SMB share access&gt;</p>
+</li>
+</ul>
+</li>
+<li><p>Insert ksmbd.ko module after build your kernel. No need to load module
+if ksmbd is built into the kernel.</p>
+<ul>
+<li><dl>
+<dt>Set ksmbd in menuconfig(e.g. $ make menuconfig)</dt><dd><dl>
+<dt>[*] Network File Systems  —&gt;</dt><dd><blockquote>
+<div><p>&lt;M&gt; SMB3 server support (EXPERIMENTAL)</p>
+</div></blockquote>
+<p>$ sudo modprobe ksmbd.ko</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</li>
+</ul>
+</li>
+<li><p>Start ksmbd user space daemon</p>
+<blockquote>
+<div><p>$ sudo ksmbd.mountd</p>
+</div></blockquote>
+</li>
+<li><p>Access share from Windows or Linux using SMB3 client (cifs.ko or smbclient of samba)</p></li>
+</ol>
+</section>
+<section id="shutdown-ksmbd">
+<h2>Shutdown KSMBD<a class="headerlink" href="#shutdown-ksmbd" title="Permalink to this headline">¶</a></h2>
+<ol class="arabic simple">
+<li><dl class="simple">
+<dt>kill user and kernel space daemon</dt><dd><p># sudo ksmbd.control -s</p>
+</dd>
+</dl>
+</li>
+</ol>
+</section>
+<section id="how-to-turn-debug-print-on">
+<h2>How to turn debug print on<a class="headerlink" href="#how-to-turn-debug-print-on" title="Permalink to this headline">¶</a></h2>
+<p>Each layer
+/sys/class/ksmbd-control/debug</p>
+<ol class="arabic simple">
+<li><dl class="simple">
+<dt>Enable all component prints</dt><dd><p># sudo ksmbd.control -d “all”</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>Enable one of components (smb, auth, vfs, oplock, ipc, conn, rdma)</dt><dd><p># sudo ksmbd.control -d “smb”</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>Show what prints are enabled.</dt><dd><dl class="simple">
+<dt># cat /sys/class/ksmbd-control/debug</dt><dd><p>[smb] auth vfs oplock ipc conn [rdma]</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>Disable prints:</dt><dd><p>If you try the selected component once more, It is disabled without brackets.</p>
+</dd>
+</dl>
+</li>
+</ol>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">KSMBD - SMB3 Kernel Server</a><ul>
+<li><a class="reference internal" href="#ksmbd-architecture">KSMBD architecture</a><ul>
+<li><a class="reference internal" href="#ksmbd-kernel-daemon">ksmbd (kernel daemon)</a></li>
+<li><a class="reference internal" href="#ksmbd-mountd-user-space-daemon">ksmbd.mountd (user space daemon)</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#ksmbd-feature-status">KSMBD Feature Status</a></li>
+<li><a class="reference internal" href="#how-to-run">How to run</a></li>
+<li><a class="reference internal" href="#shutdown-ksmbd">Shutdown KSMBD</a></li>
+<li><a class="reference internal" href="#how-to-turn-debug-print-on">How to turn debug print on</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/filesystems/cifs/ksmbd.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/filesystems/cifs/ksmbd.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

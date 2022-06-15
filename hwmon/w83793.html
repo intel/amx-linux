@@ -1,0 +1,235 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Kernel driver w83793 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Kernel driver w83795" href="w83795.html" />
+    <link rel="prev" title="Kernel driver w83792d" href="w83792d.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="kernel-driver-w83793">
+<h1>Kernel driver w83793<a class="headerlink" href="#kernel-driver-w83793" title="Permalink to this headline">¶</a></h1>
+<p>Supported chips:</p>
+<blockquote>
+<div><ul>
+<li><p>Winbond W83793G/W83793R</p>
+<p>Prefix: ‘w83793’</p>
+<p>Addresses scanned: I2C 0x2c - 0x2f</p>
+<p>Datasheet: Still not published</p>
+</li>
+</ul>
+</div></blockquote>
+<dl class="simple">
+<dt>Authors:</dt><dd><ul class="simple">
+<li><p>Yuan Mu (Winbond Electronics)</p></li>
+<li><p>Rudolf Marek &lt;<a class="reference external" href="mailto:r&#46;marek&#37;&#52;&#48;assembler&#46;cz">r<span>&#46;</span>marek<span>&#64;</span>assembler<span>&#46;</span>cz</a>&gt;</p></li>
+</ul>
+</dd>
+</dl>
+<section id="module-parameters">
+<h2>Module parameters<a class="headerlink" href="#module-parameters" title="Permalink to this headline">¶</a></h2>
+<ul>
+<li><dl>
+<dt>reset int</dt><dd><p>(default 0)</p>
+<p>This parameter is not recommended, it will lose motherboard specific
+settings. Use ‘reset=1’ to reset the chip when loading this module.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>force_subclients=bus,caddr,saddr1,saddr2</dt><dd><p>This is used to force the i2c addresses for subclients of
+a certain chip. Typical usage is <cite>force_subclients=0,0x2f,0x4a,0x4b</cite>
+to force the subclients of chip 0x2f on bus 0 to i2c addresses
+0x4a and 0x4b.</p>
+</dd>
+</dl>
+</li>
+</ul>
+</section>
+<section id="description">
+<h2>Description<a class="headerlink" href="#description" title="Permalink to this headline">¶</a></h2>
+<p>This driver implements support for Winbond W83793G/W83793R chips.</p>
+<ul>
+<li><dl class="simple">
+<dt>Exported features</dt><dd><p>This driver exports 10 voltage sensors, up to 12 fan tachometer inputs,
+6 remote temperatures, up to 8 sets of PWM fan controls, SmartFan
+(automatic fan speed control) on all temperature/PWM combinations, 2
+sets of 6-pin CPU VID input.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>Sensor resolutions</dt><dd><p>If your motherboard maker used the reference design, the resolution of
+voltage0-2 is 2mV, resolution of voltage3/4/5 is 16mV, 8mV for voltage6,
+24mV for voltage7/8. Temp1-4 have a 0.25 degree Celsius resolution,
+temp5-6 have a 1 degree Celsiis resolution.</p>
+</dd>
+</dl>
+</li>
+<li><dl>
+<dt>Temperature sensor types</dt><dd><p>Temp1-4 have 2 possible types. It can be read from (and written to)
+temp[1-4]_type.</p>
+<ul class="simple">
+<li><p>If the value is 3, it starts monitoring using a remote termal diode
+(default).</p></li>
+<li><p>If the value is 6, it starts monitoring using the temperature sensor
+in Intel CPU and get result by PECI.</p></li>
+</ul>
+<p>Temp5-6 can be connected to external thermistors (value of
+temp[5-6]_type is 4).</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>Alarm mechanism</dt><dd><p>For voltage sensors, an alarm triggers if the measured value is below
+the low voltage limit or over the high voltage limit.
+For temperature sensors, an alarm triggers if the measured value goes
+above the high temperature limit, and wears off only after the measured
+value drops below the hysteresis value.
+For fan sensors, an alarm triggers if the measured value is below the
+low speed limit.</p>
+</dd>
+</dl>
+</li>
+<li><dl>
+<dt>SmartFan/PWM control</dt><dd><p>If you want to set a pwm fan to manual mode, you just need to make sure it
+is not controlled by any temp channel, for example, you want to set fan1
+to manual mode, you need to check the value of temp[1-6]_fan_map, make
+sure bit 0 is cleared in the 6 values. And then set the pwm1 value to
+control the fan.</p>
+<p>Each temperature channel can control all the 8 PWM outputs (by setting the
+corresponding bit in tempX_fan_map), you can set the temperature channel
+mode using temp[1-6]_pwm_enable, 2 is Thermal Cruise mode and 3
+is the SmartFanII mode. Temperature channels will try to speed up or
+slow down all controlled fans, this means one fan can receive different
+PWM value requests from different temperature channels, but the chip
+will always pick the safest (max) PWM value for each fan.</p>
+<p>In Thermal Cruise mode, the chip attempts to keep the temperature at a
+predefined value, within a tolerance margin. So if tempX_input &gt;
+thermal_cruiseX + toleranceX, the chip will increase the PWM value,
+if tempX_input &lt; thermal_cruiseX - toleranceX, the chip will decrease
+the PWM value. If the temperature is within the tolerance range, the PWM
+value is left unchanged.</p>
+<p>SmartFanII works differently, you have to define up to 7 PWM, temperature
+trip points, defining a PWM/temperature curve which the chip will follow.
+While not fundamentally different from the Thermal Cruise mode, the
+implementation is quite different, giving you a finer-grained control.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>Chassis</dt><dd><p>If the case open alarm triggers, it will stay in this state unless cleared
+by writing 0 to the sysfs file “intrusion0_alarm”.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>VID and VRM</dt><dd><p>The VRM version is detected automatically, don’t modify the it unless you
+<em>do</em> know the cpu VRM version and it’s not properly detected.</p>
+</dd>
+</dl>
+</li>
+</ul>
+</section>
+<section id="notes">
+<h2>Notes<a class="headerlink" href="#notes" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>Only Fan1-5 and PWM1-3 are guaranteed to always exist, other fan inputs and
+PWM outputs may or may not exist depending on the chip pin configuration.</p>
+</div></blockquote>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Kernel driver w83793</a><ul>
+<li><a class="reference internal" href="#module-parameters">Module parameters</a></li>
+<li><a class="reference internal" href="#description">Description</a></li>
+<li><a class="reference internal" href="#notes">Notes</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/hwmon/w83793.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/hwmon/w83793.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

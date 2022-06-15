@@ -1,0 +1,496 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Sound Blaster Audigy mixer / default DSP code &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Low latency, multichannel audio with JACK and the emu10k1/emu10k2" href="emu10k1-jack.html" />
+    <link rel="prev" title="Sound Blaster Live mixer / default DSP code" href="sb-live-mixer.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="sound-blaster-audigy-mixer-default-dsp-code">
+<h1>Sound Blaster Audigy mixer / default DSP code<a class="headerlink" href="#sound-blaster-audigy-mixer-default-dsp-code" title="Permalink to this headline">¶</a></h1>
+<p>This is based on <a class="reference internal" href="sb-live-mixer.html"><span class="doc">Sound Blaster Live mixer / default DSP code</span></a>.</p>
+<p>The EMU10K2 chips have a DSP part which can be programmed to support
+various ways of sample processing, which is described here.
+(This article does not deal with the overall functionality of the
+EMU10K2 chips. See the manuals section for further details.)</p>
+<p>The ALSA driver programs this portion of chip by default code
+(can be altered later) which offers the following functionality:</p>
+<section id="digital-mixer-controls">
+<h2>Digital mixer controls<a class="headerlink" href="#digital-mixer-controls" title="Permalink to this headline">¶</a></h2>
+<p>These controls are built using the DSP instructions. They offer extended
+functionality. Only the default build-in code in the ALSA driver is described
+here. Note that the controls work as attenuators: the maximum value is the
+neutral position leaving the signal unchanged. Note that if the  same destination
+is mentioned in multiple controls, the signal is accumulated and can be wrapped
+(set to maximal or minimal value without checking of overflow).</p>
+<p>Explanation of used abbreviations:</p>
+<dl class="simple">
+<dt>DAC</dt><dd><p>digital to analog converter</p>
+</dd>
+<dt>ADC</dt><dd><p>analog to digital converter</p>
+</dd>
+<dt>I2S</dt><dd><p>one-way three wire serial bus for digital sound by Philips Semiconductors
+(this standard is used for connecting standalone DAC and ADC converters)</p>
+</dd>
+<dt>LFE</dt><dd><p>low frequency effects (subwoofer signal)</p>
+</dd>
+<dt>AC97</dt><dd><p>a chip containing an analog mixer, DAC and ADC converters</p>
+</dd>
+<dt>IEC958</dt><dd><p>S/PDIF</p>
+</dd>
+<dt>FX-bus</dt><dd><p>the EMU10K2 chip has an effect bus containing 64 accumulators.
+Each of the synthesizer voices can feed its output to these accumulators
+and the DSP microcontroller can operate with the resulting sum.</p>
+</dd>
+</dl>
+<section id="name-pcm-front-playback-volume-index-0">
+<h3>name=’PCM Front Playback Volume’,index=0<a class="headerlink" href="#name-pcm-front-playback-volume-index-0" title="Permalink to this headline">¶</a></h3>
+<p>This control is used to attenuate samples for left and right front PCM FX-bus
+accumulators. ALSA uses accumulators 8 and 9 for left and right front PCM
+samples for 5.1 playback. The result samples are forwarded to the front DAC PCM
+slots of the Philips DAC.</p>
+</section>
+<section id="name-pcm-surround-playback-volume-index-0">
+<h3>name=’PCM Surround Playback Volume’,index=0<a class="headerlink" href="#name-pcm-surround-playback-volume-index-0" title="Permalink to this headline">¶</a></h3>
+<p>This control is used to attenuate samples for left and right surround PCM FX-bus
+accumulators. ALSA uses accumulators 2 and 3 for left and right surround PCM
+samples for 5.1 playback. The result samples are forwarded to the surround DAC PCM
+slots of the Philips DAC.</p>
+</section>
+<section id="name-pcm-center-playback-volume-index-0">
+<h3>name=’PCM Center Playback Volume’,index=0<a class="headerlink" href="#name-pcm-center-playback-volume-index-0" title="Permalink to this headline">¶</a></h3>
+<p>This control is used to attenuate samples for center PCM FX-bus accumulator.
+ALSA uses accumulator 6 for center PCM sample for 5.1 playback. The result sample
+is forwarded to the center DAC PCM slot of the Philips DAC.</p>
+</section>
+<section id="name-pcm-lfe-playback-volume-index-0">
+<h3>name=’PCM LFE Playback Volume’,index=0<a class="headerlink" href="#name-pcm-lfe-playback-volume-index-0" title="Permalink to this headline">¶</a></h3>
+<p>This control is used to attenuate sample for LFE PCM FX-bus accumulator.
+ALSA uses accumulator 7 for LFE PCM sample for 5.1 playback. The result sample
+is forwarded to the LFE DAC PCM slot of the Philips DAC.</p>
+</section>
+<section id="name-pcm-playback-volume-index-0">
+<h3>name=’PCM Playback Volume’,index=0<a class="headerlink" href="#name-pcm-playback-volume-index-0" title="Permalink to this headline">¶</a></h3>
+<p>This control is used to attenuate samples for left and right PCM FX-bus
+accumulators. ALSA uses accumulators 0 and 1 for left and right PCM samples for
+stereo playback. The result samples are forwarded to the front DAC PCM slots
+of the Philips DAC.</p>
+</section>
+<section id="name-pcm-capture-volume-index-0">
+<h3>name=’PCM Capture Volume’,index=0<a class="headerlink" href="#name-pcm-capture-volume-index-0" title="Permalink to this headline">¶</a></h3>
+<p>This control is used to attenuate samples for left and right PCM FX-bus
+accumulator. ALSA uses accumulators 0 and 1 for left and right PCM.
+The result is forwarded to the ADC capture FIFO (thus to the standard capture
+PCM device).</p>
+</section>
+<section id="name-music-playback-volume-index-0">
+<h3>name=’Music Playback Volume’,index=0<a class="headerlink" href="#name-music-playback-volume-index-0" title="Permalink to this headline">¶</a></h3>
+<p>This control is used to attenuate samples for left and right MIDI FX-bus
+accumulators. ALSA uses accumulators 4 and 5 for left and right MIDI samples.
+The result samples are forwarded to the front DAC PCM slots of the AC97 codec.</p>
+</section>
+<section id="name-music-capture-volume-index-0">
+<h3>name=’Music Capture Volume’,index=0<a class="headerlink" href="#name-music-capture-volume-index-0" title="Permalink to this headline">¶</a></h3>
+<p>These controls are used to attenuate samples for left and right MIDI FX-bus
+accumulator. ALSA uses accumulators 4 and 5 for left and right PCM.
+The result is forwarded to the ADC capture FIFO (thus to the standard capture
+PCM device).</p>
+</section>
+<section id="name-mic-playback-volume-index-0">
+<h3>name=’Mic Playback Volume’,index=0<a class="headerlink" href="#name-mic-playback-volume-index-0" title="Permalink to this headline">¶</a></h3>
+<p>This control is used to attenuate samples for left and right Mic input.
+For Mic input is used AC97 codec. The result samples are forwarded to
+the front DAC PCM slots of the Philips DAC. Samples are forwarded to Mic
+capture FIFO (device 1 - 16bit/8KHz mono) too without volume control.</p>
+</section>
+<section id="name-mic-capture-volume-index-0">
+<h3>name=’Mic Capture Volume’,index=0<a class="headerlink" href="#name-mic-capture-volume-index-0" title="Permalink to this headline">¶</a></h3>
+<p>This control is used to attenuate samples for left and right Mic input.
+The result is forwarded to the ADC capture FIFO (thus to the standard capture
+PCM device).</p>
+</section>
+<section id="name-audigy-cd-playback-volume-index-0">
+<h3>name=’Audigy CD Playback Volume’,index=0<a class="headerlink" href="#name-audigy-cd-playback-volume-index-0" title="Permalink to this headline">¶</a></h3>
+<p>This control is used to attenuate samples from left and right IEC958 TTL
+digital inputs (usually used by a CDROM drive). The result samples are
+forwarded to the front DAC PCM slots of the Philips DAC.</p>
+</section>
+<section id="name-audigy-cd-capture-volume-index-0">
+<h3>name=’Audigy CD Capture Volume’,index=0<a class="headerlink" href="#name-audigy-cd-capture-volume-index-0" title="Permalink to this headline">¶</a></h3>
+<p>This control is used to attenuate samples from left and right IEC958 TTL
+digital inputs (usually used by a CDROM drive). The result samples are
+forwarded to the ADC capture FIFO (thus to the standard capture PCM device).</p>
+</section>
+<section id="name-iec958-optical-playback-volume-index-0">
+<h3>name=’IEC958 Optical Playback Volume’,index=0<a class="headerlink" href="#name-iec958-optical-playback-volume-index-0" title="Permalink to this headline">¶</a></h3>
+<p>This control is used to attenuate samples from left and right IEC958 optical
+digital input. The result samples are forwarded to the front DAC PCM slots
+of the Philips DAC.</p>
+</section>
+<section id="name-iec958-optical-capture-volume-index-0">
+<h3>name=’IEC958 Optical Capture Volume’,index=0<a class="headerlink" href="#name-iec958-optical-capture-volume-index-0" title="Permalink to this headline">¶</a></h3>
+<p>This control is used to attenuate samples from left and right IEC958 optical
+digital inputs. The result samples are forwarded to the ADC capture FIFO
+(thus to the standard capture PCM device).</p>
+</section>
+<section id="name-line2-playback-volume-index-0">
+<h3>name=’Line2 Playback Volume’,index=0<a class="headerlink" href="#name-line2-playback-volume-index-0" title="Permalink to this headline">¶</a></h3>
+<p>This control is used to attenuate samples from left and right I2S ADC
+inputs (on the AudigyDrive). The result samples are forwarded to the front
+DAC PCM slots of the Philips DAC.</p>
+</section>
+<section id="name-line2-capture-volume-index-1">
+<h3>name=’Line2 Capture Volume’,index=1<a class="headerlink" href="#name-line2-capture-volume-index-1" title="Permalink to this headline">¶</a></h3>
+<p>This control is used to attenuate samples from left and right I2S ADC
+inputs (on the AudigyDrive). The result samples are forwarded to the ADC
+capture FIFO (thus to the standard capture PCM device).</p>
+</section>
+<section id="name-analog-mix-playback-volume-index-0">
+<h3>name=’Analog Mix Playback Volume’,index=0<a class="headerlink" href="#name-analog-mix-playback-volume-index-0" title="Permalink to this headline">¶</a></h3>
+<p>This control is used to attenuate samples from left and right I2S ADC
+inputs from Philips ADC. The result samples are forwarded to the front
+DAC PCM slots of the Philips DAC. This contains mix from analog sources
+like CD, Line In, Aux, ….</p>
+</section>
+<section id="name-analog-mix-capture-volume-index-1">
+<h3>name=’Analog Mix Capture Volume’,index=1<a class="headerlink" href="#name-analog-mix-capture-volume-index-1" title="Permalink to this headline">¶</a></h3>
+<p>This control is used to attenuate samples from left and right I2S ADC
+inputs Philips ADC. The result samples are forwarded to the ADC
+capture FIFO (thus to the standard capture PCM device).</p>
+</section>
+<section id="name-aux2-playback-volume-index-0">
+<h3>name=’Aux2 Playback Volume’,index=0<a class="headerlink" href="#name-aux2-playback-volume-index-0" title="Permalink to this headline">¶</a></h3>
+<p>This control is used to attenuate samples from left and right I2S ADC
+inputs (on the AudigyDrive). The result samples are forwarded to the front
+DAC PCM slots of the Philips DAC.</p>
+</section>
+<section id="name-aux2-capture-volume-index-1">
+<h3>name=’Aux2 Capture Volume’,index=1<a class="headerlink" href="#name-aux2-capture-volume-index-1" title="Permalink to this headline">¶</a></h3>
+<p>This control is used to attenuate samples from left and right I2S ADC
+inputs (on the AudigyDrive). The result samples are forwarded to the ADC
+capture FIFO (thus to the standard capture PCM device).</p>
+</section>
+<section id="name-front-playback-volume-index-0">
+<h3>name=’Front Playback Volume’,index=0<a class="headerlink" href="#name-front-playback-volume-index-0" title="Permalink to this headline">¶</a></h3>
+<p>All stereo signals are mixed together and mirrored to surround, center and LFE.
+This control is used to attenuate samples for left and right front speakers of
+this mix.</p>
+</section>
+<section id="name-surround-playback-volume-index-0">
+<h3>name=’Surround Playback Volume’,index=0<a class="headerlink" href="#name-surround-playback-volume-index-0" title="Permalink to this headline">¶</a></h3>
+<p>All stereo signals are mixed together and mirrored to surround, center and LFE.
+This control is used to attenuate samples for left and right surround speakers of
+this mix.</p>
+</section>
+<section id="name-center-playback-volume-index-0">
+<h3>name=’Center Playback Volume’,index=0<a class="headerlink" href="#name-center-playback-volume-index-0" title="Permalink to this headline">¶</a></h3>
+<p>All stereo signals are mixed together and mirrored to surround, center and LFE.
+This control is used to attenuate sample for center speaker of this mix.</p>
+</section>
+<section id="name-lfe-playback-volume-index-0">
+<h3>name=’LFE Playback Volume’,index=0<a class="headerlink" href="#name-lfe-playback-volume-index-0" title="Permalink to this headline">¶</a></h3>
+<p>All stereo signals are mixed together and mirrored to surround, center and LFE.
+This control is used to attenuate sample for LFE speaker of this mix.</p>
+</section>
+<section id="name-tone-control-switch-index-0">
+<h3>name=’Tone Control - Switch’,index=0<a class="headerlink" href="#name-tone-control-switch-index-0" title="Permalink to this headline">¶</a></h3>
+<p>This control turns the tone control on or off. The samples for front, rear
+and center / LFE outputs are affected.</p>
+</section>
+<section id="name-tone-control-bass-index-0">
+<h3>name=’Tone Control - Bass’,index=0<a class="headerlink" href="#name-tone-control-bass-index-0" title="Permalink to this headline">¶</a></h3>
+<p>This control sets the bass intensity. There is no neutral value!!
+When the tone control code is activated, the samples are always modified.
+The closest value to pure signal is 20.</p>
+</section>
+<section id="name-tone-control-treble-index-0">
+<h3>name=’Tone Control - Treble’,index=0<a class="headerlink" href="#name-tone-control-treble-index-0" title="Permalink to this headline">¶</a></h3>
+<p>This control sets the treble intensity. There is no neutral value!!
+When the tone control code is activated, the samples are always modified.
+The closest value to pure signal is 20.</p>
+</section>
+<section id="name-master-playback-volume-index-0">
+<h3>name=’Master Playback Volume’,index=0<a class="headerlink" href="#name-master-playback-volume-index-0" title="Permalink to this headline">¶</a></h3>
+<p>This control is used to attenuate samples for front, surround, center and
+LFE outputs.</p>
+</section>
+<section id="name-iec958-optical-raw-playback-switch-index-0">
+<h3>name=’IEC958 Optical Raw Playback Switch’,index=0<a class="headerlink" href="#name-iec958-optical-raw-playback-switch-index-0" title="Permalink to this headline">¶</a></h3>
+<p>If this switch is on, then the samples for the IEC958 (S/PDIF) digital
+output are taken only from the raw FX8010 PCM, otherwise standard front
+PCM samples are taken.</p>
+</section>
+</section>
+<section id="pcm-stream-related-controls">
+<h2>PCM stream related controls<a class="headerlink" href="#pcm-stream-related-controls" title="Permalink to this headline">¶</a></h2>
+<section id="name-emu10k1-pcm-volume-index-0-31">
+<h3>name=’EMU10K1 PCM Volume’,index 0-31<a class="headerlink" href="#name-emu10k1-pcm-volume-index-0-31" title="Permalink to this headline">¶</a></h3>
+<p>Channel volume attenuation in range 0-0xffff. The maximum value (no
+attenuation) is default. The channel mapping for three values is
+as follows:</p>
+<ul class="simple">
+<li><p>0 - mono, default 0xffff (no attenuation)</p></li>
+<li><p>1 - left, default 0xffff (no attenuation)</p></li>
+<li><p>2 - right, default 0xffff (no attenuation)</p></li>
+</ul>
+</section>
+<section id="name-emu10k1-pcm-send-routing-index-0-31">
+<h3>name=’EMU10K1 PCM Send Routing’,index 0-31<a class="headerlink" href="#name-emu10k1-pcm-send-routing-index-0-31" title="Permalink to this headline">¶</a></h3>
+<p>This control specifies the destination - FX-bus accumulators. There 24
+values with this mapping:</p>
+<ul class="simple">
+<li><p>0 -  mono, A destination (FX-bus 0-63), default 0</p></li>
+<li><p>1 -  mono, B destination (FX-bus 0-63), default 1</p></li>
+<li><p>2 -  mono, C destination (FX-bus 0-63), default 2</p></li>
+<li><p>3 -  mono, D destination (FX-bus 0-63), default 3</p></li>
+<li><p>4 -  mono, E destination (FX-bus 0-63), default 0</p></li>
+<li><p>5 -  mono, F destination (FX-bus 0-63), default 0</p></li>
+<li><p>6 -  mono, G destination (FX-bus 0-63), default 0</p></li>
+<li><p>7 -  mono, H destination (FX-bus 0-63), default 0</p></li>
+<li><p>8 -  left, A destination (FX-bus 0-63), default 0</p></li>
+<li><p>9 -  left, B destination (FX-bus 0-63), default 1</p></li>
+<li><p>10 -  left, C destination (FX-bus 0-63), default 2</p></li>
+<li><p>11 -  left, D destination (FX-bus 0-63), default 3</p></li>
+<li><p>12 -  left, E destination (FX-bus 0-63), default 0</p></li>
+<li><p>13 -  left, F destination (FX-bus 0-63), default 0</p></li>
+<li><p>14 -  left, G destination (FX-bus 0-63), default 0</p></li>
+<li><p>15 -  left, H destination (FX-bus 0-63), default 0</p></li>
+<li><p>16 - right, A destination (FX-bus 0-63), default 0</p></li>
+<li><p>17 - right, B destination (FX-bus 0-63), default 1</p></li>
+<li><p>18 - right, C destination (FX-bus 0-63), default 2</p></li>
+<li><p>19 - right, D destination (FX-bus 0-63), default 3</p></li>
+<li><p>20 - right, E destination (FX-bus 0-63), default 0</p></li>
+<li><p>21 - right, F destination (FX-bus 0-63), default 0</p></li>
+<li><p>22 - right, G destination (FX-bus 0-63), default 0</p></li>
+<li><p>23 - right, H destination (FX-bus 0-63), default 0</p></li>
+</ul>
+<p>Don’t forget that it’s illegal to assign a channel to the same FX-bus accumulator
+more than once (it means 0=0 &amp;&amp; 1=0 is an invalid combination).</p>
+</section>
+<section id="name-emu10k1-pcm-send-volume-index-0-31">
+<h3>name=’EMU10K1 PCM Send Volume’,index 0-31<a class="headerlink" href="#name-emu10k1-pcm-send-volume-index-0-31" title="Permalink to this headline">¶</a></h3>
+<p>It specifies the attenuation (amount) for given destination in range 0-255.
+The channel mapping is following:</p>
+<ul class="simple">
+<li><p>0 -  mono, A destination attn, default 255 (no attenuation)</p></li>
+<li><p>1 -  mono, B destination attn, default 255 (no attenuation)</p></li>
+<li><p>2 -  mono, C destination attn, default 0 (mute)</p></li>
+<li><p>3 -  mono, D destination attn, default 0 (mute)</p></li>
+<li><p>4 -  mono, E destination attn, default 0 (mute)</p></li>
+<li><p>5 -  mono, F destination attn, default 0 (mute)</p></li>
+<li><p>6 -  mono, G destination attn, default 0 (mute)</p></li>
+<li><p>7 -  mono, H destination attn, default 0 (mute)</p></li>
+<li><p>8 -  left, A destination attn, default 255 (no attenuation)</p></li>
+<li><p>9 -  left, B destination attn, default 0 (mute)</p></li>
+<li><p>10 -  left, C destination attn, default 0 (mute)</p></li>
+<li><p>11 -  left, D destination attn, default 0 (mute)</p></li>
+<li><p>12 -  left, E destination attn, default 0 (mute)</p></li>
+<li><p>13 -  left, F destination attn, default 0 (mute)</p></li>
+<li><p>14 -  left, G destination attn, default 0 (mute)</p></li>
+<li><p>15 -  left, H destination attn, default 0 (mute)</p></li>
+<li><p>16 - right, A destination attn, default 0 (mute)</p></li>
+<li><p>17 - right, B destination attn, default 255 (no attenuation)</p></li>
+<li><p>18 - right, C destination attn, default 0 (mute)</p></li>
+<li><p>19 - right, D destination attn, default 0 (mute)</p></li>
+<li><p>20 - right, E destination attn, default 0 (mute)</p></li>
+<li><p>21 - right, F destination attn, default 0 (mute)</p></li>
+<li><p>22 - right, G destination attn, default 0 (mute)</p></li>
+<li><p>23 - right, H destination attn, default 0 (mute)</p></li>
+</ul>
+</section>
+</section>
+<section id="manuals-patents">
+<h2>MANUALS/PATENTS<a class="headerlink" href="#manuals-patents" title="Permalink to this headline">¶</a></h2>
+<section id="ftp-opensource-creative-com-pub-doc">
+<h3><a class="reference external" href="ftp://opensource.creative.com/pub/doc">ftp://opensource.creative.com/pub/doc</a><a class="headerlink" href="#ftp-opensource-creative-com-pub-doc" title="Permalink to this headline">¶</a></h3>
+<dl class="simple">
+<dt>LM4545.pdf</dt><dd><p>AC97 Codec</p>
+</dd>
+<dt>m2049.pdf</dt><dd><p>The EMU10K1 Digital Audio Processor</p>
+</dd>
+<dt>hog63.ps</dt><dd><p>FX8010 - A DSP Chip Architecture for Audio Effects</p>
+</dd>
+</dl>
+</section>
+<section id="wipo-patents">
+<h3>WIPO Patents<a class="headerlink" href="#wipo-patents" title="Permalink to this headline">¶</a></h3>
+<dl class="simple">
+<dt>WO 9901813 (A1)</dt><dd><p>Audio Effects Processor with multiple asynchronous streams
+(Jan. 14, 1999)</p>
+</dd>
+<dt>WO 9901814 (A1)</dt><dd><p>Processor with Instruction Set for Audio Effects (Jan. 14, 1999)</p>
+</dd>
+<dt>WO 9901953 (A1)</dt><dd><p>Audio Effects Processor having Decoupled Instruction
+Execution and Audio Data Sequencing (Jan. 14, 1999)</p>
+</dd>
+</dl>
+</section>
+<section id="us-patents-https-www-uspto-gov">
+<h3>US Patents (<a class="reference external" href="https://www.uspto.gov/">https://www.uspto.gov/</a>)<a class="headerlink" href="#us-patents-https-www-uspto-gov" title="Permalink to this headline">¶</a></h3>
+<dl class="simple">
+<dt>US 5925841</dt><dd><p>Digital Sampling Instrument employing cache memory (Jul. 20, 1999)</p>
+</dd>
+<dt>US 5928342</dt><dd><p>Audio Effects Processor integrated on a single chip
+with a multiport memory onto which multiple asynchronous
+digital sound samples can be concurrently loaded
+(Jul. 27, 1999)</p>
+</dd>
+<dt>US 5930158</dt><dd><p>Processor with Instruction Set for Audio Effects (Jul. 27, 1999)</p>
+</dd>
+<dt>US 6032235</dt><dd><p>Memory initialization circuit (Tram) (Feb. 29, 2000)</p>
+</dd>
+<dt>US 6138207</dt><dd><p>Interpolation looping of audio samples in cache connected to
+system bus with prioritization and modification of bus transfers
+in accordance with loop ends and minimum block sizes
+(Oct. 24, 2000)</p>
+</dd>
+<dt>US 6151670</dt><dd><p>Method for conserving memory storage using a
+pool of  short term memory registers
+(Nov. 21, 2000)</p>
+</dd>
+<dt>US 6195715</dt><dd><p>Interrupt control for multiple programs communicating with
+a common interrupt by associating programs to GP registers,
+defining interrupt register, polling GP registers, and invoking
+callback routine associated with defined interrupt register
+(Feb. 27, 2001)</p>
+</dd>
+</dl>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Sound Blaster Audigy mixer / default DSP code</a><ul>
+<li><a class="reference internal" href="#digital-mixer-controls">Digital mixer controls</a><ul>
+<li><a class="reference internal" href="#name-pcm-front-playback-volume-index-0">name=’PCM Front Playback Volume’,index=0</a></li>
+<li><a class="reference internal" href="#name-pcm-surround-playback-volume-index-0">name=’PCM Surround Playback Volume’,index=0</a></li>
+<li><a class="reference internal" href="#name-pcm-center-playback-volume-index-0">name=’PCM Center Playback Volume’,index=0</a></li>
+<li><a class="reference internal" href="#name-pcm-lfe-playback-volume-index-0">name=’PCM LFE Playback Volume’,index=0</a></li>
+<li><a class="reference internal" href="#name-pcm-playback-volume-index-0">name=’PCM Playback Volume’,index=0</a></li>
+<li><a class="reference internal" href="#name-pcm-capture-volume-index-0">name=’PCM Capture Volume’,index=0</a></li>
+<li><a class="reference internal" href="#name-music-playback-volume-index-0">name=’Music Playback Volume’,index=0</a></li>
+<li><a class="reference internal" href="#name-music-capture-volume-index-0">name=’Music Capture Volume’,index=0</a></li>
+<li><a class="reference internal" href="#name-mic-playback-volume-index-0">name=’Mic Playback Volume’,index=0</a></li>
+<li><a class="reference internal" href="#name-mic-capture-volume-index-0">name=’Mic Capture Volume’,index=0</a></li>
+<li><a class="reference internal" href="#name-audigy-cd-playback-volume-index-0">name=’Audigy CD Playback Volume’,index=0</a></li>
+<li><a class="reference internal" href="#name-audigy-cd-capture-volume-index-0">name=’Audigy CD Capture Volume’,index=0</a></li>
+<li><a class="reference internal" href="#name-iec958-optical-playback-volume-index-0">name=’IEC958 Optical Playback Volume’,index=0</a></li>
+<li><a class="reference internal" href="#name-iec958-optical-capture-volume-index-0">name=’IEC958 Optical Capture Volume’,index=0</a></li>
+<li><a class="reference internal" href="#name-line2-playback-volume-index-0">name=’Line2 Playback Volume’,index=0</a></li>
+<li><a class="reference internal" href="#name-line2-capture-volume-index-1">name=’Line2 Capture Volume’,index=1</a></li>
+<li><a class="reference internal" href="#name-analog-mix-playback-volume-index-0">name=’Analog Mix Playback Volume’,index=0</a></li>
+<li><a class="reference internal" href="#name-analog-mix-capture-volume-index-1">name=’Analog Mix Capture Volume’,index=1</a></li>
+<li><a class="reference internal" href="#name-aux2-playback-volume-index-0">name=’Aux2 Playback Volume’,index=0</a></li>
+<li><a class="reference internal" href="#name-aux2-capture-volume-index-1">name=’Aux2 Capture Volume’,index=1</a></li>
+<li><a class="reference internal" href="#name-front-playback-volume-index-0">name=’Front Playback Volume’,index=0</a></li>
+<li><a class="reference internal" href="#name-surround-playback-volume-index-0">name=’Surround Playback Volume’,index=0</a></li>
+<li><a class="reference internal" href="#name-center-playback-volume-index-0">name=’Center Playback Volume’,index=0</a></li>
+<li><a class="reference internal" href="#name-lfe-playback-volume-index-0">name=’LFE Playback Volume’,index=0</a></li>
+<li><a class="reference internal" href="#name-tone-control-switch-index-0">name=’Tone Control - Switch’,index=0</a></li>
+<li><a class="reference internal" href="#name-tone-control-bass-index-0">name=’Tone Control - Bass’,index=0</a></li>
+<li><a class="reference internal" href="#name-tone-control-treble-index-0">name=’Tone Control - Treble’,index=0</a></li>
+<li><a class="reference internal" href="#name-master-playback-volume-index-0">name=’Master Playback Volume’,index=0</a></li>
+<li><a class="reference internal" href="#name-iec958-optical-raw-playback-switch-index-0">name=’IEC958 Optical Raw Playback Switch’,index=0</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#pcm-stream-related-controls">PCM stream related controls</a><ul>
+<li><a class="reference internal" href="#name-emu10k1-pcm-volume-index-0-31">name=’EMU10K1 PCM Volume’,index 0-31</a></li>
+<li><a class="reference internal" href="#name-emu10k1-pcm-send-routing-index-0-31">name=’EMU10K1 PCM Send Routing’,index 0-31</a></li>
+<li><a class="reference internal" href="#name-emu10k1-pcm-send-volume-index-0-31">name=’EMU10K1 PCM Send Volume’,index 0-31</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#manuals-patents">MANUALS/PATENTS</a><ul>
+<li><a class="reference internal" href="#ftp-opensource-creative-com-pub-doc">ftp://opensource.creative.com/pub/doc</a></li>
+<li><a class="reference internal" href="#wipo-patents">WIPO Patents</a></li>
+<li><a class="reference internal" href="#us-patents-https-www-uspto-gov">US Patents (https://www.uspto.gov/)</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/sound/cards/audigy-mixer.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/sound/cards/audigy-mixer.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

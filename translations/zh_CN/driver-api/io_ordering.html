@@ -1,0 +1,159 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>对内存映射地址的I/O写入排序 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="锁" href="../locking/index.html" />
+    <link rel="prev" title="传统GPIO接口" href="gpio/legacy.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../driver-api/io_ordering.html"><span class="doc">Ordering I/O writes to memory-mapped addresses</span></a></p>
+</dd>
+<dt class="field-even">翻译</dt>
+<dd class="field-even"><p>林永听 Lin Yongting &lt;<a class="reference external" href="mailto:linyongting&#37;&#52;&#48;gmail&#46;com">linyongting<span>&#64;</span>gmail<span>&#46;</span>com</a>&gt;
+司延腾 Yanteng Si &lt;<a class="reference external" href="mailto:siyanteng&#37;&#52;&#48;loongson&#46;cn">siyanteng<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+<dt class="field-odd">校译</dt>
+<dd class="field-odd"><p></p></dd>
+</dl>
+<section id="i-o">
+<h1>对内存映射地址的I/O写入排序<a class="headerlink" href="#i-o" title="Permalink to this headline">¶</a></h1>
+<p>在某些平台上，所谓的内存映射I/O是弱顺序。在这些平台上，驱动开发者有责任
+保证I/O内存映射地址的写操作按程序图意的顺序达到设备。通常读取一个“安全”
+设备寄存器或桥寄存器，触发IO芯片清刷未处理的写操作到达设备后才处理读操作，
+而达到保证目的。驱动程序通常在spinlock保护的临界区退出之前使用这种技术。
+这也可以保证后面的写操作只在前面的写操作之后到达设备（这非常类似于内存
+屏障操作，mb()，不过仅适用于I/O）。</p>
+<p>假设一个设备驱动程的具体例子:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>        ...
+CPU A:  spin_lock_irqsave(&amp;dev_lock, flags)
+CPU A:  val = readl(my_status);
+CPU A:  ...
+CPU A:  writel(newval, ring_ptr);
+CPU A:  spin_unlock_irqrestore(&amp;dev_lock, flags)
+        ...
+CPU B:  spin_lock_irqsave(&amp;dev_lock, flags)
+CPU B:  val = readl(my_status);
+CPU B:  ...
+CPU B:  writel(newval2, ring_ptr);
+CPU B:  spin_unlock_irqrestore(&amp;dev_lock, flags)
+        ...
+</pre></div>
+</div>
+<p>上述例子中，设备可能会先接收到newval2的值，然后接收到newval的值，问题就
+发生了。不过很容易通过下面方法来修复:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>        ...
+CPU A:  spin_lock_irqsave(&amp;dev_lock, flags)
+CPU A:  val = readl(my_status);
+CPU A:  ...
+CPU A:  writel(newval, ring_ptr);
+CPU A:  (void)readl(safe_register); /* 配置寄存器？*/
+CPU A:  spin_unlock_irqrestore(&amp;dev_lock, flags)
+        ...
+CPU B:  spin_lock_irqsave(&amp;dev_lock, flags)
+CPU B:  val = readl(my_status);
+CPU B:  ...
+CPU B:  writel(newval2, ring_ptr);
+CPU B:  (void)readl(safe_register); /* 配置寄存器？*/
+CPU B:  spin_unlock_irqrestore(&amp;dev_lock, flags)
+</pre></div>
+</div>
+<p>在解决方案中，读取safe_register寄存器，触发IO芯片清刷未处理的写操作，
+再处理后面的读操作，防止引发数据不一致问题。</p>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/driver-api/io_ordering.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/driver-api/io_ordering.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

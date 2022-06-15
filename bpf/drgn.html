@@ -1,0 +1,298 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>BPF drgn tools &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Testing BPF on s390" href="s390.html" />
+    <link rel="prev" title="Testing and debugging BPF" href="test_debug.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="bpf-drgn-tools">
+<h1>BPF drgn tools<a class="headerlink" href="#bpf-drgn-tools" title="Permalink to this headline">¶</a></h1>
+<p>drgn scripts is a convenient and easy to use mechanism to retrieve arbitrary
+kernel data structures. drgn is not relying on kernel UAPI to read the data.
+Instead it’s reading directly from <code class="docutils literal notranslate"><span class="pre">/proc/kcore</span></code> or vmcore and pretty prints
+the data based on DWARF debug information from vmlinux.</p>
+<p>This document describes BPF related drgn tools.</p>
+<p>See <a class="reference external" href="https://github.com/osandov/drgn/tree/master/tools">drgn/tools</a> for all tools available at the moment and <a class="reference external" href="https://drgn.readthedocs.io/en/latest/">drgn/doc</a> for
+more details on drgn itself.</p>
+<section id="bpf-inspect-py">
+<h2>bpf_inspect.py<a class="headerlink" href="#bpf-inspect-py" title="Permalink to this headline">¶</a></h2>
+<section id="description">
+<h3>Description<a class="headerlink" href="#description" title="Permalink to this headline">¶</a></h3>
+<p><a class="reference external" href="https://github.com/osandov/drgn/blob/master/tools/bpf_inspect.py">bpf_inspect.py</a> is a tool intended to inspect BPF programs and maps. It can
+iterate over all programs and maps in the system and print basic information
+about these objects, including id, type and name.</p>
+<p>The main use-case <a class="reference external" href="https://github.com/osandov/drgn/blob/master/tools/bpf_inspect.py">bpf_inspect.py</a> covers is to show BPF programs of types
+<code class="docutils literal notranslate"><span class="pre">BPF_PROG_TYPE_EXT</span></code> and <code class="docutils literal notranslate"><span class="pre">BPF_PROG_TYPE_TRACING</span></code> attached to other BPF
+programs via <code class="docutils literal notranslate"><span class="pre">freplace</span></code>/<code class="docutils literal notranslate"><span class="pre">fentry</span></code>/<code class="docutils literal notranslate"><span class="pre">fexit</span></code> mechanisms, since there is no
+user-space API to get this information.</p>
+</section>
+<section id="getting-started">
+<h3>Getting started<a class="headerlink" href="#getting-started" title="Permalink to this headline">¶</a></h3>
+<p>List BPF programs (full names are obtained from BTF):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>% sudo bpf_inspect.py prog
+    27: BPF_PROG_TYPE_TRACEPOINT         tracepoint__tcp__tcp_send_reset
+  4632: BPF_PROG_TYPE_CGROUP_SOCK_ADDR   tw_ipt_bind
+ 49464: BPF_PROG_TYPE_RAW_TRACEPOINT     raw_tracepoint__sched_process_exit
+</pre></div>
+</div>
+<p>List BPF maps:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>% sudo bpf_inspect.py map
+  2577: BPF_MAP_TYPE_HASH                tw_ipt_vips
+  4050: BPF_MAP_TYPE_STACK_TRACE         stack_traces
+  4069: BPF_MAP_TYPE_PERCPU_ARRAY        ned_dctcp_cntr
+</pre></div>
+</div>
+<p>Find BPF programs attached to BPF program <code class="docutils literal notranslate"><span class="pre">test_pkt_access</span></code>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>% sudo bpf_inspect.py p | grep test_pkt_access
+   650: BPF_PROG_TYPE_SCHED_CLS          test_pkt_access
+   654: BPF_PROG_TYPE_TRACING            test_main                        linked:[650-&gt;25: BPF_TRAMP_FEXIT test_pkt_access-&gt;test_pkt_access()]
+   655: BPF_PROG_TYPE_TRACING            test_subprog1                    linked:[650-&gt;29: BPF_TRAMP_FEXIT test_pkt_access-&gt;test_pkt_access_subprog1()]
+   656: BPF_PROG_TYPE_TRACING            test_subprog2                    linked:[650-&gt;31: BPF_TRAMP_FEXIT test_pkt_access-&gt;test_pkt_access_subprog2()]
+   657: BPF_PROG_TYPE_TRACING            test_subprog3                    linked:[650-&gt;21: BPF_TRAMP_FEXIT test_pkt_access-&gt;test_pkt_access_subprog3()]
+   658: BPF_PROG_TYPE_EXT                new_get_skb_len                  linked:[650-&gt;16: BPF_TRAMP_REPLACE test_pkt_access-&gt;get_skb_len()]
+   659: BPF_PROG_TYPE_EXT                new_get_skb_ifindex              linked:[650-&gt;23: BPF_TRAMP_REPLACE test_pkt_access-&gt;get_skb_ifindex()]
+   660: BPF_PROG_TYPE_EXT                new_get_constant                 linked:[650-&gt;19: BPF_TRAMP_REPLACE test_pkt_access-&gt;get_constant()]
+</pre></div>
+</div>
+<p>It can be seen that there is a program <code class="docutils literal notranslate"><span class="pre">test_pkt_access</span></code>, id 650 and there
+are multiple other tracing and ext programs attached to functions in
+<code class="docutils literal notranslate"><span class="pre">test_pkt_access</span></code>.</p>
+<p>For example the line:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>658: BPF_PROG_TYPE_EXT                new_get_skb_len                  linked:[650-&gt;16: BPF_TRAMP_REPLACE test_pkt_access-&gt;get_skb_len()]
+</pre></div>
+</div>
+<p>, means that BPF program id 658, type <code class="docutils literal notranslate"><span class="pre">BPF_PROG_TYPE_EXT</span></code>, name
+<code class="docutils literal notranslate"><span class="pre">new_get_skb_len</span></code> replaces (<code class="docutils literal notranslate"><span class="pre">BPF_TRAMP_REPLACE</span></code>) function <code class="docutils literal notranslate"><span class="pre">get_skb_len()</span></code>
+that has BTF id 16 in BPF program id 650, name <code class="docutils literal notranslate"><span class="pre">test_pkt_access</span></code>.</p>
+<p>Getting help:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>% sudo bpf_inspect.py
+usage: bpf_inspect.py [-h] {prog,p,map,m} ...
+
+drgn script to list BPF programs or maps and their properties
+unavailable via kernel API.
+
+See https://github.com/osandov/drgn/ for more details on drgn.
+
+optional arguments:
+  -h, --help      show this help message and exit
+
+subcommands:
+  {prog,p,map,m}
+    prog (p)      list BPF programs
+    map (m)       list BPF maps
+</pre></div>
+</div>
+</section>
+<section id="customization">
+<h3>Customization<a class="headerlink" href="#customization" title="Permalink to this headline">¶</a></h3>
+<p>The script is intended to be customized by developers to print relevant
+information about BPF programs, maps and other objects.</p>
+<p>For example, to print <code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">bpf_prog_aux</span></code> for BPF program id 53077:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>% git diff
+diff --git a/tools/bpf_inspect.py b/tools/bpf_inspect.py
+index 650e228..aea2357 100755
+--- a/tools/bpf_inspect.py
++++ b/tools/bpf_inspect.py
+@@ -112,7 +112,9 @@ def list_bpf_progs(args):
+         if linked:
+             linked = f&quot; linked:[{linked}]&quot;
+
+-        print(f&quot;{id_:&gt;6}: {type_:32} {name:32} {linked}&quot;)
++        if id_ == 53077:
++            print(f&quot;{id_:&gt;6}: {type_:32} {name:32}&quot;)
++            print(f&quot;{bpf_prog.aux}&quot;)
+
+
+ def list_bpf_maps(args):
+</pre></div>
+</div>
+<p>It produces the output:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>% sudo bpf_inspect.py p
+ 53077: BPF_PROG_TYPE_XDP                tw_xdp_policer
+*(struct bpf_prog_aux *)0xffff8893fad4b400 = {
+        .refcnt = (atomic64_t){
+                .counter = (long)58,
+        },
+        .used_map_cnt = (u32)1,
+        .max_ctx_offset = (u32)8,
+        .max_pkt_offset = (u32)15,
+        .max_tp_access = (u32)0,
+        .stack_depth = (u32)8,
+        .id = (u32)53077,
+        .func_cnt = (u32)0,
+        .func_idx = (u32)0,
+        .attach_btf_id = (u32)0,
+        .linked_prog = (struct bpf_prog *)0x0,
+        .verifier_zext = (bool)0,
+        .offload_requested = (bool)0,
+        .attach_btf_trace = (bool)0,
+        .func_proto_unreliable = (bool)0,
+        .trampoline_prog_type = (enum bpf_tramp_prog_type)BPF_TRAMP_FENTRY,
+        .trampoline = (struct bpf_trampoline *)0x0,
+        .tramp_hlist = (struct hlist_node){
+                .next = (struct hlist_node *)0x0,
+                .pprev = (struct hlist_node **)0x0,
+        },
+        .attach_func_proto = (const struct btf_type *)0x0,
+        .attach_func_name = (const char *)0x0,
+        .func = (struct bpf_prog **)0x0,
+        .jit_data = (void *)0x0,
+        .poke_tab = (struct bpf_jit_poke_descriptor *)0x0,
+        .size_poke_tab = (u32)0,
+        .ksym_tnode = (struct latch_tree_node){
+                .node = (struct rb_node [2]){
+                        {
+                                .__rb_parent_color = (unsigned long)18446612956263126665,
+                                .rb_right = (struct rb_node *)0x0,
+                                .rb_left = (struct rb_node *)0xffff88a0be3d0088,
+                        },
+                        {
+                                .__rb_parent_color = (unsigned long)18446612956263126689,
+                                .rb_right = (struct rb_node *)0x0,
+                                .rb_left = (struct rb_node *)0xffff88a0be3d00a0,
+                        },
+                },
+        },
+        .ksym_lnode = (struct list_head){
+                .next = (struct list_head *)0xffff88bf481830b8,
+                .prev = (struct list_head *)0xffff888309f536b8,
+        },
+        .ops = (const struct bpf_prog_ops *)xdp_prog_ops+0x0 = 0xffffffff820fa350,
+        .used_maps = (struct bpf_map **)0xffff889ff795de98,
+        .prog = (struct bpf_prog *)0xffffc9000cf2d000,
+        .user = (struct user_struct *)root_user+0x0 = 0xffffffff82444820,
+        .load_time = (u64)2408348759285319,
+        .cgroup_storage = (struct bpf_map *[2]){},
+        .name = (char [16])&quot;tw_xdp_policer&quot;,
+        .security = (void *)0xffff889ff795d548,
+        .offload = (struct bpf_prog_offload *)0x0,
+        .btf = (struct btf *)0xffff8890ce6d0580,
+        .func_info = (struct bpf_func_info *)0xffff889ff795d240,
+        .func_info_aux = (struct bpf_func_info_aux *)0xffff889ff795de20,
+        .linfo = (struct bpf_line_info *)0xffff888a707afc00,
+        .jited_linfo = (void **)0xffff8893fad48600,
+        .func_info_cnt = (u32)1,
+        .nr_linfo = (u32)37,
+        .linfo_idx = (u32)0,
+        .num_exentries = (u32)0,
+        .extable = (struct exception_table_entry *)0xffffffffa032d950,
+        .stats = (struct bpf_prog_stats *)0x603fe3a1f6d0,
+        .work = (struct work_struct){
+                .data = (atomic_long_t){
+                        .counter = (long)0,
+                },
+                .entry = (struct list_head){
+                        .next = (struct list_head *)0x0,
+                        .prev = (struct list_head *)0x0,
+                },
+                .func = (work_func_t)0x0,
+        },
+        .rcu = (struct callback_head){
+                .next = (struct callback_head *)0x0,
+                .func = (void (*)(struct callback_head *))0x0,
+        },
+}
+</pre></div>
+</div>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">BPF drgn tools</a><ul>
+<li><a class="reference internal" href="#bpf-inspect-py">bpf_inspect.py</a><ul>
+<li><a class="reference internal" href="#description">Description</a></li>
+<li><a class="reference internal" href="#getting-started">Getting started</a></li>
+<li><a class="reference internal" href="#customization">Customization</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/bpf/drgn.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/bpf/drgn.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

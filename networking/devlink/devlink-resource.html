@@ -1,0 +1,175 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Devlink Resource &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Devlink Reload" href="devlink-reload.html" />
+    <link rel="prev" title="Devlink Region" href="devlink-region.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="devlink-resource">
+<h1>Devlink Resource<a class="headerlink" href="#devlink-resource" title="Permalink to this headline">¶</a></h1>
+<p><code class="docutils literal notranslate"><span class="pre">devlink</span></code> provides the ability for drivers to register resources, which
+can allow administrators to see the device restrictions for a given
+resource, as well as how much of the given resource is currently
+in use. Additionally, these resources can optionally have configurable size.
+This could enable the administrator to limit the number of resources that
+are used.</p>
+<p>For example, the <code class="docutils literal notranslate"><span class="pre">netdevsim</span></code> driver enables <code class="docutils literal notranslate"><span class="pre">/IPv4/fib</span></code> and
+<code class="docutils literal notranslate"><span class="pre">/IPv4/fib-rules</span></code> as resources to limit the number of IPv4 FIB entries and
+rules for a given device.</p>
+<section id="resource-ids">
+<h2>Resource Ids<a class="headerlink" href="#resource-ids" title="Permalink to this headline">¶</a></h2>
+<p>Each resource is represented by an id, and contains information about its
+current size and related sub resources. To access a sub resource, you
+specify the path of the resource. For example <code class="docutils literal notranslate"><span class="pre">/IPv4/fib</span></code> is the id for
+the <code class="docutils literal notranslate"><span class="pre">fib</span></code> sub-resource under the <code class="docutils literal notranslate"><span class="pre">IPv4</span></code> resource.</p>
+</section>
+<section id="generic-resources">
+<h2>Generic Resources<a class="headerlink" href="#generic-resources" title="Permalink to this headline">¶</a></h2>
+<p>Generic resources are used to describe resources that can be shared by multiple
+device drivers and their description must be added to the following table:</p>
+<table class="colwidths-given docutils align-default" id="id1">
+<caption><span class="caption-text">List of Generic Resources</span><a class="headerlink" href="#id1" title="Permalink to this table">¶</a></caption>
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>Name</p></td>
+<td><p>Description</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">physical_ports</span></code></p></td>
+<td><p>A limited capacity of physical ports that the switch ASIC can support</p></td>
+</tr>
+</tbody>
+</table>
+<section id="example-usage">
+<h3>example usage<a class="headerlink" href="#example-usage" title="Permalink to this headline">¶</a></h3>
+<p>The resources exposed by the driver can be observed, for example:</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span><span class="nv">$devlink</span> resource show pci/0000:03:00.0
+pci/0000:03:00.0:
+  name kvd size <span class="m">245760</span> unit entry
+    resources:
+      name linear size <span class="m">98304</span> occ <span class="m">0</span> unit entry size_min <span class="m">0</span> size_max <span class="m">147456</span> size_gran <span class="m">128</span>
+      name hash_double size <span class="m">60416</span> unit entry size_min <span class="m">32768</span> size_max <span class="m">180224</span> size_gran <span class="m">128</span>
+      name hash_single size <span class="m">87040</span> unit entry size_min <span class="m">65536</span> size_max <span class="m">212992</span> size_gran <span class="m">128</span>
+</pre></div>
+</div>
+<p>Some resource’s size can be changed. Examples:</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span><span class="nv">$devlink</span> resource <span class="nb">set</span> pci/0000:03:00.0 path /kvd/hash_single size <span class="m">73088</span>
+<span class="nv">$devlink</span> resource <span class="nb">set</span> pci/0000:03:00.0 path /kvd/hash_double size <span class="m">74368</span>
+</pre></div>
+</div>
+<p>The changes do not apply immediately, this can be validated by the ‘size_new’
+attribute, which represents the pending change in size. For example:</p>
+<div class="highlight-shell notranslate"><div class="highlight"><pre><span></span><span class="nv">$devlink</span> resource show pci/0000:03:00.0
+pci/0000:03:00.0:
+  name kvd size <span class="m">245760</span> unit entry size_valid <span class="nb">false</span>
+  resources:
+    name linear size <span class="m">98304</span> size_new <span class="m">147456</span> occ <span class="m">0</span> unit entry size_min <span class="m">0</span> size_max <span class="m">147456</span> size_gran <span class="m">128</span>
+    name hash_double size <span class="m">60416</span> unit entry size_min <span class="m">32768</span> size_max <span class="m">180224</span> size_gran <span class="m">128</span>
+    name hash_single size <span class="m">87040</span> unit entry size_min <span class="m">65536</span> size_max <span class="m">212992</span> size_gran <span class="m">128</span>
+</pre></div>
+</div>
+<p>Note that changes in resource size may require a device reload to properly
+take effect.</p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Devlink Resource</a><ul>
+<li><a class="reference internal" href="#resource-ids">Resource Ids</a></li>
+<li><a class="reference internal" href="#generic-resources">Generic Resources</a><ul>
+<li><a class="reference internal" href="#example-usage">example usage</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/networking/devlink/devlink-resource.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/networking/devlink/devlink-resource.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

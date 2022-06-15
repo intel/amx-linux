@@ -1,0 +1,232 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>9.3. Configuring PCI Endpoint Using CONFIGFS &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="9.4. PCI Test Function" href="pci-test-function.html" />
+    <link rel="prev" title="9.1. Introduction" href="pci-endpoint.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="configuring-pci-endpoint-using-configfs">
+<h1><span class="section-number">9.3. </span>Configuring PCI Endpoint Using CONFIGFS<a class="headerlink" href="#configuring-pci-endpoint-using-configfs" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">Author</dt>
+<dd class="field-odd"><p>Kishon Vijay Abraham I &lt;<a class="reference external" href="mailto:kishon&#37;&#52;&#48;ti&#46;com">kishon<span>&#64;</span>ti<span>&#46;</span>com</a>&gt;</p>
+</dd>
+</dl>
+<p>The PCI Endpoint Core exposes configfs entry (pci_ep) to configure the
+PCI endpoint function and to bind the endpoint function
+with the endpoint controller. (For introducing other mechanisms to
+configure the PCI Endpoint Function refer to [1]).</p>
+<section id="mounting-configfs">
+<h2><span class="section-number">9.3.1. </span>Mounting configfs<a class="headerlink" href="#mounting-configfs" title="Permalink to this headline">¶</a></h2>
+<p>The PCI Endpoint Core layer creates pci_ep directory in the mounted configfs
+directory. configfs can be mounted using the following command:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>mount -t configfs none /sys/kernel/config
+</pre></div>
+</div>
+</section>
+<section id="directory-structure">
+<h2><span class="section-number">9.3.2. </span>Directory Structure<a class="headerlink" href="#directory-structure" title="Permalink to this headline">¶</a></h2>
+<p>The pci_ep configfs has two directories at its root: controllers and
+functions. Every EPC device present in the system will have an entry in
+the <em>controllers</em> directory and every EPF driver present in the system
+will have an entry in the <em>functions</em> directory.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/sys/kernel/config/pci_ep/
+        .. controllers/
+        .. functions/
+</pre></div>
+</div>
+</section>
+<section id="creating-epf-device">
+<h2><span class="section-number">9.3.3. </span>Creating EPF Device<a class="headerlink" href="#creating-epf-device" title="Permalink to this headline">¶</a></h2>
+<p>Every registered EPF driver will be listed in controllers directory. The
+entries corresponding to EPF driver will be created by the EPF core.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/sys/kernel/config/pci_ep/functions/
+        .. &lt;EPF Driver1&gt;/
+                ... &lt;EPF Device 11&gt;/
+                ... &lt;EPF Device 21&gt;/
+                ... &lt;EPF Device 31&gt;/
+        .. &lt;EPF Driver2&gt;/
+                ... &lt;EPF Device 12&gt;/
+                ... &lt;EPF Device 22&gt;/
+</pre></div>
+</div>
+<p>In order to create a &lt;EPF device&gt; of the type probed by &lt;EPF Driver&gt;, the
+user has to create a directory inside &lt;EPF DriverN&gt;.</p>
+<p>Every &lt;EPF device&gt; directory consists of the following entries that can be
+used to configure the standard configuration header of the endpoint function.
+(These entries are created by the framework when any new &lt;EPF Device&gt; is
+created)</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>.. &lt;EPF Driver1&gt;/
+        ... &lt;EPF Device 11&gt;/
+                ... vendorid
+                ... deviceid
+                ... revid
+                ... progif_code
+                ... subclass_code
+                ... baseclass_code
+                ... cache_line_size
+                ... subsys_vendor_id
+                ... subsys_id
+                ... interrupt_pin
+                ... &lt;Symlink EPF Device 31&gt;/
+                ... primary/
+                        ... &lt;Symlink EPC Device1&gt;/
+                ... secondary/
+                        ... &lt;Symlink EPC Device2&gt;/
+</pre></div>
+</div>
+<p>If an EPF device has to be associated with 2 EPCs (like in the case of
+Non-transparent bridge), symlink of endpoint controller connected to primary
+interface should be added in ‘primary’ directory and symlink of endpoint
+controller connected to secondary interface should be added in ‘secondary’
+directory.</p>
+<p>The &lt;EPF Device&gt; directory can have a list of symbolic links
+(&lt;Symlink EPF Device 31&gt;) to other &lt;EPF Device&gt;. These symbolic links should
+be created by the user to represent the virtual functions that are bound to
+the physical function. In the above directory structure &lt;EPF Device 11&gt; is a
+physical function and &lt;EPF Device 31&gt; is a virtual function. An EPF device once
+it’s linked to another EPF device, cannot be linked to a EPC device.</p>
+</section>
+<section id="epc-device">
+<h2><span class="section-number">9.3.4. </span>EPC Device<a class="headerlink" href="#epc-device" title="Permalink to this headline">¶</a></h2>
+<p>Every registered EPC device will be listed in controllers directory. The
+entries corresponding to EPC device will be created by the EPC core.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/sys/kernel/config/pci_ep/controllers/
+        .. &lt;EPC Device1&gt;/
+                ... &lt;Symlink EPF Device11&gt;/
+                ... &lt;Symlink EPF Device12&gt;/
+                ... start
+        .. &lt;EPC Device2&gt;/
+                ... &lt;Symlink EPF Device21&gt;/
+                ... &lt;Symlink EPF Device22&gt;/
+                ... start
+</pre></div>
+</div>
+<p>The &lt;EPC Device&gt; directory will have a list of symbolic links to
+&lt;EPF Device&gt;. These symbolic links should be created by the user to
+represent the functions present in the endpoint device. Only &lt;EPF Device&gt;
+that represents a physical function can be linked to a EPC device.</p>
+<p>The &lt;EPC Device&gt; directory will also have a <em>start</em> field. Once
+“1” is written to this field, the endpoint device will be ready to
+establish the link with the host. This is usually done after
+all the EPF devices are created and linked with the EPC device.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>| controllers/
+       | &lt;Directory: EPC name&gt;/
+               | &lt;Symbolic Link: Function&gt;
+               | start
+| functions/
+       | &lt;Directory: EPF driver&gt;/
+               | &lt;Directory: EPF device&gt;/
+                       | vendorid
+                       | deviceid
+                       | revid
+                       | progif_code
+                       | subclass_code
+                       | baseclass_code
+                       | cache_line_size
+                       | subsys_vendor_id
+                       | subsys_id
+                       | interrupt_pin
+                       | function
+</pre></div>
+</div>
+<p>[1] <a class="reference internal" href="pci-endpoint.html"><span class="doc">Introduction</span></a></p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">9.3. Configuring PCI Endpoint Using CONFIGFS</a><ul>
+<li><a class="reference internal" href="#mounting-configfs">9.3.1. Mounting configfs</a></li>
+<li><a class="reference internal" href="#directory-structure">9.3.2. Directory Structure</a></li>
+<li><a class="reference internal" href="#creating-epf-device">9.3.3. Creating EPF Device</a></li>
+<li><a class="reference internal" href="#epc-device">9.3.4. EPC Device</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/PCI/endpoint/pci-endpoint-cfs.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/PCI/endpoint/pci-endpoint-cfs.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,163 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>NFS ID Mapper &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="pNFS block layout server user guide" href="pnfs-block-server.html" />
+    <link rel="prev" title="Administrative interfaces for nfsd" href="nfsd-admin-interfaces.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="nfs-id-mapper">
+<h1>NFS ID Mapper<a class="headerlink" href="#nfs-id-mapper" title="Permalink to this headline">¶</a></h1>
+<p>Id mapper is used by NFS to translate user and group ids into names, and to
+translate user and group names into ids.  Part of this translation involves
+performing an upcall to userspace to request the information.  There are two
+ways NFS could obtain this information: placing a call to /sbin/request-key
+or by placing a call to the rpc.idmap daemon.</p>
+<p>NFS will attempt to call /sbin/request-key first.  If this succeeds, the
+result will be cached using the generic request-key cache.  This call should
+only fail if /etc/request-key.conf is not configured for the id_resolver key
+type, see the “Configuring” section below if you wish to use the request-key
+method.</p>
+<p>If the call to /sbin/request-key fails (if /etc/request-key.conf is not
+configured with the id_resolver key type), then the idmapper will ask the
+legacy rpc.idmap daemon for the id mapping.  This result will be stored
+in a custom NFS idmap cache.</p>
+<section id="configuring">
+<h2>Configuring<a class="headerlink" href="#configuring" title="Permalink to this headline">¶</a></h2>
+<p>The file /etc/request-key.conf will need to be modified so /sbin/request-key can
+direct the upcall.  The following line should be added:</p>
+<p><code class="docutils literal notranslate"><span class="pre">#OP</span>&#160;&#160; <span class="pre">TYPE</span>&#160;&#160;&#160; <span class="pre">DESCRIPTION</span>&#160;&#160;&#160;&#160; <span class="pre">CALLOUT</span> <span class="pre">INFO</span>&#160;&#160;&#160; <span class="pre">PROGRAM</span> <span class="pre">ARG1</span> <span class="pre">ARG2</span> <span class="pre">ARG3</span> <span class="pre">...</span></code>
+<code class="docutils literal notranslate"><span class="pre">#======</span>&#160;&#160;&#160;&#160;&#160;&#160; <span class="pre">=======</span> <span class="pre">===============</span> <span class="pre">===============</span> <span class="pre">===============================</span></code>
+<code class="docutils literal notranslate"><span class="pre">create</span>&#160;&#160;&#160;&#160;&#160;&#160;&#160; <span class="pre">id_resolver</span>&#160;&#160;&#160;&#160; <span class="pre">*</span>&#160;&#160;&#160;&#160;&#160;&#160; <span class="pre">*</span>&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160; <span class="pre">/usr/sbin/nfs.idmap</span> <span class="pre">%k</span> <span class="pre">%d</span> <span class="pre">600</span></code></p>
+<p>This will direct all id_resolver requests to the program /usr/sbin/nfs.idmap.
+The last parameter, 600, defines how many seconds into the future the key will
+expire.  This parameter is optional for /usr/sbin/nfs.idmap.  When the timeout
+is not specified, nfs.idmap will default to 600 seconds.</p>
+<p>id mapper uses for key descriptions:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>  uid:  Find the UID for the given user
+  gid:  Find the GID for the given group
+ user:  Find the user  name for the given UID
+group:  Find the group name for the given GID
+</pre></div>
+</div>
+<p>You can handle any of these individually, rather than using the generic upcall
+program.  If you would like to use your own program for a uid lookup then you
+would edit your request-key.conf so it look similar to this:</p>
+<p><code class="docutils literal notranslate"><span class="pre">#OP</span>&#160;&#160; <span class="pre">TYPE</span>&#160;&#160;&#160; <span class="pre">DESCRIPTION</span>&#160;&#160;&#160;&#160; <span class="pre">CALLOUT</span> <span class="pre">INFO</span>&#160;&#160;&#160; <span class="pre">PROGRAM</span> <span class="pre">ARG1</span> <span class="pre">ARG2</span> <span class="pre">ARG3</span> <span class="pre">...</span></code>
+<code class="docutils literal notranslate"><span class="pre">#======</span>&#160;&#160;&#160;&#160;&#160;&#160; <span class="pre">=======</span> <span class="pre">===============</span> <span class="pre">===============</span> <span class="pre">===============================</span></code>
+<code class="docutils literal notranslate"><span class="pre">create</span>&#160;&#160;&#160;&#160;&#160;&#160;&#160; <span class="pre">id_resolver</span>&#160;&#160;&#160;&#160; <span class="pre">uid:*</span>&#160;&#160; <span class="pre">*</span>&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160; <span class="pre">/some/other/program</span> <span class="pre">%k</span> <span class="pre">%d</span> <span class="pre">600</span></code>
+<code class="docutils literal notranslate"><span class="pre">create</span>&#160;&#160;&#160;&#160;&#160;&#160;&#160; <span class="pre">id_resolver</span>&#160;&#160;&#160;&#160; <span class="pre">*</span>&#160;&#160;&#160;&#160;&#160;&#160; <span class="pre">*</span>&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160; <span class="pre">/usr/sbin/nfs.idmap</span> <span class="pre">%k</span> <span class="pre">%d</span> <span class="pre">600</span></code></p>
+<p>Notice that the new line was added above the line for the generic program.
+request-key will find the first matching line and corresponding program.  In
+this case, /some/other/program will handle all uid lookups and
+/usr/sbin/nfs.idmap will handle gid, user, and group lookups.</p>
+<p>See <a class="reference internal" href="../../security/keys/request-key.html"><span class="doc">Key Request Service</span></a> for more information
+about the request-key function.</p>
+</section>
+<section id="nfs-idmap">
+<h2>nfs.idmap<a class="headerlink" href="#nfs-idmap" title="Permalink to this headline">¶</a></h2>
+<p>nfs.idmap is designed to be called by request-key, and should not be run “by
+hand”.  This program takes two arguments, a serialized key and a key
+description.  The serialized key is first converted into a key_serial_t, and
+then passed as an argument to keyctl_instantiate (both are part of keyutils.h).</p>
+<p>The actual lookups are performed by functions found in nfsidmap.h.  nfs.idmap
+determines the correct function to call by looking at the first part of the
+description string.  For example, a uid lookup description will appear as
+“uid:user&#64;domain”.</p>
+<p>nfs.idmap will return 0 if the key was instantiated, and non-zero otherwise.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">NFS ID Mapper</a><ul>
+<li><a class="reference internal" href="#configuring">Configuring</a></li>
+<li><a class="reference internal" href="#nfs-idmap">nfs.idmap</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/admin-guide/nfs/nfs-idmapper.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/admin-guide/nfs/nfs-idmapper.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

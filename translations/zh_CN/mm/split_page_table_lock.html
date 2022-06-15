@@ -1,0 +1,203 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>分页表锁（split page table lock） &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="split-page-table-lock">
+<h1>分页表锁（split page table lock）<a class="headerlink" href="#split-page-table-lock" title="Permalink to this headline">¶</a></h1>
+<p>最初，mm-&gt;page_table_lock spinlock保护了mm_struct的所有页表。但是这种方
+法导致了多线程应用程序的缺页异常可扩展性差，因为对锁的争夺很激烈。为了提高可扩
+展性，我们引入了分页表锁。</p>
+<p>有了分页表锁，我们就有了单独的每张表锁来顺序化对表的访问。目前，我们对PTE和
+PMD表使用分页锁。对高层表的访问由mm-&gt;page_table_lock保护。</p>
+<p>有一些辅助工具来锁定/解锁一个表和其他访问器函数:</p>
+<blockquote>
+<div><ul class="simple">
+<li><dl class="simple">
+<dt>pte_offset_map_lock()</dt><dd><p>映射pte并获取PTE表锁，返回所取锁的指针；</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>pte_unmap_unlock()</dt><dd><p>解锁和解映射PTE表；</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>pte_alloc_map_lock()</dt><dd><p>如果需要的话，分配PTE表并获取锁，如果分配失败，返回已获取的锁的指针
+或NULL；</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>pte_lockptr()</dt><dd><p>返回指向PTE表锁的指针；</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>pmd_lock()</dt><dd><p>取得PMD表锁，返回所取锁的指针。</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>pmd_lockptr()</dt><dd><p>返回指向PMD表锁的指针；</p>
+</dd>
+</dl>
+</li>
+</ul>
+</div></blockquote>
+<p>如果CONFIG_SPLIT_PTLOCK_CPUS（通常为4）小于或等于NR_CPUS，则在编译
+时启用PTE表的分页表锁。如果分页锁被禁用，所有的表都由mm-&gt;page_table_lock
+来保护。</p>
+<p>如果PMD表启用了分页锁，并且架构支持它，那么PMD表的分页锁就会被启用（见
+下文）。</p>
+<section id="hugetlb">
+<h2>Hugetlb 和分页表锁<a class="headerlink" href="#hugetlb" title="Permalink to this headline">¶</a></h2>
+<p>Hugetlb可以支持多种页面大小。我们只对PMD级别使用分页锁，但不对PUD使用。</p>
+<p>Hugetlb特定的辅助函数:</p>
+<blockquote>
+<div><ul class="simple">
+<li><dl class="simple">
+<dt>huge_pte_lock()</dt><dd><p>对PMD_SIZE页面采取pmd分割锁，否则mm-&gt;page_table_lock；</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>huge_pte_lockptr()</dt><dd><p>返回指向表锁的指针。</p>
+</dd>
+</dl>
+</li>
+</ul>
+</div></blockquote>
+</section>
+<section id="id1">
+<h2>架构对分页表锁的支持<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>没有必要特别启用PTE分页表锁：所有需要的东西都由pgtable_pte_page_ctor()
+和pgtable_pte_page_dtor()完成，它们必须在PTE表分配/释放时被调用。</p>
+<p>确保架构不使用slab分配器来分配页表：slab使用page-&gt;slab_cache来分配其页
+面。这个区域与page-&gt;ptl共享存储。</p>
+<p>PMD分页锁只有在你有两个以上的页表级别时才有意义。</p>
+<p>启用PMD分页锁需要在PMD表分配时调用pgtable_pmd_page_ctor()，在释放时调
+用pgtable_pmd_page_dtor()。</p>
+<p>分配通常发生在pmd_alloc_one()中，释放发生在pmd_free()和pmd_free_tlb()
+中，但要确保覆盖所有的PMD表分配/释放路径：即X86_PAE在pgd_alloc()中预先
+分配一些PMD。</p>
+<p>一切就绪后，你可以设置CONFIG_ARCH_ENABLE_SPLIT_PMD_PTLOCK。</p>
+<p>注意：pgtable_pte_page_ctor()和pgtable_pmd_page_ctor()可能失败–必
+须正确处理。</p>
+</section>
+<section id="page-ptl">
+<h2>page-&gt;ptl<a class="headerlink" href="#page-ptl" title="Permalink to this headline">¶</a></h2>
+<p>page-&gt;ptl用于访问分割页表锁，其中’page’是包含该表的页面struct page。它
+与page-&gt;private（以及union中的其他几个字段）共享存储。</p>
+<p>为了避免增加struct page的大小并获得最佳性能，我们使用了一个技巧:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>如果spinlock_t适合于long，我们使用page-&gt;ptr作为spinlock，这样我们
+就可以避免间接访问并节省一个缓存行。</p></li>
+<li><p>如果spinlock_t的大小大于long的大小，我们使用page-&gt;ptl作为spinlock_t
+的指针并动态分配它。这允许在启用DEBUG_SPINLOCK或DEBUG_LOCK_ALLOC的
+情况下使用分页锁，但由于间接访问而多花了一个缓存行。</p></li>
+</ul>
+</div></blockquote>
+<p>PTE表的spinlock_t分配在pgtable_pte_page_ctor()中，PMD表的spinlock_t
+分配在pgtable_pmd_page_ctor()中。</p>
+<p>请不要直接访问page-&gt;ptl - -使用适当的辅助函数。</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">分页表锁（split page table lock）</a><ul>
+<li><a class="reference internal" href="#hugetlb">Hugetlb 和分页表锁</a></li>
+<li><a class="reference internal" href="#id1">架构对分页表锁的支持</a></li>
+<li><a class="reference internal" href="#page-ptl">page-&gt;ptl</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/mm/split_page_table_lock.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/mm/split_page_table_lock.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

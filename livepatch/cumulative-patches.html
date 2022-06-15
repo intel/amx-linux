@@ -1,0 +1,191 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Atomic Replace &amp; Cumulative Patches &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Livepatch module Elf format" href="module-elf-format.html" />
+    <link rel="prev" title="(Un)patching Callbacks" href="callbacks.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="atomic-replace-cumulative-patches">
+<h1>Atomic Replace &amp; Cumulative Patches<a class="headerlink" href="#atomic-replace-cumulative-patches" title="Permalink to this headline">¶</a></h1>
+<p>There might be dependencies between livepatches. If multiple patches need
+to do different changes to the same function(s) then we need to define
+an order in which the patches will be installed. And function implementations
+from any newer livepatch must be done on top of the older ones.</p>
+<p>This might become a maintenance nightmare. Especially when more patches
+modified the same function in different ways.</p>
+<p>An elegant solution comes with the feature called “Atomic Replace”. It allows
+creation of so called “Cumulative Patches”. They include all wanted changes
+from all older livepatches and completely replace them in one transition.</p>
+<section id="usage">
+<h2>Usage<a class="headerlink" href="#usage" title="Permalink to this headline">¶</a></h2>
+<p>The atomic replace can be enabled by setting “replace” flag in <a class="reference internal" href="api.html#c.klp_patch" title="klp_patch"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">klp_patch</span></code></a>,
+for example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>static struct klp_patch patch = {
+        .mod = THIS_MODULE,
+        .objs = objs,
+        .replace = true,
+};
+</pre></div>
+</div>
+<p>All processes are then migrated to use the code only from the new patch.
+Once the transition is finished, all older patches are automatically
+disabled.</p>
+<p>Ftrace handlers are transparently removed from functions that are no
+longer modified by the new cumulative patch.</p>
+<p>As a result, the livepatch authors might maintain sources only for one
+cumulative patch. It helps to keep the patch consistent while adding or
+removing various fixes or features.</p>
+<p>Users could keep only the last patch installed on the system after
+the transition to has finished. It helps to clearly see what code is
+actually in use. Also the livepatch might then be seen as a “normal”
+module that modifies the kernel behavior. The only difference is that
+it can be updated at runtime without breaking its functionality.</p>
+</section>
+<section id="features">
+<h2>Features<a class="headerlink" href="#features" title="Permalink to this headline">¶</a></h2>
+<p>The atomic replace allows:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Atomically revert some functions in a previous patch while
+upgrading other functions.</p></li>
+<li><p>Remove eventual performance impact caused by core redirection
+for functions that are no longer patched.</p></li>
+<li><p>Decrease user confusion about dependencies between livepatches.</p></li>
+</ul>
+</div></blockquote>
+</section>
+<section id="limitations">
+<h2>Limitations:<a class="headerlink" href="#limitations" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><ul>
+<li><p>Once the operation finishes, there is no straightforward way
+to reverse it and restore the replaced patches atomically.</p>
+<p>A good practice is to set .replace flag in any released livepatch.
+Then re-adding an older livepatch is equivalent to downgrading
+to that patch. This is safe as long as the livepatches do _not_ do
+extra modifications in (un)patching callbacks or in the <a class="reference internal" href="../driver-api/basics.html#c.module_init" title="module_init"><code class="xref c c-func docutils literal notranslate"><span class="pre">module_init()</span></code></a>
+or <a class="reference internal" href="../driver-api/basics.html#c.module_exit" title="module_exit"><code class="xref c c-func docutils literal notranslate"><span class="pre">module_exit()</span></code></a> functions, see below.</p>
+<p>Also note that the replaced patch can be removed and loaded again
+only when the transition was not forced.</p>
+</li>
+<li><p>Only the (un)patching callbacks from the _new_ cumulative livepatch are
+executed. Any callbacks from the replaced patches are ignored.</p>
+<p>In other words, the cumulative patch is responsible for doing any actions
+that are necessary to properly replace any older patch.</p>
+<p>As a result, it might be dangerous to replace newer cumulative patches by
+older ones. The old livepatches might not provide the necessary callbacks.</p>
+<p>This might be seen as a limitation in some scenarios. But it makes life
+easier in many others. Only the new cumulative livepatch knows what
+fixes/features are added/removed and what special actions are necessary
+for a smooth transition.</p>
+<p>In any case, it would be a nightmare to think about the order of
+the various callbacks and their interactions if the callbacks from all
+enabled patches were called.</p>
+</li>
+<li><p>There is no special handling of shadow variables. Livepatch authors
+must create their own rules how to pass them from one cumulative
+patch to the other. Especially that they should not blindly remove
+them in <a class="reference internal" href="../driver-api/basics.html#c.module_exit" title="module_exit"><code class="xref c c-func docutils literal notranslate"><span class="pre">module_exit()</span></code></a> functions.</p>
+<p>A good practice might be to remove shadow variables in the post-unpatch
+callback. It is called only when the livepatch is properly disabled.</p>
+</li>
+</ul>
+</div></blockquote>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Atomic Replace &amp; Cumulative Patches</a><ul>
+<li><a class="reference internal" href="#usage">Usage</a></li>
+<li><a class="reference internal" href="#features">Features</a></li>
+<li><a class="reference internal" href="#limitations">Limitations:</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/livepatch/cumulative-patches.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/livepatch/cumulative-patches.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

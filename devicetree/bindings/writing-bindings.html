@@ -1,0 +1,180 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>DOs and DON’Ts for designing and writing Devicetree bindings &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Writing Devicetree Bindings in json-schema" href="writing-schema.html" />
+    <link rel="prev" title="Devicetree (DT) ABI" href="ABI.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="dos-and-don-ts-for-designing-and-writing-devicetree-bindings">
+<h1>DOs and DON’Ts for designing and writing Devicetree bindings<a class="headerlink" href="#dos-and-don-ts-for-designing-and-writing-devicetree-bindings" title="Permalink to this headline">¶</a></h1>
+<p>This is a list of common review feedback items focused on binding design. With
+every rule, there are exceptions and bindings have many gray areas.</p>
+<p>For guidelines related to patches, see
+<a class="reference internal" href="submitting-patches.html"><span class="doc">Submitting Devicetree (DT) binding patches</span></a></p>
+<section id="overall-design">
+<h2>Overall design<a class="headerlink" href="#overall-design" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p>DO attempt to make bindings complete even if a driver doesn’t support some
+features. For example, if a device has an interrupt, then include the
+‘interrupts’ property even if the driver is only polled mode.</p></li>
+<li><p>DON’T refer to Linux or “device driver” in bindings. Bindings should be
+based on what the hardware has, not what an OS and driver currently support.</p></li>
+<li><p>DO use node names matching the class of the device. Many standard names are
+defined in the DT Spec. If there isn’t one, consider adding it.</p></li>
+<li><p>DO check that the example matches the documentation especially after making
+review changes.</p></li>
+<li><p>DON’T create nodes just for the sake of instantiating drivers. Multi-function
+devices only need child nodes when the child nodes have their own DT
+resources. A single node can be multiple providers (e.g. clocks and resets).</p></li>
+<li><p>DON’T use ‘syscon’ alone without a specific compatible string. A ‘syscon’
+hardware block should have a compatible string unique enough to infer the
+register layout of the entire block (at a minimum).</p></li>
+</ul>
+</section>
+<section id="properties">
+<h2>Properties<a class="headerlink" href="#properties" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p>DO make ‘compatible’ properties specific. DON’T use wildcards in compatible
+strings. DO use fallback compatibles when devices are the same as or a subset
+of prior implementations. DO add new compatibles in case there are new
+features or bugs.</p></li>
+<li><p>DO use a vendor prefix on device-specific property names. Consider if
+properties could be common among devices of the same class. Check other
+existing bindings for similar devices.</p></li>
+<li><p>DON’T redefine common properties. Just reference the definition and define
+constraints specific to the device.</p></li>
+<li><p>DO use common property unit suffixes for properties with scientific units.
+Recommended suffixes are listed at
+<a class="reference external" href="https://github.com/devicetree-org/dt-schema/blob/main/dtschema/schemas/property-units.yaml">https://github.com/devicetree-org/dt-schema/blob/main/dtschema/schemas/property-units.yaml</a></p></li>
+<li><p>DO define properties in terms of constraints. How many entries? What are
+possible values? What is the order?</p></li>
+</ul>
+</section>
+<section id="typical-cases-and-caveats">
+<h2>Typical cases and caveats<a class="headerlink" href="#typical-cases-and-caveats" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p>Phandle entries, like clocks/dmas/interrupts/resets, should always be
+explicitly ordered. Include the {clock,dma,interrupt,reset}-names if there is
+more than one phandle. When used, both of these fields need the same
+constraints (e.g.  list of items).</p></li>
+<li><p>For names used in {clock,dma,interrupt,reset}-names, do not add any suffix,
+e.g.: “tx” instead of “txirq” (for interrupt).</p></li>
+<li><p>Properties without schema types (e.g. without standard suffix or not defined
+by schema) need the type, even if this is an enum.</p></li>
+<li><p>If schema includes other schema (e.g. /schemas/i2c/i2c-controller.yaml) use
+“unevaluatedProperties:false”. In other cases, usually use
+“additionalProperties:false”.</p></li>
+<li><p>For sub-blocks/components of bigger device (e.g. SoC blocks) use rather
+device-based compatible (e.g. SoC-based compatible), instead of custom
+versioning of that component.
+For example use “vendor,soc1234-i2c” instead of “vendor,i2c-v2”.</p></li>
+<li><p>“syscon” is not a generic property. Use vendor and type, e.g.
+“vendor,power-manager-syscon”.</p></li>
+</ul>
+</section>
+<section id="board-soc-dts-files">
+<h2>Board/SoC .dts Files<a class="headerlink" href="#board-soc-dts-files" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p>DO put all MMIO devices under a bus node and not at the top-level.</p></li>
+<li><p>DO use non-empty ‘ranges’ to limit the size of child buses/devices. 64-bit
+platforms don’t need all devices to have 64-bit address and size.</p></li>
+</ul>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">DOs and DON’Ts for designing and writing Devicetree bindings</a><ul>
+<li><a class="reference internal" href="#overall-design">Overall design</a></li>
+<li><a class="reference internal" href="#properties">Properties</a></li>
+<li><a class="reference internal" href="#typical-cases-and-caveats">Typical cases and caveats</a></li>
+<li><a class="reference internal" href="#board-soc-dts-files">Board/SoC .dts Files</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/devicetree/bindings/writing-bindings.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/devicetree/bindings/writing-bindings.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

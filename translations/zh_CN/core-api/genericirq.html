@@ -1,0 +1,473 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Linux通用IRQ处理 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="内存热插拔" href="memory-hotplug.html" />
+    <link rel="prev" title="内核中的CPU热拔插" href="cpu_hotplug.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../core-api/genericirq.html"><span class="doc">Linux generic IRQ handling</span></a></p>
+</dd>
+<dt class="field-even">翻译</dt>
+<dd class="field-even"><p>司延腾 Yanteng Si &lt;<a class="reference external" href="mailto:siyanteng&#37;&#52;&#48;loongson&#46;cn">siyanteng<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+<dt class="field-odd">校译</dt>
+<dd class="field-odd"><p>吴想成 Wu XiangCheng &lt;<a class="reference external" href="mailto:bobwxc&#37;&#52;&#48;email&#46;cn">bobwxc<span>&#64;</span>email<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+</dl>
+<section id="linuxirq">
+<span id="cn-core-api-genericirq"></span><h1>Linux通用IRQ处理<a class="headerlink" href="#linuxirq" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">版权</dt>
+<dd class="field-odd"><p>© 2005-2010: Thomas Gleixner</p>
+</dd>
+<dt class="field-even">版权</dt>
+<dd class="field-even"><p>© 2005-2006:  Ingo Molnar</p>
+</dd>
+</dl>
+<section id="id1">
+<h2>简介<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>通用中断处理层是为了给设备驱动程序提供一个完整的中断处理抽象（层）。它能够处
+理所有不同类型的中断控制器硬件。设备驱动程序使用通用API函数来请求、启用、禁
+用和释放中断。驱动程序不需要知道任何关于硬件处理中断的细节，所以它们可以在不同的
+平台上使用而不需要修改代码。</p>
+<p>本文档提供给那些希望在通用IRQ处理层的帮助下实现基于其架构的中断子系统的开发
+者。</p>
+</section>
+<section id="id2">
+<h2>理论依据<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>Linux中中断处理的原始实现使用__do_IRQ()超级处理程序，它能够处理每种类型的
+中断逻辑。</p>
+<p>最初，Russell King确定了不同类型的处理程序，以便为Linux 2.5/2.6中的ARM中
+断处理程序实现建立一个相当通用的集合。他区分了以下几种类型:</p>
+<ul class="simple">
+<li><p>电平触发型</p></li>
+<li><p>边沿触发型</p></li>
+<li><p>简单型</p></li>
+</ul>
+<p>在实现过程中，我们发现了另一种类型:</p>
+<ul class="simple">
+<li><p>响应EOI（end of interrupt）型</p></li>
+</ul>
+<p>在SMP的__do_IRQ()超级处理程序中，还需定义一种类型：</p>
+<ul class="simple">
+<li><p> 每cpu型（针对CPU SMP）</p></li>
+</ul>
+<p>这种高层IRQ处理程序的拆分实现使我们能够为每个特定的中断类型优化中断处理的流
+程。这减少了该特定代码路径的复杂性，并允许对特定类型进行优化处理。</p>
+<p>最初的通用IRQ实现使用hw_interrupt_type结构体及其 <code class="docutils literal notranslate"><span class="pre">-&gt;ack</span></code> <code class="docutils literal notranslate"><span class="pre">-&gt;end</span></code> 等回
+调来区分超级处理程序中的流控制。这导致了流逻辑和低级硬件逻辑的混合，也导致了
+不必要的代码重复：例如i386中的 <code class="docutils literal notranslate"><span class="pre">ioapic_level_irq</span></code> 和 <code class="docutils literal notranslate"><span class="pre">ioapic_edge_irq</span></code> ，
+这两个IRQ类型共享许多低级的细节，但有不同的流处理。</p>
+<p>一个更自然的抽象是“irq流”和“芯片细节”的干净分离。</p>
+<p>分析一些架构的IRQ子系统的实现可以发现，他们中的大多数可以使用一套通用的“irq
+流”方法，只需要添加芯片级的特定代码。这种分离对于那些需要IRQ流本身而不需要芯
+片细节的特定（子）架构也很有价值——以提供了一个更透明的IRQ子系统设计。</p>
+<p>每个中断描述符都被分配给它自己的高层流程处理程序，这通常是一个通用的实现。(这
+种高层次的流程处理程序的实现也使得提供解复用处理程序变得简单，这可以在各种架
+构的嵌入式平台上找到。)</p>
+<p>这种分离使得通用中断处理层更加灵活和可扩展。例如，一个（子）架构可以使用通用
+的IRQ流实现“电平触发型”中断，并添加一个（子）架构特定的“边沿型”实现。</p>
+<p>为了使向新模型的过渡更容易，并防止破坏现有实现，__do_IRQ()超级处理程序仍然
+可用。这导致了一种暂时的双重性。随着时间的推移，新的模型应该在越来越多的架构中
+被使用，因为它能使IRQ子系统更小更干净。它已经被废弃三年了，即将被删除。</p>
+</section>
+<section id="id3">
+<h2>已知的缺陷和假设<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h2>
+<p>没有（但愿如此）。</p>
+</section>
+<section id="id4">
+<h2>抽象层<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h2>
+<p>中断代码中主要有三个抽象层次:</p>
+<ol class="arabic simple">
+<li><p>高级别的驱动API</p></li>
+<li><p>高级别的IRQ流处理器</p></li>
+<li><p>芯片级的硬件封装</p></li>
+</ol>
+<section id="id5">
+<h3>中断控制流<a class="headerlink" href="#id5" title="Permalink to this headline">¶</a></h3>
+<p>每个中断都由一个中断描述符结构体irq_desc来描述。中断是由一个“无符号整型”的数值来
+引用的，它在描述符结构体数组中选择相应的中断描述符结构体。描述符结构体包含状态
+信息和指向中断流方法和中断芯片结构的指针，这些都是分配给这个中断的。</p>
+<p>每当中断触发时，低级架构代码通过调用desc-&gt;handle_irq()调用到通用中断代码中。
+这个高层IRQ处理函数只使用由分配的芯片描述符结构体引用的desc-&gt;irq_data.chip
+基元。</p>
+</section>
+<section id="api">
+<h3>高级驱动程序API<a class="headerlink" href="#api" title="Permalink to this headline">¶</a></h3>
+<p>高层驱动API由以下函数组成:</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="../../../core-api/genericirq.html#c.request_irq" title="request_irq"><code class="xref c c-func docutils literal notranslate"><span class="pre">request_irq()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/genericirq.html#c.request_threaded_irq" title="request_threaded_irq"><code class="xref c c-func docutils literal notranslate"><span class="pre">request_threaded_irq()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/genericirq.html#c.free_irq" title="free_irq"><code class="xref c c-func docutils literal notranslate"><span class="pre">free_irq()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/genericirq.html#c.disable_irq" title="disable_irq"><code class="xref c c-func docutils literal notranslate"><span class="pre">disable_irq()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/genericirq.html#c.enable_irq" title="enable_irq"><code class="xref c c-func docutils literal notranslate"><span class="pre">enable_irq()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/genericirq.html#c.disable_irq_nosync" title="disable_irq_nosync"><code class="xref c c-func docutils literal notranslate"><span class="pre">disable_irq_nosync()</span></code></a> (SMP only)</p></li>
+<li><p><a class="reference internal" href="../../../core-api/genericirq.html#c.synchronize_irq" title="synchronize_irq"><code class="xref c c-func docutils literal notranslate"><span class="pre">synchronize_irq()</span></code></a> (SMP only)</p></li>
+<li><p><a class="reference internal" href="../../../core-api/genericirq.html#c.irq_set_irq_type" title="irq_set_irq_type"><code class="xref c c-func docutils literal notranslate"><span class="pre">irq_set_irq_type()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/genericirq.html#c.irq_set_irq_wake" title="irq_set_irq_wake"><code class="xref c c-func docutils literal notranslate"><span class="pre">irq_set_irq_wake()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/genericirq.html#c.irq_set_handler_data" title="irq_set_handler_data"><code class="xref c c-func docutils literal notranslate"><span class="pre">irq_set_handler_data()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/genericirq.html#c.irq_set_chip" title="irq_set_chip"><code class="xref c c-func docutils literal notranslate"><span class="pre">irq_set_chip()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/genericirq.html#c.irq_set_chip_data" title="irq_set_chip_data"><code class="xref c c-func docutils literal notranslate"><span class="pre">irq_set_chip_data()</span></code></a></p></li>
+</ul>
+<p>详见自动生成的函数文档。</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>由于文档构建流程所限，中文文档中并没有引入自动生成的函数文档，所以请读者直接
+阅读源码注释。</p>
+</div>
+</section>
+<section id="irq">
+<h3>电平触发型IRQ流处理程序<a class="headerlink" href="#irq" title="Permalink to this headline">¶</a></h3>
+<p>通用层提供了一套预定义的irq-flow方法:</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="../../../core-api/genericirq.html#c.handle_level_irq" title="handle_level_irq"><code class="xref c c-func docutils literal notranslate"><span class="pre">handle_level_irq()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/genericirq.html#c.handle_edge_irq" title="handle_edge_irq"><code class="xref c c-func docutils literal notranslate"><span class="pre">handle_edge_irq()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/genericirq.html#c.handle_fasteoi_irq" title="handle_fasteoi_irq"><code class="xref c c-func docutils literal notranslate"><span class="pre">handle_fasteoi_irq()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/genericirq.html#c.handle_simple_irq" title="handle_simple_irq"><code class="xref c c-func docutils literal notranslate"><span class="pre">handle_simple_irq()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/genericirq.html#c.handle_percpu_irq" title="handle_percpu_irq"><code class="xref c c-func docutils literal notranslate"><span class="pre">handle_percpu_irq()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/genericirq.html#c.handle_edge_eoi_irq" title="handle_edge_eoi_irq"><code class="xref c c-func docutils literal notranslate"><span class="pre">handle_edge_eoi_irq()</span></code></a></p></li>
+<li><p><a class="reference internal" href="../../../core-api/genericirq.html#c.handle_bad_irq" title="handle_bad_irq"><code class="xref c c-func docutils literal notranslate"><span class="pre">handle_bad_irq()</span></code></a></p></li>
+</ul>
+<p>中断流处理程序（无论是预定义的还是架构特定的）由架构在启动期间或设备初始化期间分配给
+特定中断。</p>
+<section id="id6">
+<h4>默认流实现<a class="headerlink" href="#id6" title="Permalink to this headline">¶</a></h4>
+<section id="id7">
+<h5>辅助函数<a class="headerlink" href="#id7" title="Permalink to this headline">¶</a></h5>
+<p>辅助函数调用芯片基元，并被默认流实现所使用。以下是实现的辅助函数（简化摘录）:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>default_enable(struct irq_data *data)
+{
+    desc-&gt;irq_data.chip-&gt;irq_unmask(data);
+}
+
+default_disable(struct irq_data *data)
+{
+    if (!delay_disable(data))
+        desc-&gt;irq_data.chip-&gt;irq_mask(data);
+}
+
+default_ack(struct irq_data *data)
+{
+    chip-&gt;irq_ack(data);
+}
+
+default_mask_ack(struct irq_data *data)
+{
+    if (chip-&gt;irq_mask_ack) {
+        chip-&gt;irq_mask_ack(data);
+    } else {
+        chip-&gt;irq_mask(data);
+        chip-&gt;irq_ack(data);
+    }
+}
+
+noop(struct irq_data *data))
+{
+}
+</pre></div>
+</div>
+</section>
+</section>
+<section id="id8">
+<h4>默认流处理程序的实现<a class="headerlink" href="#id8" title="Permalink to this headline">¶</a></h4>
+<section id="id9">
+<h5>电平触发型IRQ流处理器<a class="headerlink" href="#id9" title="Permalink to this headline">¶</a></h5>
+<p>handle_level_irq为电平触发型的中断提供了一个通用实现。</p>
+<p>实现的控制流如下（简化摘录）:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>desc-&gt;irq_data.chip-&gt;irq_mask_ack();
+handle_irq_event(desc-&gt;action);
+desc-&gt;irq_data.chip-&gt;irq_unmask();
+</pre></div>
+</div>
+</section>
+<section id="id10">
+<h5>默认的需回应IRQ流处理器<a class="headerlink" href="#id10" title="Permalink to this headline">¶</a></h5>
+<p>handle_fasteoi_irq为中断提供了一个通用的实现，它只需要在处理程序的末端有一个EOI。</p>
+<p>实现的控制流如下（简化摘录）:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>handle_irq_event(desc-&gt;action);
+desc-&gt;irq_data.chip-&gt;irq_eoi();
+</pre></div>
+</div>
+</section>
+<section id="id11">
+<h5>默认的边沿触发型IRQ流处理器<a class="headerlink" href="#id11" title="Permalink to this headline">¶</a></h5>
+<p>handle_edge_irq为边沿触发型的中断提供了一个通用的实现。</p>
+<p>实现的控制流如下（简化摘录）:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>if (desc-&gt;status &amp; running) {
+    desc-&gt;irq_data.chip-&gt;irq_mask_ack();
+    desc-&gt;status |= pending | masked;
+    return;
+}
+desc-&gt;irq_data.chip-&gt;irq_ack();
+desc-&gt;status |= running;
+do {
+    if (desc-&gt;status &amp; masked)
+        desc-&gt;irq_data.chip-&gt;irq_unmask();
+    desc-&gt;status &amp;= ~pending;
+    handle_irq_event(desc-&gt;action);
+} while (status &amp; pending);
+desc-&gt;status &amp;= ~running;
+</pre></div>
+</div>
+</section>
+<section id="id12">
+<h5>默认的简单型IRQ流处理器<a class="headerlink" href="#id12" title="Permalink to this headline">¶</a></h5>
+<p>handle_simple_irq提供了一个简单型中断的通用实现。</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>简单型的流处理程序不调用任何处理程序/芯片基元。</p>
+</div>
+<p>实现的控制流程如下（简化摘录）:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>handle_irq_event(desc-&gt;action);
+</pre></div>
+</div>
+</section>
+<section id="cpu">
+<h5>默认的每CPU型流处理程序<a class="headerlink" href="#cpu" title="Permalink to this headline">¶</a></h5>
+<p>handle_percpu_irq为每CPU型中断提供一个通用的实现。</p>
+<p>每个CPU中断只在SMP上可用，该处理程序提供了一个没有锁的简化版本。</p>
+<p>以下是控制流的实现（简化摘录）:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>if (desc-&gt;irq_data.chip-&gt;irq_ack)
+    desc-&gt;irq_data.chip-&gt;irq_ack();
+handle_irq_event(desc-&gt;action);
+if (desc-&gt;irq_data.chip-&gt;irq_eoi)
+    desc-&gt;irq_data.chip-&gt;irq_eoi();
+</pre></div>
+</div>
+</section>
+<section id="eoiirq">
+<h5>EOI边沿型IRQ流处理器<a class="headerlink" href="#eoiirq" title="Permalink to this headline">¶</a></h5>
+<p>handle_edge_eoi_irq提供了一个异常的边沿触发型处理程序，它只用于拯救powerpc/cell
+上的一个严重失控的irq控制器。</p>
+</section>
+<section id="id13">
+<h5>坏的IRQ流处理器<a class="headerlink" href="#id13" title="Permalink to this headline">¶</a></h5>
+<p>handle_bad_irq用于处理没有真正分配处理程序的假中断。</p>
+</section>
+</section>
+<section id="id14">
+<h4>特殊性和优化<a class="headerlink" href="#id14" title="Permalink to this headline">¶</a></h4>
+<p>通用函数是为“干净”的架构和芯片设计的，它们没有平台特定的IRQ处理特殊性。如果一
+个架构需要在“流”的层面上实现特殊性，那么它可以通过覆盖高层的IRQ-流处理程序来实
+现。</p>
+</section>
+<section id="id15">
+<h4>延迟中断禁用<a class="headerlink" href="#id15" title="Permalink to this headline">¶</a></h4>
+<p>每个中断可选择的功能是由Russell King在ARM中断实现中引入的，当调用<a class="reference internal" href="../../../core-api/genericirq.html#c.disable_irq" title="disable_irq"><code class="xref c c-func docutils literal notranslate"><span class="pre">disable_irq()</span></code></a>
+时，不会在硬件层面上屏蔽中断。中断保持启用状态，而在中断事件发生时在流处理器中被
+屏蔽。这可以防止在硬件上丢失边沿中断，因为硬件上不存储边沿中断事件，而中断在硬件
+级被禁用。当一个中断在IRQ_DISABLED标志被设置时到达，那么该中断在硬件层面被屏蔽，
+IRQ_PENDING位被设置。当中断被<a class="reference internal" href="../../../core-api/genericirq.html#c.enable_irq" title="enable_irq"><code class="xref c c-func docutils literal notranslate"><span class="pre">enable_irq()</span></code></a>重新启用时，将检查挂起位，如果它被设置，
+中断将通过硬件或软件重发机制重新发送。(当你想使用延迟中断禁用功能，而你的硬件又不
+能重新触发中断时，有必要启用CONFIG_HARDIRQS_SW_RESEND。) 延迟中断禁止功能是不可
+配置的。</p>
+</section>
+</section>
+<section id="id16">
+<h3>芯片级硬件封装<a class="headerlink" href="#id16" title="Permalink to this headline">¶</a></h3>
+<p>芯片级硬件描述符结构体 <a class="reference internal" href="../../../core-api/genericirq.html#c.irq_chip" title="irq_chip"><code class="xref c c-type docutils literal notranslate"><span class="pre">irq_chip</span></code></a> 包含了所有与芯片直接相关的功能，这些功
+能可以被irq流实现所利用。</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">irq_ack</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">irq_mask_ack</span></code> - 可选的，建议使用的性能</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">irq_mask</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">irq_unmask</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">irq_eoi</span></code> - 可选的，EOI流处理程序需要</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">irq_retrigger</span></code> - 可选的</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">irq_set_type</span></code> - 可选的</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">irq_set_wake</span></code> - 可选的</p></li>
+</ul>
+<p>这些基元的意思是严格意义上的：ack是指ACK，masking是指对IRQ线的屏蔽，等等。这取决
+于流处理器如何使用这些基本的低级功能单元。</p>
+</section>
+</section>
+<section id="do-irq">
+<h2>__do_IRQ入口点<a class="headerlink" href="#do-irq" title="Permalink to this headline">¶</a></h2>
+<p>最初的实现__do_IRQ()是所有类型中断的替代入口点。它已经不存在了。</p>
+<p>这个处理程序被证明不适合所有的中断硬件，因此被重新实现了边沿/级别/简单/超高速中断
+的拆分功能。这不仅是一个功能优化。它也缩短了中断的代码路径。</p>
+</section>
+<section id="smp">
+<h2>在SMP上的锁<a class="headerlink" href="#smp" title="Permalink to this headline">¶</a></h2>
+<p>芯片寄存器的锁定是由定义芯片基元的架构决定的。每个寄存器的结构通过desc-&gt;lock，由
+通用层保护。</p>
+</section>
+<section id="id17">
+<h2>通用中断芯片<a class="headerlink" href="#id17" title="Permalink to this headline">¶</a></h2>
+<p>为了避免复制相同的IRQ芯片实现，核心提供了一个可配置的通用中断芯片实现。开发者在自
+己实现相同的功能之前，应该仔细检查通用芯片是否符合他们的需求，并以稍微不同的方式实
+现相同的功能。</p>
+<p>该API在以下内核代码中:</p>
+<p>kernel/irq/generic-chip.c</p>
+</section>
+<section id="id18">
+<h2>结构体<a class="headerlink" href="#id18" title="Permalink to this headline">¶</a></h2>
+<p>本章包含自动生成的结构体文档，这些结构体在通用IRQ层中使用。</p>
+<p>该API在以下内核代码中:</p>
+<p>include/linux/irq.h</p>
+<p>include/linux/interrupt.h</p>
+</section>
+<section id="id19">
+<h2>提供的通用函数<a class="headerlink" href="#id19" title="Permalink to this headline">¶</a></h2>
+<p>这一章包含了自动生成的内核API函数的文档，这些函数被导出。</p>
+<p>该API在以下内核代码中:</p>
+<p>kernel/irq/manage.c</p>
+<p>kernel/irq/chip.c</p>
+</section>
+<section id="id20">
+<h2>提供的内部函数<a class="headerlink" href="#id20" title="Permalink to this headline">¶</a></h2>
+<p>本章包含自动生成的内部函数的文档。</p>
+<p>该API在以下内核代码中:</p>
+<p>kernel/irq/irqdesc.c</p>
+<p>kernel/irq/handle.c</p>
+<p>kernel/irq/chip.c</p>
+</section>
+<section id="id21">
+<h2>鸣谢<a class="headerlink" href="#id21" title="Permalink to this headline">¶</a></h2>
+<p>感谢以下人士对本文档作出的贡献：</p>
+<ol class="arabic simple">
+<li><p>Thomas Gleixner <a class="reference external" href="mailto:tglx&#37;&#52;&#48;linutronix&#46;de">tglx<span>&#64;</span>linutronix<span>&#46;</span>de</a></p></li>
+<li><p>Ingo Molnar <a class="reference external" href="mailto:mingo&#37;&#52;&#48;elte&#46;hu">mingo<span>&#64;</span>elte<span>&#46;</span>hu</a></p></li>
+</ol>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Linux通用IRQ处理</a><ul>
+<li><a class="reference internal" href="#id1">简介</a></li>
+<li><a class="reference internal" href="#id2">理论依据</a></li>
+<li><a class="reference internal" href="#id3">已知的缺陷和假设</a></li>
+<li><a class="reference internal" href="#id4">抽象层</a><ul>
+<li><a class="reference internal" href="#id5">中断控制流</a></li>
+<li><a class="reference internal" href="#api">高级驱动程序API</a></li>
+<li><a class="reference internal" href="#irq">电平触发型IRQ流处理程序</a><ul>
+<li><a class="reference internal" href="#id6">默认流实现</a><ul>
+<li><a class="reference internal" href="#id7">辅助函数</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id8">默认流处理程序的实现</a><ul>
+<li><a class="reference internal" href="#id9">电平触发型IRQ流处理器</a></li>
+<li><a class="reference internal" href="#id10">默认的需回应IRQ流处理器</a></li>
+<li><a class="reference internal" href="#id11">默认的边沿触发型IRQ流处理器</a></li>
+<li><a class="reference internal" href="#id12">默认的简单型IRQ流处理器</a></li>
+<li><a class="reference internal" href="#cpu">默认的每CPU型流处理程序</a></li>
+<li><a class="reference internal" href="#eoiirq">EOI边沿型IRQ流处理器</a></li>
+<li><a class="reference internal" href="#id13">坏的IRQ流处理器</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id14">特殊性和优化</a></li>
+<li><a class="reference internal" href="#id15">延迟中断禁用</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id16">芯片级硬件封装</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#do-irq">__do_IRQ入口点</a></li>
+<li><a class="reference internal" href="#smp">在SMP上的锁</a></li>
+<li><a class="reference internal" href="#id17">通用中断芯片</a></li>
+<li><a class="reference internal" href="#id18">结构体</a></li>
+<li><a class="reference internal" href="#id19">提供的通用函数</a></li>
+<li><a class="reference internal" href="#id20">提供的内部函数</a></li>
+<li><a class="reference internal" href="#id21">鸣谢</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/core-api/genericirq.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/core-api/genericirq.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

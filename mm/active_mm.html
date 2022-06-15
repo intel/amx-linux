@@ -1,0 +1,181 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Active MM &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Architecture Page Table Helpers" href="arch_pgtable_helpers.html" />
+    <link rel="prev" title="Out Of Memory Handling" href="oom.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="active-mm">
+<span id="id1"></span><h1>Active MM<a class="headerlink" href="#active-mm" title="Permalink to this headline">¶</a></h1>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>List:       linux-kernel
+Subject:    Re: active_mm
+From:       Linus Torvalds &lt;torvalds () transmeta ! com&gt;
+Date:       1999-07-30 21:36:24
+
+Cc&#39;d to linux-kernel, because I don&#39;t write explanations all that often,
+and when I do I feel better about more people reading them.
+
+On Fri, 30 Jul 1999, David Mosberger wrote:
+&gt;
+&gt; Is there a brief description someplace on how &quot;mm&quot; vs. &quot;active_mm&quot; in
+&gt; the task_struct are supposed to be used?  (My apologies if this was
+&gt; discussed on the mailing lists---I just returned from vacation and
+&gt; wasn&#39;t able to follow linux-kernel for a while).
+
+Basically, the new setup is:
+
+ - we have &quot;real address spaces&quot; and &quot;anonymous address spaces&quot;. The
+   difference is that an anonymous address space doesn&#39;t care about the
+   user-level page tables at all, so when we do a context switch into an
+   anonymous address space we just leave the previous address space
+   active.
+
+   The obvious use for a &quot;anonymous address space&quot; is any thread that
+   doesn&#39;t need any user mappings - all kernel threads basically fall into
+   this category, but even &quot;real&quot; threads can temporarily say that for
+   some amount of time they are not going to be interested in user space,
+   and that the scheduler might as well try to avoid wasting time on
+   switching the VM state around. Currently only the old-style bdflush
+   sync does that.
+
+ - &quot;tsk-&gt;mm&quot; points to the &quot;real address space&quot;. For an anonymous process,
+   tsk-&gt;mm will be NULL, for the logical reason that an anonymous process
+   really doesn&#39;t _have_ a real address space at all.
+
+ - however, we obviously need to keep track of which address space we
+   &quot;stole&quot; for such an anonymous user. For that, we have &quot;tsk-&gt;active_mm&quot;,
+   which shows what the currently active address space is.
+
+   The rule is that for a process with a real address space (ie tsk-&gt;mm is
+   non-NULL) the active_mm obviously always has to be the same as the real
+   one.
+
+   For a anonymous process, tsk-&gt;mm == NULL, and tsk-&gt;active_mm is the
+   &quot;borrowed&quot; mm while the anonymous process is running. When the
+   anonymous process gets scheduled away, the borrowed address space is
+   returned and cleared.
+
+To support all that, the &quot;struct mm_struct&quot; now has two counters: a
+&quot;mm_users&quot; counter that is how many &quot;real address space users&quot; there are,
+and a &quot;mm_count&quot; counter that is the number of &quot;lazy&quot; users (ie anonymous
+users) plus one if there are any real users.
+
+Usually there is at least one real user, but it could be that the real
+user exited on another CPU while a lazy user was still active, so you do
+actually get cases where you have a address space that is _only_ used by
+lazy users. That is often a short-lived state, because once that thread
+gets scheduled away in favour of a real thread, the &quot;zombie&quot; mm gets
+released because &quot;mm_count&quot; becomes zero.
+
+Also, a new rule is that _nobody_ ever has &quot;init_mm&quot; as a real MM any
+more. &quot;init_mm&quot; should be considered just a &quot;lazy context when no other
+context is available&quot;, and in fact it is mainly used just at bootup when
+no real VM has yet been created. So code that used to check
+
+       if (current-&gt;mm == &amp;init_mm)
+
+should generally just do
+
+       if (!current-&gt;mm)
+
+instead (which makes more sense anyway - the test is basically one of &quot;do
+we have a user context&quot;, and is generally done by the page fault handler
+and things like that).
+
+Anyway, I put a pre-patch-2.3.13-1 on ftp.kernel.org just a moment ago,
+because it slightly changes the interfaces to accommodate the alpha (who
+would have thought it, but the alpha actually ends up having one of the
+ugliest context switch codes - unlike the other architectures where the MM
+and register state is separate, the alpha PALcode joins the two, and you
+need to switch both together).
+
+(From http://marc.info/?l=linux-kernel&amp;m=93337278602211&amp;w=2)
+</pre></div>
+</div>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/mm/active_mm.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/mm/active_mm.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

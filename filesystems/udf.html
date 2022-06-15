@@ -1,0 +1,215 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>UDF file system &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="virtiofs: virtio-fs host&lt;-&gt;guest shared file system" href="virtiofs.html" />
+    <link rel="prev" title="UBIFS Authentication Support" href="ubifs-authentication.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="udf-file-system">
+<h1>UDF file system<a class="headerlink" href="#udf-file-system" title="Permalink to this headline">¶</a></h1>
+<p>If you encounter problems with reading UDF discs using this driver,
+please report them according to MAINTAINERS file.</p>
+<p>Write support requires a block driver which supports writing.  Currently
+dvd+rw drives and media support true random sector writes, and so a udf
+filesystem on such devices can be directly mounted read/write.  CD-RW
+media however, does not support this.  Instead the media can be formatted
+for packet mode using the utility cdrwtool, then the pktcdvd driver can
+be bound to the underlying cd device to provide the required buffering
+and read-modify-write cycles to allow the filesystem random sector writes
+while providing the hardware with only full packet writes.  While not
+required for dvd+rw media, use of the pktcdvd driver often enhances
+performance due to very poor read-modify-write support supplied internally
+by drive firmware.</p>
+<hr class="docutils" />
+<p>The following mount options are supported:</p>
+<blockquote>
+<div><table class="docutils align-default">
+<colgroup>
+<col style="width: 22%" />
+<col style="width: 78%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>gid=</p></td>
+<td><p>Set the default group.</p></td>
+</tr>
+<tr class="row-even"><td><p>umask=</p></td>
+<td><p>Set the default umask.</p></td>
+</tr>
+<tr class="row-odd"><td><p>mode=</p></td>
+<td><p>Set the default file permissions.</p></td>
+</tr>
+<tr class="row-even"><td><p>dmode=</p></td>
+<td><p>Set the default directory permissions.</p></td>
+</tr>
+<tr class="row-odd"><td><p>uid=</p></td>
+<td><p>Set the default user.</p></td>
+</tr>
+<tr class="row-even"><td><p>bs=</p></td>
+<td><p>Set the block size.</p></td>
+</tr>
+<tr class="row-odd"><td><p>unhide</p></td>
+<td><p>Show otherwise hidden files.</p></td>
+</tr>
+<tr class="row-even"><td><p>undelete</p></td>
+<td><p>Show deleted files in lists.</p></td>
+</tr>
+<tr class="row-odd"><td><p>adinicb</p></td>
+<td><p>Embed data in the inode (default)</p></td>
+</tr>
+<tr class="row-even"><td><p>noadinicb</p></td>
+<td><p>Don’t embed data in the inode</p></td>
+</tr>
+<tr class="row-odd"><td><p>shortad</p></td>
+<td><p>Use short ad’s</p></td>
+</tr>
+<tr class="row-even"><td><p>longad</p></td>
+<td><p>Use long ad’s (default)</p></td>
+</tr>
+<tr class="row-odd"><td><p>nostrict</p></td>
+<td><p>Unset strict conformance</p></td>
+</tr>
+<tr class="row-even"><td><p>iocharset=</p></td>
+<td><p>Set the NLS character set</p></td>
+</tr>
+</tbody>
+</table>
+</div></blockquote>
+<p>The uid= and gid= options need a bit more explaining.  They will accept a
+decimal numeric value and all inodes on that mount will then appear as
+belonging to that uid and gid.  Mount options also accept the string “forget”.
+The forget option causes all IDs to be written to disk as -1 which is a way
+of UDF standard to indicate that IDs are not supported for these files .</p>
+<p>For typical desktop use of removable media, you should set the ID to that of
+the interactively logged on user, and also specify the forget option.  This way
+the interactive user will always see the files on the disk as belonging to him.</p>
+<p>The remaining are for debugging and disaster recovery:</p>
+<blockquote>
+<div><table class="docutils align-default">
+<colgroup>
+<col style="width: 14%" />
+<col style="width: 86%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>novrs</p></td>
+<td><p>Skip volume sequence recognition</p></td>
+</tr>
+</tbody>
+</table>
+</div></blockquote>
+<p>The following expect a offset from 0.</p>
+<blockquote>
+<div><table class="docutils align-default">
+<colgroup>
+<col style="width: 17%" />
+<col style="width: 83%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>session=</p></td>
+<td><p>Set the CDROM session (default= last session)</p></td>
+</tr>
+<tr class="row-even"><td><p>anchor=</p></td>
+<td><p>Override standard anchor location. (default= 256)</p></td>
+</tr>
+<tr class="row-odd"><td><p>lastblock=</p></td>
+<td><p>Set the last block of the filesystem/</p></td>
+</tr>
+</tbody>
+</table>
+</div></blockquote>
+<hr class="docutils" />
+<dl class="simple">
+<dt>For the latest version and toolset see:</dt><dd><p><a class="reference external" href="https://github.com/pali/udftools">https://github.com/pali/udftools</a></p>
+</dd>
+<dt>Documentation on UDF and ECMA 167 is available FREE from:</dt><dd><ul class="simple">
+<li><p><a class="reference external" href="http://www.osta.org/">http://www.osta.org/</a></p></li>
+<li><p><a class="reference external" href="https://www.ecma-international.org/">https://www.ecma-international.org/</a></p></li>
+</ul>
+</dd>
+</dl>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/filesystems/udf.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/filesystems/udf.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

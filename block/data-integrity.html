@@ -1,0 +1,365 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Data Integrity &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Deadline IO scheduler tunables" href="deadline-iosched.html" />
+    <link rel="prev" title="Embedded device command line partition parsing" href="cmdline-partition.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="data-integrity">
+<h1>Data Integrity<a class="headerlink" href="#data-integrity" title="Permalink to this headline">¶</a></h1>
+<section id="introduction">
+<h2>1. Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>Modern filesystems feature checksumming of data and metadata to
+protect against data corruption.  However, the detection of the
+corruption is done at read time which could potentially be months
+after the data was written.  At that point the original data that the
+application tried to write is most likely lost.</p>
+<p>The solution is to ensure that the disk is actually storing what the
+application meant it to.  Recent additions to both the SCSI family
+protocols (SBC Data Integrity Field, SCC protection proposal) as well
+as SATA/T13 (External Path Protection) try to remedy this by adding
+support for appending integrity metadata to an I/O.  The integrity
+metadata (or protection information in SCSI terminology) includes a
+checksum for each sector as well as an incrementing counter that
+ensures the individual sectors are written in the right order.  And
+for some protection schemes also that the I/O is written to the right
+place on disk.</p>
+<p>Current storage controllers and devices implement various protective
+measures, for instance checksumming and scrubbing.  But these
+technologies are working in their own isolated domains or at best
+between adjacent nodes in the I/O path.  The interesting thing about
+DIF and the other integrity extensions is that the protection format
+is well defined and every node in the I/O path can verify the
+integrity of the I/O and reject it if corruption is detected.  This
+allows not only corruption prevention but also isolation of the point
+of failure.</p>
+</section>
+<section id="the-data-integrity-extensions">
+<h2>2. The Data Integrity Extensions<a class="headerlink" href="#the-data-integrity-extensions" title="Permalink to this headline">¶</a></h2>
+<p>As written, the protocol extensions only protect the path between
+controller and storage device.  However, many controllers actually
+allow the operating system to interact with the integrity metadata
+(IMD).  We have been working with several FC/SAS HBA vendors to enable
+the protection information to be transferred to and from their
+controllers.</p>
+<p>The SCSI Data Integrity Field works by appending 8 bytes of protection
+information to each sector.  The data + integrity metadata is stored
+in 520 byte sectors on disk.  Data + IMD are interleaved when
+transferred between the controller and target.  The T13 proposal is
+similar.</p>
+<p>Because it is highly inconvenient for operating systems to deal with
+520 (and 4104) byte sectors, we approached several HBA vendors and
+encouraged them to allow separation of the data and integrity metadata
+scatter-gather lists.</p>
+<p>The controller will interleave the buffers on write and split them on
+read.  This means that Linux can DMA the data buffers to and from
+host memory without changes to the page cache.</p>
+<p>Also, the 16-bit CRC checksum mandated by both the SCSI and SATA specs
+is somewhat heavy to compute in software.  Benchmarks found that
+calculating this checksum had a significant impact on system
+performance for a number of workloads.  Some controllers allow a
+lighter-weight checksum to be used when interfacing with the operating
+system.  Emulex, for instance, supports the TCP/IP checksum instead.
+The IP checksum received from the OS is converted to the 16-bit CRC
+when writing and vice versa.  This allows the integrity metadata to be
+generated by Linux or the application at very low cost (comparable to
+software RAID5).</p>
+<p>The IP checksum is weaker than the CRC in terms of detecting bit
+errors.  However, the strength is really in the separation of the data
+buffers and the integrity metadata.  These two distinct buffers must
+match up for an I/O to complete.</p>
+<p>The separation of the data and integrity metadata buffers as well as
+the choice in checksums is referred to as the Data Integrity
+Extensions.  As these extensions are outside the scope of the protocol
+bodies (T10, T13), Oracle and its partners are trying to standardize
+them within the Storage Networking Industry Association.</p>
+</section>
+<section id="kernel-changes">
+<h2>3. Kernel Changes<a class="headerlink" href="#kernel-changes" title="Permalink to this headline">¶</a></h2>
+<p>The data integrity framework in Linux enables protection information
+to be pinned to I/Os and sent to/received from controllers that
+support it.</p>
+<p>The advantage to the integrity extensions in SCSI and SATA is that
+they enable us to protect the entire path from application to storage
+device.  However, at the same time this is also the biggest
+disadvantage. It means that the protection information must be in a
+format that can be understood by the disk.</p>
+<p>Generally Linux/POSIX applications are agnostic to the intricacies of
+the storage devices they are accessing.  The virtual filesystem switch
+and the block layer make things like hardware sector size and
+transport protocols completely transparent to the application.</p>
+<p>However, this level of detail is required when preparing the
+protection information to send to a disk.  Consequently, the very
+concept of an end-to-end protection scheme is a layering violation.
+It is completely unreasonable for an application to be aware whether
+it is accessing a SCSI or SATA disk.</p>
+<p>The data integrity support implemented in Linux attempts to hide this
+from the application.  As far as the application (and to some extent
+the kernel) is concerned, the integrity metadata is opaque information
+that’s attached to the I/O.</p>
+<p>The current implementation allows the block layer to automatically
+generate the protection information for any I/O.  Eventually the
+intent is to move the integrity metadata calculation to userspace for
+user data.  Metadata and other I/O that originates within the kernel
+will still use the automatic generation interface.</p>
+<p>Some storage devices allow each hardware sector to be tagged with a
+16-bit value.  The owner of this tag space is the owner of the block
+device.  I.e. the filesystem in most cases.  The filesystem can use
+this extra space to tag sectors as they see fit.  Because the tag
+space is limited, the block interface allows tagging bigger chunks by
+way of interleaving.  This way, 8*16 bits of information can be
+attached to a typical 4KB filesystem block.</p>
+<p>This also means that applications such as fsck and mkfs will need
+access to manipulate the tags from user space.  A passthrough
+interface for this is being worked on.</p>
+</section>
+<section id="block-layer-implementation-details">
+<h2>4. Block Layer Implementation Details<a class="headerlink" href="#block-layer-implementation-details" title="Permalink to this headline">¶</a></h2>
+<section id="bio">
+<h3>4.1 Bio<a class="headerlink" href="#bio" title="Permalink to this headline">¶</a></h3>
+<p>The data integrity patches add a new field to struct bio when
+CONFIG_BLK_DEV_INTEGRITY is enabled.  bio_integrity(bio) returns a
+pointer to a struct bip which contains the bio integrity payload.
+Essentially a bip is a trimmed down struct bio which holds a bio_vec
+containing the integrity metadata and the required housekeeping
+information (bvec pool, vector count, etc.)</p>
+<p>A kernel subsystem can enable data integrity protection on a bio by
+calling bio_integrity_alloc(bio).  This will allocate and attach the
+bip to the bio.</p>
+<p>Individual pages containing integrity metadata can subsequently be
+attached using bio_integrity_add_page().</p>
+<p>bio_free() will automatically free the bip.</p>
+</section>
+<section id="block-device">
+<h3>4.2 Block Device<a class="headerlink" href="#block-device" title="Permalink to this headline">¶</a></h3>
+<p>Because the format of the protection data is tied to the physical
+disk, each block device has been extended with a block integrity
+profile (struct blk_integrity).  This optional profile is registered
+with the block layer using <a class="reference internal" href="../core-api/kernel-api.html#c.blk_integrity_register" title="blk_integrity_register"><code class="xref c c-func docutils literal notranslate"><span class="pre">blk_integrity_register()</span></code></a>.</p>
+<p>The profile contains callback functions for generating and verifying
+the protection data, as well as getting and setting application tags.
+The profile also contains a few constants to aid in completing,
+merging and splitting the integrity metadata.</p>
+<p>Layered block devices will need to pick a profile that’s appropriate
+for all subdevices.  <a class="reference internal" href="../core-api/kernel-api.html#c.blk_integrity_compare" title="blk_integrity_compare"><code class="xref c c-func docutils literal notranslate"><span class="pre">blk_integrity_compare()</span></code></a> can help with that.  DM
+and MD linear, RAID0 and RAID1 are currently supported.  RAID4/5/6
+will require extra work due to the application tag.</p>
+</section>
+</section>
+<section id="block-layer-integrity-api">
+<h2>5.0 Block Layer Integrity API<a class="headerlink" href="#block-layer-integrity-api" title="Permalink to this headline">¶</a></h2>
+<section id="normal-filesystem">
+<h3>5.1 Normal Filesystem<a class="headerlink" href="#normal-filesystem" title="Permalink to this headline">¶</a></h3>
+<blockquote>
+<div><p>The normal filesystem is unaware that the underlying block device
+is capable of sending/receiving integrity metadata.  The IMD will
+be automatically generated by the block layer at <a class="reference internal" href="../core-api/kernel-api.html#c.submit_bio" title="submit_bio"><code class="xref c c-func docutils literal notranslate"><span class="pre">submit_bio()</span></code></a> time
+in case of a WRITE.  A READ request will cause the I/O integrity
+to be verified upon completion.</p>
+<p>IMD generation and verification can be toggled using the:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/sys/block/&lt;bdev&gt;/integrity/write_generate
+</pre></div>
+</div>
+<p>and:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/sys/block/&lt;bdev&gt;/integrity/read_verify
+</pre></div>
+</div>
+<p>flags.</p>
+</div></blockquote>
+</section>
+<section id="integrity-aware-filesystem">
+<h3>5.2 Integrity-Aware Filesystem<a class="headerlink" href="#integrity-aware-filesystem" title="Permalink to this headline">¶</a></h3>
+<blockquote>
+<div><p>A filesystem that is integrity-aware can prepare I/Os with IMD
+attached.  It can also use the application tag space if this is
+supported by the block device.</p>
+<p><cite>bool bio_integrity_prep(bio);</cite></p>
+<blockquote>
+<div><p>To generate IMD for WRITE and to set up buffers for READ, the
+filesystem must call bio_integrity_prep(bio).</p>
+<p>Prior to calling this function, the bio data direction and start
+sector must be set, and the bio should have all data pages
+added.  It is up to the caller to ensure that the bio does not
+change while I/O is in progress.
+Complete bio with error if prepare failed for some reson.</p>
+</div></blockquote>
+</div></blockquote>
+</section>
+<section id="passing-existing-integrity-metadata">
+<h3>5.3 Passing Existing Integrity Metadata<a class="headerlink" href="#passing-existing-integrity-metadata" title="Permalink to this headline">¶</a></h3>
+<blockquote>
+<div><p>Filesystems that either generate their own integrity metadata or
+are capable of transferring IMD from user space can use the
+following calls:</p>
+<p><cite>struct bip * bio_integrity_alloc(bio, gfp_mask, nr_pages);</cite></p>
+<blockquote>
+<div><p>Allocates the bio integrity payload and hangs it off of the bio.
+nr_pages indicate how many pages of protection data need to be
+stored in the integrity bio_vec list (similar to bio_alloc()).</p>
+<p>The integrity payload will be freed at bio_free() time.</p>
+</div></blockquote>
+<p><cite>int bio_integrity_add_page(bio, page, len, offset);</cite></p>
+<blockquote>
+<div><p>Attaches a page containing integrity metadata to an existing
+bio.  The bio must have an existing bip,
+i.e. bio_integrity_alloc() must have been called.  For a WRITE,
+the integrity metadata in the pages must be in a format
+understood by the target device with the notable exception that
+the sector numbers will be remapped as the request traverses the
+I/O stack.  This implies that the pages added using this call
+will be modified during I/O!  The first reference tag in the
+integrity metadata must have a value of bip-&gt;bip_sector.</p>
+<p>Pages can be added using bio_integrity_add_page() as long as
+there is room in the bip bio_vec array (nr_pages).</p>
+<p>Upon completion of a READ operation, the attached pages will
+contain the integrity metadata received from the storage device.
+It is up to the receiver to process them and verify data
+integrity upon completion.</p>
+</div></blockquote>
+</div></blockquote>
+</section>
+<section id="registering-a-block-device-as-capable-of-exchanging-integrity-metadata">
+<h3>5.4 Registering A Block Device As Capable Of Exchanging Integrity Metadata<a class="headerlink" href="#registering-a-block-device-as-capable-of-exchanging-integrity-metadata" title="Permalink to this headline">¶</a></h3>
+<blockquote>
+<div><p>To enable integrity exchange on a block device the gendisk must be
+registered as capable:</p>
+<p><cite>int blk_integrity_register(gendisk, blk_integrity);</cite></p>
+<blockquote>
+<div><p>The blk_integrity struct is a template and should contain the
+following:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>static struct blk_integrity my_profile = {
+    .name                   = &quot;STANDARDSBODY-TYPE-VARIANT-CSUM&quot;,
+    .generate_fn            = my_generate_fn,
+    .verify_fn              = my_verify_fn,
+    .tuple_size             = sizeof(struct my_tuple_size),
+    .tag_size               = &lt;tag bytes per hw sector&gt;,
+};
+</pre></div>
+</div>
+<p>‘name’ is a text string which will be visible in sysfs.  This is
+part of the userland API so chose it carefully and never change
+it.  The format is standards body-type-variant.
+E.g. T10-DIF-TYPE1-IP or T13-EPP-0-CRC.</p>
+<p>‘generate_fn’ generates appropriate integrity metadata (for WRITE).</p>
+<p>‘verify_fn’ verifies that the data buffer matches the integrity
+metadata.</p>
+<p>‘tuple_size’ must be set to match the size of the integrity
+metadata per sector.  I.e. 8 for DIF and EPP.</p>
+<p>‘tag_size’ must be set to identify how many bytes of tag space
+are available per hardware sector.  For DIF this is either 2 or
+0 depending on the value of the Control Mode Page ATO bit.</p>
+</div></blockquote>
+</div></blockquote>
+<hr class="docutils" />
+<p>2007-12-24 Martin K. Petersen &lt;<a class="reference external" href="mailto:martin&#46;petersen&#37;&#52;&#48;oracle&#46;com">martin<span>&#46;</span>petersen<span>&#64;</span>oracle<span>&#46;</span>com</a>&gt;</p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Data Integrity</a><ul>
+<li><a class="reference internal" href="#introduction">1. Introduction</a></li>
+<li><a class="reference internal" href="#the-data-integrity-extensions">2. The Data Integrity Extensions</a></li>
+<li><a class="reference internal" href="#kernel-changes">3. Kernel Changes</a></li>
+<li><a class="reference internal" href="#block-layer-implementation-details">4. Block Layer Implementation Details</a><ul>
+<li><a class="reference internal" href="#bio">4.1 Bio</a></li>
+<li><a class="reference internal" href="#block-device">4.2 Block Device</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#block-layer-integrity-api">5.0 Block Layer Integrity API</a><ul>
+<li><a class="reference internal" href="#normal-filesystem">5.1 Normal Filesystem</a></li>
+<li><a class="reference internal" href="#integrity-aware-filesystem">5.2 Integrity-Aware Filesystem</a></li>
+<li><a class="reference internal" href="#passing-existing-integrity-metadata">5.3 Passing Existing Integrity Metadata</a></li>
+<li><a class="reference internal" href="#registering-a-block-device-as-capable-of-exchanging-integrity-metadata">5.4 Registering A Block Device As Capable Of Exchanging Integrity Metadata</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/block/data-integrity.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/block/data-integrity.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

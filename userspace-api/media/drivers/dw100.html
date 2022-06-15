@@ -1,0 +1,165 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>4. DW100 dewarp driver &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="5. i.MX Video Capture Driver" href="imx-uapi.html" />
+    <link rel="prev" title="3. The cx2341x driver" href="cx2341x-uapi.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="dw100-dewarp-driver">
+<h1><span class="section-number">4. </span>DW100 dewarp driver<a class="headerlink" href="#dw100-dewarp-driver" title="Permalink to this headline">¶</a></h1>
+<p>The Vivante DW100 Dewarp Processor IP core found on i.MX8MP SoC applies a
+programmable geometrical transformation on the input image to correct distortion
+introduced by lenses.</p>
+<p>The transformation function is exposed by the hardware as a grid map with 16x16
+pixel macroblocks indexed using X, Y vertex coordinates.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>                       Image width
+        &lt;---------------------------------------&gt;
+
+   ^    .-------.-------.-------.-------.-------.
+   |    | 16x16 |       |       |       |       |
+I  |    | pixel |       |       |       |       |
+m  |    | block |       |       |       |       |
+a  |    .-------.-------.-------.-------.-------.
+g  |    |       |       |       |       |       |
+e  |    |       |       |       |       |       |
+   |    |       |       |       |       |       |
+h  |    .-------.-------.-------.-------.-------.
+e  |    |       |       |       |       |       |
+i  |    |       |       |       |       |       |
+g  |    |       |       |       |       |       |
+h  |    .-------.-------.-------.-------.-------.
+t  |    |       |       |       |       |       |
+   |    |       |       |       |       |       |
+   |    |       |       |       |       |       |
+   v    &#39;-------&#39;-------&#39;-------&#39;-------&#39;-------&#39;
+
+         Grid of Image Blocks for Dewarping Map
+</pre></div>
+</div>
+<p>Each x, y coordinate register uses 16 bits to record the coordinate address in
+an unsigned 12.4 fixed point format (UQ12.4).</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>.----------------------.--------..----------------------.--------.
+|         31~20        | 19~16  ||         15~4         |  3~0   |
+|       (integer)      | (frac) ||       (integer)      | (frac) |
+&#39;----------------------&#39;--------&#39;&#39;----------------------&#39;--------&#39;
+&lt;-------------------------------&gt;&lt;-------------------------------&gt;
+            Y coordinate                     X coordinate
+
+                       Remap Register Layout
+</pre></div>
+</div>
+<p>The dewarping map is set from applications using the
+V4L2_CID_DW100_DEWARPING_16x16_VERTEX_MAP control. The control contains
+an array of u32 values storing (x, y) destination coordinates for each
+vertex of the grid. The x coordinate is stored in the 16 LSBs and the y
+coordinate in the 16 MSBs.</p>
+<p>The number of elements in the array must match the image size:</p>
+<div class="highlight-C notranslate"><div class="highlight"><pre><span></span><span class="n">elems</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">DIV_ROUND_UP</span><span class="p">(</span><span class="n">width</span><span class="p">,</span><span class="w"> </span><span class="mi">16</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="n">DIV_ROUND_UP</span><span class="p">(</span><span class="n">height</span><span class="p">,</span><span class="w"> </span><span class="mi">16</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span><span class="w"></span>
+</pre></div>
+</div>
+<p>If the control has not been set by the application, the driver uses an identity
+map.</p>
+<p>More details on the DW100 hardware operations can be found in
+<em>chapter 13.15 DeWarp</em> of <a class="reference external" href="https://www.nxp.com/webapp/Download?colCode=IMX8MPRM">IMX8MP</a> reference manual.</p>
+<p>The Vivante DW100 m2m driver implements the following driver-specific control:</p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">V4L2_CID_DW100_DEWARPING_16x16_VERTEX_MAP</span> <span class="pre">(__u32</span> <span class="pre">array)</span></code></dt><dd><p>Specifies to DW100 driver its dewarping map (aka LUT) blob as described in
+<em>chapter 13.15.2.3 Dewarping Remap</em> of <a class="reference external" href="https://www.nxp.com/webapp/Download?colCode=IMX8MPRM">IMX8MP</a> reference manual as an U32
+dynamic array. The image is divided into many small 16x16 blocks. If the
+width/height of the image is not divisible by 16, the size of the
+rightmost/bottommost block is the remainder. The dewarping map only saves
+the vertex coordinates of the block. The dewarping grid map is comprised of
+vertex coordinates for x and y. Each x, y coordinate register uses 16 bits
+(UQ12.4) to record the coordinate address, with the Y coordinate in the
+upper bits and X in the lower bits. The driver modifies the dimensions of
+this control when the sink format is changed, to reflect the new input
+resolution.</p>
+</dd>
+</dl>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/userspace-api/media/drivers/dw100.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/userspace-api/media/drivers/dw100.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

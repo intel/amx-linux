@@ -1,0 +1,137 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>IPsec &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="IP Sysctl" href="ip-sysctl.html" />
+    <link rel="prev" title="IP dynamic address hack-port v0.03" href="ip_dynaddr.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="ipsec">
+<h1>IPsec<a class="headerlink" href="#ipsec" title="Permalink to this headline">¶</a></h1>
+<p>Here documents known IPsec corner cases which need to be keep in mind when
+deploy various IPsec configuration in real world production environment.</p>
+<ol class="arabic simple">
+<li><dl class="simple">
+<dt>IPcomp:</dt><dd><p>Small IP packet won’t get compressed at sender, and failed on
+policy check on receiver.</p>
+</dd>
+</dl>
+</li>
+</ol>
+<p>Quote from RFC3173:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>2.2. Non-Expansion Policy
+
+ If the total size of a compressed payload and the IPComp header, as
+ defined in section 3, is not smaller than the size of the original
+ payload, the IP datagram MUST be sent in the original non-compressed
+ form.  To clarify: If an IP datagram is sent non-compressed, no
+
+ IPComp header is added to the datagram.  This policy ensures saving
+ the decompression processing cycles and avoiding incurring IP
+ datagram fragmentation when the expanded datagram is larger than the
+ MTU.
+
+ Small IP datagrams are likely to expand as a result of compression.
+ Therefore, a numeric threshold should be applied before compression,
+ where IP datagrams of size smaller than the threshold are sent in the
+ original form without attempting compression.  The numeric threshold
+ is implementation dependent.
+</pre></div>
+</div>
+<p>Current IPComp implementation is indeed by the book, while as in practice
+when sending non-compressed packet to the peer (whether or not packet len
+is smaller than the threshold or the compressed len is larger than original
+packet len), the packet is dropped when checking the policy as this packet
+matches the selector but not coming from any XFRM layer, i.e., with no
+security path. Such naked packet will not eventually make it to upper layer.
+The result is much more wired to the user when ping peer with different
+payload length.</p>
+<p>One workaround is try to set “level use” for each policy if user observed
+above scenario. The consequence of doing so is small packet(uncompressed)
+will skip policy checking on receiver side.</p>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/networking/ipsec.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/networking/ipsec.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

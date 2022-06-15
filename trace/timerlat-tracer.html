@@ -1,0 +1,281 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Timerlat tracer &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Intel(R) Trace Hub (TH)" href="intel_th.html" />
+    <link rel="prev" title="OSNOISE Tracer" href="osnoise-tracer.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="timerlat-tracer">
+<h1>Timerlat tracer<a class="headerlink" href="#timerlat-tracer" title="Permalink to this headline">¶</a></h1>
+<p>The timerlat tracer aims to help the preemptive kernel developers to
+find sources of wakeup latencies of real-time threads. Like cyclictest,
+the tracer sets a periodic timer that wakes up a thread. The thread then
+computes a <em>wakeup latency</em> value as the difference between the <em>current
+time</em> and the <em>absolute time</em> that the timer was set to expire. The main
+goal of timerlat is tracing in such a way to help kernel developers.</p>
+<section id="usage">
+<h2>Usage<a class="headerlink" href="#usage" title="Permalink to this headline">¶</a></h2>
+<p>Write the ASCII text “timerlat” into the current_tracer file of the
+tracing system (generally mounted at /sys/kernel/tracing).</p>
+<p>For example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[root@f32 ~]# cd /sys/kernel/tracing/
+[root@f32 tracing]# echo timerlat &gt; current_tracer
+</pre></div>
+</div>
+<p>It is possible to follow the trace by reading the trace file:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[root@f32 tracing]# cat trace
+# tracer: timerlat
+#
+#                              _-----=&gt; irqs-off
+#                             / _----=&gt; need-resched
+#                            | / _---=&gt; hardirq/softirq
+#                            || / _--=&gt; preempt-depth
+#                            || /
+#                            ||||             ACTIVATION
+#         TASK-PID      CPU# ||||   TIMESTAMP    ID            CONTEXT                LATENCY
+#            | |         |   ||||      |         |                  |                       |
+        &lt;idle&gt;-0       [000] d.h1    54.029328: #1     context    irq timer_latency       932 ns
+         &lt;...&gt;-867     [000] ....    54.029339: #1     context thread timer_latency     11700 ns
+        &lt;idle&gt;-0       [001] dNh1    54.029346: #1     context    irq timer_latency      2833 ns
+         &lt;...&gt;-868     [001] ....    54.029353: #1     context thread timer_latency      9820 ns
+        &lt;idle&gt;-0       [000] d.h1    54.030328: #2     context    irq timer_latency       769 ns
+         &lt;...&gt;-867     [000] ....    54.030330: #2     context thread timer_latency      3070 ns
+        &lt;idle&gt;-0       [001] d.h1    54.030344: #2     context    irq timer_latency       935 ns
+         &lt;...&gt;-868     [001] ....    54.030347: #2     context thread timer_latency      4351 ns
+</pre></div>
+</div>
+<p>The tracer creates a per-cpu kernel thread with real-time priority that
+prints two lines at every activation. The first is the <em>timer latency</em>
+observed at the <em>hardirq</em> context before the activation of the thread.
+The second is the <em>timer latency</em> observed by the thread. The ACTIVATION
+ID field serves to relate the <em>irq</em> execution to its respective <em>thread</em>
+execution.</p>
+<p>The <em>irq</em>/<em>thread</em> splitting is important to clarify in which context
+the unexpected high value is coming from. The <em>irq</em> context can be
+delayed by hardware-related actions, such as SMIs, NMIs, IRQs,
+or by thread masking interrupts. Once the timer happens, the delay
+can also be influenced by blocking caused by threads. For example, by
+postponing the scheduler execution via preempt_disable(), scheduler
+execution, or masking interrupts. Threads can also be delayed by the
+interference from other threads and IRQs.</p>
+</section>
+<section id="tracer-options">
+<h2>Tracer options<a class="headerlink" href="#tracer-options" title="Permalink to this headline">¶</a></h2>
+<p>The timerlat tracer is built on top of osnoise tracer.
+So its configuration is also done in the osnoise/ config
+directory. The timerlat configs are:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>cpus: CPUs at which a timerlat thread will execute.</p></li>
+<li><p>timerlat_period_us: the period of the timerlat thread.</p></li>
+<li><p>stop_tracing_us: stop the system tracing if a
+timer latency at the <em>irq</em> context higher than the configured
+value happens. Writing 0 disables this option.</p></li>
+<li><p>stop_tracing_total_us: stop the system tracing if a
+timer latency at the <em>thread</em> context is higher than the configured
+value happens. Writing 0 disables this option.</p></li>
+<li><p>print_stack: save the stack of the IRQ occurrence. The stack is printed
+after the <em>thread context</em> event, or at the IRQ handler if <em>stop_tracing_us</em>
+is hit.</p></li>
+</ul>
+</div></blockquote>
+</section>
+<section id="timerlat-and-osnoise">
+<h2>timerlat and osnoise<a class="headerlink" href="#timerlat-and-osnoise" title="Permalink to this headline">¶</a></h2>
+<p>The timerlat can also take advantage of the osnoise: traceevents.
+For example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>  [root@f32 ~]# cd /sys/kernel/tracing/
+  [root@f32 tracing]# echo timerlat &gt; current_tracer
+  [root@f32 tracing]# echo 1 &gt; events/osnoise/enable
+  [root@f32 tracing]# echo 25 &gt; osnoise/stop_tracing_total_us
+  [root@f32 tracing]# tail -10 trace
+       cc1-87882   [005] d..h...   548.771078: #402268 context    irq timer_latency     13585 ns
+       cc1-87882   [005] dNLh1..   548.771082: irq_noise: local_timer:236 start 548.771077442 duration 7597 ns
+       cc1-87882   [005] dNLh2..   548.771099: irq_noise: qxl:21 start 548.771085017 duration 7139 ns
+       cc1-87882   [005] d...3..   548.771102: thread_noise:      cc1:87882 start 548.771078243 duration 9909 ns
+timerlat/5-1035    [005] .......   548.771104: #402268 context thread timer_latency     39960 ns
+</pre></div>
+</div>
+<p>In this case, the root cause of the timer latency does not point to a
+single cause but to multiple ones. Firstly, the timer IRQ was delayed
+for 13 us, which may point to a long IRQ disabled section (see IRQ
+stacktrace section). Then the timer interrupt that wakes up the timerlat
+thread took 7597 ns, and the qxl:21 device IRQ took 7139 ns. Finally,
+the cc1 thread noise took 9909 ns of time before the context switch.
+Such pieces of evidence are useful for the developer to use other
+tracing methods to figure out how to debug and optimize the system.</p>
+<p>It is worth mentioning that the <em>duration</em> values reported
+by the osnoise: events are <em>net</em> values. For example, the
+thread_noise does not include the duration of the overhead caused
+by the IRQ execution (which indeed accounted for 12736 ns). But
+the values reported by the timerlat tracer (timerlat_latency)
+are <em>gross</em> values.</p>
+<p>The art below illustrates a CPU timeline and how the timerlat tracer
+observes it at the top and the osnoise: events at the bottom. Each “-”
+in the timelines means circa 1 us, and the time moves ==&gt;:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>    External     timer irq                   thread
+     clock        latency                    latency
+     event        13585 ns                   39960 ns
+       |             ^                         ^
+       v             |                         |
+       |-------------|                         |
+       |-------------+-------------------------|
+                     ^                         ^
+========================================================================
+                  [tmr irq]  [dev irq]
+[another thread...^       v..^       v.......][timerlat/ thread]  &lt;-- CPU timeline
+=========================================================================
+                  |-------|  |-------|
+                          |--^       v-------|
+                          |          |       |
+                          |          |       + thread_noise: 9909 ns
+                          |          +-&gt; irq_noise: 6139 ns
+                          +-&gt; irq_noise: 7597 ns
+</pre></div>
+</div>
+</section>
+<section id="irq-stacktrace">
+<h2>IRQ stacktrace<a class="headerlink" href="#irq-stacktrace" title="Permalink to this headline">¶</a></h2>
+<p>The osnoise/print_stack option is helpful for the cases in which a thread
+noise causes the major factor for the timer latency, because of preempt or
+irq disabled. For example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>      [root@f32 tracing]# echo 500 &gt; osnoise/stop_tracing_total_us
+      [root@f32 tracing]# echo 500 &gt; osnoise/print_stack
+      [root@f32 tracing]# echo timerlat &gt; current_tracer
+      [root@f32 tracing]# tail -21 per_cpu/cpu7/trace
+        insmod-1026    [007] dN.h1..   200.201948: irq_noise: local_timer:236 start 200.201939376 duration 7872 ns
+        insmod-1026    [007] d..h1..   200.202587: #29800 context    irq timer_latency      1616 ns
+        insmod-1026    [007] dN.h2..   200.202598: irq_noise: local_timer:236 start 200.202586162 duration 11855 ns
+        insmod-1026    [007] dN.h3..   200.202947: irq_noise: local_timer:236 start 200.202939174 duration 7318 ns
+        insmod-1026    [007] d...3..   200.203444: thread_noise:   insmod:1026 start 200.202586933 duration 838681 ns
+    timerlat/7-1001    [007] .......   200.203445: #29800 context thread timer_latency    859978 ns
+    timerlat/7-1001    [007] ....1..   200.203446: &lt;stack trace&gt;
+=&gt; timerlat_irq
+=&gt; __hrtimer_run_queues
+=&gt; hrtimer_interrupt
+=&gt; __sysvec_apic_timer_interrupt
+=&gt; asm_call_irq_on_stack
+=&gt; sysvec_apic_timer_interrupt
+=&gt; asm_sysvec_apic_timer_interrupt
+=&gt; delay_tsc
+=&gt; dummy_load_1ms_pd_init
+=&gt; do_one_initcall
+=&gt; do_init_module
+=&gt; __do_sys_finit_module
+=&gt; do_syscall_64
+=&gt; entry_SYSCALL_64_after_hwframe
+</pre></div>
+</div>
+<p>In this case, it is possible to see that the thread added the highest
+contribution to the <em>timer latency</em> and the stack trace, saved during
+the timerlat IRQ handler, points to a function named
+dummy_load_1ms_pd_init, which had the following code (on purpose):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>static int __init dummy_load_1ms_pd_init(void)
+{
+        preempt_disable();
+        mdelay(1);
+        preempt_enable();
+        return 0;
+
+}
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Timerlat tracer</a><ul>
+<li><a class="reference internal" href="#usage">Usage</a></li>
+<li><a class="reference internal" href="#tracer-options">Tracer options</a></li>
+<li><a class="reference internal" href="#timerlat-and-osnoise">timerlat and osnoise</a></li>
+<li><a class="reference internal" href="#irq-stacktrace">IRQ stacktrace</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/trace/timerlat-tracer.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/trace/timerlat-tracer.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

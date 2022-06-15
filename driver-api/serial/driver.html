@@ -1,0 +1,1109 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Low Level Serial API &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="ISO7816 Serial Communications" href="serial-iso7816.html" />
+    <link rel="prev" title="Support for Serial devices" href="index.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="low-level-serial-api">
+<h1>Low Level Serial API<a class="headerlink" href="#low-level-serial-api" title="Permalink to this headline">¶</a></h1>
+<p>This document is meant as a brief overview of some aspects of the new serial
+driver.  It is not complete, any questions you have should be directed to
+&lt;<a class="reference external" href="mailto:rmk&#37;&#52;&#48;arm&#46;linux&#46;org&#46;uk">rmk<span>&#64;</span>arm<span>&#46;</span>linux<span>&#46;</span>org<span>&#46;</span>uk</a>&gt;</p>
+<p>The reference implementation is contained within amba-pl011.c.</p>
+<section id="low-level-serial-hardware-driver">
+<h2>Low Level Serial Hardware Driver<a class="headerlink" href="#low-level-serial-hardware-driver" title="Permalink to this headline">¶</a></h2>
+<p>The low level serial hardware driver is responsible for supplying port
+information (defined by uart_port) and a set of control methods (defined
+by uart_ops) to the core serial driver.  The low level driver is also
+responsible for handling interrupts for the port, and providing any
+console support.</p>
+</section>
+<section id="console-support">
+<h2>Console Support<a class="headerlink" href="#console-support" title="Permalink to this headline">¶</a></h2>
+<p>The serial core provides a few helper functions.  This includes identifing
+the correct port structure (via <a class="reference internal" href="#c.uart_get_console" title="uart_get_console"><code class="xref c c-func docutils literal notranslate"><span class="pre">uart_get_console()</span></code></a>) and decoding command line
+arguments (<a class="reference internal" href="#c.uart_parse_options" title="uart_parse_options"><code class="xref c c-func docutils literal notranslate"><span class="pre">uart_parse_options()</span></code></a>).</p>
+<p>There is also a helper function (<a class="reference internal" href="#c.uart_console_write" title="uart_console_write"><code class="xref c c-func docutils literal notranslate"><span class="pre">uart_console_write()</span></code></a>) which performs a
+character by character write, translating newlines to CRLF sequences.
+Driver writers are recommended to use this function rather than implementing
+their own version.</p>
+</section>
+<section id="locking">
+<h2>Locking<a class="headerlink" href="#locking" title="Permalink to this headline">¶</a></h2>
+<p>It is the responsibility of the low level hardware driver to perform the
+necessary locking using port-&gt;lock.  There are some exceptions (which
+are described in the <a class="reference internal" href="#c.uart_ops" title="uart_ops"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">uart_ops</span></code></a> listing below.)</p>
+<p>There are two locks.  A per-port spinlock, and an overall semaphore.</p>
+<p>From the core driver perspective, the port-&gt;lock locks the following
+data:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>port-&gt;mctrl
+port-&gt;icount
+port-&gt;state-&gt;xmit.head (circ_buf-&gt;head)
+port-&gt;state-&gt;xmit.tail (circ_buf-&gt;tail)
+</pre></div>
+</div>
+<p>The low level driver is free to use this lock to provide any additional
+locking.</p>
+<p>The port_sem semaphore is used to protect against ports being added/
+removed or reconfigured at inappropriate times. Since v2.6.27, this
+semaphore has been the ‘mutex’ member of the tty_port struct, and
+commonly referred to as the port mutex.</p>
+</section>
+<section id="uart-ops">
+<h2>uart_ops<a class="headerlink" href="#uart-ops" title="Permalink to this headline">¶</a></h2>
+<dl class="type">
+<dt id="c.uart_ops">
+struct <code class="sig-name descname">uart_ops</code><a class="headerlink" href="#c.uart_ops" title="Permalink to this definition">¶</a></dt>
+<dd><ul class="simple">
+<li><p>interface between serial_core and the driver</p></li>
+</ul>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct uart_ops {
+    unsigned int    (*tx_empty)(struct uart_port *);
+    void (*set_mctrl)(struct uart_port *, unsigned int mctrl);
+    unsigned int    (*get_mctrl)(struct uart_port *);
+    void (*stop_tx)(struct uart_port *);
+    void (*start_tx)(struct uart_port *);
+    void (*throttle)(struct uart_port *);
+    void (*unthrottle)(struct uart_port *);
+    void (*send_xchar)(struct uart_port *, char ch);
+    void (*stop_rx)(struct uart_port *);
+    void (*start_rx)(struct uart_port *);
+    void (*enable_ms)(struct uart_port *);
+    void (*break_ctl)(struct uart_port *, int ctl);
+    int (*startup)(struct uart_port *);
+    void (*shutdown)(struct uart_port *);
+    void (*flush_buffer)(struct uart_port *);
+    void (*set_termios)(struct uart_port *, struct ktermios *new, const struct ktermios *old);
+    void (*set_ldisc)(struct uart_port *, struct ktermios *);
+    void (*pm)(struct uart_port *, unsigned int state, unsigned int oldstate);
+    const char      *(*type)(struct uart_port *);
+    void (*release_port)(struct uart_port *);
+    int (*request_port)(struct uart_port *);
+    void (*config_port)(struct uart_port *, int);
+    int (*verify_port)(struct uart_port *, struct serial_struct *);
+    int (*ioctl)(struct uart_port *, unsigned int, unsigned long);
+#ifdef CONFIG_CONSOLE_POLL;
+    int (*poll_init)(struct uart_port *);
+    void (*poll_put_char)(struct uart_port *, unsigned char);
+    int (*poll_get_char)(struct uart_port *);
+#endif;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl>
+<dt><code class="docutils literal notranslate"><span class="pre">tx_empty</span></code></dt><dd><p><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">()(struct</span> <span class="pre">uart_port</span> <span class="pre">*port)</span></code></p>
+<p>This function tests whether the transmitter fifo and shifter for the
+<strong>port</strong> is empty. If it is empty, this function should return
+<code class="docutils literal notranslate"><span class="pre">TIOCSER_TEMT</span></code>, otherwise return 0. If the port does not support this
+operation, then it should return <code class="docutils literal notranslate"><span class="pre">TIOCSER_TEMT</span></code>.</p>
+<p>Locking: none.
+Interrupts: caller dependent.
+This call must not sleep</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">set_mctrl</span></code></dt><dd><p><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">()(struct</span> <span class="pre">uart_port</span> <span class="pre">*port,</span> <span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">mctrl)</span></code></p>
+<p>This function sets the modem control lines for <strong>port</strong> to the state
+described by <strong>mctrl</strong>. The relevant bits of <strong>mctrl</strong> are:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">TIOCM_RTS</span></code>    RTS signal.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">TIOCM_DTR</span></code>    DTR signal.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">TIOCM_OUT1</span></code>   OUT1 signal.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">TIOCM_OUT2</span></code>   OUT2 signal.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">TIOCM_LOOP</span></code>   Set the port into loopback mode.</p></li>
+</ul>
+</div></blockquote>
+<p>If the appropriate bit is set, the signal should be driven
+active.  If the bit is clear, the signal should be driven
+inactive.</p>
+<p>Locking: <strong>port-&gt;lock</strong> taken.
+Interrupts: locally disabled.
+This call must not sleep</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">get_mctrl</span></code></dt><dd><p><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">()(struct</span> <span class="pre">uart_port</span> <span class="pre">*port)</span></code></p>
+<p>Returns the current state of modem control inputs of <strong>port</strong>. The state
+of the outputs should not be returned, since the core keeps track of
+their state. The state information should include:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">TIOCM_CAR</span></code>    state of DCD signal</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">TIOCM_CTS</span></code>    state of CTS signal</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">TIOCM_DSR</span></code>    state of DSR signal</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">TIOCM_RI</span></code>     state of RI signal</p></li>
+</ul>
+</div></blockquote>
+<p>The bit is set if the signal is currently driven active.  If
+the port does not support CTS, DCD or DSR, the driver should
+indicate that the signal is permanently active. If RI is
+not available, the signal should not be indicated as active.</p>
+<p>Locking: <strong>port-&gt;lock</strong> taken.
+Interrupts: locally disabled.
+This call must not sleep</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">stop_tx</span></code></dt><dd><p><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">()(struct</span> <span class="pre">uart_port</span> <span class="pre">*port)</span></code></p>
+<p>Stop transmitting characters. This might be due to the CTS line
+becoming inactive or the tty layer indicating we want to stop
+transmission due to an <code class="docutils literal notranslate"><span class="pre">XOFF</span></code> character.</p>
+<p>The driver should stop transmitting characters as soon as possible.</p>
+<p>Locking: <strong>port-&gt;lock</strong> taken.
+Interrupts: locally disabled.
+This call must not sleep</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">start_tx</span></code></dt><dd><p><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">()(struct</span> <span class="pre">uart_port</span> <span class="pre">*port)</span></code></p>
+<p>Start transmitting characters.</p>
+<p>Locking: <strong>port-&gt;lock</strong> taken.
+Interrupts: locally disabled.
+This call must not sleep</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">throttle</span></code></dt><dd><p><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">()(struct</span> <span class="pre">uart_port</span> <span class="pre">*port)</span></code></p>
+<p>Notify the serial driver that input buffers for the line discipline are
+close to full, and it should somehow signal that no more characters
+should be sent to the serial port.
+This will be called only if hardware assisted flow control is enabled.</p>
+<p>Locking: serialized with <strong>unthrottle()</strong> and termios modification by the
+tty layer.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unthrottle</span></code></dt><dd><p><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">()(struct</span> <span class="pre">uart_port</span> <span class="pre">*port)</span></code></p>
+<p>Notify the serial driver that characters can now be sent to the serial
+port without fear of overrunning the input buffers of the line
+disciplines.</p>
+<p>This will be called only if hardware assisted flow control is enabled.</p>
+<p>Locking: serialized with <strong>throttle()</strong> and termios modification by the
+tty layer.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">send_xchar</span></code></dt><dd><p><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">()(struct</span> <span class="pre">uart_port</span> <span class="pre">*port,</span> <span class="pre">char</span> <span class="pre">ch)</span></code></p>
+<p>Transmit a high priority character, even if the port is stopped. This
+is used to implement XON/XOFF flow control and tcflow(). If the serial
+driver does not implement this function, the tty core will append the
+character to the circular buffer and then call start_tx() / stop_tx()
+to flush the data out.</p>
+<p>Do not transmit if <strong>ch</strong> == ‘0’ (<code class="docutils literal notranslate"><span class="pre">__DISABLED_CHAR</span></code>).</p>
+<p>Locking: none.
+Interrupts: caller dependent.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">stop_rx</span></code></dt><dd><p><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">()(struct</span> <span class="pre">uart_port</span> <span class="pre">*port)</span></code></p>
+<p>Stop receiving characters; the <strong>port</strong> is in the process of being closed.</p>
+<p>Locking: <strong>port-&gt;lock</strong> taken.
+Interrupts: locally disabled.
+This call must not sleep</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">start_rx</span></code></dt><dd><p><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">()(struct</span> <span class="pre">uart_port</span> <span class="pre">*port)</span></code></p>
+<p>Start receiving characters.</p>
+<p>Locking: <strong>port-&gt;lock</strong> taken.
+Interrupts: locally disabled.
+This call must not sleep</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">enable_ms</span></code></dt><dd><p><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">()(struct</span> <span class="pre">uart_port</span> <span class="pre">*port)</span></code></p>
+<p>Enable the modem status interrupts.</p>
+<p>This method may be called multiple times. Modem status interrupts
+should be disabled when the <strong>shutdown()</strong> method is called.</p>
+<p>Locking: <strong>port-&gt;lock</strong> taken.
+Interrupts: locally disabled.
+This call must not sleep</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">break_ctl</span></code></dt><dd><p><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">()(struct</span> <span class="pre">uart_port</span> <span class="pre">*port,</span> <span class="pre">int</span> <span class="pre">ctl)</span></code></p>
+<p>Control the transmission of a break signal. If <strong>ctl</strong> is nonzero, the
+break signal should be transmitted. The signal should be terminated
+when another call is made with a zero <strong>ctl</strong>.</p>
+<p>Locking: caller holds tty_port-&gt;mutex</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">startup</span></code></dt><dd><p><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">()(struct</span> <span class="pre">uart_port</span> <span class="pre">*port)</span></code></p>
+<p>Grab any interrupt resources and initialise any low level driver state.
+Enable the port for reception. It should not activate RTS nor DTR;
+this will be done via a separate call to <strong>set_mctrl()</strong>.</p>
+<p>This method will only be called when the port is initially opened.</p>
+<p>Locking: port_sem taken.
+Interrupts: globally disabled.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">shutdown</span></code></dt><dd><p><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">()(struct</span> <span class="pre">uart_port</span> <span class="pre">*port)</span></code></p>
+<p>Disable the <strong>port</strong>, disable any break condition that may be in effect,
+and free any interrupt resources. It should not disable RTS nor DTR;
+this will have already been done via a separate call to <strong>set_mctrl()</strong>.</p>
+<p>Drivers must not access <strong>port-&gt;state</strong> once this call has completed.</p>
+<p>This method will only be called when there are no more users of this
+<strong>port</strong>.</p>
+<p>Locking: port_sem taken.
+Interrupts: caller dependent.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">flush_buffer</span></code></dt><dd><p><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">()(struct</span> <span class="pre">uart_port</span> <span class="pre">*port)</span></code></p>
+<p>Flush any write buffers, reset any DMA state and stop any ongoing DMA
+transfers.</p>
+<p>This will be called whenever the <strong>port-&gt;state-&gt;xmit</strong> circular buffer is
+cleared.</p>
+<p>Locking: <strong>port-&gt;lock</strong> taken.
+Interrupts: locally disabled.
+This call must not sleep</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">set_termios</span></code></dt><dd><p><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">()(struct</span> <span class="pre">uart_port</span> <span class="pre">*port,</span> <span class="pre">struct</span> <span class="pre">ktermios</span> <span class="pre">*new,</span>
+<span class="pre">struct</span> <span class="pre">ktermios</span> <span class="pre">*old)</span></code></p>
+<blockquote>
+<div><p>Change the <strong>port</strong> parameters, including word length, parity, stop bits.
+Update <strong>port-&gt;read_status_mask</strong> and <strong>port-&gt;ignore_status_mask</strong> to
+indicate the types of events we are interested in receiving. Relevant
+ktermios::c_cflag bits are:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">CSIZE</span></code> - word size</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">CSTOPB</span></code> - 2 stop bits</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">PARENB</span></code> - parity enable</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">PARODD</span></code> - odd parity (when <code class="docutils literal notranslate"><span class="pre">PARENB</span></code> is in force)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ADDRB</span></code> - address bit (changed through uart_port::rs485_config()).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">CREAD</span></code> - enable reception of characters (if not set, still receive
+characters from the port, but throw them away).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">CRTSCTS</span></code> - if set, enable CTS status change reporting.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">CLOCAL</span></code> - if not set, enable modem status change reporting.</p></li>
+</ul>
+<p>Relevant ktermios::c_iflag bits are:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">INPCK</span></code> - enable frame and parity error events to be passed to the TTY
+layer.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">BRKINT</span></code> / <code class="docutils literal notranslate"><span class="pre">PARMRK</span></code> - both of these enable break events to be passed to
+the TTY layer.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">IGNPAR</span></code> - ignore parity and framing errors.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">IGNBRK</span></code> - ignore break errors. If <code class="docutils literal notranslate"><span class="pre">IGNPAR</span></code> is also set, ignore overrun
+errors as well.</p></li>
+</ul>
+<p>The interaction of the ktermios::c_iflag bits is as follows (parity
+error given as an example):</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 17%" />
+<col style="width: 10%" />
+<col style="width: 10%" />
+<col style="width: 63%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Parity error</p></th>
+<th class="head"><p>INPCK</p></th>
+<th class="head"><p>IGNPAR</p></th>
+<th class="head"></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>n/a</p></td>
+<td><p>0</p></td>
+<td><p>n/a</p></td>
+<td><p>character received, marked as <code class="docutils literal notranslate"><span class="pre">TTY_NORMAL</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>None</p></td>
+<td><p>1</p></td>
+<td><p>n/a</p></td>
+<td><p>character received, marked as <code class="docutils literal notranslate"><span class="pre">TTY_NORMAL</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>Yes</p></td>
+<td><p>1</p></td>
+<td><p>0</p></td>
+<td><p>character received, marked as <code class="docutils literal notranslate"><span class="pre">TTY_PARITY</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>Yes</p></td>
+<td><p>1</p></td>
+<td><p>1</p></td>
+<td><p>character discarded</p></td>
+</tr>
+</tbody>
+</table>
+<p>Other flags may be used (eg, xon/xoff characters) if your hardware
+supports hardware “soft” flow control.</p>
+<p>Locking: caller holds tty_port-&gt;mutex
+Interrupts: caller dependent.
+This call must not sleep</p>
+</div></blockquote>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">set_ldisc</span></code></dt><dd><p><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">()(struct</span> <span class="pre">uart_port</span> <span class="pre">*port,</span> <span class="pre">struct</span> <span class="pre">ktermios</span> <span class="pre">*termios)</span></code></p>
+<p>Notifier for discipline change. See
+<a class="reference internal" href="../tty/tty_ldisc.html"><span class="doc">TTY Line Discipline</span></a>.</p>
+<p>Locking: caller holds tty_port-&gt;mutex</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">pm</span></code></dt><dd><p><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">()(struct</span> <span class="pre">uart_port</span> <span class="pre">*port,</span> <span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">state,</span>
+<span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">oldstate)</span></code></p>
+<blockquote>
+<div><p>Perform any power management related activities on the specified <strong>port</strong>.
+<strong>state</strong> indicates the new state (defined by enum uart_pm_state),
+<strong>oldstate</strong> indicates the previous state.</p>
+<p>This function should not be used to grab any resources.</p>
+<p>This will be called when the <strong>port</strong> is initially opened and finally
+closed, except when the <strong>port</strong> is also the system console. This will
+occur even if <code class="docutils literal notranslate"><span class="pre">CONFIG_PM</span></code> is not set.</p>
+<p>Locking: none.
+Interrupts: caller dependent.</p>
+</div></blockquote>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">type</span></code></dt><dd><p><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*()(struct</span> <span class="pre">uart_port</span> <span class="pre">*port)</span></code></p>
+<p>Return a pointer to a string constant describing the specified <strong>port</strong>,
+or return <code class="docutils literal notranslate"><span class="pre">NULL</span></code>, in which case the string ‘unknown’ is substituted.</p>
+<p>Locking: none.
+Interrupts: caller dependent.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">release_port</span></code></dt><dd><p><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">()(struct</span> <span class="pre">uart_port</span> <span class="pre">*port)</span></code></p>
+<p>Release any memory and IO region resources currently in use by the
+<strong>port</strong>.</p>
+<p>Locking: none.
+Interrupts: caller dependent.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">request_port</span></code></dt><dd><p><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">()(struct</span> <span class="pre">uart_port</span> <span class="pre">*port)</span></code></p>
+<p>Request any memory and IO region resources required by the port. If any
+fail, no resources should be registered when this function returns, and
+it should return -<code class="docutils literal notranslate"><span class="pre">EBUSY</span></code> on failure.</p>
+<p>Locking: none.
+Interrupts: caller dependent.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">config_port</span></code></dt><dd><p><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">()(struct</span> <span class="pre">uart_port</span> <span class="pre">*port,</span> <span class="pre">int</span> <span class="pre">type)</span></code></p>
+<p>Perform any autoconfiguration steps required for the <strong>port</strong>. <strong>type</strong>
+contains a bit mask of the required configuration. <code class="docutils literal notranslate"><span class="pre">UART_CONFIG_TYPE</span></code>
+indicates that the port requires detection and identification.
+<strong>port-&gt;type</strong> should be set to the type found, or <code class="docutils literal notranslate"><span class="pre">PORT_UNKNOWN</span></code> if no
+port was detected.</p>
+<p><code class="docutils literal notranslate"><span class="pre">UART_CONFIG_IRQ</span></code> indicates autoconfiguration of the interrupt signal,
+which should be probed using standard kernel autoprobing techniques.
+This is not necessary on platforms where ports have interrupts
+internally hard wired (eg, system on a chip implementations).</p>
+<p>Locking: none.
+Interrupts: caller dependent.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">verify_port</span></code></dt><dd><p><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">()(struct</span> <span class="pre">uart_port</span> <span class="pre">*port,</span>
+<span class="pre">struct</span> <span class="pre">serial_struct</span> <span class="pre">*serinfo)</span></code></p>
+<blockquote>
+<div><p>Verify the new serial port information contained within <strong>serinfo</strong> is
+suitable for this port type.</p>
+<p>Locking: none.
+Interrupts: caller dependent.</p>
+</div></blockquote>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">ioctl</span></code></dt><dd><p><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">()(struct</span> <span class="pre">uart_port</span> <span class="pre">*port,</span> <span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">cmd,</span>
+<span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">arg)</span></code></p>
+<blockquote>
+<div><p>Perform any port specific IOCTLs. IOCTL commands must be defined using
+the standard numbering system found in &lt;asm/ioctl.h&gt;.</p>
+<p>Locking: none.
+Interrupts: caller dependent.</p>
+</div></blockquote>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">poll_init</span></code></dt><dd><p><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">()(struct</span> <span class="pre">uart_port</span> <span class="pre">*port)</span></code></p>
+<p>Called by kgdb to perform the minimal hardware initialization needed to
+support <strong>poll_put_char()</strong> and <strong>poll_get_char()</strong>. Unlike <strong>startup()</strong>, this
+should not request interrupts.</p>
+<p>Locking: <code class="docutils literal notranslate"><span class="pre">tty_mutex</span></code> and tty_port-&gt;mutex taken.
+Interrupts: n/a.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">poll_put_char</span></code></dt><dd><p><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">()(struct</span> <span class="pre">uart_port</span> <span class="pre">*port,</span> <span class="pre">unsigned</span> <span class="pre">char</span> <span class="pre">ch)</span></code></p>
+<p>Called by kgdb to write a single character <strong>ch</strong> directly to the serial
+<strong>port</strong>. It can and should block until there is space in the TX FIFO.</p>
+<p>Locking: none.
+Interrupts: caller dependent.
+This call must not sleep</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">poll_get_char</span></code></dt><dd><p><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">()(struct</span> <span class="pre">uart_port</span> <span class="pre">*port)</span></code></p>
+<p>Called by kgdb to read a single character directly from the serial
+port. If data is available, it should be returned; otherwise the
+function should return <code class="docutils literal notranslate"><span class="pre">NO_POLL_CHAR</span></code> immediately.</p>
+<p>Locking: none.
+Interrupts: caller dependent.
+This call must not sleep</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>This structure describes all the operations that can be done on the
+physical hardware.</p>
+</section>
+<section id="other-functions">
+<h2>Other functions<a class="headerlink" href="#other-functions" title="Permalink to this headline">¶</a></h2>
+<dl class="function">
+<dt id="c.uart_write_wakeup">
+void <code class="sig-name descname">uart_write_wakeup</code><span class="sig-paren">(</span>struct uart_port<em> *port</em><span class="sig-paren">)</span><a class="headerlink" href="#c.uart_write_wakeup" title="Permalink to this definition">¶</a></dt>
+<dd><p>schedule write processing</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">uart_port</span> <span class="pre">*port</span></code></dt><dd><p>port to be processed</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This routine is used by the interrupt handler to schedule processing in the
+software interrupt portion of the driver. A driver is expected to call this
+function when the number of characters in the transmit buffer have dropped
+below a threshold.</p>
+<p>Locking: <strong>port-&gt;lock</strong> should be held</p>
+</div>
+<dl class="function">
+<dt id="c.uart_update_timeout">
+void <code class="sig-name descname">uart_update_timeout</code><span class="sig-paren">(</span>struct uart_port<em> *port</em>, unsigned int<em> cflag</em>, unsigned int<em> baud</em><span class="sig-paren">)</span><a class="headerlink" href="#c.uart_update_timeout" title="Permalink to this definition">¶</a></dt>
+<dd><p>update per-port frame timing information</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">uart_port</span> <span class="pre">*port</span></code></dt><dd><p>uart_port structure describing the port</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">cflag</span></code></dt><dd><p>termios cflag value</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">baud</span></code></dt><dd><p>speed of the port</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Set the <strong>port</strong> frame timing information from which the FIFO timeout value is
+derived. The <strong>cflag</strong> value should reflect the actual hardware settings as
+number of bits, parity, stop bits and baud rate is taken into account here.</p>
+<p>Locking: caller is expected to take <strong>port-&gt;lock</strong></p>
+</div>
+<dl class="function">
+<dt id="c.uart_get_baud_rate">
+unsigned int <code class="sig-name descname">uart_get_baud_rate</code><span class="sig-paren">(</span>struct uart_port<em> *port</em>, struct ktermios<em> *termios</em>, const struct ktermios<em> *old</em>, unsigned int<em> min</em>, unsigned int<em> max</em><span class="sig-paren">)</span><a class="headerlink" href="#c.uart_get_baud_rate" title="Permalink to this definition">¶</a></dt>
+<dd><p>return baud rate for a particular port</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">uart_port</span> <span class="pre">*port</span></code></dt><dd><p>uart_port structure describing the port in question.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">ktermios</span> <span class="pre">*termios</span></code></dt><dd><p>desired termios settings</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">struct</span> <span class="pre">ktermios</span> <span class="pre">*old</span></code></dt><dd><p>old termios (or <code class="docutils literal notranslate"><span class="pre">NULL</span></code>)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">min</span></code></dt><dd><p>minimum acceptable baud rate</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">max</span></code></dt><dd><p>maximum acceptable baud rate</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Decode the termios structure into a numeric baud rate, taking account of the
+magic 38400 baud rate (with spd_* flags), and mapping the <code class="docutils literal notranslate"><span class="pre">B0</span></code> rate to 9600
+baud.</p>
+<p>If the new baud rate is invalid, try the <strong>old</strong> termios setting. If it’s still
+invalid, we try 9600 baud.</p>
+<p>The <strong>termios</strong> structure is updated to reflect the baud rate we’re actually
+going to be using. Don’t do this for the case where B0 is requested (“hang
+up”).</p>
+<p>Locking: caller dependent</p>
+</div>
+<dl class="function">
+<dt id="c.uart_get_divisor">
+unsigned int <code class="sig-name descname">uart_get_divisor</code><span class="sig-paren">(</span>struct uart_port<em> *port</em>, unsigned int<em> baud</em><span class="sig-paren">)</span><a class="headerlink" href="#c.uart_get_divisor" title="Permalink to this definition">¶</a></dt>
+<dd><p>return uart clock divisor</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">uart_port</span> <span class="pre">*port</span></code></dt><dd><p>uart_port structure describing the port</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">baud</span></code></dt><dd><p>desired baud rate</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Calculate the divisor (baud_base / baud) for the specified <strong>baud</strong>,
+appropriately rounded.</p>
+<p>If 38400 baud and custom divisor is selected, return the custom divisor
+instead.</p>
+<p>Locking: caller dependent</p>
+</div>
+<dl class="function">
+<dt id="c.uart_get_lsr_info">
+int <code class="sig-name descname">uart_get_lsr_info</code><span class="sig-paren">(</span>struct <a class="reference internal" href="../tty/tty_struct.html#c.tty_struct" title="tty_struct">tty_struct</a><em> *tty</em>, struct uart_state<em> *state</em>, unsigned int __user<em> *value</em><span class="sig-paren">)</span><a class="headerlink" href="#c.uart_get_lsr_info" title="Permalink to this definition">¶</a></dt>
+<dd><p>get line status register info</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">tty_struct</span> <span class="pre">*tty</span></code></dt><dd><p>tty associated with the UART</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">uart_state</span> <span class="pre">*state</span></code></dt><dd><p>UART being queried</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">__user</span> <span class="pre">*value</span></code></dt><dd><p>returned modem value</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.uart_console_write">
+void <code class="sig-name descname">uart_console_write</code><span class="sig-paren">(</span>struct uart_port<em> *port</em>, const char<em> *s</em>, unsigned int<em> count</em>, void (<em>*putchar</em>)(struct uart_port *, unsigned char)<span class="sig-paren">)</span><a class="headerlink" href="#c.uart_console_write" title="Permalink to this definition">¶</a></dt>
+<dd><p>write a console message to a serial port</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">uart_port</span> <span class="pre">*port</span></code></dt><dd><p>the port to write the message</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*s</span></code></dt><dd><p>array of characters</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">count</span></code></dt><dd><p>number of characters in string to write</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">(*putchar)(struct</span> <span class="pre">uart_port</span> <span class="pre">*,</span> <span class="pre">unsigned</span> <span class="pre">char)</span></code></dt><dd><p>function to write character to port</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.uart_get_console">
+struct uart_port * <code class="sig-name descname">uart_get_console</code><span class="sig-paren">(</span>struct uart_port<em> *ports</em>, int<em> nr</em>, struct console<em> *co</em><span class="sig-paren">)</span><a class="headerlink" href="#c.uart_get_console" title="Permalink to this definition">¶</a></dt>
+<dd><p>get uart port for console</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">uart_port</span> <span class="pre">*ports</span></code></dt><dd><p>ports to search in</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">nr</span></code></dt><dd><p>number of <strong>ports</strong></p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">console</span> <span class="pre">*co</span></code></dt><dd><p>console to search for</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p>uart_port for the console <strong>co</strong></p>
+<p><strong>Description</strong></p>
+<p>Check whether an invalid uart number has been specified (as <strong>co-&gt;index</strong>), and
+if so, search for the first available port that does have console support.</p>
+</div>
+<dl class="function">
+<dt id="c.uart_parse_earlycon">
+int <code class="sig-name descname">uart_parse_earlycon</code><span class="sig-paren">(</span>char<em> *p</em>, unsigned char<em> *iotype</em>, resource_size_t<em> *addr</em>, char<em> **options</em><span class="sig-paren">)</span><a class="headerlink" href="#c.uart_parse_earlycon" title="Permalink to this definition">¶</a></dt>
+<dd><p>Parse earlycon options</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">char</span> <span class="pre">*p</span></code></dt><dd><p>ptr to 2nd field (ie., just beyond ‘&lt;name&gt;,’)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">char</span> <span class="pre">*iotype</span></code></dt><dd><p>ptr for decoded iotype (out)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">resource_size_t</span> <span class="pre">*addr</span></code></dt><dd><p>ptr for decoded mapbase/iobase (out)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">char</span> <span class="pre">**options</span></code></dt><dd><p>ptr for &lt;options&gt; field; <code class="docutils literal notranslate"><span class="pre">NULL</span></code> if not present (out)</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<dl class="simple">
+<dt>Decodes earlycon kernel command line parameters of the form:</dt><dd><ul class="simple">
+<li><p>earlycon=&lt;name&gt;,io|mmio|mmio16|mmio32|mmio32be|mmio32native,&lt;addr&gt;,&lt;options&gt;</p></li>
+<li><p>console=&lt;name&gt;,io|mmio|mmio16|mmio32|mmio32be|mmio32native,&lt;addr&gt;,&lt;options&gt;</p></li>
+</ul>
+</dd>
+<dt>The optional form:</dt><dd><ul class="simple">
+<li><p>earlycon=&lt;name&gt;,0x&lt;addr&gt;,&lt;options&gt;</p></li>
+<li><p>console=&lt;name&gt;,0x&lt;addr&gt;,&lt;options&gt;</p></li>
+</ul>
+</dd>
+</dl>
+<p>is also accepted; the returned <strong>iotype</strong> will be <code class="docutils literal notranslate"><span class="pre">UPIO_MEM</span></code>.</p>
+<p><strong>Return</strong></p>
+<p>0 on success or -<code class="docutils literal notranslate"><span class="pre">EINVAL</span></code> on failure</p>
+</div>
+<dl class="function">
+<dt id="c.uart_parse_options">
+void <code class="sig-name descname">uart_parse_options</code><span class="sig-paren">(</span>const char<em> *options</em>, int<em> *baud</em>, int<em> *parity</em>, int<em> *bits</em>, int<em> *flow</em><span class="sig-paren">)</span><a class="headerlink" href="#c.uart_parse_options" title="Permalink to this definition">¶</a></dt>
+<dd><p>Parse serial port baud/parity/bits/flow control.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*options</span></code></dt><dd><p>pointer to option string</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">*baud</span></code></dt><dd><p>pointer to an ‘int’ variable for the baud rate.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">*parity</span></code></dt><dd><p>pointer to an ‘int’ variable for the parity.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">*bits</span></code></dt><dd><p>pointer to an ‘int’ variable for the number of data bits.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">*flow</span></code></dt><dd><p>pointer to an ‘int’ variable for the flow control character.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p><a class="reference internal" href="#c.uart_parse_options" title="uart_parse_options"><code class="xref c c-func docutils literal notranslate"><span class="pre">uart_parse_options()</span></code></a> decodes a string containing the serial console
+options. The format of the string is &lt;baud&gt;&lt;parity&gt;&lt;bits&gt;&lt;flow&gt;,
+eg: 115200n8r</p>
+</div>
+<dl class="function">
+<dt id="c.uart_set_options">
+int <code class="sig-name descname">uart_set_options</code><span class="sig-paren">(</span>struct uart_port<em> *port</em>, struct console<em> *co</em>, int<em> baud</em>, int<em> parity</em>, int<em> bits</em>, int<em> flow</em><span class="sig-paren">)</span><a class="headerlink" href="#c.uart_set_options" title="Permalink to this definition">¶</a></dt>
+<dd><p>setup the serial console parameters</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">uart_port</span> <span class="pre">*port</span></code></dt><dd><p>pointer to the serial ports uart_port structure</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">console</span> <span class="pre">*co</span></code></dt><dd><p>console pointer</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">baud</span></code></dt><dd><p>baud rate</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">parity</span></code></dt><dd><p>parity character - ‘n’ (none), ‘o’ (odd), ‘e’ (even)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">bits</span></code></dt><dd><p>number of data bits</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">flow</span></code></dt><dd><p>flow control character - ‘r’ (rts)</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Locking: Caller must hold console_list_lock in order to serialize
+early initialization of the serial-console lock.</p>
+</div>
+<dl class="function">
+<dt id="c.uart_register_driver">
+int <code class="sig-name descname">uart_register_driver</code><span class="sig-paren">(</span>struct uart_driver<em> *drv</em><span class="sig-paren">)</span><a class="headerlink" href="#c.uart_register_driver" title="Permalink to this definition">¶</a></dt>
+<dd><p>register a driver with the uart core layer</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">uart_driver</span> <span class="pre">*drv</span></code></dt><dd><p>low level driver structure</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Register a uart driver with the core driver. We in turn register with the
+tty layer, and initialise the core driver per-port state.</p>
+<p>We have a proc file in /proc/tty/driver which is named after the normal
+driver.</p>
+<p><strong>drv-&gt;port</strong> should be <code class="docutils literal notranslate"><span class="pre">NULL</span></code>, and the per-port structures should be registered
+using <a class="reference internal" href="#c.uart_add_one_port" title="uart_add_one_port"><code class="xref c c-func docutils literal notranslate"><span class="pre">uart_add_one_port()</span></code></a> after this call has succeeded.</p>
+<p>Locking: none, Interrupts: enabled</p>
+</div>
+<dl class="function">
+<dt id="c.uart_unregister_driver">
+void <code class="sig-name descname">uart_unregister_driver</code><span class="sig-paren">(</span>struct uart_driver<em> *drv</em><span class="sig-paren">)</span><a class="headerlink" href="#c.uart_unregister_driver" title="Permalink to this definition">¶</a></dt>
+<dd><p>remove a driver from the uart core layer</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">uart_driver</span> <span class="pre">*drv</span></code></dt><dd><p>low level driver structure</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Remove all references to a driver from the core driver. The low level
+driver must have removed all its ports via the <a class="reference internal" href="#c.uart_remove_one_port" title="uart_remove_one_port"><code class="xref c c-func docutils literal notranslate"><span class="pre">uart_remove_one_port()</span></code></a> if it
+registered them with <a class="reference internal" href="#c.uart_add_one_port" title="uart_add_one_port"><code class="xref c c-func docutils literal notranslate"><span class="pre">uart_add_one_port()</span></code></a>. (I.e. <strong>drv-&gt;port</strong> is <code class="docutils literal notranslate"><span class="pre">NULL</span></code>.)</p>
+<p>Locking: none, Interrupts: enabled</p>
+</div>
+<dl class="function">
+<dt id="c.uart_add_one_port">
+int <code class="sig-name descname">uart_add_one_port</code><span class="sig-paren">(</span>struct uart_driver<em> *drv</em>, struct uart_port<em> *uport</em><span class="sig-paren">)</span><a class="headerlink" href="#c.uart_add_one_port" title="Permalink to this definition">¶</a></dt>
+<dd><p>attach a driver-defined port structure</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">uart_driver</span> <span class="pre">*drv</span></code></dt><dd><p>pointer to the uart low level driver structure for this port</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">uart_port</span> <span class="pre">*uport</span></code></dt><dd><p>uart port structure to use for this port.</p>
+</dd>
+</dl>
+<p><strong>Context</strong></p>
+<p>task context, might sleep</p>
+<p><strong>Description</strong></p>
+<p>This allows the driver <strong>drv</strong> to register its own uart_port structure with the
+core driver. The main purpose is to allow the low level uart drivers to
+expand uart_port, rather than having yet more levels of structures.</p>
+</div>
+<dl class="function">
+<dt id="c.uart_remove_one_port">
+int <code class="sig-name descname">uart_remove_one_port</code><span class="sig-paren">(</span>struct uart_driver<em> *drv</em>, struct uart_port<em> *uport</em><span class="sig-paren">)</span><a class="headerlink" href="#c.uart_remove_one_port" title="Permalink to this definition">¶</a></dt>
+<dd><p>detach a driver defined port structure</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">uart_driver</span> <span class="pre">*drv</span></code></dt><dd><p>pointer to the uart low level driver structure for this port</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">uart_port</span> <span class="pre">*uport</span></code></dt><dd><p>uart port structure for this port</p>
+</dd>
+</dl>
+<p><strong>Context</strong></p>
+<p>task context, might sleep</p>
+<p><strong>Description</strong></p>
+<p>This unhooks (and hangs up) the specified port structure from the core
+driver. No further calls will be made to the low-level code for this port.</p>
+</div>
+<dl class="function">
+<dt id="c.uart_match_port">
+bool <code class="sig-name descname">uart_match_port</code><span class="sig-paren">(</span>const struct uart_port<em> *port1</em>, const struct uart_port<em> *port2</em><span class="sig-paren">)</span><a class="headerlink" href="#c.uart_match_port" title="Permalink to this definition">¶</a></dt>
+<dd><p>are the two ports equivalent?</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">struct</span> <span class="pre">uart_port</span> <span class="pre">*port1</span></code></dt><dd><p>first port</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">struct</span> <span class="pre">uart_port</span> <span class="pre">*port2</span></code></dt><dd><p>second port</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This utility function can be used to determine whether two uart_port
+structures describe the same port.</p>
+</div>
+<dl class="function">
+<dt id="c.uart_handle_dcd_change">
+void <code class="sig-name descname">uart_handle_dcd_change</code><span class="sig-paren">(</span>struct uart_port<em> *uport</em>, unsigned int<em> status</em><span class="sig-paren">)</span><a class="headerlink" href="#c.uart_handle_dcd_change" title="Permalink to this definition">¶</a></dt>
+<dd><p>handle a change of carrier detect state</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">uart_port</span> <span class="pre">*uport</span></code></dt><dd><p>uart_port structure for the open port</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">status</span></code></dt><dd><p>new carrier detect status, nonzero if active</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Caller must hold uport-&gt;lock.</p>
+</div>
+<dl class="function">
+<dt id="c.uart_handle_cts_change">
+void <code class="sig-name descname">uart_handle_cts_change</code><span class="sig-paren">(</span>struct uart_port<em> *uport</em>, unsigned int<em> status</em><span class="sig-paren">)</span><a class="headerlink" href="#c.uart_handle_cts_change" title="Permalink to this definition">¶</a></dt>
+<dd><p>handle a change of clear-to-send state</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">uart_port</span> <span class="pre">*uport</span></code></dt><dd><p>uart_port structure for the open port</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">status</span></code></dt><dd><p>new clear to send status, nonzero if active</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Caller must hold uport-&gt;lock.</p>
+</div>
+<dl class="function">
+<dt id="c.uart_try_toggle_sysrq">
+bool <code class="sig-name descname">uart_try_toggle_sysrq</code><span class="sig-paren">(</span>struct uart_port<em> *port</em>, unsigned int<em> ch</em><span class="sig-paren">)</span><a class="headerlink" href="#c.uart_try_toggle_sysrq" title="Permalink to this definition">¶</a></dt>
+<dd><p>Enables SysRq from serial line</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">uart_port</span> <span class="pre">*port</span></code></dt><dd><p>uart_port structure where char(s) after BREAK met</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">ch</span></code></dt><dd><p>new character in the sequence after received BREAK</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Enables magic SysRq when the required sequence is met on port
+(see CONFIG_MAGIC_SYSRQ_SERIAL_SEQUENCE).</p>
+<p><strong>Return</strong></p>
+<p><code class="docutils literal notranslate"><span class="pre">false</span></code> if <strong>ch</strong> is out of enabling sequence and should be
+handled some other way, <code class="docutils literal notranslate"><span class="pre">true</span></code> if <strong>ch</strong> was consumed.</p>
+</div>
+<dl class="function">
+<dt id="c.uart_port_tx_limited">
+<code class="sig-name descname">uart_port_tx_limited</code><span class="sig-paren">(</span><em>port</em>, <em>ch</em>, <em>count</em>, <em>tx_ready</em>, <em>put_char</em>, <em>tx_done</em><span class="sig-paren">)</span><a class="headerlink" href="#c.uart_port_tx_limited" title="Permalink to this definition">¶</a></dt>
+<dd><ul class="simple">
+<li><p>transmit helper for uart_port with count limiting</p></li>
+</ul>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">port</span></code></dt><dd><p>uart port</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">ch</span></code></dt><dd><p>variable to store a character to be written to the HW</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">count</span></code></dt><dd><p>a limit of characters to send</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">tx_ready</span></code></dt><dd><p>can HW accept more data function</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">put_char</span></code></dt><dd><p>function to write a character</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">tx_done</span></code></dt><dd><p>function to call after the loop is done</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This helper transmits characters from the xmit buffer to the hardware using
+<strong>put_char()</strong>. It does so until <strong>count</strong> characters are sent and while <strong>tx_ready</strong>
+evaluates to true.</p>
+<dl class="simple">
+<dt>The expression in macro parameters shall be designed as follows:</dt><dd><ul class="simple">
+<li><p><strong>tx_ready:</strong> should evaluate to true if the HW can accept more data to
+be sent. This parameter can be <code class="docutils literal notranslate"><span class="pre">true</span></code>, which means the HW is always ready.</p></li>
+<li><p><strong>put_char:</strong> shall write <strong>ch</strong> to the device of <strong>port</strong>.</p></li>
+<li><p><strong>tx_done:</strong> when the write loop is done, this can perform arbitrary
+action before potential invocation of ops-&gt;stop_tx() happens. If the
+driver does not need to do anything, use e.g. ({}).</p></li>
+</ul>
+</dd>
+</dl>
+<p>For all of them, <strong>port-&gt;lock</strong> is held, interrupts are locally disabled and
+the expressions must not sleep.</p>
+<p><strong>Return</strong></p>
+<p>the number of characters in the xmit buffer when done.</p>
+</div>
+<dl class="function">
+<dt id="c.uart_port_tx">
+<code class="sig-name descname">uart_port_tx</code><span class="sig-paren">(</span><em>port</em>, <em>ch</em>, <em>tx_ready</em>, <em>put_char</em><span class="sig-paren">)</span><a class="headerlink" href="#c.uart_port_tx" title="Permalink to this definition">¶</a></dt>
+<dd><ul class="simple">
+<li><p>transmit helper for uart_port</p></li>
+</ul>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">port</span></code></dt><dd><p>uart port</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">ch</span></code></dt><dd><p>variable to store a character to be written to the HW</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">tx_ready</span></code></dt><dd><p>can HW accept more data function</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">put_char</span></code></dt><dd><p>function to write a character</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>See <a class="reference internal" href="#c.uart_port_tx_limited" title="uart_port_tx_limited"><code class="xref c c-func docutils literal notranslate"><span class="pre">uart_port_tx_limited()</span></code></a> for more details.</p>
+</div>
+</section>
+<section id="other-notes">
+<h2>Other notes<a class="headerlink" href="#other-notes" title="Permalink to this headline">¶</a></h2>
+<p>It is intended some day to drop the ‘unused’ entries from uart_port, and
+allow low level drivers to register their own individual uart_port’s with
+the core.  This will allow drivers to use uart_port as a pointer to a
+structure containing both the uart_port entry with their own extensions,
+thus:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct my_port {
+        struct uart_port        port;
+        int                     my_stuff;
+};
+</pre></div>
+</div>
+</section>
+<section id="modem-control-lines-via-gpio">
+<h2>Modem control lines via GPIO<a class="headerlink" href="#modem-control-lines-via-gpio" title="Permalink to this headline">¶</a></h2>
+<p>Some helpers are provided in order to set/get modem control lines via GPIO.</p>
+<dl class="function">
+<dt id="c.mctrl_gpio_set">
+void <code class="sig-name descname">mctrl_gpio_set</code><span class="sig-paren">(</span>struct mctrl_gpios<em> *gpios</em>, unsigned int<em> mctrl</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mctrl_gpio_set" title="Permalink to this definition">¶</a></dt>
+<dd><p>set gpios according to mctrl state</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">mctrl_gpios</span> <span class="pre">*gpios</span></code></dt><dd><p>gpios to set</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">mctrl</span></code></dt><dd><p>state to set</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Set the gpios according to the mctrl state.</p>
+</div>
+<dl class="function">
+<dt id="c.mctrl_gpio_to_gpiod">
+struct gpio_desc * <code class="sig-name descname">mctrl_gpio_to_gpiod</code><span class="sig-paren">(</span>struct mctrl_gpios<em> *gpios</em>, enum mctrl_gpio_idx<em> gidx</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mctrl_gpio_to_gpiod" title="Permalink to this definition">¶</a></dt>
+<dd><p>obtain gpio_desc of modem line index</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">mctrl_gpios</span> <span class="pre">*gpios</span></code></dt><dd><p>gpios to look into</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">enum</span> <span class="pre">mctrl_gpio_idx</span> <span class="pre">gidx</span></code></dt><dd><p>index of the modem line</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p>the gpio_desc structure associated to the modem line index</p>
+</div>
+<dl class="function">
+<dt id="c.mctrl_gpio_get">
+unsigned int <code class="sig-name descname">mctrl_gpio_get</code><span class="sig-paren">(</span>struct mctrl_gpios<em> *gpios</em>, unsigned int<em> *mctrl</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mctrl_gpio_get" title="Permalink to this definition">¶</a></dt>
+<dd><p>update mctrl with the gpios values.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">mctrl_gpios</span> <span class="pre">*gpios</span></code></dt><dd><p>gpios to get the info from</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">*mctrl</span></code></dt><dd><p>mctrl to set</p>
+</dd>
+</dl>
+<p><strong>Return</strong></p>
+<p>modified mctrl (the same value as in <strong>mctrl</strong>)</p>
+<p><strong>Description</strong></p>
+<p>Update mctrl with the gpios values.</p>
+</div>
+<dl class="function">
+<dt id="c.mctrl_gpio_init">
+struct mctrl_gpios * <code class="sig-name descname">mctrl_gpio_init</code><span class="sig-paren">(</span>struct uart_port<em> *port</em>, unsigned int<em> idx</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mctrl_gpio_init" title="Permalink to this definition">¶</a></dt>
+<dd><p>initialize uart gpios</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">uart_port</span> <span class="pre">*port</span></code></dt><dd><p>port to initialize gpios for</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">int</span> <span class="pre">idx</span></code></dt><dd><p>index of the gpio in the <strong>port</strong>’s device</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This will get the {cts,rts,…}-gpios from device tree if they are present
+and request them, set direction etc, and return an allocated structure.
+<cite>devm_*</cite> functions are used, so there’s no need to call <a class="reference internal" href="#c.mctrl_gpio_free" title="mctrl_gpio_free"><code class="xref c c-func docutils literal notranslate"><span class="pre">mctrl_gpio_free()</span></code></a>.
+As this sets up the irq handling, make sure to not handle changes to the
+gpio input lines in your driver, too.</p>
+</div>
+<dl class="function">
+<dt id="c.mctrl_gpio_free">
+void <code class="sig-name descname">mctrl_gpio_free</code><span class="sig-paren">(</span>struct <a class="reference internal" href="../infrastructure.html#c.device" title="device">device</a><em> *dev</em>, struct mctrl_gpios<em> *gpios</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mctrl_gpio_free" title="Permalink to this definition">¶</a></dt>
+<dd><p>explicitly free uart gpios</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>uart port’s device</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">mctrl_gpios</span> <span class="pre">*gpios</span></code></dt><dd><p>gpios structure to be freed</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This will free the requested gpios in <a class="reference internal" href="#c.mctrl_gpio_init" title="mctrl_gpio_init"><code class="xref c c-func docutils literal notranslate"><span class="pre">mctrl_gpio_init()</span></code></a>. As <cite>devm_*</cite>
+functions are used, there’s generally no need to call this function.</p>
+</div>
+<dl class="function">
+<dt id="c.mctrl_gpio_enable_ms">
+void <code class="sig-name descname">mctrl_gpio_enable_ms</code><span class="sig-paren">(</span>struct mctrl_gpios<em> *gpios</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mctrl_gpio_enable_ms" title="Permalink to this definition">¶</a></dt>
+<dd><p>enable irqs and handling of changes to the ms lines</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">mctrl_gpios</span> <span class="pre">*gpios</span></code></dt><dd><p>gpios to enable</p>
+</dd>
+</dl>
+</div>
+<dl class="function">
+<dt id="c.mctrl_gpio_disable_ms">
+void <code class="sig-name descname">mctrl_gpio_disable_ms</code><span class="sig-paren">(</span>struct mctrl_gpios<em> *gpios</em><span class="sig-paren">)</span><a class="headerlink" href="#c.mctrl_gpio_disable_ms" title="Permalink to this definition">¶</a></dt>
+<dd><p>disable irqs and handling of changes to the ms lines</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">mctrl_gpios</span> <span class="pre">*gpios</span></code></dt><dd><p>gpios to disable</p>
+</dd>
+</dl>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Low Level Serial API</a><ul>
+<li><a class="reference internal" href="#low-level-serial-hardware-driver">Low Level Serial Hardware Driver</a></li>
+<li><a class="reference internal" href="#console-support">Console Support</a></li>
+<li><a class="reference internal" href="#locking">Locking</a></li>
+<li><a class="reference internal" href="#uart-ops">uart_ops</a></li>
+<li><a class="reference internal" href="#other-functions">Other functions</a></li>
+<li><a class="reference internal" href="#other-notes">Other notes</a></li>
+<li><a class="reference internal" href="#modem-control-lines-via-gpio">Modem control lines via GPIO</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/serial/driver.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/serial/driver.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

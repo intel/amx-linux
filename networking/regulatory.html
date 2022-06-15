@@ -1,0 +1,292 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Linux wireless regulatory documentation &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Network Function Representors" href="representors.html" />
+    <link rel="prev" title="RDS" href="rds.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="linux-wireless-regulatory-documentation">
+<h1>Linux wireless regulatory documentation<a class="headerlink" href="#linux-wireless-regulatory-documentation" title="Permalink to this headline">¶</a></h1>
+<p>This document gives a brief review over how the Linux wireless
+regulatory infrastructure works.</p>
+<p>More up to date information can be obtained at the project’s web page:</p>
+<p><a class="reference external" href="https://wireless.wiki.kernel.org/en/developers/Regulatory">https://wireless.wiki.kernel.org/en/developers/Regulatory</a></p>
+<section id="keeping-regulatory-domains-in-userspace">
+<h2>Keeping regulatory domains in userspace<a class="headerlink" href="#keeping-regulatory-domains-in-userspace" title="Permalink to this headline">¶</a></h2>
+<p>Due to the dynamic nature of regulatory domains we keep them
+in userspace and provide a framework for userspace to upload
+to the kernel one regulatory domain to be used as the central
+core regulatory domain all wireless devices should adhere to.</p>
+</section>
+<section id="how-to-get-regulatory-domains-to-the-kernel">
+<h2>How to get regulatory domains to the kernel<a class="headerlink" href="#how-to-get-regulatory-domains-to-the-kernel" title="Permalink to this headline">¶</a></h2>
+<p>When the regulatory domain is first set up, the kernel will request a
+database file (regulatory.db) containing all the regulatory rules. It
+will then use that database when it needs to look up the rules for a
+given country.</p>
+</section>
+<section id="how-to-get-regulatory-domains-to-the-kernel-old-crda-solution">
+<h2>How to get regulatory domains to the kernel (old CRDA solution)<a class="headerlink" href="#how-to-get-regulatory-domains-to-the-kernel-old-crda-solution" title="Permalink to this headline">¶</a></h2>
+<p>Userspace gets a regulatory domain in the kernel by having
+a userspace agent build it and send it via nl80211. Only
+expected regulatory domains will be respected by the kernel.</p>
+<p>A currently available userspace agent which can accomplish this
+is CRDA - central regulatory domain agent. Its documented here:</p>
+<p><a class="reference external" href="https://wireless.wiki.kernel.org/en/developers/Regulatory/CRDA">https://wireless.wiki.kernel.org/en/developers/Regulatory/CRDA</a></p>
+<p>Essentially the kernel will send a udev event when it knows
+it needs a new regulatory domain. A udev rule can be put in place
+to trigger crda to send the respective regulatory domain for a
+specific ISO/IEC 3166 alpha2.</p>
+<p>Below is an example udev rule which can be used:</p>
+<p># Example file, should be put in /etc/udev/rules.d/regulatory.rules
+KERNEL==”regulatory*”, ACTION==”change”, SUBSYSTEM==”platform”, RUN+=”/sbin/crda”</p>
+<p>The alpha2 is passed as an environment variable under the variable COUNTRY.</p>
+</section>
+<section id="who-asks-for-regulatory-domains">
+<h2>Who asks for regulatory domains?<a class="headerlink" href="#who-asks-for-regulatory-domains" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p>Users</p></li>
+</ul>
+<p>Users can use iw:</p>
+<p><a class="reference external" href="https://wireless.wiki.kernel.org/en/users/Documentation/iw">https://wireless.wiki.kernel.org/en/users/Documentation/iw</a></p>
+<p>An example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># set regulatory domain to &quot;Costa Rica&quot;
+iw reg set CR
+</pre></div>
+</div>
+<p>This will request the kernel to set the regulatory domain to
+the specificied alpha2. The kernel in turn will then ask userspace
+to provide a regulatory domain for the alpha2 specified by the user
+by sending a uevent.</p>
+<ul class="simple">
+<li><p>Wireless subsystems for Country Information elements</p></li>
+</ul>
+<p>The kernel will send a uevent to inform userspace a new
+regulatory domain is required. More on this to be added
+as its integration is added.</p>
+<ul class="simple">
+<li><p>Drivers</p></li>
+</ul>
+<p>If drivers determine they need a specific regulatory domain
+set they can inform the wireless core using <a class="reference internal" href="../driver-api/80211/cfg80211.html#c.regulatory_hint" title="regulatory_hint"><code class="xref c c-func docutils literal notranslate"><span class="pre">regulatory_hint()</span></code></a>.
+They have two options – they either provide an alpha2 so that
+crda can provide back a regulatory domain for that country or
+they can build their own regulatory domain based on internal
+custom knowledge so the wireless core can respect it.</p>
+<p><em>Most</em> drivers will rely on the first mechanism of providing a
+regulatory hint with an alpha2. For these drivers there is an additional
+check that can be used to ensure compliance based on custom EEPROM
+regulatory data. This additional check can be used by drivers by
+registering on its <a class="reference internal" href="../driver-api/80211/cfg80211.html#c.wiphy" title="wiphy"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">wiphy</span></code></a> a reg_notifier() callback. This notifier
+is called when the core’s regulatory domain has been changed. The driver
+can use this to review the changes made and also review who made them
+(driver, user, country IE) and determine what to allow based on its
+internal EEPROM data. Devices drivers wishing to be capable of world
+roaming should use this callback. More on world roaming will be
+added to this document when its support is enabled.</p>
+<p>Device drivers who provide their own built regulatory domain
+do not need a callback as the channels registered by them are
+the only ones that will be allowed and therefore <em>additional</em>
+channels cannot be enabled.</p>
+</section>
+<section id="example-code-drivers-hinting-an-alpha2">
+<h2>Example code - drivers hinting an alpha2:<a class="headerlink" href="#example-code-drivers-hinting-an-alpha2" title="Permalink to this headline">¶</a></h2>
+<p>This example comes from the zd1211rw device driver. You can start
+by having a mapping of your device’s EEPROM country/regulatory
+domain value to a specific alpha2 as follows:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>static struct zd_reg_alpha2_map reg_alpha2_map[] = {
+      { ZD_REGDOMAIN_FCC, &quot;US&quot; },
+      { ZD_REGDOMAIN_IC, &quot;CA&quot; },
+      { ZD_REGDOMAIN_ETSI, &quot;DE&quot; }, /* Generic ETSI, use most restrictive */
+      { ZD_REGDOMAIN_JAPAN, &quot;JP&quot; },
+      { ZD_REGDOMAIN_JAPAN_ADD, &quot;JP&quot; },
+      { ZD_REGDOMAIN_SPAIN, &quot;ES&quot; },
+      { ZD_REGDOMAIN_FRANCE, &quot;FR&quot; },
+</pre></div>
+</div>
+<p>Then you can define a routine to map your read EEPROM value to an alpha2,
+as follows:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>static int zd_reg2alpha2(u8 regdomain, char *alpha2)
+{
+      unsigned int i;
+      struct zd_reg_alpha2_map *reg_map;
+              for (i = 0; i &lt; ARRAY_SIZE(reg_alpha2_map); i++) {
+                      reg_map = &amp;reg_alpha2_map[i];
+                      if (regdomain == reg_map-&gt;reg) {
+                      alpha2[0] = reg_map-&gt;alpha2[0];
+                      alpha2[1] = reg_map-&gt;alpha2[1];
+                      return 0;
+              }
+      }
+      return 1;
+}
+</pre></div>
+</div>
+<p>Lastly, you can then hint to the core of your discovered alpha2, if a match
+was found. You need to do this after you have registered your wiphy. You
+are expected to do this during initialization.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>r = zd_reg2alpha2(mac-&gt;regdomain, alpha2);
+if (!r)
+        regulatory_hint(hw-&gt;wiphy, alpha2);
+</pre></div>
+</div>
+</section>
+<section id="example-code-drivers-providing-a-built-in-regulatory-domain">
+<h2>Example code - drivers providing a built in regulatory domain:<a class="headerlink" href="#example-code-drivers-providing-a-built-in-regulatory-domain" title="Permalink to this headline">¶</a></h2>
+<p>[NOTE: This API is not currently available, it can be added when required]</p>
+<p>If you have regulatory information you can obtain from your
+driver and you <em>need</em> to use this we let you build a regulatory domain
+structure and pass it to the wireless core. To do this you should
+<a class="reference internal" href="../core-api/mm-api.html#c.kmalloc" title="kmalloc"><code class="xref c c-func docutils literal notranslate"><span class="pre">kmalloc()</span></code></a> a structure big enough to hold your regulatory domain
+structure and you should then fill it with your data. Finally you simply
+call <a class="reference internal" href="../driver-api/80211/cfg80211.html#c.regulatory_hint" title="regulatory_hint"><code class="xref c c-func docutils literal notranslate"><span class="pre">regulatory_hint()</span></code></a> with the regulatory domain structure in it.</p>
+<p>Bellow is a simple example, with a regulatory domain cached using the stack.
+Your implementation may vary (read EEPROM cache instead, for example).</p>
+<p>Example cache of some regulatory domain:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct ieee80211_regdomain mydriver_jp_regdom = {
+      .n_reg_rules = 3,
+      .alpha2 =  &quot;JP&quot;,
+      //.alpha2 =  &quot;99&quot;, /* If I have no alpha2 to map it to */
+      .reg_rules = {
+              /* IEEE 802.11b/g, channels 1..14 */
+              REG_RULE(2412-10, 2484+10, 40, 6, 20, 0),
+              /* IEEE 802.11a, channels 34..48 */
+              REG_RULE(5170-10, 5240+10, 40, 6, 20,
+                      NL80211_RRF_NO_IR),
+              /* IEEE 802.11a, channels 52..64 */
+              REG_RULE(5260-10, 5320+10, 40, 6, 20,
+                      NL80211_RRF_NO_IR|
+                      NL80211_RRF_DFS),
+      }
+};
+</pre></div>
+</div>
+<p>Then in some part of your code after your wiphy has been registered:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct ieee80211_regdomain *rd;
+int size_of_regd;
+int num_rules = mydriver_jp_regdom.n_reg_rules;
+unsigned int i;
+
+size_of_regd = sizeof(struct ieee80211_regdomain) +
+        (num_rules * sizeof(struct ieee80211_reg_rule));
+
+rd = kzalloc(size_of_regd, GFP_KERNEL);
+if (!rd)
+        return -ENOMEM;
+
+memcpy(rd, &amp;mydriver_jp_regdom, sizeof(struct ieee80211_regdomain));
+
+for (i=0; i &lt; num_rules; i++)
+        memcpy(&amp;rd-&gt;reg_rules[i],
+               &amp;mydriver_jp_regdom.reg_rules[i],
+               sizeof(struct ieee80211_reg_rule));
+regulatory_struct_hint(rd);
+</pre></div>
+</div>
+</section>
+<section id="statically-compiled-regulatory-database">
+<h2>Statically compiled regulatory database<a class="headerlink" href="#statically-compiled-regulatory-database" title="Permalink to this headline">¶</a></h2>
+<p>When a database should be fixed into the kernel, it can be provided as a
+firmware file at build time that is then linked into the kernel.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Linux wireless regulatory documentation</a><ul>
+<li><a class="reference internal" href="#keeping-regulatory-domains-in-userspace">Keeping regulatory domains in userspace</a></li>
+<li><a class="reference internal" href="#how-to-get-regulatory-domains-to-the-kernel">How to get regulatory domains to the kernel</a></li>
+<li><a class="reference internal" href="#how-to-get-regulatory-domains-to-the-kernel-old-crda-solution">How to get regulatory domains to the kernel (old CRDA solution)</a></li>
+<li><a class="reference internal" href="#who-asks-for-regulatory-domains">Who asks for regulatory domains?</a></li>
+<li><a class="reference internal" href="#example-code-drivers-hinting-an-alpha2">Example code - drivers hinting an alpha2:</a></li>
+<li><a class="reference internal" href="#example-code-drivers-providing-a-built-in-regulatory-domain">Example code - drivers providing a built in regulatory domain:</a></li>
+<li><a class="reference internal" href="#statically-compiled-regulatory-database">Statically compiled regulatory database</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/networking/regulatory.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/networking/regulatory.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

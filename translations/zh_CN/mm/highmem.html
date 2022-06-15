@@ -1,0 +1,231 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>高内存处理 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../mm/highmem.html"><span class="doc">High Memory Handling</span></a></p>
+</dd>
+<dt class="field-even">翻译</dt>
+<dd class="field-even"><p>司延腾 Yanteng Si &lt;<a class="reference external" href="mailto:siyanteng&#37;&#52;&#48;loongson&#46;cn">siyanteng<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+<dt class="field-odd">校译</dt>
+<dd class="field-odd"><p></p></dd>
+</dl>
+<section id="id1">
+<h1>高内存处理<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h1>
+<p>作者: Peter Zijlstra &lt;<a class="reference external" href="mailto:a&#46;p&#46;zijlstra&#37;&#52;&#48;chello&#46;nl">a<span>&#46;</span>p<span>&#46;</span>zijlstra<span>&#64;</span>chello<span>&#46;</span>nl</a>&gt;</p>
+<div class="contents local topic" id="contents">
+<ul class="simple">
+<li><p><a class="reference internal" href="#id2" id="id6">高内存是什么？</a></p></li>
+<li><p><a class="reference internal" href="#id3" id="id7">临时虚拟映射</a></p></li>
+<li><p><a class="reference internal" href="#id4" id="id8">临时映射的成本</a></p></li>
+<li><p><a class="reference internal" href="#i386-pae" id="id9">i386 PAE</a></p></li>
+<li><p><a class="reference internal" href="#id5" id="id10">函数</a></p></li>
+</ul>
+</div>
+<section id="id2">
+<h2><a class="toc-backref" href="#id6">高内存是什么？</a><a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>当物理内存的大小接近或超过虚拟内存的最大大小时，就会使用高内存（highmem）。在这一点上，内
+核不可能在任何时候都保持所有可用的物理内存的映射。这意味着内核需要开始使用它想访问的物理内
+存的临时映射。</p>
+<p>没有被永久映射覆盖的那部分（物理）内存就是我们所说的 “高内存”。对于这个边界的确切位置，有
+各种架构上的限制。</p>
+<p>例如，在i386架构中，我们选择将内核映射到每个进程的虚拟空间，这样我们就不必为内核的进入/退
+出付出全部的TLB作废代价。这意味着可用的虚拟内存空间（i386上为4GiB）必须在用户和内核空间之
+间进行划分。</p>
+<p>使用这种方法的架构的传统分配方式是3:1，3GiB用于用户空间，顶部的1GiB用于内核空间。:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>+--------+ 0xffffffff
+| Kernel |
++--------+ 0xc0000000
+|        |
+| User   |
+|        |
++--------+ 0x00000000
+</pre></div>
+</div>
+<p>这意味着内核在任何时候最多可以映射1GiB的物理内存，但是由于我们需要虚拟地址空间来做其他事
+情–包括访问其余物理内存的临时映射–实际的直接映射通常会更少（通常在~896MiB左右）。</p>
+<p>其他有mm上下文标签的TLB的架构可以有独立的内核和用户映射。然而，一些硬件（如一些ARM）在使
+用mm上下文标签时，其虚拟空间有限。</p>
+</section>
+<section id="id3">
+<h2><a class="toc-backref" href="#id7">临时虚拟映射</a><a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h2>
+<p>内核包含几种创建临时映射的方法。下面的列表按照使用的优先顺序显示了它们。</p>
+<ul>
+<li><p><a class="reference internal" href="../../../mm/highmem.html#c.kmap_local_page" title="kmap_local_page"><code class="xref c c-func docutils literal notranslate"><span class="pre">kmap_local_page()</span></code></a>。这个函数是用来要求短期映射的。它可以从任何上下文（包括中断）中调用，
+但是映射只能在获取它们的上下文中使用。</p>
+<p>在可行的情况下，这个函数应该比其他所有的函数优先使用。</p>
+<p>这些映射是线程本地和CPU本地的，这意味着映射只能从这个线程中访问，并且当映射处于活动状
+态时，该线程与CPU绑定。即使线程被抢占了（因为抢占永远不会被函数禁用），CPU也不能通过
+CPU-hotplug从系统中拔出，直到映射被处理掉。</p>
+<p>在本地的kmap区域中采取pagefaults是有效的，除非获取本地映射的上下文由于其他原因不允许
+这样做。</p>
+<p><a class="reference internal" href="../../../mm/highmem.html#c.kmap_local_page" title="kmap_local_page"><code class="xref c c-func docutils literal notranslate"><span class="pre">kmap_local_page()</span></code></a>总是返回一个有效的虚拟地址，并且假定<a class="reference internal" href="../../../mm/highmem.html#c.kunmap_local" title="kunmap_local"><code class="xref c c-func docutils literal notranslate"><span class="pre">kunmap_local()</span></code></a>不会失败。</p>
+<p>嵌套<a class="reference internal" href="../../../mm/highmem.html#c.kmap_local_page" title="kmap_local_page"><code class="xref c c-func docutils literal notranslate"><span class="pre">kmap_local_page()</span></code></a>和<a class="reference internal" href="../../../mm/highmem.html#c.kmap_atomic" title="kmap_atomic"><code class="xref c c-func docutils literal notranslate"><span class="pre">kmap_atomic()</span></code></a>映射在一定程度上是允许的（最多到KMAP_TYPE_NR），
+但是它们的调用必须严格排序，因为映射的实现是基于堆栈的。关于如何管理嵌套映射的细节，
+请参见<a class="reference internal" href="../../../mm/highmem.html#c.kmap_local_page" title="kmap_local_page"><code class="xref c c-func docutils literal notranslate"><span class="pre">kmap_local_page()</span></code></a> kdocs（包含在 “函数 “部分）。</p>
+</li>
+<li><p><a class="reference internal" href="../../../mm/highmem.html#c.kmap_atomic" title="kmap_atomic"><code class="xref c c-func docutils literal notranslate"><span class="pre">kmap_atomic()</span></code></a>.  这允许对单个页面进行非常短的时间映射。由于映射被限制在发布它的CPU上，
+它表现得很好，但发布的任务因此被要求留在该CPU上直到它完成，以免其他任务取代它的映射。</p>
+<p><a class="reference internal" href="../../../mm/highmem.html#c.kmap_atomic" title="kmap_atomic"><code class="xref c c-func docutils literal notranslate"><span class="pre">kmap_atomic()</span></code></a>也可以被中断上下文使用，因为它不睡眠，调用者也可能在调用<a class="reference internal" href="../../../mm/highmem.html#c.kunmap_atomic" title="kunmap_atomic"><code class="xref c c-func docutils literal notranslate"><span class="pre">kunmap_atomic()</span></code></a>
+后才睡眠。</p>
+<p>内核中对<a class="reference internal" href="../../../mm/highmem.html#c.kmap_atomic" title="kmap_atomic"><code class="xref c c-func docutils literal notranslate"><span class="pre">kmap_atomic()</span></code></a>的每次调用都会创建一个不可抢占的段，并禁用缺页异常。这可能是
+未预期延迟的来源之一。因此用户应该选择<a class="reference internal" href="../../../mm/highmem.html#c.kmap_local_page" title="kmap_local_page"><code class="xref c c-func docutils literal notranslate"><span class="pre">kmap_local_page()</span></code></a>而不是<a class="reference internal" href="../../../mm/highmem.html#c.kmap_atomic" title="kmap_atomic"><code class="xref c c-func docutils literal notranslate"><span class="pre">kmap_atomic()</span></code></a>。</p>
+<p>假设k[un]map_atomic()不会失败。</p>
+</li>
+<li><p><a class="reference internal" href="../../../mm/highmem.html#c.kmap" title="kmap"><code class="xref c c-func docutils literal notranslate"><span class="pre">kmap()</span></code></a>。这应该被用来对单个页面进行短时间的映射，对抢占或迁移没有限制。它会带来开销，
+因为映射空间是受限制的，并且受到全局锁的保护，以实现同步。当不再需要映射时，必须用
+<a class="reference internal" href="../../../mm/highmem.html#c.kunmap" title="kunmap"><code class="xref c c-func docutils literal notranslate"><span class="pre">kunmap()</span></code></a>释放该页被映射的地址。</p>
+<dl class="simple">
+<dt>映射变化必须广播到所有CPU（核）上，kmap()还需要在kmap的池被回绕（TLB项用光了，需要从第</dt><dd><p>一项复用）时进行全局TLB无效化，当映射空间被完全利用时，它可能会阻塞，直到有一个可用的
+槽出现。因此，<a class="reference internal" href="../../../mm/highmem.html#c.kmap" title="kmap"><code class="xref c c-func docutils literal notranslate"><span class="pre">kmap()</span></code></a>只能从可抢占的上下文中调用。</p>
+</dd>
+</dl>
+<p>如果一个映射必须持续相对较长的时间，上述所有的工作都是必要的，但是内核中大部分的
+高内存映射都是短暂的，而且只在一个地方使用。这意味着在这种情况下，<a class="reference internal" href="../../../mm/highmem.html#c.kmap" title="kmap"><code class="xref c c-func docutils literal notranslate"><span class="pre">kmap()</span></code></a>的成本大
+多被浪费了。<a class="reference internal" href="../../../mm/highmem.html#c.kmap" title="kmap"><code class="xref c c-func docutils literal notranslate"><span class="pre">kmap()</span></code></a>并不是为长期映射而设计的，但是它已经朝着这个方向发展了，在较新
+的代码中强烈不鼓励使用它，前面的函数集应该是首选。</p>
+<p>在64位系统中，调用<a class="reference internal" href="../../../mm/highmem.html#c.kmap_local_page" title="kmap_local_page"><code class="xref c c-func docutils literal notranslate"><span class="pre">kmap_local_page()</span></code></a>、<a class="reference internal" href="../../../mm/highmem.html#c.kmap_atomic" title="kmap_atomic"><code class="xref c c-func docutils literal notranslate"><span class="pre">kmap_atomic()</span></code></a>和<a class="reference internal" href="../../../mm/highmem.html#c.kmap" title="kmap"><code class="xref c c-func docutils literal notranslate"><span class="pre">kmap()</span></code></a>没有实际作用，因为64位
+地址空间足以永久映射所有物理内存页面。</p>
+</li>
+<li><p><a class="reference internal" href="../../../core-api/mm-api.html#c.vmap" title="vmap"><code class="xref c c-func docutils literal notranslate"><span class="pre">vmap()</span></code></a>。这可以用来将多个物理页长期映射到一个连续的虚拟空间。它需要全局同步来解除
+映射。</p></li>
+</ul>
+</section>
+<section id="id4">
+<h2><a class="toc-backref" href="#id8">临时映射的成本</a><a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h2>
+<p>创建临时映射的代价可能相当高。体系架构必须操作内核的页表、数据TLB和/或MMU的寄存器。</p>
+<p>如果CONFIG_HIGHMEM没有被设置，那么内核会尝试用一点计算来创建映射，将页面结构地址转换成
+指向页面内容的指针，而不是去捣鼓映射。在这种情况下，解映射操作可能是一个空操作。</p>
+<p>如果CONFIG_MMU没有被设置，那么就不可能有临时映射和高内存。在这种情况下，也将使用计算方法。</p>
+</section>
+<section id="i386-pae">
+<h2><a class="toc-backref" href="#id9">i386 PAE</a><a class="headerlink" href="#i386-pae" title="Permalink to this headline">¶</a></h2>
+<p>在某些情况下，i386 架构将允许你在 32 位机器上安装多达 64GiB 的内存。但这有一些后果:</p>
+<ul class="simple">
+<li><p>Linux需要为系统中的每个页面建立一个页帧结构，而且页帧需要驻在永久映射中，这意味着：</p></li>
+<li><p>你最多可以有896M/sizeof(struct page)页帧；由于页结构体是32字节的，所以最终会有
+112G的页；然而，内核需要在内存中存储更多的页帧……</p></li>
+<li><p>PAE使你的页表变大–这使系统变慢，因为更多的数据需要在TLB填充等方面被访问。一个好处
+是，PAE有更多的PTE位，可以提供像NX和PAT这样的高级功能。</p></li>
+</ul>
+<p>一般的建议是，你不要在32位机器上使用超过8GiB的空间–尽管更多的空间可能对你和你的工作
+量有用，但你几乎是靠你自己–不要指望内核开发者真的会很关心事情的进展情况。</p>
+</section>
+<section id="id5">
+<h2><a class="toc-backref" href="#id10">函数</a><a class="headerlink" href="#id5" title="Permalink to this headline">¶</a></h2>
+<p>该API在以下内核代码中:</p>
+<p>include/linux/highmem.h</p>
+<p>include/linux/highmem-internal.h</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">高内存处理</a><ul>
+<li><a class="reference internal" href="#id2">高内存是什么？</a></li>
+<li><a class="reference internal" href="#id3">临时虚拟映射</a></li>
+<li><a class="reference internal" href="#id4">临时映射的成本</a></li>
+<li><a class="reference internal" href="#i386-pae">i386 PAE</a></li>
+<li><a class="reference internal" href="#id5">函数</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/mm/highmem.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/mm/highmem.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,182 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Persistent data &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Device-mapper snapshot support" href="snapshot.html" />
+    <link rel="prev" title="dm-log-writes" href="log-writes.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="persistent-data">
+<h1>Persistent data<a class="headerlink" href="#persistent-data" title="Permalink to this headline">¶</a></h1>
+<section id="introduction">
+<h2>Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>The more-sophisticated device-mapper targets require complex metadata
+that is managed in kernel.  In late 2010 we were seeing that various
+different targets were rolling their own data structures, for example:</p>
+<ul class="simple">
+<li><p>Mikulas Patocka’s multisnap implementation</p></li>
+<li><p>Heinz Mauelshagen’s thin provisioning target</p></li>
+<li><p>Another btree-based caching target posted to dm-devel</p></li>
+<li><p>Another multi-snapshot target based on a design of Daniel Phillips</p></li>
+</ul>
+<p>Maintaining these data structures takes a lot of work, so if possible
+we’d like to reduce the number.</p>
+<p>The persistent-data library is an attempt to provide a re-usable
+framework for people who want to store metadata in device-mapper
+targets.  It’s currently used by the thin-provisioning target and an
+upcoming hierarchical storage target.</p>
+</section>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Permalink to this headline">¶</a></h2>
+<p>The main documentation is in the header files which can all be found
+under drivers/md/persistent-data.</p>
+<section id="the-block-manager">
+<h3>The block manager<a class="headerlink" href="#the-block-manager" title="Permalink to this headline">¶</a></h3>
+<p>dm-block-manager.[hc]</p>
+<p>This provides access to the data on disk in fixed sized-blocks.  There
+is a read/write locking interface to prevent concurrent accesses, and
+keep data that is being used in the cache.</p>
+<p>Clients of persistent-data are unlikely to use this directly.</p>
+</section>
+<section id="the-transaction-manager">
+<h3>The transaction manager<a class="headerlink" href="#the-transaction-manager" title="Permalink to this headline">¶</a></h3>
+<p>dm-transaction-manager.[hc]</p>
+<p>This restricts access to blocks and enforces copy-on-write semantics.
+The only way you can get hold of a writable block through the
+transaction manager is by shadowing an existing block (ie. doing
+copy-on-write) or allocating a fresh one.  Shadowing is elided within
+the same transaction so performance is reasonable.  The commit method
+ensures that all data is flushed before it writes the superblock.
+On power failure your metadata will be as it was when last committed.</p>
+</section>
+<section id="the-space-maps">
+<h3>The Space Maps<a class="headerlink" href="#the-space-maps" title="Permalink to this headline">¶</a></h3>
+<p>dm-space-map.h
+dm-space-map-metadata.[hc]
+dm-space-map-disk.[hc]</p>
+<p>On-disk data structures that keep track of reference counts of blocks.
+Also acts as the allocator of new blocks.  Currently two
+implementations: a simpler one for managing blocks on a different
+device (eg. thinly-provisioned data blocks); and one for managing
+the metadata space.  The latter is complicated by the need to store
+its own data within the space it’s managing.</p>
+</section>
+<section id="the-data-structures">
+<h3>The data structures<a class="headerlink" href="#the-data-structures" title="Permalink to this headline">¶</a></h3>
+<p>dm-btree.[hc]
+dm-btree-remove.c
+dm-btree-spine.c
+dm-btree-internal.h</p>
+<p>Currently there is only one data structure, a hierarchical btree.
+There are plans to add more.  For example, something with an
+array-like interface would see a lot of use.</p>
+<p>The btree is ‘hierarchical’ in that you can define it to be composed
+of nested btrees, and take multiple keys.  For example, the
+thin-provisioning target uses a btree with two levels of nesting.
+The first maps a device id to a mapping tree, and that in turn maps a
+virtual block to a physical block.</p>
+<p>Values stored in the btrees can have arbitrary size.  Keys are always
+64bits, although nesting allows you to use multiple keys.</p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Persistent data</a><ul>
+<li><a class="reference internal" href="#introduction">Introduction</a></li>
+<li><a class="reference internal" href="#overview">Overview</a><ul>
+<li><a class="reference internal" href="#the-block-manager">The block manager</a></li>
+<li><a class="reference internal" href="#the-transaction-manager">The transaction manager</a></li>
+<li><a class="reference internal" href="#the-space-maps">The Space Maps</a></li>
+<li><a class="reference internal" href="#the-data-structures">The data structures</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/admin-guide/device-mapper/persistent-data.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/admin-guide/device-mapper/persistent-data.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

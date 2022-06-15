@@ -1,0 +1,447 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Linux kernel driver for Elastic Network Adapter (ENA) family &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../../" src="../../../../_static/documentation_options.js"></script>
+    <script src="../../../../_static/jquery.js"></script>
+    <script src="../../../../_static/underscore.js"></script>
+    <script src="../../../../_static/doctools.js"></script>
+    <script src="../../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" />
+    <link rel="next" title="Altera Triple-Speed Ethernet MAC driver" href="../altera/altera_tse.html" />
+    <link rel="prev" title="3Com Vortex device driver" href="../3com/vortex.html" />
+   
+  <link rel="stylesheet" href="../../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="linux-kernel-driver-for-elastic-network-adapter-ena-family">
+<h1>Linux kernel driver for Elastic Network Adapter (ENA) family<a class="headerlink" href="#linux-kernel-driver-for-elastic-network-adapter-ena-family" title="Permalink to this headline">¶</a></h1>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Permalink to this headline">¶</a></h2>
+<p>ENA is a networking interface designed to make good use of modern CPU
+features and system architectures.</p>
+<p>The ENA device exposes a lightweight management interface with a
+minimal set of memory mapped registers and extendible command set
+through an Admin Queue.</p>
+<p>The driver supports a range of ENA devices, is link-speed independent
+(i.e., the same driver is used for 10GbE, 25GbE, 40GbE, etc), and has
+a negotiated and extendible feature set.</p>
+<p>Some ENA devices support SR-IOV. This driver is used for both the
+SR-IOV Physical Function (PF) and Virtual Function (VF) devices.</p>
+<p>ENA devices enable high speed and low overhead network traffic
+processing by providing multiple Tx/Rx queue pairs (the maximum number
+is advertised by the device via the Admin Queue), a dedicated MSI-X
+interrupt vector per Tx/Rx queue pair, adaptive interrupt moderation,
+and CPU cacheline optimized data placement.</p>
+<p>The ENA driver supports industry standard TCP/IP offload features such as
+checksum offload. Receive-side scaling (RSS) is supported for multi-core
+scaling.</p>
+<p>The ENA driver and its corresponding devices implement health
+monitoring mechanisms such as watchdog, enabling the device and driver
+to recover in a manner transparent to the application, as well as
+debug logs.</p>
+<p>Some of the ENA devices support a working mode called Low-latency
+Queue (LLQ), which saves several more microseconds.
+ENA Source Code Directory Structure
+===================================</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 24%" />
+<col style="width: 76%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>ena_com.[ch]</p></td>
+<td><p>Management communication layer. This layer is
+responsible for the handling all the management
+(admin) communication between the device and the
+driver.</p></td>
+</tr>
+<tr class="row-even"><td><p>ena_eth_com.[ch]</p></td>
+<td><p>Tx/Rx data path.</p></td>
+</tr>
+<tr class="row-odd"><td><p>ena_admin_defs.h</p></td>
+<td><p>Definition of ENA management interface.</p></td>
+</tr>
+<tr class="row-even"><td><p>ena_eth_io_defs.h</p></td>
+<td><p>Definition of ENA data path interface.</p></td>
+</tr>
+<tr class="row-odd"><td><p>ena_common_defs.h</p></td>
+<td><p>Common definitions for ena_com layer.</p></td>
+</tr>
+<tr class="row-even"><td><p>ena_regs_defs.h</p></td>
+<td><p>Definition of ENA PCI memory-mapped (MMIO) registers.</p></td>
+</tr>
+<tr class="row-odd"><td><p>ena_netdev.[ch]</p></td>
+<td><p>Main Linux kernel driver.</p></td>
+</tr>
+<tr class="row-even"><td><p>ena_ethtool.c</p></td>
+<td><p>ethtool callbacks.</p></td>
+</tr>
+<tr class="row-odd"><td><p>ena_pci_id_tbl.h</p></td>
+<td><p>Supported device IDs.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="management-interface">
+<h2>Management Interface:<a class="headerlink" href="#management-interface" title="Permalink to this headline">¶</a></h2>
+<p>ENA management interface is exposed by means of:</p>
+<ul class="simple">
+<li><p>PCIe Configuration Space</p></li>
+<li><p>Device Registers</p></li>
+<li><p>Admin Queue (AQ) and Admin Completion Queue (ACQ)</p></li>
+<li><p>Asynchronous Event Notification Queue (AENQ)</p></li>
+</ul>
+<p>ENA device MMIO Registers are accessed only during driver
+initialization and are not used during further normal device
+operation.</p>
+<p>AQ is used for submitting management commands, and the
+results/responses are reported asynchronously through ACQ.</p>
+<p>ENA introduces a small set of management commands with room for
+vendor-specific extensions. Most of the management operations are
+framed in a generic Get/Set feature command.</p>
+<p>The following admin queue commands are supported:</p>
+<ul class="simple">
+<li><p>Create I/O submission queue</p></li>
+<li><p>Create I/O completion queue</p></li>
+<li><p>Destroy I/O submission queue</p></li>
+<li><p>Destroy I/O completion queue</p></li>
+<li><p>Get feature</p></li>
+<li><p>Set feature</p></li>
+<li><p>Configure AENQ</p></li>
+<li><p>Get statistics</p></li>
+</ul>
+<p>Refer to ena_admin_defs.h for the list of supported Get/Set Feature
+properties.</p>
+<p>The Asynchronous Event Notification Queue (AENQ) is a uni-directional
+queue used by the ENA device to send to the driver events that cannot
+be reported using ACQ. AENQ events are subdivided into groups. Each
+group may have multiple syndromes, as shown below</p>
+<p>The events are:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 57%" />
+<col style="width: 43%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Group</p></th>
+<th class="head"><p>Syndrome</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Link state change</p></td>
+<td><p><strong>X</strong></p></td>
+</tr>
+<tr class="row-odd"><td><p>Fatal error</p></td>
+<td><p><strong>X</strong></p></td>
+</tr>
+<tr class="row-even"><td><p>Notification</p></td>
+<td><p>Suspend traffic</p></td>
+</tr>
+<tr class="row-odd"><td><p>Notification</p></td>
+<td><p>Resume traffic</p></td>
+</tr>
+<tr class="row-even"><td><p>Keep-Alive</p></td>
+<td><p><strong>X</strong></p></td>
+</tr>
+</tbody>
+</table>
+<p>ACQ and AENQ share the same MSI-X vector.</p>
+<p>Keep-Alive is a special mechanism that allows monitoring the device’s health.
+A Keep-Alive event is delivered by the device every second.
+The driver maintains a watchdog (WD) handler which logs the current state and
+statistics. If the keep-alive events aren’t delivered as expected the WD resets
+the device and the driver.</p>
+</section>
+<section id="data-path-interface">
+<h2>Data Path Interface<a class="headerlink" href="#data-path-interface" title="Permalink to this headline">¶</a></h2>
+<p>I/O operations are based on Tx and Rx Submission Queues (Tx SQ and Rx
+SQ correspondingly). Each SQ has a completion queue (CQ) associated
+with it.</p>
+<p>The SQs and CQs are implemented as descriptor rings in contiguous
+physical memory.</p>
+<p>The ENA driver supports two Queue Operation modes for Tx SQs:</p>
+<ul>
+<li><p><strong>Regular mode:</strong>
+In this mode the Tx SQs reside in the host’s memory. The ENA
+device fetches the ENA Tx descriptors and packet data from host
+memory.</p></li>
+<li><p><strong>Low Latency Queue (LLQ) mode or “push-mode”:</strong>
+In this mode the driver pushes the transmit descriptors and the
+first 96 bytes of the packet directly to the ENA device memory
+space. The rest of the packet payload is fetched by the
+device. For this operation mode, the driver uses a dedicated PCI
+device memory BAR, which is mapped with write-combine capability.</p>
+<p><strong>Note that</strong> not all ENA devices support LLQ, and this feature is negotiated
+with the device upon initialization. If the ENA device does not
+support LLQ mode, the driver falls back to the regular mode.</p>
+</li>
+</ul>
+<p>The Rx SQs support only the regular mode.</p>
+<p>The driver supports multi-queue for both Tx and Rx. This has various
+benefits:</p>
+<ul class="simple">
+<li><p>Reduced CPU/thread/process contention on a given Ethernet interface.</p></li>
+<li><p>Cache miss rate on completion is reduced, particularly for data
+cache lines that hold the sk_buff structures.</p></li>
+<li><p>Increased process-level parallelism when handling received packets.</p></li>
+<li><p>Increased data cache hit rate, by steering kernel processing of
+packets to the CPU, where the application thread consuming the
+packet is running.</p></li>
+<li><p>In hardware interrupt re-direction.</p></li>
+</ul>
+</section>
+<section id="interrupt-modes">
+<h2>Interrupt Modes<a class="headerlink" href="#interrupt-modes" title="Permalink to this headline">¶</a></h2>
+<p>The driver assigns a single MSI-X vector per queue pair (for both Tx
+and Rx directions). The driver assigns an additional dedicated MSI-X vector
+for management (for ACQ and AENQ).</p>
+<p>Management interrupt registration is performed when the Linux kernel
+probes the adapter, and it is de-registered when the adapter is
+removed. I/O queue interrupt registration is performed when the Linux
+interface of the adapter is opened, and it is de-registered when the
+interface is closed.</p>
+<p>The management interrupt is named:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ena-mgmnt@pci:&lt;PCI domain:bus:slot.function&gt;
+</pre></div>
+</div>
+<p>and for each queue pair, an interrupt is named:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>&lt;interface name&gt;-Tx-Rx-&lt;queue index&gt;
+</pre></div>
+</div>
+<p>The ENA device operates in auto-mask and auto-clear interrupt
+modes. That is, once MSI-X is delivered to the host, its Cause bit is
+automatically cleared and the interrupt is masked. The interrupt is
+unmasked by the driver after NAPI processing is complete.</p>
+</section>
+<section id="interrupt-moderation">
+<h2>Interrupt Moderation<a class="headerlink" href="#interrupt-moderation" title="Permalink to this headline">¶</a></h2>
+<p>ENA driver and device can operate in conventional or adaptive interrupt
+moderation mode.</p>
+<p><strong>In conventional mode</strong> the driver instructs device to postpone interrupt
+posting according to static interrupt delay value. The interrupt delay
+value can be configured through <cite>ethtool(8)</cite>. The following <cite>ethtool</cite>
+parameters are supported by the driver: <code class="docutils literal notranslate"><span class="pre">tx-usecs</span></code>, <code class="docutils literal notranslate"><span class="pre">rx-usecs</span></code></p>
+<p><strong>In adaptive interrupt</strong> moderation mode the interrupt delay value is
+updated by the driver dynamically and adjusted every NAPI cycle
+according to the traffic nature.</p>
+<p>Adaptive coalescing can be switched on/off through <cite>ethtool(8)</cite>’s
+<code class="code docutils literal notranslate"><span class="pre">adaptive_rx</span> <span class="pre">on|off</span></code> parameter.</p>
+<p>More information about Adaptive Interrupt Moderation (DIM) can be found in
+<a class="reference internal" href="../../../net_dim.html"><span class="doc">Net DIM - Generic Network Dynamic Interrupt Moderation</span></a></p>
+</section>
+<section id="rx-copybreak">
+<h2>RX copybreak<a class="headerlink" href="#rx-copybreak" title="Permalink to this headline">¶</a></h2>
+<p>The rx_copybreak is initialized by default to ENA_DEFAULT_RX_COPYBREAK
+and can be configured by the ETHTOOL_STUNABLE command of the
+SIOCETHTOOL ioctl.</p>
+</section>
+<section id="statistics">
+<h2>Statistics<a class="headerlink" href="#statistics" title="Permalink to this headline">¶</a></h2>
+<p>The user can obtain ENA device and driver statistics using <cite>ethtool</cite>.
+The driver can collect regular or extended statistics (including
+per-queue stats) from the device.</p>
+<p>In addition the driver logs the stats to syslog upon device reset.</p>
+</section>
+<section id="mtu">
+<h2>MTU<a class="headerlink" href="#mtu" title="Permalink to this headline">¶</a></h2>
+<p>The driver supports an arbitrarily large MTU with a maximum that is
+negotiated with the device. The driver configures MTU using the
+SetFeature command (ENA_ADMIN_MTU property). The user can change MTU
+via <cite>ip(8)</cite> and similar legacy tools.</p>
+</section>
+<section id="stateless-offloads">
+<h2>Stateless Offloads<a class="headerlink" href="#stateless-offloads" title="Permalink to this headline">¶</a></h2>
+<p>The ENA driver supports:</p>
+<ul class="simple">
+<li><p>IPv4 header checksum offload</p></li>
+<li><p>TCP/UDP over IPv4/IPv6 checksum offloads</p></li>
+</ul>
+</section>
+<section id="rss">
+<h2>RSS<a class="headerlink" href="#rss" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p>The ENA device supports RSS that allows flexible Rx traffic
+steering.</p></li>
+<li><p>Toeplitz and CRC32 hash functions are supported.</p></li>
+<li><p>Different combinations of L2/L3/L4 fields can be configured as
+inputs for hash functions.</p></li>
+<li><p>The driver configures RSS settings using the AQ SetFeature command
+(ENA_ADMIN_RSS_HASH_FUNCTION, ENA_ADMIN_RSS_HASH_INPUT and
+ENA_ADMIN_RSS_INDIRECTION_TABLE_CONFIG properties).</p></li>
+<li><p>If the NETIF_F_RXHASH flag is set, the 32-bit result of the hash
+function delivered in the Rx CQ descriptor is set in the received
+SKB.</p></li>
+<li><p>The user can provide a hash key, hash function, and configure the
+indirection table through <cite>ethtool(8)</cite>.</p></li>
+</ul>
+</section>
+<section id="data-path">
+<h2>DATA PATH<a class="headerlink" href="#data-path" title="Permalink to this headline">¶</a></h2>
+<section id="tx">
+<h3>Tx<a class="headerlink" href="#tx" title="Permalink to this headline">¶</a></h3>
+<p><code class="code docutils literal notranslate"><span class="pre">ena_start_xmit()</span></code> is called by the stack. This function does the following:</p>
+<ul class="simple">
+<li><p>Maps data buffers (<code class="docutils literal notranslate"><span class="pre">skb-&gt;data</span></code> and frags).</p></li>
+<li><p>Populates <code class="docutils literal notranslate"><span class="pre">ena_buf</span></code> for the push buffer (if the driver and device are
+in push mode).</p></li>
+<li><p>Prepares ENA bufs for the remaining frags.</p></li>
+<li><p>Allocates a new request ID from the empty <code class="docutils literal notranslate"><span class="pre">req_id</span></code> ring. The request
+ID is the index of the packet in the Tx info. This is used for
+out-of-order Tx completions.</p></li>
+<li><p>Adds the packet to the proper place in the Tx ring.</p></li>
+<li><p>Calls <code class="code docutils literal notranslate"><span class="pre">ena_com_prepare_tx()</span></code>, an ENA communication layer that converts
+the <code class="docutils literal notranslate"><span class="pre">ena_bufs</span></code> to ENA descriptors (and adds meta ENA descriptors as
+needed).</p>
+<ul>
+<li><p>This function also copies the ENA descriptors and the push buffer
+to the Device memory space (if in push mode).</p></li>
+</ul>
+</li>
+<li><p>Writes a doorbell to the ENA device.</p></li>
+<li><p>When the ENA device finishes sending the packet, a completion
+interrupt is raised.</p></li>
+<li><p>The interrupt handler schedules NAPI.</p></li>
+<li><p>The <code class="code docutils literal notranslate"><span class="pre">ena_clean_tx_irq()</span></code> function is called. This function handles the
+completion descriptors generated by the ENA, with a single
+completion descriptor per completed packet.</p>
+<ul>
+<li><p><code class="docutils literal notranslate"><span class="pre">req_id</span></code> is retrieved from the completion descriptor. The <code class="docutils literal notranslate"><span class="pre">tx_info</span></code> of
+the packet is retrieved via the <code class="docutils literal notranslate"><span class="pre">req_id</span></code>. The data buffers are
+unmapped and <code class="docutils literal notranslate"><span class="pre">req_id</span></code> is returned to the empty <code class="docutils literal notranslate"><span class="pre">req_id</span></code> ring.</p></li>
+<li><p>The function stops when the completion descriptors are completed or
+the budget is reached.</p></li>
+</ul>
+</li>
+</ul>
+</section>
+<section id="rx">
+<h3>Rx<a class="headerlink" href="#rx" title="Permalink to this headline">¶</a></h3>
+<ul class="simple">
+<li><p>When a packet is received from the ENA device.</p></li>
+<li><p>The interrupt handler schedules NAPI.</p></li>
+<li><p>The <code class="code docutils literal notranslate"><span class="pre">ena_clean_rx_irq()</span></code> function is called. This function calls
+<code class="code docutils literal notranslate"><span class="pre">ena_com_rx_pkt()</span></code>, an ENA communication layer function, which returns the
+number of descriptors used for a new packet, and zero if
+no new packet is found.</p></li>
+<li><p><code class="code docutils literal notranslate"><span class="pre">ena_rx_skb()</span></code> checks packet length:</p>
+<ul>
+<li><p>If the packet is small (len &lt; rx_copybreak), the driver allocates
+a SKB for the new packet, and copies the packet payload into the
+SKB data buffer.</p>
+<ul>
+<li><p>In this way the original data buffer is not passed to the stack
+and is reused for future Rx packets.</p></li>
+</ul>
+</li>
+<li><p>Otherwise the function unmaps the Rx buffer, sets the first
+descriptor as <cite>skb</cite>’s linear part and the other descriptors as the
+<cite>skb</cite>’s frags.</p></li>
+</ul>
+</li>
+<li><p>The new SKB is updated with the necessary information (protocol,
+checksum hw verify result, etc), and then passed to the network
+stack, using the NAPI interface function <code class="code docutils literal notranslate"><span class="pre">napi_gro_receive()</span></code>.</p></li>
+</ul>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Linux kernel driver for Elastic Network Adapter (ENA) family</a><ul>
+<li><a class="reference internal" href="#overview">Overview</a></li>
+<li><a class="reference internal" href="#management-interface">Management Interface:</a></li>
+<li><a class="reference internal" href="#data-path-interface">Data Path Interface</a></li>
+<li><a class="reference internal" href="#interrupt-modes">Interrupt Modes</a></li>
+<li><a class="reference internal" href="#interrupt-moderation">Interrupt Moderation</a></li>
+<li><a class="reference internal" href="#rx-copybreak">RX copybreak</a></li>
+<li><a class="reference internal" href="#statistics">Statistics</a></li>
+<li><a class="reference internal" href="#mtu">MTU</a></li>
+<li><a class="reference internal" href="#stateless-offloads">Stateless Offloads</a></li>
+<li><a class="reference internal" href="#rss">RSS</a></li>
+<li><a class="reference internal" href="#data-path">DATA PATH</a><ul>
+<li><a class="reference internal" href="#tx">Tx</a></li>
+<li><a class="reference internal" href="#rx">Rx</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../../_sources/networking/device_drivers/ethernet/amazon/ena.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../../_sources/networking/device_drivers/ethernet/amazon/ena.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

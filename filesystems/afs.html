@@ -1,0 +1,321 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>kAFS: AFS FILESYSTEM &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="autofs - how it works" href="autofs.html" />
+    <link rel="prev" title="Overview of Amiga Filesystems" href="affs.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="kafs-afs-filesystem">
+<h1>kAFS: AFS FILESYSTEM<a class="headerlink" href="#kafs-afs-filesystem" title="Permalink to this headline">¶</a></h1>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Permalink to this headline">¶</a></h2>
+<p>This filesystem provides a fairly simple secure AFS filesystem driver. It is
+under development and does not yet provide the full feature set.  The features
+it does support include:</p>
+<blockquote>
+<div><p>(*) Security (currently only AFS kaserver and KerberosIV tickets).</p>
+<p>(*) File reading and writing.</p>
+<p>(*) Automounting.</p>
+<p>(*) Local caching (via fscache).</p>
+</div></blockquote>
+<p>It does not yet support the following AFS features:</p>
+<blockquote>
+<div><p>(*) pioctl() system call.</p>
+</div></blockquote>
+</section>
+<section id="compilation">
+<h2>Compilation<a class="headerlink" href="#compilation" title="Permalink to this headline">¶</a></h2>
+<p>The filesystem should be enabled by turning on the kernel configuration
+options:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>CONFIG_AF_RXRPC         - The RxRPC protocol transport
+CONFIG_RXKAD            - The RxRPC Kerberos security handler
+CONFIG_AFS              - The AFS filesystem
+</pre></div>
+</div>
+<p>Additionally, the following can be turned on to aid debugging:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>CONFIG_AF_RXRPC_DEBUG   - Permit AF_RXRPC debugging to be enabled
+CONFIG_AFS_DEBUG        - Permit AFS debugging to be enabled
+</pre></div>
+</div>
+<p>They permit the debugging messages to be turned on dynamically by manipulating
+the masks in the following files:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/sys/module/af_rxrpc/parameters/debug
+/sys/module/kafs/parameters/debug
+</pre></div>
+</div>
+</section>
+<section id="usage">
+<h2>Usage<a class="headerlink" href="#usage" title="Permalink to this headline">¶</a></h2>
+<p>When inserting the driver modules the root cell must be specified along with a
+list of volume location server IP addresses:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>modprobe rxrpc
+modprobe kafs rootcell=cambridge.redhat.com:172.16.18.73:172.16.18.91
+</pre></div>
+</div>
+<p>The first module is the AF_RXRPC network protocol driver.  This provides the
+RxRPC remote operation protocol and may also be accessed from userspace.  See:</p>
+<blockquote>
+<div><p><a class="reference internal" href="../networking/rxrpc.html"><span class="doc">RxRPC Network Protocol</span></a></p>
+</div></blockquote>
+<p>The second module is the kerberos RxRPC security driver, and the third module
+is the actual filesystem driver for the AFS filesystem.</p>
+<p>Once the module has been loaded, more modules can be added by the following
+procedure:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>echo add grand.central.org 18.9.48.14:128.2.203.61:130.237.48.87 &gt;/proc/fs/afs/cells
+</pre></div>
+</div>
+<p>Where the parameters to the “add” command are the name of a cell and a list of
+volume location servers within that cell, with the latter separated by colons.</p>
+<p>Filesystems can be mounted anywhere by commands similar to the following:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>mount -t afs &quot;%cambridge.redhat.com:root.afs.&quot; /afs
+mount -t afs &quot;#cambridge.redhat.com:root.cell.&quot; /afs/cambridge
+mount -t afs &quot;#root.afs.&quot; /afs
+mount -t afs &quot;#root.cell.&quot; /afs/cambridge
+</pre></div>
+</div>
+<p>Where the initial character is either a hash or a percent symbol depending on
+whether you definitely want a R/W volume (percent) or whether you’d prefer a
+R/O volume, but are willing to use a R/W volume instead (hash).</p>
+<p>The name of the volume can be suffixes with “.backup” or “.readonly” to
+specify connection to only volumes of those types.</p>
+<p>The name of the cell is optional, and if not given during a mount, then the
+named volume will be looked up in the cell specified during modprobe.</p>
+<p>Additional cells can be added through /proc (see later section).</p>
+</section>
+<section id="mountpoints">
+<h2>Mountpoints<a class="headerlink" href="#mountpoints" title="Permalink to this headline">¶</a></h2>
+<p>AFS has a concept of mountpoints. In AFS terms, these are specially formatted
+symbolic links (of the same form as the “device name” passed to mount).  kAFS
+presents these to the user as directories that have a follow-link capability
+(i.e.: symbolic link semantics).  If anyone attempts to access them, they will
+automatically cause the target volume to be mounted (if possible) on that site.</p>
+<p>Automatically mounted filesystems will be automatically unmounted approximately
+twenty minutes after they were last used.  Alternatively they can be unmounted
+directly with the umount() system call.</p>
+<p>Manually unmounting an AFS volume will cause any idle submounts upon it to be
+culled first.  If all are culled, then the requested volume will also be
+unmounted, otherwise error EBUSY will be returned.</p>
+<p>This can be used by the administrator to attempt to unmount the whole AFS tree
+mounted on /afs in one go by doing:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>umount /afs
+</pre></div>
+</div>
+</section>
+<section id="dynamic-root">
+<h2>Dynamic Root<a class="headerlink" href="#dynamic-root" title="Permalink to this headline">¶</a></h2>
+<p>A mount option is available to create a serverless mount that is only usable
+for dynamic lookup.  Creating such a mount can be done by, for example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>mount -t afs none /afs -o dyn
+</pre></div>
+</div>
+<p>This creates a mount that just has an empty directory at the root.  Attempting
+to look up a name in this directory will cause a mountpoint to be created that
+looks up a cell of the same name, for example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ls /afs/grand.central.org/
+</pre></div>
+</div>
+</section>
+<section id="proc-filesystem">
+<h2>Proc Filesystem<a class="headerlink" href="#proc-filesystem" title="Permalink to this headline">¶</a></h2>
+<p>The AFS module creates a “/proc/fs/afs/” directory and populates it:</p>
+<blockquote>
+<div><dl>
+<dt>(*) A “cells” file that lists cells currently known to the afs module and</dt><dd><p>their usage counts:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[root@andromeda ~]# cat /proc/fs/afs/cells
+USE NAME
+  3 cambridge.redhat.com
+</pre></div>
+</div>
+</dd>
+<dt>(*) A directory per cell that contains files that list volume location</dt><dd><p>servers, volumes, and active servers known within that cell:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[root@andromeda ~]# cat /proc/fs/afs/cambridge.redhat.com/servers
+USE ADDR            STATE
+  4 172.16.18.91        0
+[root@andromeda ~]# cat /proc/fs/afs/cambridge.redhat.com/vlservers
+ADDRESS
+172.16.18.91
+[root@andromeda ~]# cat /proc/fs/afs/cambridge.redhat.com/volumes
+USE STT VLID[0]  VLID[1]  VLID[2]  NAME
+  1 Val 20000000 20000001 20000002 root.afs
+</pre></div>
+</div>
+</dd>
+</dl>
+</div></blockquote>
+</section>
+<section id="the-cell-database">
+<h2>The Cell Database<a class="headerlink" href="#the-cell-database" title="Permalink to this headline">¶</a></h2>
+<p>The filesystem maintains an internal database of all the cells it knows and the
+IP addresses of the volume location servers for those cells.  The cell to which
+the system belongs is added to the database when modprobe is performed by the
+“rootcell=” argument or, if compiled in, using a “kafs.rootcell=” argument on
+the kernel command line.</p>
+<p>Further cells can be added by commands similar to the following:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>echo add CELLNAME VLADDR[:VLADDR][:VLADDR]... &gt;/proc/fs/afs/cells
+echo add grand.central.org 18.9.48.14:128.2.203.61:130.237.48.87 &gt;/proc/fs/afs/cells
+</pre></div>
+</div>
+<p>No other cell database operations are available at this time.</p>
+</section>
+<section id="security">
+<h2>Security<a class="headerlink" href="#security" title="Permalink to this headline">¶</a></h2>
+<p>Secure operations are initiated by acquiring a key using the klog program.  A
+very primitive klog program is available at:</p>
+<blockquote>
+<div><p><a class="reference external" href="https://people.redhat.com/~dhowells/rxrpc/klog.c">https://people.redhat.com/~dhowells/rxrpc/klog.c</a></p>
+</div></blockquote>
+<p>This should be compiled by:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>make klog LDLIBS=&quot;-lcrypto -lcrypt -lkrb4 -lkeyutils&quot;
+</pre></div>
+</div>
+<p>And then run as:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>./klog
+</pre></div>
+</div>
+<p>Assuming it’s successful, this adds a key of type RxRPC, named for the service
+and cell, e.g.: “afs&#64;&lt;cellname&gt;”.  This can be viewed with the keyctl program or
+by cat’ing /proc/keys:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[root@andromeda ~]# keyctl show
+Session Keyring
+       -3 --alswrv      0     0  keyring: _ses.3268
+        2 --alswrv      0     0   \_ keyring: _uid.0
+111416553 --als--v      0     0   \_ rxrpc: afs@CAMBRIDGE.REDHAT.COM
+</pre></div>
+</div>
+<p>Currently the username, realm, password and proposed ticket lifetime are
+compiled into the program.</p>
+<p>It is not required to acquire a key before using AFS facilities, but if one is
+not acquired then all operations will be governed by the anonymous user parts
+of the ACLs.</p>
+<p>If a key is acquired, then all AFS operations, including mounts and automounts,
+made by a possessor of that key will be secured with that key.</p>
+<p>If a file is opened with a particular key and then the file descriptor is
+passed to a process that doesn’t have that key (perhaps over an AF_UNIX
+socket), then the operations on the file will be made with key that was used to
+open the file.</p>
+</section>
+<section id="the-sys-substitution">
+<h2>The &#64;sys Substitution<a class="headerlink" href="#the-sys-substitution" title="Permalink to this headline">¶</a></h2>
+<p>The list of up to 16 &#64;sys substitutions for the current network namespace can
+be configured by writing a list to /proc/fs/afs/sysname:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[root@andromeda ~]# echo foo amd64_linux_26 &gt;/proc/fs/afs/sysname
+</pre></div>
+</div>
+<p>or cleared entirely by writing an empty list:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[root@andromeda ~]# echo &gt;/proc/fs/afs/sysname
+</pre></div>
+</div>
+<p>The current list for current network namespace can be retrieved by:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[root@andromeda ~]# cat /proc/fs/afs/sysname
+foo
+amd64_linux_26
+</pre></div>
+</div>
+<p>When &#64;sys is being substituted for, each element of the list is tried in the
+order given.</p>
+<p>By default, the list will contain one item that conforms to the pattern
+“&lt;arch&gt;_linux_26”, amd64 being the name for x86_64.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">kAFS: AFS FILESYSTEM</a><ul>
+<li><a class="reference internal" href="#overview">Overview</a></li>
+<li><a class="reference internal" href="#compilation">Compilation</a></li>
+<li><a class="reference internal" href="#usage">Usage</a></li>
+<li><a class="reference internal" href="#mountpoints">Mountpoints</a></li>
+<li><a class="reference internal" href="#dynamic-root">Dynamic Root</a></li>
+<li><a class="reference internal" href="#proc-filesystem">Proc Filesystem</a></li>
+<li><a class="reference internal" href="#the-cell-database">The Cell Database</a></li>
+<li><a class="reference internal" href="#security">Security</a></li>
+<li><a class="reference internal" href="#the-sys-substitution">The &#64;sys Substitution</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/filesystems/afs.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/filesystems/afs.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

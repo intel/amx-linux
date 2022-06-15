@@ -1,0 +1,134 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Sysfs tagging &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="TC Actions - Environmental Rules" href="tc-actions-env-rules.html" />
+    <link rel="prev" title="Ethernet switch device driver model (switchdev)" href="switchdev.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="sysfs-tagging">
+<h1>Sysfs tagging<a class="headerlink" href="#sysfs-tagging" title="Permalink to this headline">¶</a></h1>
+<p>(Taken almost verbatim from Eric Biederman’s netns tagging patch
+commit msg)</p>
+<p>The problem.  Network devices show up in sysfs and with the network
+namespace active multiple devices with the same name can show up in
+the same directory, ouch!</p>
+<p>To avoid that problem and allow existing applications in network
+namespaces to see the same interface that is currently presented in
+sysfs, sysfs now has tagging directory support.</p>
+<p>By using the network namespace pointers as tags to separate out
+the sysfs directory entries we ensure that we don’t have conflicts
+in the directories and applications only see a limited set of
+the network devices.</p>
+<p>Each sysfs directory entry may be tagged with a namespace via the
+<code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*ns</span> <span class="pre">member</span></code> of its <code class="docutils literal notranslate"><span class="pre">kernfs_node</span></code>.  If a directory entry is tagged,
+then <code class="docutils literal notranslate"><span class="pre">kernfs_node-&gt;flags</span></code> will have a flag between KOBJ_NS_TYPE_NONE
+and KOBJ_NS_TYPES, and ns will point to the namespace to which it
+belongs.</p>
+<p>Each sysfs superblock’s kernfs_super_info contains an array
+<code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*ns[KOBJ_NS_TYPES]</span></code>.  When a task in a tagging namespace
+kobj_nstype first mounts sysfs, a new superblock is created.  It
+will be differentiated from other sysfs mounts by having its
+<code class="docutils literal notranslate"><span class="pre">s_fs_info-&gt;ns[kobj_nstype]</span></code> set to the new namespace.  Note that
+through bind mounting and mounts propagation, a task can easily view
+the contents of other namespaces’ sysfs mounts.  Therefore, when a
+namespace exits, it will call kobj_ns_exit() to invalidate any
+kernfs_node-&gt;ns pointers pointing to it.</p>
+<p>Users of this interface:</p>
+<ul class="simple">
+<li><p>define a type in the <code class="docutils literal notranslate"><span class="pre">kobj_ns_type</span></code> enumeration.</p></li>
+<li><p>call kobj_ns_type_register() with its <code class="docutils literal notranslate"><span class="pre">kobj_ns_type_operations</span></code> which has</p>
+<ul>
+<li><p>current_ns() which returns current’s namespace</p></li>
+<li><p>netlink_ns() which returns a socket’s namespace</p></li>
+<li><p>initial_ns() which returns the initial namesapce</p></li>
+</ul>
+</li>
+<li><p>call kobj_ns_exit() when an individual tag is no longer valid</p></li>
+</ul>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/networking/sysfs-tagging.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/networking/sysfs-tagging.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,235 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Recursion issues &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Reproducible builds" href="reproducible-builds.html" />
+    <link rel="prev" title="Exporting kernel headers for use by userspace" href="headers_install.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="recursion-issues">
+<h1>Recursion issues<a class="headerlink" href="#recursion-issues" title="Permalink to this headline">¶</a></h1>
+<section id="issue-1">
+<h2>issue #1<a class="headerlink" href="#issue-1" title="Permalink to this headline">¶</a></h2>
+<div class="highlight-kconfig notranslate"><div class="highlight"><pre><span></span><span class="c1"># Simple Kconfig recursive issue</span>
+<span class="c1"># ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~</span>
+<span class="c1">#</span>
+<span class="c1"># Test with:</span>
+<span class="c1">#</span>
+<span class="c1"># make KBUILD_KCONFIG=Documentation/kbuild/Kconfig.recursion-issue-01 allnoconfig</span>
+<span class="c1">#</span>
+<span class="c1"># This Kconfig file has a simple recursive dependency issue. In order to</span>
+<span class="c1"># understand why this recursive dependency issue occurs lets consider what</span>
+<span class="c1"># Kconfig needs to address. We iterate over what Kconfig needs to address</span>
+<span class="c1"># by stepping through the questions it needs to address sequentially.</span>
+<span class="c1">#</span>
+<span class="c1">#  * What values are possible for CORE?</span>
+<span class="c1">#</span>
+<span class="c1"># CORE_BELL_A_ADVANCED selects CORE, which means that it influences the values</span>
+<span class="c1"># that are possible for CORE. So for example if CORE_BELL_A_ADVANCED is &#39;y&#39;,</span>
+<span class="c1"># CORE must be &#39;y&#39; too.</span>
+<span class="c1">#</span>
+<span class="c1">#  * What influences CORE_BELL_A_ADVANCED ?</span>
+<span class="c1">#</span>
+<span class="c1"># As the name implies CORE_BELL_A_ADVANCED is an advanced feature of</span>
+<span class="c1"># CORE_BELL_A so naturally it depends on CORE_BELL_A. So if CORE_BELL_A is &#39;y&#39;</span>
+<span class="c1"># we know CORE_BELL_A_ADVANCED can be &#39;y&#39; too.</span>
+<span class="c1">#</span>
+<span class="c1">#   * What influences CORE_BELL_A ?</span>
+<span class="c1">#</span>
+<span class="c1"># CORE_BELL_A depends on CORE, so CORE influences CORE_BELL_A.</span>
+<span class="c1">#</span>
+<span class="c1"># But that is a problem, because this means that in order to determine</span>
+<span class="c1"># what values are possible for CORE we ended up needing to address questions</span>
+<span class="c1"># regarding possible values of CORE itself again. Answering the original</span>
+<span class="c1"># question of what are the possible values of CORE would make the kconfig</span>
+<span class="c1"># tools run in a loop. When this happens Kconfig exits and complains about</span>
+<span class="c1"># the &quot;recursive dependency detected&quot; error.</span>
+<span class="c1">#</span>
+<span class="c1"># Reading the Documentation/kbuild/Kconfig.recursion-issue-01 file it may be</span>
+<span class="c1"># obvious that an easy to solution to this problem should just be the removal</span>
+<span class="c1"># of the &quot;select CORE&quot; from CORE_BELL_A_ADVANCED as that is implicit already</span>
+<span class="c1"># since CORE_BELL_A depends on CORE. Recursive dependency issues are not always</span>
+<span class="c1"># so trivial to resolve, we provide another example below of practical</span>
+<span class="c1"># implications of this recursive issue where the solution is perhaps not so</span>
+<span class="c1"># easy to understand. Note that matching semantics on the dependency on</span>
+<span class="c1"># CORE also consist of a solution to this recursive problem.</span>
+
+<span class="k">mainmenu</span> <span class="s2">&quot;Simple example to demo kconfig recursive dependency issue&quot;</span>
+
+<span class="k">config</span> CORE
+	<span class="nb">tristate</span>
+
+<span class="k">config</span> CORE_BELL_A
+	<span class="nb">tristate</span>
+	<span class="k">depends on</span> CORE
+
+<span class="k">config</span> CORE_BELL_A_ADVANCED
+	<span class="nb">tristate</span>
+	<span class="k">depends on</span> CORE_BELL_A
+	<span class="k">select</span> CORE
+</pre></div>
+</div>
+</section>
+<section id="issue-2">
+<h2>issue #2<a class="headerlink" href="#issue-2" title="Permalink to this headline">¶</a></h2>
+<div class="highlight-kconfig notranslate"><div class="highlight"><pre><span></span><span class="c1"># Cumulative Kconfig recursive issue</span>
+<span class="c1"># ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~</span>
+<span class="c1">#</span>
+<span class="c1"># Test with:</span>
+<span class="c1">#</span>
+<span class="c1"># make KBUILD_KCONFIG=Documentation/kbuild/Kconfig.recursion-issue-02 allnoconfig</span>
+<span class="c1">#</span>
+<span class="c1"># The recursive limitations with Kconfig has some non intuitive implications on</span>
+<span class="c1"># kconfig semantics which are documented here. One known practical implication</span>
+<span class="c1"># of the recursive limitation is that drivers cannot negate features from other</span>
+<span class="c1"># drivers if they share a common core requirement and use disjoint semantics to</span>
+<span class="c1"># annotate those requirements, ie, some drivers use &quot;depends on&quot; while others</span>
+<span class="c1"># use &quot;select&quot;. For instance it means if a driver A and driver B share the same</span>
+<span class="c1"># core requirement, and one uses &quot;select&quot; while the other uses &quot;depends on&quot; to</span>
+<span class="c1"># annotate this, all features that driver A selects cannot now be negated by</span>
+<span class="c1"># driver B.</span>
+<span class="c1">#</span>
+<span class="c1"># A perhaps not so obvious implication of this is that, if semantics on these</span>
+<span class="c1"># core requirements are not carefully synced, as drivers evolve features</span>
+<span class="c1"># they select or depend on end up becoming shared requirements which cannot be</span>
+<span class="c1"># negated by other drivers.</span>
+<span class="c1">#</span>
+<span class="c1"># The example provided in Documentation/kbuild/Kconfig.recursion-issue-02</span>
+<span class="c1"># describes a simple driver core layout of example features a kernel might</span>
+<span class="c1"># have. Let&#39;s assume we have some CORE functionality, then the kernel has a</span>
+<span class="c1"># series of bells and whistles it desires to implement, its not so advanced so</span>
+<span class="c1"># it only supports bells at this time: CORE_BELL_A and CORE_BELL_B. If</span>
+<span class="c1"># CORE_BELL_A has some advanced feature CORE_BELL_A_ADVANCED which selects</span>
+<span class="c1"># CORE_BELL_A then CORE_BELL_A ends up becoming a common BELL feature which</span>
+<span class="c1"># other bells in the system cannot negate. The reason for this issue is</span>
+<span class="c1"># due to the disjoint use of semantics on expressing each bell&#39;s relationship</span>
+<span class="c1"># with CORE, one uses &quot;depends on&quot; while the other uses &quot;select&quot;. Another</span>
+<span class="c1"># more important reason is that kconfig does not check for dependencies listed</span>
+<span class="c1"># under &#39;select&#39; for a symbol, when such symbols are selected kconfig them</span>
+<span class="c1"># as mandatory required symbols. For more details on the heavy handed nature</span>
+<span class="c1"># of select refer to Documentation/kbuild/Kconfig.select-break</span>
+<span class="c1">#</span>
+<span class="c1"># To fix this the &quot;depends on CORE&quot; must be changed to &quot;select CORE&quot;, or the</span>
+<span class="c1"># &quot;select CORE&quot; must be changed to &quot;depends on CORE&quot;.</span>
+<span class="c1">#</span>
+<span class="c1"># For an example real world scenario issue refer to the attempt to remove</span>
+<span class="c1"># &quot;select FW_LOADER&quot; [0], in the end the simple alternative solution to this</span>
+<span class="c1"># problem consisted on matching semantics with newly introduced features.</span>
+<span class="c1">#</span>
+<span class="c1"># [0] https://lore.kernel.org/r/1432241149-8762-1-git-send-email-mcgrof@do-not-panic.com</span>
+
+<span class="k">mainmenu</span> <span class="s2">&quot;Simple example to demo cumulative kconfig recursive dependency implication&quot;</span>
+
+<span class="k">config</span> CORE
+	<span class="nb">tristate</span>
+
+<span class="k">config</span> CORE_BELL_A
+	<span class="nb">tristate</span>
+	<span class="k">depends on</span> CORE
+
+<span class="k">config</span> CORE_BELL_A_ADVANCED
+	<span class="nb">tristate</span>
+	<span class="k">select</span> CORE_BELL_A
+
+<span class="k">config</span> CORE_BELL_B
+	<span class="nb">tristate</span>
+	<span class="k">depends on</span> <span class="o">!</span>CORE_BELL_A
+	<span class="k">select</span> CORE
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Recursion issues</a><ul>
+<li><a class="reference internal" href="#issue-1">issue #1</a></li>
+<li><a class="reference internal" href="#issue-2">issue #2</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/kbuild/issues.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/kbuild/issues.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

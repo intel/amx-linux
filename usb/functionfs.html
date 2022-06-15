@@ -1,0 +1,150 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>How FunctionFS works &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Linux USB gadget configured through configfs" href="gadget_configfs.html" />
+    <link rel="prev" title="EHCI driver" href="ehci.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="how-functionfs-works">
+<h1>How FunctionFS works<a class="headerlink" href="#how-functionfs-works" title="Permalink to this headline">¶</a></h1>
+<p>From kernel point of view it is just a composite function with some
+unique behaviour.  It may be added to an USB configuration only after
+the user space driver has registered by writing descriptors and
+strings (the user space program has to provide the same information
+that kernel level composite functions provide when they are added to
+the configuration).</p>
+<p>This in particular means that the composite initialisation functions
+may not be in init section (ie. may not use the __init tag).</p>
+<p>From user space point of view it is a file system which when
+mounted provides an “ep0” file.  User space driver need to
+write descriptors and strings to that file.  It does not need
+to worry about endpoints, interfaces or strings numbers but
+simply provide descriptors such as if the function was the
+only one (endpoints and strings numbers starting from one and
+interface numbers starting from zero).  The FunctionFS changes
+them as needed also handling situation when numbers differ in
+different configurations.</p>
+<p>When descriptors and strings are written “ep#” files appear
+(one for each declared endpoint) which handle communication on
+a single endpoint.  Again, FunctionFS takes care of the real
+numbers and changing of the configuration (which means that
+“ep1” file may be really mapped to (say) endpoint 3 (and when
+configuration changes to (say) endpoint 2)).  “ep0” is used
+for receiving events and handling setup requests.</p>
+<p>When all files are closed the function disables itself.</p>
+<p>What I also want to mention is that the FunctionFS is designed in such
+a way that it is possible to mount it several times so in the end
+a gadget could use several FunctionFS functions. The idea is that
+each FunctionFS instance is identified by the device name used
+when mounting.</p>
+<p>One can imagine a gadget that has an Ethernet, MTP and HID interfaces
+where the last two are implemented via FunctionFS.  On user space
+level it would look like this:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ insmod g_ffs.ko idVendor=&lt;ID&gt; iSerialNumber=&lt;string&gt; functions=mtp,hid
+$ mkdir /dev/ffs-mtp &amp;&amp; mount -t functionfs mtp /dev/ffs-mtp
+$ ( cd /dev/ffs-mtp &amp;&amp; mtp-daemon ) &amp;
+$ mkdir /dev/ffs-hid &amp;&amp; mount -t functionfs hid /dev/ffs-hid
+$ ( cd /dev/ffs-hid &amp;&amp; hid-daemon ) &amp;
+</pre></div>
+</div>
+<p>On kernel level the gadget checks ffs_data-&gt;dev_name to identify
+whether its FunctionFS is designed for MTP (“mtp”) or HID (“hid”).</p>
+<p>If no “functions” module parameters is supplied, the driver accepts
+just one function with any name.</p>
+<p>When “functions” module parameter is supplied, only functions
+with listed names are accepted. In particular, if the “functions”
+parameter’s value is just a one-element list, then the behaviour
+is similar to when there is no “functions” at all; however,
+only a function with the specified name is accepted.</p>
+<p>The gadget is registered only after all the declared function
+filesystems have been mounted and USB descriptors of all functions
+have been written to their ep0’s.</p>
+<p>Conversely, the gadget is unregistered after the first USB function
+closes its endpoints.</p>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/usb/functionfs.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/usb/functionfs.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

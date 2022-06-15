@@ -1,0 +1,434 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>NTB Drivers &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="NVMEM Subsystem" href="nvmem.html" />
+    <link rel="prev" title="MEN Chameleon Bus" href="men-chameleon-bus.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="ntb-drivers">
+<h1>NTB Drivers<a class="headerlink" href="#ntb-drivers" title="Permalink to this headline">¶</a></h1>
+<p>NTB (Non-Transparent Bridge) is a type of PCI-Express bridge chip that connects
+the separate memory systems of two or more computers to the same PCI-Express
+fabric. Existing NTB hardware supports a common feature set: doorbell
+registers and memory translation windows, as well as non common features like
+scratchpad and message registers. Scratchpad registers are read-and-writable
+registers that are accessible from either side of the device, so that peers can
+exchange a small amount of information at a fixed address. Message registers can
+be utilized for the same purpose. Additionally they are provided with
+special status bits to make sure the information isn’t rewritten by another
+peer. Doorbell registers provide a way for peers to send interrupt events.
+Memory windows allow translated read and write access to the peer memory.</p>
+<section id="ntb-core-driver-ntb">
+<h2>NTB Core Driver (ntb)<a class="headerlink" href="#ntb-core-driver-ntb" title="Permalink to this headline">¶</a></h2>
+<p>The NTB core driver defines an api wrapping the common feature set, and allows
+clients interested in NTB features to discover NTB the devices supported by
+hardware drivers.  The term “client” is used here to mean an upper layer
+component making use of the NTB api.  The term “driver,” or “hardware driver,”
+is used here to mean a driver for a specific vendor and model of NTB hardware.</p>
+</section>
+<section id="ntb-client-drivers">
+<h2>NTB Client Drivers<a class="headerlink" href="#ntb-client-drivers" title="Permalink to this headline">¶</a></h2>
+<p>NTB client drivers should register with the NTB core driver.  After
+registering, the client probe and remove functions will be called appropriately
+as ntb hardware, or hardware drivers, are inserted and removed.  The
+registration uses the Linux Device framework, so it should feel familiar to
+anyone who has written a pci driver.</p>
+<section id="ntb-typical-client-driver-implementation">
+<h3>NTB Typical client driver implementation<a class="headerlink" href="#ntb-typical-client-driver-implementation" title="Permalink to this headline">¶</a></h3>
+<p>Primary purpose of NTB is to share some peace of memory between at least two
+systems. So the NTB device features like Scratchpad/Message registers are
+mainly used to perform the proper memory window initialization. Typically
+there are two types of memory window interfaces supported by the NTB API:
+inbound translation configured on the local ntb port and outbound translation
+configured by the peer, on the peer ntb port. The first type is
+depicted on the next figure:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Inbound translation:
+
+Memory:              Local NTB Port:      Peer NTB Port:      Peer MMIO:
+ ____________
+| dma-mapped |-ntb_mw_set_trans(addr)  |
+| memory     |        _v____________   |   ______________
+| (addr)     |&lt;======| MW xlat addr |&lt;====| MW base addr |&lt;== memory-mapped IO
+|------------|       |--------------|  |  |--------------|
+</pre></div>
+</div>
+<p>So typical scenario of the first type memory window initialization looks:
+1) allocate a memory region, 2) put translated address to NTB config,
+3) somehow notify a peer device of performed initialization, 4) peer device
+maps corresponding outbound memory window so to have access to the shared
+memory region.</p>
+<p>The second type of interface, that implies the shared windows being
+initialized by a peer device, is depicted on the figure:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Outbound translation:
+
+Memory:        Local NTB Port:    Peer NTB Port:      Peer MMIO:
+ ____________                      ______________
+| dma-mapped |                |   | MW base addr |&lt;== memory-mapped IO
+| memory     |                |   |--------------|
+| (addr)     |&lt;===================| MW xlat addr |&lt;-ntb_peer_mw_set_trans(addr)
+|------------|                |   |--------------|
+</pre></div>
+</div>
+<p>Typical scenario of the second type interface initialization would be:
+1) allocate a memory region, 2) somehow deliver a translated address to a peer
+device, 3) peer puts the translated address to NTB config, 4) peer device maps
+outbound memory window so to have access to the shared memory region.</p>
+<p>As one can see the described scenarios can be combined in one portable
+algorithm.</p>
+<blockquote>
+<div><dl class="simple">
+<dt>Local device:</dt><dd><ol class="arabic simple">
+<li><p>Allocate memory for a shared window</p></li>
+<li><p>Initialize memory window by translated address of the allocated region
+(it may fail if local memory window initialization is unsupported)</p></li>
+<li><p>Send the translated address and memory window index to a peer device</p></li>
+</ol>
+</dd>
+<dt>Peer device:</dt><dd><ol class="arabic simple">
+<li><p>Initialize memory window with retrieved address of the allocated
+by another device memory region (it may fail if peer memory window
+initialization is unsupported)</p></li>
+<li><p>Map outbound memory window</p></li>
+</ol>
+</dd>
+</dl>
+</div></blockquote>
+<p>In accordance with this scenario, the NTB Memory Window API can be used as
+follows:</p>
+<blockquote>
+<div><dl class="simple">
+<dt>Local device:</dt><dd><ol class="arabic simple">
+<li><p>ntb_mw_count(pidx) - retrieve number of memory ranges, which can
+be allocated for memory windows between local device and peer device
+of port with specified index.</p></li>
+<li><p>ntb_get_align(pidx, midx) - retrieve parameters restricting the
+shared memory region alignment and size. Then memory can be properly
+allocated.</p></li>
+<li><p>Allocate physically contiguous memory region in compliance with
+restrictions retrieved in 2).</p></li>
+<li><p>ntb_mw_set_trans(pidx, midx) - try to set translation address of
+the memory window with specified index for the defined peer device
+(it may fail if local translated address setting is not supported)</p></li>
+<li><p>Send translated base address (usually together with memory window
+number) to the peer device using, for instance, scratchpad or message
+registers.</p></li>
+</ol>
+</dd>
+<dt>Peer device:</dt><dd><ol class="arabic simple">
+<li><p>ntb_peer_mw_set_trans(pidx, midx) - try to set received from other
+device (related to pidx) translated address for specified memory
+window. It may fail if retrieved address, for instance, exceeds
+maximum possible address or isn’t properly aligned.</p></li>
+<li><p>ntb_peer_mw_get_addr(widx) - retrieve MMIO address to map the memory
+window so to have an access to the shared memory.</p></li>
+</ol>
+</dd>
+</dl>
+</div></blockquote>
+<p>Also it is worth to note, that method ntb_mw_count(pidx) should return the
+same value as ntb_peer_mw_count() on the peer with port index - pidx.</p>
+</section>
+<section id="ntb-transport-client-ntb-transport-and-ntb-netdev-ntb-netdev">
+<h3>NTB Transport Client (ntb_transport) and NTB Netdev (ntb_netdev)<a class="headerlink" href="#ntb-transport-client-ntb-transport-and-ntb-netdev-ntb-netdev" title="Permalink to this headline">¶</a></h3>
+<p>The primary client for NTB is the Transport client, used in tandem with NTB
+Netdev.  These drivers function together to create a logical link to the peer,
+across the ntb, to exchange packets of network data.  The Transport client
+establishes a logical link to the peer, and creates queue pairs to exchange
+messages and data.  The NTB Netdev then creates an ethernet device using a
+Transport queue pair.  Network data is copied between socket buffers and the
+Transport queue pair buffer.  The Transport client may be used for other things
+besides Netdev, however no other applications have yet been written.</p>
+</section>
+<section id="ntb-ping-pong-test-client-ntb-pingpong">
+<h3>NTB Ping Pong Test Client (ntb_pingpong)<a class="headerlink" href="#ntb-ping-pong-test-client-ntb-pingpong" title="Permalink to this headline">¶</a></h3>
+<p>The Ping Pong test client serves as a demonstration to exercise the doorbell
+and scratchpad registers of NTB hardware, and as an example simple NTB client.
+Ping Pong enables the link when started, waits for the NTB link to come up, and
+then proceeds to read and write the doorbell scratchpad registers of the NTB.
+The peers interrupt each other using a bit mask of doorbell bits, which is
+shifted by one in each round, to test the behavior of multiple doorbell bits
+and interrupt vectors.  The Ping Pong driver also reads the first local
+scratchpad, and writes the value plus one to the first peer scratchpad, each
+round before writing the peer doorbell register.</p>
+<p>Module Parameters:</p>
+<ul class="simple">
+<li><dl class="simple">
+<dt>unsafe - Some hardware has known issues with scratchpad and doorbell</dt><dd><p>registers.  By default, Ping Pong will not attempt to exercise such
+hardware.  You may override this behavior at your own risk by setting
+unsafe=1.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>delay_ms - Specify the delay between receiving a doorbell</dt><dd><p>interrupt event and setting the peer doorbell register for the next
+round.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>init_db - Specify the doorbell bits to start new series of rounds.  A new</dt><dd><p>series begins once all the doorbell bits have been shifted out of
+range.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>dyndbg - It is suggested to specify dyndbg=+p when loading this module, and</dt><dd><p>then to observe debugging output on the console.</p>
+</dd>
+</dl>
+</li>
+</ul>
+</section>
+<section id="ntb-tool-test-client-ntb-tool">
+<h3>NTB Tool Test Client (ntb_tool)<a class="headerlink" href="#ntb-tool-test-client-ntb-tool" title="Permalink to this headline">¶</a></h3>
+<p>The Tool test client serves for debugging, primarily, ntb hardware and drivers.
+The Tool provides access through debugfs for reading, setting, and clearing the
+NTB doorbell, and reading and writing scratchpads.</p>
+<p>The Tool does not currently have any module parameters.</p>
+<p>Debugfs Files:</p>
+<ul class="simple">
+<li><dl class="simple">
+<dt><em>debugfs</em>/ntb_tool/<em>hw</em>/</dt><dd><p>A directory in debugfs will be created for each
+NTB device probed by the tool.  This directory is shortened to <em>hw</em>
+below.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt><em>hw</em>/db</dt><dd><p>This file is used to read, set, and clear the local doorbell.  Not
+all operations may be supported by all hardware.  To read the doorbell,
+read the file.  To set the doorbell, write <cite>s</cite> followed by the bits to
+set (eg: <cite>echo ‘s 0x0101’ &gt; db</cite>).  To clear the doorbell, write <cite>c</cite>
+followed by the bits to clear.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt><em>hw</em>/mask</dt><dd><p>This file is used to read, set, and clear the local doorbell mask.
+See <em>db</em> for details.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt><em>hw</em>/peer_db</dt><dd><p>This file is used to read, set, and clear the peer doorbell.
+See <em>db</em> for details.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt><em>hw</em>/peer_mask</dt><dd><p>This file is used to read, set, and clear the peer doorbell
+mask.  See <em>db</em> for details.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt><em>hw</em>/spad</dt><dd><p>This file is used to read and write local scratchpads.  To read
+the values of all scratchpads, read the file.  To write values, write a
+series of pairs of scratchpad number and value
+(eg: <cite>echo ‘4 0x123 7 0xabc’ &gt; spad</cite>
+# to set scratchpads <cite>4</cite> and <cite>7</cite> to <cite>0x123</cite> and <cite>0xabc</cite>, respectively).</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt><em>hw</em>/peer_spad</dt><dd><p>This file is used to read and write peer scratchpads.  See
+<em>spad</em> for details.</p>
+</dd>
+</dl>
+</li>
+</ul>
+</section>
+<section id="ntb-msi-test-client-ntb-msi-test">
+<h3>NTB MSI Test Client (ntb_msi_test)<a class="headerlink" href="#ntb-msi-test-client-ntb-msi-test" title="Permalink to this headline">¶</a></h3>
+<p>The MSI test client serves to test and debug the MSI library which
+allows for passing MSI interrupts across NTB memory windows. The
+test client is interacted with through the debugfs filesystem:</p>
+<ul class="simple">
+<li><dl class="simple">
+<dt><em>debugfs</em>/ntb_tool/<em>hw</em>/</dt><dd><p>A directory in debugfs will be created for each
+NTB device probed by the tool.  This directory is shortened to <em>hw</em>
+below.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt><em>hw</em>/port</dt><dd><p>This file describes the local port number</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt><em>hw</em>/irq*_occurrences</dt><dd><p>One occurrences file exists for each interrupt and, when read,
+returns the number of times the interrupt has been triggered.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt><em>hw</em>/peer*/port</dt><dd><p>This file describes the port number for each peer</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt><em>hw</em>/peer*/count</dt><dd><p>This file describes the number of interrupts that can be
+triggered on each peer</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt><em>hw</em>/peer*/trigger</dt><dd><p>Writing an interrupt number (any number less than the value
+specified in count) will trigger the interrupt on the
+specified peer. That peer’s interrupt’s occurrence file
+should be incremented.</p>
+</dd>
+</dl>
+</li>
+</ul>
+</section>
+</section>
+<section id="ntb-hardware-drivers">
+<h2>NTB Hardware Drivers<a class="headerlink" href="#ntb-hardware-drivers" title="Permalink to this headline">¶</a></h2>
+<p>NTB hardware drivers should register devices with the NTB core driver.  After
+registering, clients probe and remove functions will be called.</p>
+<section id="ntb-intel-hardware-driver-ntb-hw-intel">
+<h3>NTB Intel Hardware Driver (ntb_hw_intel)<a class="headerlink" href="#ntb-intel-hardware-driver-ntb-hw-intel" title="Permalink to this headline">¶</a></h3>
+<p>The Intel hardware driver supports NTB on Xeon and Atom CPUs.</p>
+<p>Module Parameters:</p>
+<ul class="simple">
+<li><dl class="simple">
+<dt>b2b_mw_idx</dt><dd><p>If the peer ntb is to be accessed via a memory window, then use
+this memory window to access the peer ntb.  A value of zero or positive
+starts from the first mw idx, and a negative value starts from the last
+mw idx.  Both sides MUST set the same value here!  The default value is
+<cite>-1</cite>.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>b2b_mw_share</dt><dd><p>If the peer ntb is to be accessed via a memory window, and if
+the memory window is large enough, still allow the client to use the
+second half of the memory window for address translation to the peer.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>xeon_b2b_usd_bar2_addr64</dt><dd><p>If using B2B topology on Xeon hardware, use
+this 64 bit address on the bus between the NTB devices for the window
+at BAR2, on the upstream side of the link.</p>
+</dd>
+</dl>
+</li>
+<li><p>xeon_b2b_usd_bar4_addr64 - See <em>xeon_b2b_bar2_addr64</em>.</p></li>
+<li><p>xeon_b2b_usd_bar4_addr32 - See <em>xeon_b2b_bar2_addr64</em>.</p></li>
+<li><p>xeon_b2b_usd_bar5_addr32 - See <em>xeon_b2b_bar2_addr64</em>.</p></li>
+<li><p>xeon_b2b_dsd_bar2_addr64 - See <em>xeon_b2b_bar2_addr64</em>.</p></li>
+<li><p>xeon_b2b_dsd_bar4_addr64 - See <em>xeon_b2b_bar2_addr64</em>.</p></li>
+<li><p>xeon_b2b_dsd_bar4_addr32 - See <em>xeon_b2b_bar2_addr64</em>.</p></li>
+<li><p>xeon_b2b_dsd_bar5_addr32 - See <em>xeon_b2b_bar2_addr64</em>.</p></li>
+</ul>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">NTB Drivers</a><ul>
+<li><a class="reference internal" href="#ntb-core-driver-ntb">NTB Core Driver (ntb)</a></li>
+<li><a class="reference internal" href="#ntb-client-drivers">NTB Client Drivers</a><ul>
+<li><a class="reference internal" href="#ntb-typical-client-driver-implementation">NTB Typical client driver implementation</a></li>
+<li><a class="reference internal" href="#ntb-transport-client-ntb-transport-and-ntb-netdev-ntb-netdev">NTB Transport Client (ntb_transport) and NTB Netdev (ntb_netdev)</a></li>
+<li><a class="reference internal" href="#ntb-ping-pong-test-client-ntb-pingpong">NTB Ping Pong Test Client (ntb_pingpong)</a></li>
+<li><a class="reference internal" href="#ntb-tool-test-client-ntb-tool">NTB Tool Test Client (ntb_tool)</a></li>
+<li><a class="reference internal" href="#ntb-msi-test-client-ntb-msi-test">NTB MSI Test Client (ntb_msi_test)</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#ntb-hardware-drivers">NTB Hardware Drivers</a><ul>
+<li><a class="reference internal" href="#ntb-intel-hardware-driver-ntb-hw-intel">NTB Intel Hardware Driver (ntb_hw_intel)</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/driver-api/ntb.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/driver-api/ntb.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,688 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>The Linux Hardware Timestamping Engine (HTE) &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="HTE Kernel provider driver" href="tegra194-hte.html" />
+    <link rel="prev" title="The Linux Hardware Timestamping Engine (HTE)" href="index.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="the-linux-hardware-timestamping-engine-hte">
+<h1>The Linux Hardware Timestamping Engine (HTE)<a class="headerlink" href="#the-linux-hardware-timestamping-engine-hte" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">Author</dt>
+<dd class="field-odd"><p>Dipen Patel</p>
+</dd>
+</dl>
+<section id="introduction">
+<h2>Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>Certain devices have built in hardware timestamping engines which can
+monitor sets of system signals, lines, buses etc… in realtime for state
+change; upon detecting the change they can automatically store the timestamp at
+the moment of occurrence. Such functionality may help achieve better accuracy
+in obtaining timestamps than using software counterparts i.e. ktime and
+friends.</p>
+<p>This document describes the API that can be used by hardware timestamping
+engine provider and consumer drivers that want to use the hardware timestamping
+engine (HTE) framework. Both consumers and providers must include
+<code class="docutils literal notranslate"><span class="pre">#include</span> <span class="pre">&lt;linux/hte.h&gt;</span></code>.</p>
+</section>
+<section id="the-hte-framework-apis-for-the-providers">
+<h2>The HTE framework APIs for the providers<a class="headerlink" href="#the-hte-framework-apis-for-the-providers" title="Permalink to this headline">¶</a></h2>
+<dl class="function">
+<dt id="c.hte_push_ts_ns">
+int <code class="sig-name descname">hte_push_ts_ns</code><span class="sig-paren">(</span>const struct <a class="reference internal" href="#c.hte_chip" title="hte_chip">hte_chip</a><em> *chip</em>, u32<em> xlated_id</em>, struct <a class="reference internal" href="#c.hte_ts_data" title="hte_ts_data">hte_ts_data</a><em> *data</em><span class="sig-paren">)</span><a class="headerlink" href="#c.hte_push_ts_ns" title="Permalink to this definition">¶</a></dt>
+<dd><p>Push timestamp data in nanoseconds.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">struct</span> <span class="pre">hte_chip</span> <span class="pre">*chip</span></code></dt><dd><p>The HTE chip, used during the registration.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">u32</span> <span class="pre">xlated_id</span></code></dt><dd><p>entity id understood by both subsystem and provider, this is
+obtained from xlate callback during request API.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hte_ts_data</span> <span class="pre">*data</span></code></dt><dd><p>timestamp data.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>It is used by the provider to push timestamp data.</p>
+<p><strong>Return</strong></p>
+<p>0 on success or a negative error code on failure.</p>
+</div>
+<dl class="function">
+<dt id="c.devm_hte_register_chip">
+int <code class="sig-name descname">devm_hte_register_chip</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.hte_chip" title="hte_chip">hte_chip</a><em> *chip</em><span class="sig-paren">)</span><a class="headerlink" href="#c.devm_hte_register_chip" title="Permalink to this definition">¶</a></dt>
+<dd><p>Resource managed API to register HTE chip.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hte_chip</span> <span class="pre">*chip</span></code></dt><dd><p>the HTE chip to add to subsystem.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>It is used by the provider to register itself with the HTE subsystem.
+The unregistration is done automatically when the provider exits.</p>
+<p><strong>Return</strong></p>
+<p>0 on success or a negative error code on failure.</p>
+</div>
+</section>
+<section id="the-hte-framework-apis-for-the-consumers">
+<h2>The HTE framework APIs for the consumers<a class="headerlink" href="#the-hte-framework-apis-for-the-consumers" title="Permalink to this headline">¶</a></h2>
+<dl class="function">
+<dt id="c.hte_ts_put">
+int <code class="sig-name descname">hte_ts_put</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.hte_ts_desc" title="hte_ts_desc">hte_ts_desc</a><em> *desc</em><span class="sig-paren">)</span><a class="headerlink" href="#c.hte_ts_put" title="Permalink to this definition">¶</a></dt>
+<dd><p>Release and disable timestamp for the given desc.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hte_ts_desc</span> <span class="pre">*desc</span></code></dt><dd><p>timestamp descriptor.</p>
+</dd>
+</dl>
+<p><strong>Context</strong></p>
+<p>debugfs_remove_recursive() function call may use sleeping locks,
+not suitable from atomic context.</p>
+<p><strong>Return</strong></p>
+<p>0 on success or a negative error code on failure.</p>
+</div>
+<dl class="function">
+<dt id="c.hte_disable_ts">
+int <code class="sig-name descname">hte_disable_ts</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.hte_ts_desc" title="hte_ts_desc">hte_ts_desc</a><em> *desc</em><span class="sig-paren">)</span><a class="headerlink" href="#c.hte_disable_ts" title="Permalink to this definition">¶</a></dt>
+<dd><p>Disable timestamp on given descriptor.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hte_ts_desc</span> <span class="pre">*desc</span></code></dt><dd><p>ts descriptor, this is the same as returned by the request API.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>The API does not release any resources associated with desc.</p>
+<p><strong>Context</strong></p>
+<p>Holds mutex lock, not suitable from atomic context.</p>
+<p><strong>Return</strong></p>
+<p>0 on success or a negative error code on failure.</p>
+</div>
+<dl class="function">
+<dt id="c.hte_enable_ts">
+int <code class="sig-name descname">hte_enable_ts</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.hte_ts_desc" title="hte_ts_desc">hte_ts_desc</a><em> *desc</em><span class="sig-paren">)</span><a class="headerlink" href="#c.hte_enable_ts" title="Permalink to this definition">¶</a></dt>
+<dd><p>Enable timestamp on given descriptor.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hte_ts_desc</span> <span class="pre">*desc</span></code></dt><dd><p>ts descriptor, this is the same as returned by the request API.</p>
+</dd>
+</dl>
+<p><strong>Context</strong></p>
+<p>Holds mutex lock, not suitable from atomic context.</p>
+<p><strong>Return</strong></p>
+<p>0 on success or a negative error code on failure.</p>
+</div>
+<dl class="function">
+<dt id="c.of_hte_req_count">
+int <code class="sig-name descname">of_hte_req_count</code><span class="sig-paren">(</span>struct <a class="reference internal" href="../infrastructure.html#c.device" title="device">device</a><em> *dev</em><span class="sig-paren">)</span><a class="headerlink" href="#c.of_hte_req_count" title="Permalink to this definition">¶</a></dt>
+<dd><p>Return the number of entities to timestamp.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>The HTE consumer.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>The function returns the total count of the requested entities to timestamp
+by parsing device tree.</p>
+<p><strong>Return</strong></p>
+<p>Positive number on success, -ENOENT if no entries,
+-EINVAL for other errors.</p>
+</div>
+<dl class="function">
+<dt id="c.hte_ts_get">
+int <code class="sig-name descname">hte_ts_get</code><span class="sig-paren">(</span>struct <a class="reference internal" href="../infrastructure.html#c.device" title="device">device</a><em> *dev</em>, struct <a class="reference internal" href="#c.hte_ts_desc" title="hte_ts_desc">hte_ts_desc</a><em> *desc</em>, int<em> index</em><span class="sig-paren">)</span><a class="headerlink" href="#c.hte_ts_get" title="Permalink to this definition">¶</a></dt>
+<dd><p>The function to initialize and obtain HTE desc.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>HTE consumer/client device, used in case of parsing device tree node.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hte_ts_desc</span> <span class="pre">*desc</span></code></dt><dd><p>Pre-allocated timestamp descriptor.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">index</span></code></dt><dd><p>The index will be used as an index to parse line_id from the
+device tree node if node is present.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>The function initializes the consumer provided HTE descriptor. If consumer
+has device tree node, index is used to parse the line id and other details.
+The function needs to be called before using any request APIs.</p>
+<p><strong>Context</strong></p>
+<p>Holds mutex lock.</p>
+<p><strong>Return</strong></p>
+<p>Returns 0 on success or negative error code on failure.</p>
+</div>
+<dl class="function">
+<dt id="c.hte_request_ts_ns">
+int <code class="sig-name descname">hte_request_ts_ns</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.hte_ts_desc" title="hte_ts_desc">hte_ts_desc</a><em> *desc</em>, <a class="reference internal" href="#c.hte_ts_cb_t" title="hte_ts_cb_t">hte_ts_cb_t</a><em> cb</em>, <a class="reference internal" href="#c.hte_ts_sec_cb_t" title="hte_ts_sec_cb_t">hte_ts_sec_cb_t</a><em> tcb</em>, void<em> *data</em><span class="sig-paren">)</span><a class="headerlink" href="#c.hte_request_ts_ns" title="Permalink to this definition">¶</a></dt>
+<dd><p>The API to request and enable hardware timestamp in nanoseconds.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hte_ts_desc</span> <span class="pre">*desc</span></code></dt><dd><p>Pre-allocated and initialized timestamp descriptor.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">hte_ts_cb_t</span> <span class="pre">cb</span></code></dt><dd><p>Callback to push the timestamp data to consumer.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">hte_ts_sec_cb_t</span> <span class="pre">tcb</span></code></dt><dd><p>Optional callback. If its provided, subsystem initializes
+workqueue. It is called when cb returns HTE_RUN_SECOND_CB.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*data</span></code></dt><dd><p>Client data, used during cb and tcb callbacks.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>The entity is provider specific for example, GPIO lines, signals, buses
+etc…The API allocates necessary resources and enables the timestamp.</p>
+<p><strong>Context</strong></p>
+<p>Holds mutex lock.</p>
+<p><strong>Return</strong></p>
+<p>Returns 0 on success or negative error code on failure.</p>
+</div>
+<dl class="function">
+<dt id="c.devm_hte_request_ts_ns">
+int <code class="sig-name descname">devm_hte_request_ts_ns</code><span class="sig-paren">(</span>struct <a class="reference internal" href="../infrastructure.html#c.device" title="device">device</a><em> *dev</em>, struct <a class="reference internal" href="#c.hte_ts_desc" title="hte_ts_desc">hte_ts_desc</a><em> *desc</em>, <a class="reference internal" href="#c.hte_ts_cb_t" title="hte_ts_cb_t">hte_ts_cb_t</a><em> cb</em>, <a class="reference internal" href="#c.hte_ts_sec_cb_t" title="hte_ts_sec_cb_t">hte_ts_sec_cb_t</a><em> tcb</em>, void<em> *data</em><span class="sig-paren">)</span><a class="headerlink" href="#c.devm_hte_request_ts_ns" title="Permalink to this definition">¶</a></dt>
+<dd><p>Resource managed API to request and enable hardware timestamp in nanoseconds.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>HTE consumer/client device.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hte_ts_desc</span> <span class="pre">*desc</span></code></dt><dd><p>Pre-allocated and initialized timestamp descriptor.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">hte_ts_cb_t</span> <span class="pre">cb</span></code></dt><dd><p>Callback to push the timestamp data to consumer.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">hte_ts_sec_cb_t</span> <span class="pre">tcb</span></code></dt><dd><p>Optional callback. If its provided, subsystem initializes
+workqueue. It is called when cb returns HTE_RUN_SECOND_CB.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*data</span></code></dt><dd><p>Client data, used during cb and tcb callbacks.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>The entity is provider specific for example, GPIO lines, signals, buses
+etc…The API allocates necessary resources and enables the timestamp. It
+deallocates and disables automatically when the consumer exits.</p>
+<p><strong>Context</strong></p>
+<p>Holds mutex lock.</p>
+<p><strong>Return</strong></p>
+<p>Returns 0 on success or negative error code on failure.</p>
+</div>
+<dl class="function">
+<dt id="c.hte_init_line_attr">
+int <code class="sig-name descname">hte_init_line_attr</code><span class="sig-paren">(</span>struct <a class="reference internal" href="#c.hte_ts_desc" title="hte_ts_desc">hte_ts_desc</a><em> *desc</em>, u32<em> line_id</em>, unsigned long<em> edge_flags</em>, const char<em> *name</em>, void<em> *data</em><span class="sig-paren">)</span><a class="headerlink" href="#c.hte_init_line_attr" title="Permalink to this definition">¶</a></dt>
+<dd><p>Initialize line attributes.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hte_ts_desc</span> <span class="pre">*desc</span></code></dt><dd><p>Pre-allocated timestamp descriptor.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">u32</span> <span class="pre">line_id</span></code></dt><dd><p>line id.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">edge_flags</span></code></dt><dd><p>edge flags related to line_id.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*name</span></code></dt><dd><p>name of the line.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*data</span></code></dt><dd><p>line data related to line_id.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Zeroes out line attributes and initializes with provided arguments.
+The function needs to be called before calling any consumer facing
+functions.</p>
+<p><strong>Context</strong></p>
+<p>Any.</p>
+<p><strong>Return</strong></p>
+<p>0 on success or negative error code for the failure.</p>
+</div>
+<dl class="function">
+<dt id="c.hte_get_clk_src_info">
+int <code class="sig-name descname">hte_get_clk_src_info</code><span class="sig-paren">(</span>const struct <a class="reference internal" href="#c.hte_ts_desc" title="hte_ts_desc">hte_ts_desc</a><em> *desc</em>, struct <a class="reference internal" href="#c.hte_clk_info" title="hte_clk_info">hte_clk_info</a><em> *ci</em><span class="sig-paren">)</span><a class="headerlink" href="#c.hte_get_clk_src_info" title="Permalink to this definition">¶</a></dt>
+<dd><p>Get the clock source information for a ts descriptor.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">struct</span> <span class="pre">hte_ts_desc</span> <span class="pre">*desc</span></code></dt><dd><p>ts descriptor, same as returned from request API.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hte_clk_info</span> <span class="pre">*ci</span></code></dt><dd><p>The API fills this structure with the clock information data.</p>
+</dd>
+</dl>
+<p><strong>Context</strong></p>
+<p>Any context.</p>
+<p><strong>Return</strong></p>
+<p>0 on success else negative error code on failure.</p>
+</div>
+</section>
+<section id="the-hte-framework-public-structures">
+<h2>The HTE framework public structures<a class="headerlink" href="#the-hte-framework-public-structures" title="Permalink to this headline">¶</a></h2>
+<dl class="type">
+<dt id="c.hte_edge">
+enum <code class="sig-name descname">hte_edge</code><a class="headerlink" href="#c.hte_edge" title="Permalink to this definition">¶</a></dt>
+<dd><p>HTE line edge flags.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Constants</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">HTE_EDGE_NO_SETUP</span></code></dt><dd><p>No edge setup. In this case consumer will setup edges,
+for example during request irq call.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">HTE_RISING_EDGE_TS</span></code></dt><dd><p>Rising edge.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">HTE_FALLING_EDGE_TS</span></code></dt><dd><p>Falling edge.</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.hte_return">
+enum <code class="sig-name descname">hte_return</code><a class="headerlink" href="#c.hte_return" title="Permalink to this definition">¶</a></dt>
+<dd><p>HTE subsystem return values used during callback.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Constants</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">HTE_CB_HANDLED</span></code></dt><dd><p>The consumer handled the data.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">HTE_RUN_SECOND_CB</span></code></dt><dd><p>The consumer needs further processing, in that case
+HTE subsystem calls secondary callback provided by the consumer where it
+is allowed to sleep.</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.hte_ts_data">
+struct <code class="sig-name descname">hte_ts_data</code><a class="headerlink" href="#c.hte_ts_data" title="Permalink to this definition">¶</a></dt>
+<dd><p>HTE timestamp data.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct hte_ts_data {
+    u64 tsc;
+    u64 seq;
+    int raw_level;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">tsc</span></code></dt><dd><p>Timestamp value.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">seq</span></code></dt><dd><p>Sequence counter of the timestamps.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">raw_level</span></code></dt><dd><p>Level of the line at the timestamp if provider supports it,
+-1 otherwise.</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.hte_clk_info">
+struct <code class="sig-name descname">hte_clk_info</code><a class="headerlink" href="#c.hte_clk_info" title="Permalink to this definition">¶</a></dt>
+<dd><p>Clock source info that HTE provider uses to timestamp.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct hte_clk_info {
+    u64 hz;
+    clockid_t type;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">hz</span></code></dt><dd><p>Supported clock rate in HZ, for example 1KHz clock = 1000.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">type</span></code></dt><dd><p>Supported clock type.</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.hte_ts_cb_t">
+<code class="sig-name descname">hte_ts_cb_t</code><a class="headerlink" href="#c.hte_ts_cb_t" title="Permalink to this definition">¶</a></dt>
+<dd><p><strong>Typedef</strong>: HTE timestamp data processing primary callback.</p>
+</dd></dl>
+
+<p><strong>Syntax</strong></p>
+<blockquote>
+<div><p><code class="docutils literal notranslate"><span class="pre">enum</span> <span class="pre">hte_return</span> <span class="pre">hte_ts_cb_t</span> <span class="pre">(struct</span> <span class="pre">hte_ts_data</span> <span class="pre">*ts,</span> <span class="pre">void</span> <span class="pre">*data)</span></code></p>
+</div></blockquote>
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hte_ts_data</span> <span class="pre">*ts</span></code></dt><dd><p>HW timestamp data.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*data</span></code></dt><dd><p>Client supplied data.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>The callback is used to push timestamp data to the client and it is
+not allowed to sleep.</p>
+</div>
+<dl class="type">
+<dt id="c.hte_ts_sec_cb_t">
+<code class="sig-name descname">hte_ts_sec_cb_t</code><a class="headerlink" href="#c.hte_ts_sec_cb_t" title="Permalink to this definition">¶</a></dt>
+<dd><p><strong>Typedef</strong>: HTE timestamp data processing secondary callback.</p>
+</dd></dl>
+
+<p><strong>Syntax</strong></p>
+<blockquote>
+<div><p><code class="docutils literal notranslate"><span class="pre">enum</span> <span class="pre">hte_return</span> <span class="pre">hte_ts_sec_cb_t</span> <span class="pre">(void</span> <span class="pre">*data)</span></code></p>
+</div></blockquote>
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*data</span></code></dt><dd><p>Client supplied data.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>This is used when the client needs further processing where it is
+allowed to sleep.</p>
+</div>
+<dl class="type">
+<dt id="c.hte_line_attr">
+struct <code class="sig-name descname">hte_line_attr</code><a class="headerlink" href="#c.hte_line_attr" title="Permalink to this definition">¶</a></dt>
+<dd><p>Line attributes.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct hte_line_attr {
+    u32 line_id;
+    void *line_data;
+    unsigned long edge_flags;
+    const char *name;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">line_id</span></code></dt><dd><p>The logical ID understood by the consumers and providers.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">line_data</span></code></dt><dd><p>Line data related to line_id.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">edge_flags</span></code></dt><dd><p>Edge setup flags.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">name</span></code></dt><dd><p>Descriptive name of the entity that is being monitored for the
+hardware timestamping. If null, HTE core will construct the name.</p>
+</dd>
+</dl>
+</div>
+<dl class="type">
+<dt id="c.hte_ts_desc">
+struct <code class="sig-name descname">hte_ts_desc</code><a class="headerlink" href="#c.hte_ts_desc" title="Permalink to this definition">¶</a></dt>
+<dd><p>HTE timestamp descriptor.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct hte_ts_desc {
+    struct hte_line_attr attr;
+    void *hte_data;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">attr</span></code></dt><dd><p>The line attributes.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">hte_data</span></code></dt><dd><p>Subsystem’s private data, set by HTE subsystem.</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>This structure is a communication token between consumers to subsystem
+and subsystem to providers.</p>
+<dl class="type">
+<dt id="c.hte_ops">
+struct <code class="sig-name descname">hte_ops</code><a class="headerlink" href="#c.hte_ops" title="Permalink to this definition">¶</a></dt>
+<dd><p>HTE operations set by providers.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct hte_ops {
+    int (*request)(struct hte_chip *chip, struct hte_ts_desc *desc, u32 xlated_id);
+    int (*release)(struct hte_chip *chip, struct hte_ts_desc *desc, u32 xlated_id);
+    int (*enable)(struct hte_chip *chip, u32 xlated_id);
+    int (*disable)(struct hte_chip *chip, u32 xlated_id);
+    int (*get_clk_src_info)(struct hte_chip *chip, struct hte_clk_info *ci);
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">request</span></code></dt><dd><p>Hook for requesting a HTE timestamp. Returns 0 on success,
+non-zero for failures.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">release</span></code></dt><dd><p>Hook for releasing a HTE timestamp. Returns 0 on success,
+non-zero for failures.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">enable</span></code></dt><dd><p>Hook to enable the specified timestamp. Returns 0 on success,
+non-zero for failures.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">disable</span></code></dt><dd><p>Hook to disable specified timestamp. Returns 0 on success,
+non-zero for failures.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">get_clk_src_info</span></code></dt><dd><p>Hook to get the clock information the provider uses
+to timestamp. Returns 0 for success and negative error code for failure. On
+success HTE subsystem fills up provided <a class="reference internal" href="#c.hte_clk_info" title="hte_clk_info"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hte_clk_info</span></code></a>.</p>
+</dd>
+</dl>
+</div>
+<p><strong>Description</strong></p>
+<p>xlated_id parameter is used to communicate between HTE subsystem and the
+providers and is translated by the provider.</p>
+<dl class="type">
+<dt id="c.hte_chip">
+struct <code class="sig-name descname">hte_chip</code><a class="headerlink" href="#c.hte_chip" title="Permalink to this definition">¶</a></dt>
+<dd><p>Abstract HTE chip.</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Definition</strong>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct hte_chip {
+    const char *name;
+    struct device *dev;
+    const struct hte_ops *ops;
+    u32 nlines;
+    int (*xlate_of)(struct hte_chip *gc,const struct of_phandle_args *args, struct hte_ts_desc *desc, u32 *xlated_id);
+    int (*xlate_plat)(struct hte_chip *gc, struct hte_ts_desc *desc, u32 *xlated_id);
+    bool (*match_from_linedata)(const struct hte_chip *chip, const struct hte_ts_desc *hdesc);
+    u8 of_hte_n_cells;
+    struct hte_device *gdev;
+    void *data;
+};
+</pre></div>
+</div>
+<p><strong>Members</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">name</span></code></dt><dd><p>functional name of the HTE IP block.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dev</span></code></dt><dd><p>device providing the HTE.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">ops</span></code></dt><dd><p>callbacks for this HTE.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">nlines</span></code></dt><dd><p>number of lines/signals supported by this chip.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">xlate_of</span></code></dt><dd><p>Callback which translates consumer supplied logical ids to
+physical ids, return 0 for the success and negative for the failures.
+It stores (between 0 to <strong>nlines</strong>) in xlated_id parameter for the success.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">xlate_plat</span></code></dt><dd><p>Same as above but for the consumers with no DT node.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">match_from_linedata</span></code></dt><dd><p>Match HTE device using the line_data.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">of_hte_n_cells</span></code></dt><dd><p>Number of cells used to form the HTE specifier.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">gdev</span></code></dt><dd><p>HTE subsystem abstract device, internal to the HTE subsystem.</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">data</span></code></dt><dd><p>chip specific private data.</p>
+</dd>
+</dl>
+</div>
+</section>
+<section id="more-on-the-hte-timestamp-data">
+<h2>More on the HTE timestamp data<a class="headerlink" href="#more-on-the-hte-timestamp-data" title="Permalink to this headline">¶</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hte_ts_data</span></code> is used to pass timestamp details between the
+consumers and the providers. It expresses timestamp data in nanoseconds in
+u64. An example of the typical timestamp data life cycle, for the GPIO line is
+as follows:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>- Monitors GPIO line change.
+- Detects the state change on GPIO line.
+- Converts timestamps in nanoseconds.
+- Stores GPIO raw level in raw_level variable if the provider has that
+hardware capability.
+- Pushes this hte_ts_data object to HTE subsystem.
+- HTE subsystem increments seq counter and invokes consumer provided callback.
+Based on callback return value, the HTE core invokes secondary callback in
+the thread context.
+</pre></div>
+</div>
+</section>
+<section id="hte-subsystem-debugfs-attributes">
+<h2>HTE subsystem debugfs attributes<a class="headerlink" href="#hte-subsystem-debugfs-attributes" title="Permalink to this headline">¶</a></h2>
+<p>HTE subsystem creates debugfs attributes at <code class="docutils literal notranslate"><span class="pre">/sys/kernel/debug/hte/</span></code>.
+It also creates line/signal-related debugfs attributes at
+<code class="docutils literal notranslate"><span class="pre">/sys/kernel/debug/hte/&lt;provider&gt;/&lt;label</span> <span class="pre">or</span> <span class="pre">line</span> <span class="pre">id&gt;/</span></code>. Note that these
+attributes are read-only.</p>
+<dl class="simple">
+<dt><cite>ts_requested</cite></dt><dd><p>The total number of entities requested from the given provider,
+where entity is specified by the provider and could represent
+lines, GPIO, chip signals, buses etc…
+The attribute will be available at
+<code class="docutils literal notranslate"><span class="pre">/sys/kernel/debug/hte/&lt;provider&gt;/</span></code>.</p>
+</dd>
+<dt><cite>total_ts</cite></dt><dd><p>The total number of entities supported by the provider.
+The attribute will be available at
+<code class="docutils literal notranslate"><span class="pre">/sys/kernel/debug/hte/&lt;provider&gt;/</span></code>.</p>
+</dd>
+<dt><cite>dropped_timestamps</cite></dt><dd><p>The dropped timestamps for a given line.
+The attribute will be available at
+<code class="docutils literal notranslate"><span class="pre">/sys/kernel/debug/hte/&lt;provider&gt;/&lt;label</span> <span class="pre">or</span> <span class="pre">line</span> <span class="pre">id&gt;/</span></code>.</p>
+</dd>
+</dl>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">The Linux Hardware Timestamping Engine (HTE)</a><ul>
+<li><a class="reference internal" href="#introduction">Introduction</a></li>
+<li><a class="reference internal" href="#the-hte-framework-apis-for-the-providers">The HTE framework APIs for the providers</a></li>
+<li><a class="reference internal" href="#the-hte-framework-apis-for-the-consumers">The HTE framework APIs for the consumers</a></li>
+<li><a class="reference internal" href="#the-hte-framework-public-structures">The HTE framework public structures</a></li>
+<li><a class="reference internal" href="#more-on-the-hte-timestamp-data">More on the HTE timestamp data</a></li>
+<li><a class="reference internal" href="#hte-subsystem-debugfs-attributes">HTE subsystem debugfs attributes</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/hte/hte.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/hte/hte.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

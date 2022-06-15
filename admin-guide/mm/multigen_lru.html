@@ -1,0 +1,276 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Multi-Gen LRU &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="No-MMU memory mapping support" href="nommu-mmap.html" />
+    <link rel="prev" title="Memory Hot(Un)Plug" href="memory-hotplug.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="multi-gen-lru">
+<h1>Multi-Gen LRU<a class="headerlink" href="#multi-gen-lru" title="Permalink to this headline">¶</a></h1>
+<p>The multi-gen LRU is an alternative LRU implementation that optimizes
+page reclaim and improves performance under memory pressure. Page
+reclaim decides the kernel’s caching policy and ability to overcommit
+memory. It directly impacts the kswapd CPU usage and RAM efficiency.</p>
+<section id="quick-start">
+<h2>Quick start<a class="headerlink" href="#quick-start" title="Permalink to this headline">¶</a></h2>
+<p>Build the kernel with the following configurations.</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">CONFIG_LRU_GEN=y</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">CONFIG_LRU_GEN_ENABLED=y</span></code></p></li>
+</ul>
+<p>All set!</p>
+</section>
+<section id="runtime-options">
+<h2>Runtime options<a class="headerlink" href="#runtime-options" title="Permalink to this headline">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">/sys/kernel/mm/lru_gen/</span></code> contains stable ABIs described in the
+following subsections.</p>
+<section id="kill-switch">
+<h3>Kill switch<a class="headerlink" href="#kill-switch" title="Permalink to this headline">¶</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">enabled</span></code> accepts different values to enable or disable the
+following components. Its default value depends on
+<code class="docutils literal notranslate"><span class="pre">CONFIG_LRU_GEN_ENABLED</span></code>. All the components should be enabled
+unless some of them have unforeseen side effects. Writing to
+<code class="docutils literal notranslate"><span class="pre">enabled</span></code> has no effect when a component is not supported by the
+hardware, and valid values will be accepted even when the main switch
+is off.</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 9%" />
+<col style="width: 91%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Values</p></th>
+<th class="head"><p>Components</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>0x0001</p></td>
+<td><p>The main switch for the multi-gen LRU.</p></td>
+</tr>
+<tr class="row-odd"><td><p>0x0002</p></td>
+<td><p>Clearing the accessed bit in leaf page table entries in large
+batches, when MMU sets it (e.g., on x86). This behavior can
+theoretically worsen lock contention (mmap_lock). If it is
+disabled, the multi-gen LRU will suffer a minor performance
+degradation for workloads that contiguously map hot pages,
+whose accessed bits can be otherwise cleared by fewer larger
+batches.</p></td>
+</tr>
+<tr class="row-even"><td><p>0x0004</p></td>
+<td><p>Clearing the accessed bit in non-leaf page table entries as
+well, when MMU sets it (e.g., on x86). This behavior was not
+verified on x86 varieties other than Intel and AMD. If it is
+disabled, the multi-gen LRU will suffer a negligible
+performance degradation.</p></td>
+</tr>
+<tr class="row-odd"><td><p>[yYnN]</p></td>
+<td><p>Apply to all the components above.</p></td>
+</tr>
+</tbody>
+</table>
+<p>E.g.,</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>echo y &gt;/sys/kernel/mm/lru_gen/enabled
+cat /sys/kernel/mm/lru_gen/enabled
+0x0007
+echo 5 &gt;/sys/kernel/mm/lru_gen/enabled
+cat /sys/kernel/mm/lru_gen/enabled
+0x0005
+</pre></div>
+</div>
+</section>
+<section id="thrashing-prevention">
+<h3>Thrashing prevention<a class="headerlink" href="#thrashing-prevention" title="Permalink to this headline">¶</a></h3>
+<p>Personal computers are more sensitive to thrashing because it can
+cause janks (lags when rendering UI) and negatively impact user
+experience. The multi-gen LRU offers thrashing prevention to the
+majority of laptop and desktop users who do not have <code class="docutils literal notranslate"><span class="pre">oomd</span></code>.</p>
+<p>Users can write <code class="docutils literal notranslate"><span class="pre">N</span></code> to <code class="docutils literal notranslate"><span class="pre">min_ttl_ms</span></code> to prevent the working set of
+<code class="docutils literal notranslate"><span class="pre">N</span></code> milliseconds from getting evicted. The OOM killer is triggered
+if this working set cannot be kept in memory. In other words, this
+option works as an adjustable pressure relief valve, and when open, it
+terminates applications that are hopefully not being used.</p>
+<p>Based on the average human detectable lag (~100ms), <code class="docutils literal notranslate"><span class="pre">N=1000</span></code> usually
+eliminates intolerable janks due to thrashing. Larger values like
+<code class="docutils literal notranslate"><span class="pre">N=3000</span></code> make janks less noticeable at the risk of premature OOM
+kills.</p>
+<p>The default value <code class="docutils literal notranslate"><span class="pre">0</span></code> means disabled.</p>
+</section>
+</section>
+<section id="experimental-features">
+<h2>Experimental features<a class="headerlink" href="#experimental-features" title="Permalink to this headline">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">/sys/kernel/debug/lru_gen</span></code> accepts commands described in the
+following subsections. Multiple command lines are supported, so does
+concatenation with delimiters <code class="docutils literal notranslate"><span class="pre">,</span></code> and <code class="docutils literal notranslate"><span class="pre">;</span></code>.</p>
+<p><code class="docutils literal notranslate"><span class="pre">/sys/kernel/debug/lru_gen_full</span></code> provides additional stats for
+debugging. <code class="docutils literal notranslate"><span class="pre">CONFIG_LRU_GEN_STATS=y</span></code> keeps historical stats from
+evicted generations in this file.</p>
+<section id="working-set-estimation">
+<h3>Working set estimation<a class="headerlink" href="#working-set-estimation" title="Permalink to this headline">¶</a></h3>
+<p>Working set estimation measures how much memory an application needs
+in a given time interval, and it is usually done with little impact on
+the performance of the application. E.g., data centers want to
+optimize job scheduling (bin packing) to improve memory utilizations.
+When a new job comes in, the job scheduler needs to find out whether
+each server it manages can allocate a certain amount of memory for
+this new job before it can pick a candidate. To do so, the job
+scheduler needs to estimate the working sets of the existing jobs.</p>
+<p>When it is read, <code class="docutils literal notranslate"><span class="pre">lru_gen</span></code> returns a histogram of numbers of pages
+accessed over different time intervals for each memcg and node.
+<code class="docutils literal notranslate"><span class="pre">MAX_NR_GENS</span></code> decides the number of bins for each histogram. The
+histograms are noncumulative.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>memcg  memcg_id  memcg_path
+   node  node_id
+       min_gen_nr  age_in_ms  nr_anon_pages  nr_file_pages
+       ...
+       max_gen_nr  age_in_ms  nr_anon_pages  nr_file_pages
+</pre></div>
+</div>
+<p>Each bin contains an estimated number of pages that have been accessed
+within <code class="docutils literal notranslate"><span class="pre">age_in_ms</span></code>. E.g., <code class="docutils literal notranslate"><span class="pre">min_gen_nr</span></code> contains the coldest pages
+and <code class="docutils literal notranslate"><span class="pre">max_gen_nr</span></code> contains the hottest pages, since <code class="docutils literal notranslate"><span class="pre">age_in_ms</span></code> of
+the former is the largest and that of the latter is the smallest.</p>
+<p>Users can write the following command to <code class="docutils literal notranslate"><span class="pre">lru_gen</span></code> to create a new
+generation <code class="docutils literal notranslate"><span class="pre">max_gen_nr+1</span></code>:</p>
+<blockquote>
+<div><p><code class="docutils literal notranslate"><span class="pre">+</span> <span class="pre">memcg_id</span> <span class="pre">node_id</span> <span class="pre">max_gen_nr</span> <span class="pre">[can_swap</span> <span class="pre">[force_scan]]</span></code></p>
+</div></blockquote>
+<p><code class="docutils literal notranslate"><span class="pre">can_swap</span></code> defaults to the swap setting and, if it is set to <code class="docutils literal notranslate"><span class="pre">1</span></code>,
+it forces the scan of anon pages when swap is off, and vice versa.
+<code class="docutils literal notranslate"><span class="pre">force_scan</span></code> defaults to <code class="docutils literal notranslate"><span class="pre">1</span></code> and, if it is set to <code class="docutils literal notranslate"><span class="pre">0</span></code>, it
+employs heuristics to reduce the overhead, which is likely to reduce
+the coverage as well.</p>
+<p>A typical use case is that a job scheduler runs this command at a
+certain time interval to create new generations, and it ranks the
+servers it manages based on the sizes of their cold pages defined by
+this time interval.</p>
+</section>
+<section id="proactive-reclaim">
+<h3>Proactive reclaim<a class="headerlink" href="#proactive-reclaim" title="Permalink to this headline">¶</a></h3>
+<p>Proactive reclaim induces page reclaim when there is no memory
+pressure. It usually targets cold pages only. E.g., when a new job
+comes in, the job scheduler wants to proactively reclaim cold pages on
+the server it selected, to improve the chance of successfully landing
+this new job.</p>
+<p>Users can write the following command to <code class="docutils literal notranslate"><span class="pre">lru_gen</span></code> to evict
+generations less than or equal to <code class="docutils literal notranslate"><span class="pre">min_gen_nr</span></code>.</p>
+<blockquote>
+<div><p><code class="docutils literal notranslate"><span class="pre">-</span> <span class="pre">memcg_id</span> <span class="pre">node_id</span> <span class="pre">min_gen_nr</span> <span class="pre">[swappiness</span> <span class="pre">[nr_to_reclaim]]</span></code></p>
+</div></blockquote>
+<p><code class="docutils literal notranslate"><span class="pre">min_gen_nr</span></code> should be less than <code class="docutils literal notranslate"><span class="pre">max_gen_nr-1</span></code>, since
+<code class="docutils literal notranslate"><span class="pre">max_gen_nr</span></code> and <code class="docutils literal notranslate"><span class="pre">max_gen_nr-1</span></code> are not fully aged (equivalent to
+the active list) and therefore cannot be evicted. <code class="docutils literal notranslate"><span class="pre">swappiness</span></code>
+overrides the default value in <code class="docutils literal notranslate"><span class="pre">/proc/sys/vm/swappiness</span></code>.
+<code class="docutils literal notranslate"><span class="pre">nr_to_reclaim</span></code> limits the number of pages to evict.</p>
+<p>A typical use case is that a job scheduler runs this command before it
+tries to land a new job on a server. If it fails to materialize enough
+cold pages because of the overestimation, it retries on the next
+server according to the ranking result obtained from the working set
+estimation step. This less forceful approach limits the impacts on the
+existing jobs.</p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Multi-Gen LRU</a><ul>
+<li><a class="reference internal" href="#quick-start">Quick start</a></li>
+<li><a class="reference internal" href="#runtime-options">Runtime options</a><ul>
+<li><a class="reference internal" href="#kill-switch">Kill switch</a></li>
+<li><a class="reference internal" href="#thrashing-prevention">Thrashing prevention</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#experimental-features">Experimental features</a><ul>
+<li><a class="reference internal" href="#working-set-estimation">Working set estimation</a></li>
+<li><a class="reference internal" href="#proactive-reclaim">Proactive reclaim</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/admin-guide/mm/multigen_lru.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/admin-guide/mm/multigen_lru.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

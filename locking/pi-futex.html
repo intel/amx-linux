@@ -1,0 +1,214 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Lightweight PI-futexes &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Futex Requeue PI" href="futex-requeue-pi.html" />
+    <link rel="prev" title="Proper Locking Under a Preemptible Kernel: Keeping Kernel Code Preempt-Safe" href="preempt-locking.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="lightweight-pi-futexes">
+<h1>Lightweight PI-futexes<a class="headerlink" href="#lightweight-pi-futexes" title="Permalink to this headline">¶</a></h1>
+<p>We are calling them lightweight for 3 reasons:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>in the user-space fastpath a PI-enabled futex involves no kernel work
+(or any other PI complexity) at all. No registration, no extra kernel
+calls - just pure fast atomic ops in userspace.</p></li>
+<li><p>even in the slowpath, the system call and scheduling pattern is very
+similar to normal futexes.</p></li>
+<li><p>the in-kernel PI implementation is streamlined around the mutex
+abstraction, with strict rules that keep the implementation
+relatively simple: only a single owner may own a lock (i.e. no
+read-write lock support), only the owner may unlock a lock, no
+recursive locking, etc.</p></li>
+</ul>
+</div></blockquote>
+<section id="priority-inheritance-why">
+<h2>Priority Inheritance - why?<a class="headerlink" href="#priority-inheritance-why" title="Permalink to this headline">¶</a></h2>
+<p>The short reply: user-space PI helps achieving/improving determinism for
+user-space applications. In the best-case, it can help achieve
+determinism and well-bound latencies. Even in the worst-case, PI will
+improve the statistical distribution of locking related application
+delays.</p>
+</section>
+<section id="the-longer-reply">
+<h2>The longer reply<a class="headerlink" href="#the-longer-reply" title="Permalink to this headline">¶</a></h2>
+<p>Firstly, sharing locks between multiple tasks is a common programming
+technique that often cannot be replaced with lockless algorithms. As we
+can see it in the kernel [which is a quite complex program in itself],
+lockless structures are rather the exception than the norm - the current
+ratio of lockless vs. locky code for shared data structures is somewhere
+between 1:10 and 1:100. Lockless is hard, and the complexity of lockless
+algorithms often endangers to ability to do robust reviews of said code.
+I.e. critical RT apps often choose lock structures to protect critical
+data structures, instead of lockless algorithms. Furthermore, there are
+cases (like shared hardware, or other resource limits) where lockless
+access is mathematically impossible.</p>
+<p>Media players (such as Jack) are an example of reasonable application
+design with multiple tasks (with multiple priority levels) sharing
+short-held locks: for example, a highprio audio playback thread is
+combined with medium-prio construct-audio-data threads and low-prio
+display-colory-stuff threads. Add video and decoding to the mix and
+we’ve got even more priority levels.</p>
+<p>So once we accept that synchronization objects (locks) are an
+unavoidable fact of life, and once we accept that multi-task userspace
+apps have a very fair expectation of being able to use locks, we’ve got
+to think about how to offer the option of a deterministic locking
+implementation to user-space.</p>
+<p>Most of the technical counter-arguments against doing priority
+inheritance only apply to kernel-space locks. But user-space locks are
+different, there we cannot disable interrupts or make the task
+non-preemptible in a critical section, so the ‘use spinlocks’ argument
+does not apply (user-space spinlocks have the same priority inversion
+problems as other user-space locking constructs). Fact is, pretty much
+the only technique that currently enables good determinism for userspace
+locks (such as futex-based pthread mutexes) is priority inheritance:</p>
+<p>Currently (without PI), if a high-prio and a low-prio task shares a lock
+[this is a quite common scenario for most non-trivial RT applications],
+even if all critical sections are coded carefully to be deterministic
+(i.e. all critical sections are short in duration and only execute a
+limited number of instructions), the kernel cannot guarantee any
+deterministic execution of the high-prio task: any medium-priority task
+could preempt the low-prio task while it holds the shared lock and
+executes the critical section, and could delay it indefinitely.</p>
+</section>
+<section id="implementation">
+<h2>Implementation<a class="headerlink" href="#implementation" title="Permalink to this headline">¶</a></h2>
+<p>As mentioned before, the userspace fastpath of PI-enabled pthread
+mutexes involves no kernel work at all - they behave quite similarly to
+normal futex-based locks: a 0 value means unlocked, and a value==TID
+means locked. (This is the same method as used by list-based robust
+futexes.) Userspace uses atomic ops to lock/unlock these mutexes without
+entering the kernel.</p>
+<p>To handle the slowpath, we have added two new futex ops:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>FUTEX_LOCK_PI</p></li>
+<li><p>FUTEX_UNLOCK_PI</p></li>
+</ul>
+</div></blockquote>
+<p>If the lock-acquire fastpath fails, [i.e. an atomic transition from 0 to
+TID fails], then FUTEX_LOCK_PI is called. The kernel does all the
+remaining work: if there is no futex-queue attached to the futex address
+yet then the code looks up the task that owns the futex [it has put its
+own TID into the futex value], and attaches a ‘PI state’ structure to
+the futex-queue. The pi_state includes an rt-mutex, which is a PI-aware,
+kernel-based synchronization object. The ‘other’ task is made the owner
+of the rt-mutex, and the FUTEX_WAITERS bit is atomically set in the
+futex value. Then this task tries to lock the rt-mutex, on which it
+blocks. Once it returns, it has the mutex acquired, and it sets the
+futex value to its own TID and returns. Userspace has no other work to
+perform - it now owns the lock, and futex value contains
+FUTEX_WAITERS|TID.</p>
+<p>If the unlock side fastpath succeeds, [i.e. userspace manages to do a
+TID -&gt; 0 atomic transition of the futex value], then no kernel work is
+triggered.</p>
+<p>If the unlock fastpath fails (because the FUTEX_WAITERS bit is set),
+then FUTEX_UNLOCK_PI is called, and the kernel unlocks the futex on the
+behalf of userspace - and it also unlocks the attached
+pi_state-&gt;rt_mutex and thus wakes up any potential waiters.</p>
+<p>Note that under this approach, contrary to previous PI-futex approaches,
+there is no prior ‘registration’ of a PI-futex. [which is not quite
+possible anyway, due to existing ABI properties of pthread mutexes.]</p>
+<p>Also, under this scheme, ‘robustness’ and ‘PI’ are two orthogonal
+properties of futexes, and all four combinations are possible: futex,
+robust-futex, PI-futex, robust+PI-futex.</p>
+<p>More details about priority inheritance can be found in
+<a class="reference internal" href="rt-mutex.html"><span class="doc">RT-mutex subsystem with PI support</span></a>.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Lightweight PI-futexes</a><ul>
+<li><a class="reference internal" href="#priority-inheritance-why">Priority Inheritance - why?</a></li>
+<li><a class="reference internal" href="#the-longer-reply">The longer reply</a></li>
+<li><a class="reference internal" href="#implementation">Implementation</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/locking/pi-futex.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/locking/pi-futex.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,1605 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>2.5. RGB Formats &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="2.6. Raw Bayer Formats" href="pixfmt-bayer.html" />
+    <link rel="prev" title="2.4. Indexed Format" href="pixfmt-indexed.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="rgb-formats">
+<span id="pixfmt-rgb"></span><h1><span class="section-number">2.5. </span>RGB Formats<a class="headerlink" href="#rgb-formats" title="Permalink to this headline">¶</a></h1>
+<p>These formats encode each pixel as a triplet of RGB values. They are packed
+formats, meaning that the RGB values for one pixel are stored consecutively in
+memory and each pixel consumes an integer number of bytes. When the number of
+bits required to store a pixel is not aligned to a byte boundary, the data is
+padded with additional bits to fill the remaining byte.</p>
+<p>The formats differ by the number of bits per RGB component (typically but not
+always the same for all components), the order of components in memory, and the
+presence of an alpha component or additional padding bits.</p>
+<p>The usage and value of the alpha bits in formats that support them (named ARGB
+or a permutation thereof, collectively referred to as alpha formats) depend on
+the device type and hardware operation. <a class="reference internal" href="dev-capture.html#capture"><span class="std std-ref">Capture</span></a> devices
+(including capture queues of mem-to-mem devices) fill the alpha component in
+memory. When the device captures an alpha channel the alpha component will have
+a meaningful value. Otherwise, when the device doesn’t capture an alpha channel
+but can set the alpha bit to a user-configurable value, the
+<a class="reference internal" href="control.html#v4l2-alpha-component"><span class="std std-ref">V4L2_CID_ALPHA_COMPONENT</span></a> control is used to
+specify that alpha value, and the alpha component of all pixels will be set to
+the value specified by that control. Otherwise a corresponding format without
+an alpha component (XRGB or XBGR) must be used instead of an alpha format.</p>
+<p><a class="reference internal" href="dev-output.html#output"><span class="std std-ref">Output</span></a> devices (including output queues of mem-to-mem devices
+and <a class="reference internal" href="dev-osd.html#osd"><span class="std std-ref">video output overlay</span></a> devices) read the alpha component from
+memory. When the device processes the alpha channel the alpha component must be
+filled with meaningful values by applications. Otherwise a corresponding format
+without an alpha component (XRGB or XBGR) must be used instead of an alpha
+format.</p>
+<p>Formats that contain padding bits are named XRGB (or a permutation thereof).
+The padding bits contain undefined values and must be ignored by applications,
+devices and drivers, for both <a class="reference internal" href="dev-capture.html#capture"><span class="std std-ref">Video Capture Interface</span></a> and <a class="reference internal" href="dev-output.html#output"><span class="std std-ref">Video Output Interface</span></a> devices.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<ul class="simple">
+<li><p>In all the tables that follow, bit 7 is the most significant bit in a byte.</p></li>
+<li><p>‘r’, ‘g’ and ‘b’ denote bits of the red, green and blue components
+respectively. ‘a’ denotes bits of the alpha component (if supported by the
+format), and ‘x’ denotes padding bits.</p></li>
+</ul>
+</div>
+<section id="less-than-8-bits-per-component">
+<h2><span class="section-number">2.5.1. </span>Less Than 8 Bits Per Component<a class="headerlink" href="#less-than-8-bits-per-component" title="Permalink to this headline">¶</a></h2>
+<p>These formats store an RGB triplet in one, two or four bytes. They are named
+based on the order of the RGB components as seen in a 8-, 16- or 32-bit word,
+which is then stored in memory in little endian byte order (unless otherwise
+noted by the presence of bit 31 in the 4CC value), and on the number of bits
+for each component. For instance, the RGB565 format stores a pixel in a 16-bit
+word [15:0] laid out at as [R<sub>4</sub> R<sub>3</sub> R<sub>2</sub> R<sub>1</sub>
+R<sub>0</sub> G<sub>5</sub> G<sub>4</sub> G<sub>3</sub> G<sub>2</sub> G<sub>1</sub>
+G<sub>0</sub> B<sub>4</sub> B<sub>3</sub> B<sub>2</sub> B<sub>1</sub> B<sub>0</sub>], and
+stored in memory in two bytes, [R<sub>4</sub> R<sub>3</sub> R<sub>2</sub> R<sub>1</sub>
+R<sub>0</sub> G<sub>5</sub> G<sub>4</sub> G<sub>3</sub>] followed by [G<sub>2</sub>
+G<sub>1</sub> G<sub>0</sub> B<sub>4</sub> B<sub>3</sub> B<sub>2</sub> B<sub>1</sub>
+B<sub>0</sub>].</p>
+<table class="docutils align-default" id="id1">
+<caption><span class="caption-text">RGB Formats With Less Than 8 Bits Per Component</span><a class="headerlink" href="#id1" title="Permalink to this table">¶</a></caption>
+<colgroup>
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Identifier</p></th>
+<th class="head"><p>Code</p></th>
+<th class="head" colspan="8"><p> Byte 0 in memory</p></th>
+<th class="head" colspan="8"><p> Byte 1</p></th>
+<th class="head" colspan="8"><p> Byte 2</p></th>
+<th class="head" colspan="8"><p> Byte 3</p></th>
+</tr>
+<tr class="row-even"><th class="head"></th>
+<th class="head"></th>
+<th class="head"><p>7</p></th>
+<th class="head"><p>6</p></th>
+<th class="head"><p>5</p></th>
+<th class="head"><p>4</p></th>
+<th class="head"><p>3</p></th>
+<th class="head"><p>2</p></th>
+<th class="head"><p>1</p></th>
+<th class="head"><p>0</p></th>
+<th class="head"><p>7</p></th>
+<th class="head"><p>6</p></th>
+<th class="head"><p>5</p></th>
+<th class="head"><p>4</p></th>
+<th class="head"><p>3</p></th>
+<th class="head"><p>2</p></th>
+<th class="head"><p>1</p></th>
+<th class="head"><p>0</p></th>
+<th class="head"><p>7</p></th>
+<th class="head"><p>6</p></th>
+<th class="head"><p>5</p></th>
+<th class="head"><p>4</p></th>
+<th class="head"><p>3</p></th>
+<th class="head"><p>2</p></th>
+<th class="head"><p>1</p></th>
+<th class="head"><p>0</p></th>
+<th class="head"><p>7</p></th>
+<th class="head"><p>6</p></th>
+<th class="head"><p>5</p></th>
+<th class="head"><p>4</p></th>
+<th class="head"><p>3</p></th>
+<th class="head"><p>2</p></th>
+<th class="head"><p>1</p></th>
+<th class="head"><p>0</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_RGB332</span></code></p>
+</td>
+<td><p>‘RGB1’</p>
+</td>
+<td><p>r<sub>2</sub></p>
+</td>
+<td><p>r<sub>1</sub></p>
+</td>
+<td><p>r<sub>0</sub></p>
+</td>
+<td><p>g<sub>2</sub></p>
+</td>
+<td><p>g<sub>1</sub></p>
+</td>
+<td><p>g<sub>0</sub></p>
+</td>
+<td><p>b<sub>1</sub></p>
+</td>
+<td><p>b<sub>0</sub></p>
+</td>
+<td colspan="24"></td>
+</tr>
+<tr class="row-even" id="v4l2-pix-fmt-rgb332"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_ARGB444</span></code></p>
+</td>
+<td><p>‘AR12’</p>
+</td>
+<td><p>g<sub>3</sub></p>
+</td>
+<td><p>g<sub>2</sub></p>
+</td>
+<td><p>g<sub>1</sub></p>
+</td>
+<td><p>g<sub>0</sub></p>
+</td>
+<td><p>b<sub>3</sub></p>
+</td>
+<td><p>b<sub>2</sub></p>
+</td>
+<td><p>b<sub>1</sub></p>
+</td>
+<td><p>b<sub>0</sub></p>
+</td>
+<td><p>a<sub>3</sub></p>
+</td>
+<td><p>a<sub>2</sub></p>
+</td>
+<td><p>a<sub>1</sub></p>
+</td>
+<td><p>a<sub>0</sub></p>
+</td>
+<td><p>r<sub>3</sub></p>
+</td>
+<td><p>r<sub>2</sub></p>
+</td>
+<td><p>r<sub>1</sub></p>
+</td>
+<td><p>r<sub>0</sub></p>
+</td>
+<td colspan="16"></td>
+</tr>
+<tr class="row-odd" id="v4l2-pix-fmt-argb444"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_XRGB444</span></code></p>
+</td>
+<td><p>‘XR12’</p>
+</td>
+<td><p>g<sub>3</sub></p>
+</td>
+<td><p>g<sub>2</sub></p>
+</td>
+<td><p>g<sub>1</sub></p>
+</td>
+<td><p>g<sub>0</sub></p>
+</td>
+<td><p>b<sub>3</sub></p>
+</td>
+<td><p>b<sub>2</sub></p>
+</td>
+<td><p>b<sub>1</sub></p>
+</td>
+<td><p>b<sub>0</sub></p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>r<sub>3</sub></p>
+</td>
+<td><p>r<sub>2</sub></p>
+</td>
+<td><p>r<sub>1</sub></p>
+</td>
+<td><p>r<sub>0</sub></p>
+</td>
+<td colspan="16"></td>
+</tr>
+<tr class="row-even" id="v4l2-pix-fmt-xrgb444"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_RGBA444</span></code></p>
+</td>
+<td><p>‘RA12’</p>
+</td>
+<td><p>b<sub>3</sub></p>
+</td>
+<td><p>b<sub>2</sub></p>
+</td>
+<td><p>b<sub>1</sub></p>
+</td>
+<td><p>b<sub>0</sub></p>
+</td>
+<td><p>a<sub>3</sub></p>
+</td>
+<td><p>a<sub>2</sub></p>
+</td>
+<td><p>a<sub>1</sub></p>
+</td>
+<td><p>a<sub>0</sub></p>
+</td>
+<td><p>r<sub>3</sub></p>
+</td>
+<td><p>r<sub>2</sub></p>
+</td>
+<td><p>r<sub>1</sub></p>
+</td>
+<td><p>r<sub>0</sub></p>
+</td>
+<td><p>g<sub>3</sub></p>
+</td>
+<td><p>g<sub>2</sub></p>
+</td>
+<td><p>g<sub>1</sub></p>
+</td>
+<td><p>g<sub>0</sub></p>
+</td>
+<td colspan="16"></td>
+</tr>
+<tr class="row-odd" id="v4l2-pix-fmt-rgba444"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_RGBX444</span></code></p>
+</td>
+<td><p>‘RX12’</p>
+</td>
+<td><p>b<sub>3</sub></p>
+</td>
+<td><p>b<sub>2</sub></p>
+</td>
+<td><p>b<sub>1</sub></p>
+</td>
+<td><p>b<sub>0</sub></p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>r<sub>3</sub></p>
+</td>
+<td><p>r<sub>2</sub></p>
+</td>
+<td><p>r<sub>1</sub></p>
+</td>
+<td><p>r<sub>0</sub></p>
+</td>
+<td><p>g<sub>3</sub></p>
+</td>
+<td><p>g<sub>2</sub></p>
+</td>
+<td><p>g<sub>1</sub></p>
+</td>
+<td><p>g<sub>0</sub></p>
+</td>
+<td colspan="16"></td>
+</tr>
+<tr class="row-even" id="v4l2-pix-fmt-rgbx444"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_ABGR444</span></code></p>
+</td>
+<td><p>‘AB12’</p>
+</td>
+<td><p>g<sub>3</sub></p>
+</td>
+<td><p>g<sub>2</sub></p>
+</td>
+<td><p>g<sub>1</sub></p>
+</td>
+<td><p>g<sub>0</sub></p>
+</td>
+<td><p>r<sub>3</sub></p>
+</td>
+<td><p>r<sub>2</sub></p>
+</td>
+<td><p>r<sub>1</sub></p>
+</td>
+<td><p>r<sub>0</sub></p>
+</td>
+<td><p>a<sub>3</sub></p>
+</td>
+<td><p>a<sub>2</sub></p>
+</td>
+<td><p>a<sub>1</sub></p>
+</td>
+<td><p>a<sub>0</sub></p>
+</td>
+<td><p>b<sub>3</sub></p>
+</td>
+<td><p>b<sub>2</sub></p>
+</td>
+<td><p>b<sub>1</sub></p>
+</td>
+<td><p>b<sub>0</sub></p>
+</td>
+<td colspan="16"></td>
+</tr>
+<tr class="row-odd" id="v4l2-pix-fmt-abgr444"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_XBGR444</span></code></p>
+</td>
+<td><p>‘XB12’</p>
+</td>
+<td><p>g<sub>3</sub></p>
+</td>
+<td><p>g<sub>2</sub></p>
+</td>
+<td><p>g<sub>1</sub></p>
+</td>
+<td><p>g<sub>0</sub></p>
+</td>
+<td><p>r<sub>3</sub></p>
+</td>
+<td><p>r<sub>2</sub></p>
+</td>
+<td><p>r<sub>1</sub></p>
+</td>
+<td><p>r<sub>0</sub></p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>b<sub>3</sub></p>
+</td>
+<td><p>b<sub>2</sub></p>
+</td>
+<td><p>b<sub>1</sub></p>
+</td>
+<td><p>b<sub>0</sub></p>
+</td>
+<td colspan="16"></td>
+</tr>
+<tr class="row-even" id="v4l2-pix-fmt-xbgr444"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_BGRA444</span></code></p>
+</td>
+<td><p>‘BA12’</p>
+</td>
+<td><p>r<sub>3</sub></p>
+</td>
+<td><p>r<sub>2</sub></p>
+</td>
+<td><p>r<sub>1</sub></p>
+</td>
+<td><p>r<sub>0</sub></p>
+</td>
+<td><p>a<sub>3</sub></p>
+</td>
+<td><p>a<sub>2</sub></p>
+</td>
+<td><p>a<sub>1</sub></p>
+</td>
+<td><p>a<sub>0</sub></p>
+</td>
+<td><p>b<sub>3</sub></p>
+</td>
+<td><p>b<sub>2</sub></p>
+</td>
+<td><p>b<sub>1</sub></p>
+</td>
+<td><p>b<sub>0</sub></p>
+</td>
+<td><p>g<sub>3</sub></p>
+</td>
+<td><p>g<sub>2</sub></p>
+</td>
+<td><p>g<sub>1</sub></p>
+</td>
+<td><p>g<sub>0</sub></p>
+</td>
+<td colspan="16"></td>
+</tr>
+<tr class="row-odd" id="v4l2-pix-fmt-bgra444"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_BGRX444</span></code></p>
+</td>
+<td><p>‘BX12’</p>
+</td>
+<td><p>r<sub>3</sub></p>
+</td>
+<td><p>r<sub>2</sub></p>
+</td>
+<td><p>r<sub>1</sub></p>
+</td>
+<td><p>r<sub>0</sub></p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>b<sub>3</sub></p>
+</td>
+<td><p>b<sub>2</sub></p>
+</td>
+<td><p>b<sub>1</sub></p>
+</td>
+<td><p>b<sub>0</sub></p>
+</td>
+<td><p>g<sub>3</sub></p>
+</td>
+<td><p>g<sub>2</sub></p>
+</td>
+<td><p>g<sub>1</sub></p>
+</td>
+<td><p>g<sub>0</sub></p>
+</td>
+<td colspan="16"></td>
+</tr>
+<tr class="row-even" id="v4l2-pix-fmt-bgrx444"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_ARGB555</span></code></p>
+</td>
+<td><p>‘AR15’</p>
+</td>
+<td><p>g<sub>2</sub></p>
+</td>
+<td><p>g<sub>1</sub></p>
+</td>
+<td><p>g<sub>0</sub></p>
+</td>
+<td><p>b<sub>4</sub></p>
+</td>
+<td><p>b<sub>3</sub></p>
+</td>
+<td><p>b<sub>2</sub></p>
+</td>
+<td><p>b<sub>1</sub></p>
+</td>
+<td><p>b<sub>0</sub></p>
+</td>
+<td><p>a</p>
+</td>
+<td><p>r<sub>4</sub></p>
+</td>
+<td><p>r<sub>3</sub></p>
+</td>
+<td><p>r<sub>2</sub></p>
+</td>
+<td><p>r<sub>1</sub></p>
+</td>
+<td><p>r<sub>0</sub></p>
+</td>
+<td><p>g<sub>4</sub></p>
+</td>
+<td><p>g<sub>3</sub></p>
+</td>
+<td colspan="16"></td>
+</tr>
+<tr class="row-odd" id="v4l2-pix-fmt-argb555"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_XRGB555</span></code></p>
+</td>
+<td><p>‘XR15’</p>
+</td>
+<td><p>g<sub>2</sub></p>
+</td>
+<td><p>g<sub>1</sub></p>
+</td>
+<td><p>g<sub>0</sub></p>
+</td>
+<td><p>b<sub>4</sub></p>
+</td>
+<td><p>b<sub>3</sub></p>
+</td>
+<td><p>b<sub>2</sub></p>
+</td>
+<td><p>b<sub>1</sub></p>
+</td>
+<td><p>b<sub>0</sub></p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>r<sub>4</sub></p>
+</td>
+<td><p>r<sub>3</sub></p>
+</td>
+<td><p>r<sub>2</sub></p>
+</td>
+<td><p>r<sub>1</sub></p>
+</td>
+<td><p>r<sub>0</sub></p>
+</td>
+<td><p>g<sub>4</sub></p>
+</td>
+<td><p>g<sub>3</sub></p>
+</td>
+<td colspan="16"></td>
+</tr>
+<tr class="row-even" id="v4l2-pix-fmt-xrgb555"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_RGBA555</span></code></p>
+</td>
+<td><p>‘RA15’</p>
+</td>
+<td><p>g<sub>1</sub></p>
+</td>
+<td><p>g<sub>0</sub></p>
+</td>
+<td><p>b<sub>4</sub></p>
+</td>
+<td><p>b<sub>3</sub></p>
+</td>
+<td><p>b<sub>2</sub></p>
+</td>
+<td><p>b<sub>1</sub></p>
+</td>
+<td><p>b<sub>0</sub></p>
+</td>
+<td><p>a</p>
+</td>
+<td><p>r<sub>4</sub></p>
+</td>
+<td><p>r<sub>3</sub></p>
+</td>
+<td><p>r<sub>2</sub></p>
+</td>
+<td><p>r<sub>1</sub></p>
+</td>
+<td><p>r<sub>0</sub></p>
+</td>
+<td><p>g<sub>4</sub></p>
+</td>
+<td><p>g<sub>3</sub></p>
+</td>
+<td><p>g<sub>2</sub></p>
+</td>
+<td colspan="16"></td>
+</tr>
+<tr class="row-odd" id="v4l2-pix-fmt-rgba555"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_RGBX555</span></code></p>
+</td>
+<td><p>‘RX15’</p>
+</td>
+<td><p>g<sub>1</sub></p>
+</td>
+<td><p>g<sub>0</sub></p>
+</td>
+<td><p>b<sub>4</sub></p>
+</td>
+<td><p>b<sub>3</sub></p>
+</td>
+<td><p>b<sub>2</sub></p>
+</td>
+<td><p>b<sub>1</sub></p>
+</td>
+<td><p>b<sub>0</sub></p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>r<sub>4</sub></p>
+</td>
+<td><p>r<sub>3</sub></p>
+</td>
+<td><p>r<sub>2</sub></p>
+</td>
+<td><p>r<sub>1</sub></p>
+</td>
+<td><p>r<sub>0</sub></p>
+</td>
+<td><p>g<sub>4</sub></p>
+</td>
+<td><p>g<sub>3</sub></p>
+</td>
+<td><p>g<sub>2</sub></p>
+</td>
+<td colspan="16"></td>
+</tr>
+<tr class="row-even" id="v4l2-pix-fmt-rgbx555"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_ABGR555</span></code></p>
+</td>
+<td><p>‘AB15’</p>
+</td>
+<td><p>g<sub>2</sub></p>
+</td>
+<td><p>g<sub>1</sub></p>
+</td>
+<td><p>g<sub>0</sub></p>
+</td>
+<td><p>r<sub>4</sub></p>
+</td>
+<td><p>r<sub>3</sub></p>
+</td>
+<td><p>r<sub>2</sub></p>
+</td>
+<td><p>r<sub>1</sub></p>
+</td>
+<td><p>r<sub>0</sub></p>
+</td>
+<td><p>a</p>
+</td>
+<td><p>b<sub>4</sub></p>
+</td>
+<td><p>b<sub>3</sub></p>
+</td>
+<td><p>b<sub>2</sub></p>
+</td>
+<td><p>b<sub>1</sub></p>
+</td>
+<td><p>b<sub>0</sub></p>
+</td>
+<td><p>g<sub>4</sub></p>
+</td>
+<td><p>g<sub>3</sub></p>
+</td>
+<td colspan="16"></td>
+</tr>
+<tr class="row-odd" id="v4l2-pix-fmt-abgr555"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_XBGR555</span></code></p>
+</td>
+<td><p>‘XB15’</p>
+</td>
+<td><p>g<sub>2</sub></p>
+</td>
+<td><p>g<sub>1</sub></p>
+</td>
+<td><p>g<sub>0</sub></p>
+</td>
+<td><p>r<sub>4</sub></p>
+</td>
+<td><p>r<sub>3</sub></p>
+</td>
+<td><p>r<sub>2</sub></p>
+</td>
+<td><p>r<sub>1</sub></p>
+</td>
+<td><p>r<sub>0</sub></p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>b<sub>4</sub></p>
+</td>
+<td><p>b<sub>3</sub></p>
+</td>
+<td><p>b<sub>2</sub></p>
+</td>
+<td><p>b<sub>1</sub></p>
+</td>
+<td><p>b<sub>0</sub></p>
+</td>
+<td><p>g<sub>4</sub></p>
+</td>
+<td><p>g<sub>3</sub></p>
+</td>
+<td colspan="16"></td>
+</tr>
+<tr class="row-even" id="v4l2-pix-fmt-xbgr555"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_BGRA555</span></code></p>
+</td>
+<td><p>‘BA15’</p>
+</td>
+<td><p>g<sub>1</sub></p>
+</td>
+<td><p>g<sub>0</sub></p>
+</td>
+<td><p>r<sub>4</sub></p>
+</td>
+<td><p>r<sub>3</sub></p>
+</td>
+<td><p>r<sub>2</sub></p>
+</td>
+<td><p>r<sub>1</sub></p>
+</td>
+<td><p>r<sub>0</sub></p>
+</td>
+<td><p>a</p>
+</td>
+<td><p>b<sub>4</sub></p>
+</td>
+<td><p>b<sub>3</sub></p>
+</td>
+<td><p>b<sub>2</sub></p>
+</td>
+<td><p>b<sub>1</sub></p>
+</td>
+<td><p>b<sub>0</sub></p>
+</td>
+<td><p>g<sub>4</sub></p>
+</td>
+<td><p>g<sub>3</sub></p>
+</td>
+<td><p>g<sub>2</sub></p>
+</td>
+<td colspan="16"></td>
+</tr>
+<tr class="row-odd" id="v4l2-pix-fmt-bgra555"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_BGRX555</span></code></p>
+</td>
+<td><p>‘BX15’</p>
+</td>
+<td><p>g<sub>1</sub></p>
+</td>
+<td><p>g<sub>0</sub></p>
+</td>
+<td><p>r<sub>4</sub></p>
+</td>
+<td><p>r<sub>3</sub></p>
+</td>
+<td><p>r<sub>2</sub></p>
+</td>
+<td><p>r<sub>1</sub></p>
+</td>
+<td><p>r<sub>0</sub></p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>b<sub>4</sub></p>
+</td>
+<td><p>b<sub>3</sub></p>
+</td>
+<td><p>b<sub>2</sub></p>
+</td>
+<td><p>b<sub>1</sub></p>
+</td>
+<td><p>b<sub>0</sub></p>
+</td>
+<td><p>g<sub>4</sub></p>
+</td>
+<td><p>g<sub>3</sub></p>
+</td>
+<td><p>g<sub>2</sub></p>
+</td>
+<td colspan="16"></td>
+</tr>
+<tr class="row-even" id="v4l2-pix-fmt-bgrx555"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_RGB565</span></code></p>
+</td>
+<td><p>‘RGBP’</p>
+</td>
+<td><p>g<sub>2</sub></p>
+</td>
+<td><p>g<sub>1</sub></p>
+</td>
+<td><p>g<sub>0</sub></p>
+</td>
+<td><p>b<sub>4</sub></p>
+</td>
+<td><p>b<sub>3</sub></p>
+</td>
+<td><p>b<sub>2</sub></p>
+</td>
+<td><p>b<sub>1</sub></p>
+</td>
+<td><p>b<sub>0</sub></p>
+</td>
+<td><p>r<sub>4</sub></p>
+</td>
+<td><p>r<sub>3</sub></p>
+</td>
+<td><p>r<sub>2</sub></p>
+</td>
+<td><p>r<sub>1</sub></p>
+</td>
+<td><p>r<sub>0</sub></p>
+</td>
+<td><p>g<sub>5</sub></p>
+</td>
+<td><p>g<sub>4</sub></p>
+</td>
+<td><p>g<sub>3</sub></p>
+</td>
+<td colspan="16"></td>
+</tr>
+<tr class="row-odd" id="v4l2-pix-fmt-rgb565"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_ARGB555X</span></code></p>
+</td>
+<td><p>‘AR15’ | (1 &lt;&lt; 31)</p>
+</td>
+<td><p>a</p>
+</td>
+<td><p>r<sub>4</sub></p>
+</td>
+<td><p>r<sub>3</sub></p>
+</td>
+<td><p>r<sub>2</sub></p>
+</td>
+<td><p>r<sub>1</sub></p>
+</td>
+<td><p>r<sub>0</sub></p>
+</td>
+<td><p>g<sub>4</sub></p>
+</td>
+<td><p>g<sub>3</sub></p>
+</td>
+<td><p>g<sub>2</sub></p>
+</td>
+<td><p>g<sub>1</sub></p>
+</td>
+<td><p>g<sub>0</sub></p>
+</td>
+<td><p>b<sub>4</sub></p>
+</td>
+<td><p>b<sub>3</sub></p>
+</td>
+<td><p>b<sub>2</sub></p>
+</td>
+<td><p>b<sub>1</sub></p>
+</td>
+<td><p>b<sub>0</sub></p>
+</td>
+<td colspan="16"></td>
+</tr>
+<tr class="row-even" id="v4l2-pix-fmt-argb555x"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_XRGB555X</span></code></p>
+</td>
+<td><p>‘XR15’ | (1 &lt;&lt; 31)</p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>r<sub>4</sub></p>
+</td>
+<td><p>r<sub>3</sub></p>
+</td>
+<td><p>r<sub>2</sub></p>
+</td>
+<td><p>r<sub>1</sub></p>
+</td>
+<td><p>r<sub>0</sub></p>
+</td>
+<td><p>g<sub>4</sub></p>
+</td>
+<td><p>g<sub>3</sub></p>
+</td>
+<td><p>g<sub>2</sub></p>
+</td>
+<td><p>g<sub>1</sub></p>
+</td>
+<td><p>g<sub>0</sub></p>
+</td>
+<td><p>b<sub>4</sub></p>
+</td>
+<td><p>b<sub>3</sub></p>
+</td>
+<td><p>b<sub>2</sub></p>
+</td>
+<td><p>b<sub>1</sub></p>
+</td>
+<td><p>b<sub>0</sub></p>
+</td>
+<td colspan="16"></td>
+</tr>
+<tr class="row-odd" id="v4l2-pix-fmt-xrgb555x"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_RGB565X</span></code></p>
+</td>
+<td><p>‘RGBR’</p>
+</td>
+<td><p>r<sub>4</sub></p>
+</td>
+<td><p>r<sub>3</sub></p>
+</td>
+<td><p>r<sub>2</sub></p>
+</td>
+<td><p>r<sub>1</sub></p>
+</td>
+<td><p>r<sub>0</sub></p>
+</td>
+<td><p>g<sub>5</sub></p>
+</td>
+<td><p>g<sub>4</sub></p>
+</td>
+<td><p>g<sub>3</sub></p>
+</td>
+<td><p>g<sub>2</sub></p>
+</td>
+<td><p>g<sub>1</sub></p>
+</td>
+<td><p>g<sub>0</sub></p>
+</td>
+<td><p>b<sub>4</sub></p>
+</td>
+<td><p>b<sub>3</sub></p>
+</td>
+<td><p>b<sub>2</sub></p>
+</td>
+<td><p>b<sub>1</sub></p>
+</td>
+<td><p>b<sub>0</sub></p>
+</td>
+<td colspan="16"></td>
+</tr>
+<tr class="row-even" id="v4l2-pix-fmt-rgb565x"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_BGR666</span></code></p>
+</td>
+<td><p>‘BGRH’</p>
+</td>
+<td><p>b<sub>5</sub></p>
+</td>
+<td><p>b<sub>4</sub></p>
+</td>
+<td><p>b<sub>3</sub></p>
+</td>
+<td><p>b<sub>2</sub></p>
+</td>
+<td><p>b<sub>1</sub></p>
+</td>
+<td><p>b<sub>0</sub></p>
+</td>
+<td><p>g<sub>5</sub></p>
+</td>
+<td><p>g<sub>4</sub></p>
+</td>
+<td><p>g<sub>3</sub></p>
+</td>
+<td><p>g<sub>2</sub></p>
+</td>
+<td><p>g<sub>1</sub></p>
+</td>
+<td><p>g<sub>0</sub></p>
+</td>
+<td><p>r<sub>5</sub></p>
+</td>
+<td><p>r<sub>4</sub></p>
+</td>
+<td><p>r<sub>3</sub></p>
+</td>
+<td><p>r<sub>2</sub></p>
+</td>
+<td><p>r<sub>1</sub></p>
+</td>
+<td><p>r<sub>0</sub></p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>x</p>
+</td>
+<td><p>x</p>
+</td>
+<td><p id="v4l2-pix-fmt-bgr666">x</p>
+</td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="bits-per-component">
+<h2><span class="section-number">2.5.2. </span>8 Bits Per Component<a class="headerlink" href="#bits-per-component" title="Permalink to this headline">¶</a></h2>
+<p>These formats store an RGB triplet in three or four bytes. They are named based
+on the order of the RGB components as stored in memory, and on the total number
+of bits per pixel. For instance, RGB24 format stores a pixel with [R<sub>7</sub>
+R<sub>6</sub> R<sub>5</sub> R<sub>4</sub> R<sub>3</sub> R<sub>2</sub> R<sub>1</sub>
+R<sub>0</sub>] in the first byte, [G<sub>7</sub> G<sub>6</sub> G<sub>5</sub> G<sub>4</sub>
+G<sub>3</sub> G<sub>2</sub> G<sub>1</sub> G<sub>0</sub>] in the second byte and
+[B<sub>7</sub> B<sub>6</sub> B<sub>5</sub> B<sub>4</sub> B<sub>3</sub> B<sub>2</sub>
+B<sub>1</sub> B<sub>0</sub>] in the third byte. This differs from the DRM format
+nomenclature that instead use the order of components as seen in a 24- or
+32-bit little endian word.</p>
+<table class="docutils align-default" id="id2">
+<caption><span class="caption-text">RGB Formats With 8 Bits Per Component</span><a class="headerlink" href="#id2" title="Permalink to this table">¶</a></caption>
+<colgroup>
+<col style="width: 17%" />
+<col style="width: 17%" />
+<col style="width: 17%" />
+<col style="width: 17%" />
+<col style="width: 17%" />
+<col style="width: 17%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Identifier</p></th>
+<th class="head"><p>Code</p></th>
+<th class="head"><p>Byte 0 in memory</p></th>
+<th class="head"><p>Byte 1</p></th>
+<th class="head"><p>Byte 2</p></th>
+<th class="head"><p>Byte 3</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_BGR24</span></code></p>
+</td>
+<td><p>‘BGR3’</p>
+</td>
+<td><p>B<sub>7-0</sub></p>
+</td>
+<td><p>G<sub>7-0</sub></p>
+</td>
+<td><p>R<sub>7-0</sub></p>
+</td>
+<td></td>
+</tr>
+<tr class="row-odd" id="v4l2-pix-fmt-bgr24"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_RGB24</span></code></p>
+</td>
+<td><p>‘RGB3’</p>
+</td>
+<td><p>R<sub>7-0</sub></p>
+</td>
+<td><p>G<sub>7-0</sub></p>
+</td>
+<td><p>B<sub>7-0</sub></p>
+</td>
+<td></td>
+</tr>
+<tr class="row-even" id="v4l2-pix-fmt-rgb24"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_ABGR32</span></code></p>
+</td>
+<td><p>‘AR24’</p>
+</td>
+<td><p>B<sub>7-0</sub></p>
+</td>
+<td><p>G<sub>7-0</sub></p>
+</td>
+<td><p>R<sub>7-0</sub></p>
+</td>
+<td><p id="v4l2-pix-fmt-abgr32">A<sub>7-0</sub></p>
+</td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_XBGR32</span></code></p>
+</td>
+<td><p>‘XR24’</p>
+</td>
+<td><p>B<sub>7-0</sub></p>
+</td>
+<td><p>G<sub>7-0</sub></p>
+</td>
+<td><p>R<sub>7-0</sub></p>
+</td>
+<td><p id="v4l2-pix-fmt-xbgr32">X<sub>7-0</sub></p>
+</td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_BGRA32</span></code></p>
+</td>
+<td><p>‘RA24’</p>
+</td>
+<td><p>A<sub>7-0</sub></p>
+</td>
+<td><p>B<sub>7-0</sub></p>
+</td>
+<td><p>G<sub>7-0</sub></p>
+</td>
+<td><p id="v4l2-pix-fmt-bgra32">R<sub>7-0</sub></p>
+</td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_BGRX32</span></code></p>
+</td>
+<td><p>‘RX24’</p>
+</td>
+<td><p>X<sub>7-0</sub></p>
+</td>
+<td><p>B<sub>7-0</sub></p>
+</td>
+<td><p>G<sub>7-0</sub></p>
+</td>
+<td><p id="v4l2-pix-fmt-bgrx32">R<sub>7-0</sub></p>
+</td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_RGBA32</span></code></p>
+</td>
+<td><p>‘AB24’</p>
+</td>
+<td><p>R<sub>7-0</sub></p>
+</td>
+<td><p>G<sub>7-0</sub></p>
+</td>
+<td><p>B<sub>7-0</sub></p>
+</td>
+<td><p id="v4l2-pix-fmt-rgba32">A<sub>7-0</sub></p>
+</td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_RGBX32</span></code></p>
+</td>
+<td><p>‘XB24’</p>
+</td>
+<td><p>R<sub>7-0</sub></p>
+</td>
+<td><p>G<sub>7-0</sub></p>
+</td>
+<td><p>B<sub>7-0</sub></p>
+</td>
+<td><p id="v4l2-pix-fmt-rgbx32">X<sub>7-0</sub></p>
+</td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_ARGB32</span></code></p>
+</td>
+<td><p>‘BA24’</p>
+</td>
+<td><p>A<sub>7-0</sub></p>
+</td>
+<td><p>R<sub>7-0</sub></p>
+</td>
+<td><p>G<sub>7-0</sub></p>
+</td>
+<td><p id="v4l2-pix-fmt-argb32">B<sub>7-0</sub></p>
+</td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_XRGB32</span></code></p>
+</td>
+<td><p>‘BX24’</p>
+</td>
+<td><p>X<sub>7-0</sub></p>
+</td>
+<td><p>R<sub>7-0</sub></p>
+</td>
+<td><p>G<sub>7-0</sub></p>
+</td>
+<td><p id="v4l2-pix-fmt-xrgb32">B<sub>7-0</sub></p>
+</td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="deprecated-rgb-formats">
+<h2><span class="section-number">2.5.3. </span>Deprecated RGB Formats<a class="headerlink" href="#deprecated-rgb-formats" title="Permalink to this headline">¶</a></h2>
+<p>Formats defined in <a class="reference internal" href="#pixfmt-rgb-deprecated"><span class="std std-ref">Deprecated Packed RGB Image Formats</span></a> are deprecated and must not be
+used by new drivers. They are documented here for reference. The meaning of
+their alpha bits <code class="docutils literal notranslate"><span class="pre">(a)</span></code> is ill-defined and they are interpreted as in either
+the corresponding ARGB or XRGB format, depending on the driver.</p>
+<span id="pixfmt-rgb-deprecated"></span><table class="docutils align-default" id="id3">
+<caption><span class="caption-text">Deprecated Packed RGB Image Formats</span><a class="headerlink" href="#id3" title="Permalink to this table">¶</a></caption>
+<colgroup>
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+<col style="width: 3%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Identifier</p></th>
+<th class="head"><p>Code</p></th>
+<th class="head" colspan="8"><p> Byte 0 in memory</p></th>
+<th class="head" colspan="8"><p> Byte 1</p></th>
+<th class="head" colspan="8"><p> Byte 2</p></th>
+<th class="head" colspan="8"><p> Byte 3</p></th>
+</tr>
+<tr class="row-even"><th class="head"></th>
+<th class="head"></th>
+<th class="head"><p>7</p></th>
+<th class="head"><p>6</p></th>
+<th class="head"><p>5</p></th>
+<th class="head"><p>4</p></th>
+<th class="head"><p>3</p></th>
+<th class="head"><p>2</p></th>
+<th class="head"><p>1</p></th>
+<th class="head"><p>0</p></th>
+<th class="head"><p>7</p></th>
+<th class="head"><p>6</p></th>
+<th class="head"><p>5</p></th>
+<th class="head"><p>4</p></th>
+<th class="head"><p>3</p></th>
+<th class="head"><p>2</p></th>
+<th class="head"><p>1</p></th>
+<th class="head"><p>0</p></th>
+<th class="head"><p>7</p></th>
+<th class="head"><p>6</p></th>
+<th class="head"><p>5</p></th>
+<th class="head"><p>4</p></th>
+<th class="head"><p>3</p></th>
+<th class="head"><p>2</p></th>
+<th class="head"><p>1</p></th>
+<th class="head"><p>0</p></th>
+<th class="head"><p>7</p></th>
+<th class="head"><p>6</p></th>
+<th class="head"><p>5</p></th>
+<th class="head"><p>4</p></th>
+<th class="head"><p>3</p></th>
+<th class="head"><p>2</p></th>
+<th class="head"><p>1</p></th>
+<th class="head"><p>0</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_RGB444</span></code></p>
+</td>
+<td><p>‘R444’</p>
+</td>
+<td><p>g<sub>3</sub></p>
+</td>
+<td><p>g<sub>2</sub></p>
+</td>
+<td><p>g<sub>1</sub></p>
+</td>
+<td><p>g<sub>0</sub></p>
+</td>
+<td><p>b<sub>3</sub></p>
+</td>
+<td><p>b<sub>2</sub></p>
+</td>
+<td><p>b<sub>1</sub></p>
+</td>
+<td><p>b<sub>0</sub></p>
+</td>
+<td><p>a<sub>3</sub></p>
+</td>
+<td><p>a<sub>2</sub></p>
+</td>
+<td><p>a<sub>1</sub></p>
+</td>
+<td><p>a<sub>0</sub></p>
+</td>
+<td><p>r<sub>3</sub></p>
+</td>
+<td><p>r<sub>2</sub></p>
+</td>
+<td><p>r<sub>1</sub></p>
+</td>
+<td><p>r<sub>0</sub></p>
+</td>
+<td colspan="16"></td>
+</tr>
+<tr class="row-even" id="v4l2-pix-fmt-rgb444"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_RGB555</span></code></p>
+</td>
+<td><p>‘RGBO’</p>
+</td>
+<td><p>g<sub>2</sub></p>
+</td>
+<td><p>g<sub>1</sub></p>
+</td>
+<td><p>g<sub>0</sub></p>
+</td>
+<td><p>b<sub>4</sub></p>
+</td>
+<td><p>b<sub>3</sub></p>
+</td>
+<td><p>b<sub>2</sub></p>
+</td>
+<td><p>b<sub>1</sub></p>
+</td>
+<td><p>b<sub>0</sub></p>
+</td>
+<td><p>a</p>
+</td>
+<td><p>r<sub>4</sub></p>
+</td>
+<td><p>r<sub>3</sub></p>
+</td>
+<td><p>r<sub>2</sub></p>
+</td>
+<td><p>r<sub>1</sub></p>
+</td>
+<td><p>r<sub>0</sub></p>
+</td>
+<td><p>g<sub>4</sub></p>
+</td>
+<td><p>g<sub>3</sub></p>
+</td>
+<td colspan="16"></td>
+</tr>
+<tr class="row-odd" id="v4l2-pix-fmt-rgb555"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_RGB555X</span></code></p>
+</td>
+<td><p>‘RGBQ’</p>
+</td>
+<td><p>a</p>
+</td>
+<td><p>r<sub>4</sub></p>
+</td>
+<td><p>r<sub>3</sub></p>
+</td>
+<td><p>r<sub>2</sub></p>
+</td>
+<td><p>r<sub>1</sub></p>
+</td>
+<td><p>r<sub>0</sub></p>
+</td>
+<td><p>g<sub>4</sub></p>
+</td>
+<td><p>g<sub>3</sub></p>
+</td>
+<td><p>g<sub>2</sub></p>
+</td>
+<td><p>g<sub>1</sub></p>
+</td>
+<td><p>g<sub>0</sub></p>
+</td>
+<td><p>b<sub>4</sub></p>
+</td>
+<td><p>b<sub>3</sub></p>
+</td>
+<td><p>b<sub>2</sub></p>
+</td>
+<td><p>b<sub>1</sub></p>
+</td>
+<td><p>b<sub>0</sub></p>
+</td>
+<td colspan="16"></td>
+</tr>
+<tr class="row-even" id="v4l2-pix-fmt-rgb555x"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_BGR32</span></code></p>
+</td>
+<td><p>‘BGR4’</p>
+</td>
+<td><p>b<sub>7</sub></p>
+</td>
+<td><p>b<sub>6</sub></p>
+</td>
+<td><p>b<sub>5</sub></p>
+</td>
+<td><p>b<sub>4</sub></p>
+</td>
+<td><p>b<sub>3</sub></p>
+</td>
+<td><p>b<sub>2</sub></p>
+</td>
+<td><p>b<sub>1</sub></p>
+</td>
+<td><p>b<sub>0</sub></p>
+</td>
+<td><p>g<sub>7</sub></p>
+</td>
+<td><p>g<sub>6</sub></p>
+</td>
+<td><p>g<sub>5</sub></p>
+</td>
+<td><p>g<sub>4</sub></p>
+</td>
+<td><p>g<sub>3</sub></p>
+</td>
+<td><p>g<sub>2</sub></p>
+</td>
+<td><p>g<sub>1</sub></p>
+</td>
+<td><p>g<sub>0</sub></p>
+</td>
+<td><p>r<sub>7</sub></p>
+</td>
+<td><p>r<sub>6</sub></p>
+</td>
+<td><p>r<sub>5</sub></p>
+</td>
+<td><p>r<sub>4</sub></p>
+</td>
+<td><p>r<sub>3</sub></p>
+</td>
+<td><p>r<sub>2</sub></p>
+</td>
+<td><p>r<sub>1</sub></p>
+</td>
+<td><p>r<sub>0</sub></p>
+</td>
+<td><p>a<sub>7</sub></p>
+</td>
+<td><p>a<sub>6</sub></p>
+</td>
+<td><p>a<sub>5</sub></p>
+</td>
+<td><p>a<sub>4</sub></p>
+</td>
+<td><p>a<sub>3</sub></p>
+</td>
+<td><p>a<sub>2</sub></p>
+</td>
+<td><p>a<sub>1</sub></p>
+</td>
+<td><p id="v4l2-pix-fmt-bgr32">a<sub>0</sub></p>
+</td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">V4L2_PIX_FMT_RGB32</span></code></p>
+</td>
+<td><p>‘RGB4’</p>
+</td>
+<td><p>a<sub>7</sub></p>
+</td>
+<td><p>a<sub>6</sub></p>
+</td>
+<td><p>a<sub>5</sub></p>
+</td>
+<td><p>a<sub>4</sub></p>
+</td>
+<td><p>a<sub>3</sub></p>
+</td>
+<td><p>a<sub>2</sub></p>
+</td>
+<td><p>a<sub>1</sub></p>
+</td>
+<td><p>a<sub>0</sub></p>
+</td>
+<td><p>r<sub>7</sub></p>
+</td>
+<td><p>r<sub>6</sub></p>
+</td>
+<td><p>r<sub>5</sub></p>
+</td>
+<td><p>r<sub>4</sub></p>
+</td>
+<td><p>r<sub>3</sub></p>
+</td>
+<td><p>r<sub>2</sub></p>
+</td>
+<td><p>r<sub>1</sub></p>
+</td>
+<td><p>r<sub>0</sub></p>
+</td>
+<td><p>g<sub>7</sub></p>
+</td>
+<td><p>g<sub>6</sub></p>
+</td>
+<td><p>g<sub>5</sub></p>
+</td>
+<td><p>g<sub>4</sub></p>
+</td>
+<td><p>g<sub>3</sub></p>
+</td>
+<td><p>g<sub>2</sub></p>
+</td>
+<td><p>g<sub>1</sub></p>
+</td>
+<td><p>g<sub>0</sub></p>
+</td>
+<td><p>b<sub>7</sub></p>
+</td>
+<td><p>b<sub>6</sub></p>
+</td>
+<td><p>b<sub>5</sub></p>
+</td>
+<td><p>b<sub>4</sub></p>
+</td>
+<td><p>b<sub>3</sub></p>
+</td>
+<td><p>b<sub>2</sub></p>
+</td>
+<td><p>b<sub>1</sub></p>
+</td>
+<td><p id="v4l2-pix-fmt-rgb32">b<sub>0</sub></p>
+</td>
+</tr>
+</tbody>
+</table>
+<p>A test utility to determine which RGB formats a driver actually supports
+is available from the LinuxTV v4l-dvb repository. See
+<a class="reference external" href="https://linuxtv.org/repo/">https://linuxtv.org/repo/</a> for access
+instructions.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">2.5. RGB Formats</a><ul>
+<li><a class="reference internal" href="#less-than-8-bits-per-component">2.5.1. Less Than 8 Bits Per Component</a></li>
+<li><a class="reference internal" href="#bits-per-component">2.5.2. 8 Bits Per Component</a></li>
+<li><a class="reference internal" href="#deprecated-rgb-formats">2.5.3. Deprecated RGB Formats</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/userspace-api/media/v4l/pixfmt-rgb.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/userspace-api/media/v4l/pixfmt-rgb.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

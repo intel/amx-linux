@@ -1,0 +1,304 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>环形缓冲区 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="通用基数树/稀疏数组" href="generic-radix-tree.html" />
+    <link rel="prev" title="ID分配" href="idr.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../core-api/circular-buffers.html"><span class="doc">Circular Buffers</span></a></p>
+</dd>
+<dt class="field-even">翻译</dt>
+<dd class="field-even"><p>周彬彬 Binbin Zhou &lt;<a class="reference external" href="mailto:zhoubinbin&#37;&#52;&#48;loongson&#46;cn">zhoubinbin<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+<dt class="field-odd">校译</dt>
+<dd class="field-odd"><p>司延腾 Yanteng Si &lt;<a class="reference external" href="mailto:siyanteng&#37;&#52;&#48;loongson&#46;cn">siyanteng<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;
+吴想成 Wu Xiangcheng &lt;<a class="reference external" href="mailto:bobwxc&#37;&#52;&#48;email&#46;cn">bobwxc<span>&#64;</span>email<span>&#46;</span>cn</a>&gt;
+时奎亮 Alex Shi &lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;</p>
+</dd>
+</dl>
+<section id="id1">
+<h1>环形缓冲区<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">作者</dt>
+<dd class="field-odd"><p>David Howells &lt;<a class="reference external" href="mailto:dhowells&#37;&#52;&#48;redhat&#46;com">dhowells<span>&#64;</span>redhat<span>&#46;</span>com</a>&gt;</p>
+</dd>
+<dt class="field-even">作者</dt>
+<dd class="field-even"><p>Paul E. McKenney &lt;<a class="reference external" href="mailto:paulmck&#37;&#52;&#48;linux&#46;ibm&#46;com">paulmck<span>&#64;</span>linux<span>&#46;</span>ibm<span>&#46;</span>com</a>&gt;</p>
+</dd>
+</dl>
+<p>Linux 提供了许多可用于实现循环缓冲的特性。有两组这样的特性：</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>用于确定2次方大小的缓冲区信息的便利函数。</p></li>
+<li><p>可以代替缓冲区中对象的生产者和消费者共享锁的内存屏障。</p></li>
+</ol>
+</div></blockquote>
+<p>如下所述，要使用这些设施，只需要一个生产者和一个消费者。可以通过序列化来处理多个
+生产者，并通过序列化来处理多个消费者。</p>
+<section id="id2">
+<h2>什么是环形缓冲区？<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>首先，什么是环形缓冲区？环形缓冲区是具有固定的有限大小的缓冲区，它有两个索引：</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>‘head’索引 - 生产者将元素插入缓冲区的位置。</p></li>
+<li><p>‘tail’索引 - 消费者在缓冲区中找到下一个元素的位置。</p></li>
+</ol>
+</div></blockquote>
+<p>通常，当tail指针等于head指针时，表明缓冲区是空的；而当head指针比tail指针少一个时，
+表明缓冲区是满的。</p>
+<p>添加元素时，递增head索引；删除元素时，递增tail索引。tail索引不应该跳过head索引，
+两个索引在到达缓冲区末端时都应该被赋值为0，从而允许海量的数据流过缓冲区。</p>
+<p>通常情况下，元素都有相同的单元大小，但这并不是使用以下技术的严格要求。如果要在缓
+冲区中包含多个元素或可变大小的元素，则索引可以增加超过1，前提是两个索引都没有超过
+另一个。然而，实现者必须小心，因为超过一个单位大小的区域可能会覆盖缓冲区的末端并
+且缓冲区会被分成两段。</p>
+</section>
+<section id="id3">
+<h2>测量2次幂缓冲区<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h2>
+<p>计算任意大小的环形缓冲区的占用或剩余容量通常是一个费时的操作，需要使用模（除法）
+指令。但是如果缓冲区的大小为2次幂，则可以使用更快的按位与指令代替。</p>
+<p>Linux提供了一组用于处理2次幂环形缓冲区的宏。可以通过以下方式使用:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#include &lt;linux/circ_buf.h&gt;
+</pre></div>
+</div>
+<p>这些宏包括：</p>
+<blockquote>
+<div><ol class="arabic">
+<li><p>测量缓冲区的剩余容量:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>CIRC_SPACE(head_index, tail_index, buffer_size);
+</pre></div>
+</div>
+<p>返回缓冲区[1]中可插入元素的剩余空间大小。</p>
+</li>
+<li><p>测量缓冲区中的最大连续立即可用空间:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>CIRC_SPACE_TO_END(head_index, tail_index, buffer_size);
+</pre></div>
+</div>
+<p>返回缓冲区[1]中剩余的连续空间的大小，元素可以立即插入其中，而不必绕回到缓冲
+区的开头。</p>
+</li>
+<li><p>测量缓冲区的使用数:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>CIRC_CNT(head_index, tail_index, buffer_size);
+</pre></div>
+</div>
+<p>返回当前占用缓冲区[2]的元素数量。</p>
+</li>
+<li><p>测量缓冲区的连续使用数:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>CIRC_CNT_TO_END(head_index, tail_index, buffer_size);
+</pre></div>
+</div>
+<p>返回可以从缓冲区中提取的连续元素[2]的数量，而不必绕回到缓冲区的开头。</p>
+</li>
+</ol>
+</div></blockquote>
+<p>这里的每一个宏名义上都会返回一个介于0和buffer_size-1之间的值，但是：</p>
+<blockquote>
+<div><ol class="arabic">
+<li><p>CIRC_SPACE*()是为了在生产者中使用。对生产者来说，它们将返回一个下限，因为生
+产者控制着head索引，但消费者可能仍然在另一个CPU上耗尽缓冲区并移动tail索引。</p>
+<p>对消费者来说，它将显示一个上限，因为生产者可能正忙于耗尽空间。</p>
+</li>
+<li><p>CIRC_CNT*()是为了在消费者中使用。对消费者来说，它们将返回一个下限，因为消费
+者控制着tail索引，但生产者可能仍然在另一个CPU上填充缓冲区并移动head索引。</p>
+<p>对于生产者，它将显示一个上限，因为消费者可能正忙于清空缓冲区。</p>
+</li>
+<li><p>对于第三方来说，生产者和消费者对索引的写入顺序是无法保证的，因为它们是独立的，
+而且可能是在不同的CPU上进行的，所以在这种情况下的结果只是一种猜测，甚至可能
+是错误的。</p></li>
+</ol>
+</div></blockquote>
+</section>
+<section id="id4">
+<h2>内存屏障与环形缓冲区的结合使用<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h2>
+<p>通过将内存屏障与环形缓冲区结合使用，可以避免以下需求：</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>使用单个锁来控制对缓冲区两端的访问，从而允许同时填充和清空缓冲区；以及</p></li>
+<li><p>使用原子计数器操作。</p></li>
+</ol>
+</div></blockquote>
+<p>这有两个方面：填充缓冲区的生产者和清空缓冲区的消费者。在任何时候，只应有一个生产
+者在填充缓冲区，同样的也只应有一个消费者在清空缓冲区，但双方可以同时操作。</p>
+<section id="id5">
+<h3>生产者<a class="headerlink" href="#id5" title="Permalink to this headline">¶</a></h3>
+<p>生产者看起来像这样:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>spin_lock(&amp;producer_lock);
+
+unsigned long head = buffer-&gt;head;
+/* spin_unlock()和下一个spin_lock()提供必要的排序。 */
+unsigned long tail = READ_ONCE(buffer-&gt;tail);
+
+if (CIRC_SPACE(head, tail, buffer-&gt;size) &gt;= 1) {
+        /* 添加一个元素到缓冲区 */
+        struct item *item = buffer[head];
+
+        produce_item(item);
+
+        smp_store_release(buffer-&gt;head,
+                          (head + 1) &amp; (buffer-&gt;size - 1));
+
+        /* wake_up()将确保在唤醒任何人之前提交head */
+        wake_up(consumer);
+}
+
+spin_unlock(&amp;producer_lock);
+</pre></div>
+</div>
+<p>这将表明CPU必须在head索引使其对消费者可用之前写入新项目的内容，同时CPU必须在唤醒
+消费者之前写入修改后的head索引。</p>
+<p>请注意，wake_up()并不保证任何形式的屏障，除非确实唤醒了某些东西。因此我们不能依靠
+它来进行排序。但是数组中始终有一个元素留空，因此生产者必须产生两个元素，然后才可
+能破坏消费者当前正在读取的元素。同时，消费者连续调用之间成对的解锁-加锁提供了索引
+读取（指示消费者已清空给定元素）和生产者对该相同元素的写入之间的必要顺序。</p>
+</section>
+<section id="id6">
+<h3>消费者<a class="headerlink" href="#id6" title="Permalink to this headline">¶</a></h3>
+<p>消费者看起来像这样:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>spin_lock(&amp;consumer_lock);
+
+/* 读取该索引处的内容之前，先读取索引 */
+unsigned long head = smp_load_acquire(buffer-&gt;head);
+unsigned long tail = buffer-&gt;tail;
+
+if (CIRC_CNT(head, tail, buffer-&gt;size) &gt;= 1) {
+
+        /* 从缓冲区中提取一个元素 */
+        struct item *item = buffer[tail];
+
+        consume_item(item);
+
+        /* 在递增tail之前完成对描述符的读取。 */
+        smp_store_release(buffer-&gt;tail,
+                          (tail + 1) &amp; (buffer-&gt;size - 1));
+}
+
+spin_unlock(&amp;consumer_lock);
+</pre></div>
+</div>
+<p>这表明CPU在读取新元素之前确保索引是最新的，然后在写入新的尾指针之前应确保CPU已完
+成读取该元素，这将擦除该元素。</p>
+<p>请注意，使用READ_ONCE()和smp_load_acquire()来读取反向（head）索引。这可以防止编译
+器丢弃并重新加载其缓存值。如果您能确定反向（head）索引将仅使用一次，则这不是必须
+的。smp_load_acquire()还可以强制CPU对后续的内存引用进行排序。类似地，两种算法都使
+用smp_store_release()来写入线程的索引。这记录了我们正在写入可以并发读取的内容的事
+实，以防止编译器破坏存储，并强制对以前的访问进行排序。</p>
+</section>
+</section>
+<section id="id7">
+<h2>延伸阅读<a class="headerlink" href="#id7" title="Permalink to this headline">¶</a></h2>
+<p>关于Linux的内存屏障设施的描述，请查看Documentation/memory-barriers.txt。</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">环形缓冲区</a><ul>
+<li><a class="reference internal" href="#id2">什么是环形缓冲区？</a></li>
+<li><a class="reference internal" href="#id3">测量2次幂缓冲区</a></li>
+<li><a class="reference internal" href="#id4">内存屏障与环形缓冲区的结合使用</a><ul>
+<li><a class="reference internal" href="#id5">生产者</a></li>
+<li><a class="reference internal" href="#id6">消费者</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id7">延伸阅读</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/core-api/circular-buffers.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/core-api/circular-buffers.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

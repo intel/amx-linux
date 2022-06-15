@@ -1,0 +1,498 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>KVM Lock Overview &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="KVM VCPU Requests" href="vcpu-requests.html" />
+    <link rel="prev" title="Timekeeping Virtualization for X86-Based Architectures" href="x86/timekeeping.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="kvm-lock-overview">
+<h1>KVM Lock Overview<a class="headerlink" href="#kvm-lock-overview" title="Permalink to this headline">¶</a></h1>
+<section id="acquisition-orders">
+<h2>1. Acquisition Orders<a class="headerlink" href="#acquisition-orders" title="Permalink to this headline">¶</a></h2>
+<p>The acquisition orders for mutexes are as follows:</p>
+<ul class="simple">
+<li><p>kvm-&gt;lock is taken outside vcpu-&gt;mutex</p></li>
+<li><p>kvm-&gt;lock is taken outside kvm-&gt;slots_lock and kvm-&gt;irq_lock</p></li>
+<li><p>kvm-&gt;slots_lock is taken outside kvm-&gt;irq_lock, though acquiring
+them together is quite rare.</p></li>
+<li><p>kvm-&gt;mn_active_invalidate_count ensures that pairs of
+invalidate_range_start() and invalidate_range_end() callbacks
+use the same memslots array.  kvm-&gt;slots_lock and kvm-&gt;slots_arch_lock
+are taken on the waiting side in install_new_memslots, so MMU notifiers
+must not take either kvm-&gt;slots_lock or kvm-&gt;slots_arch_lock.</p></li>
+</ul>
+<p>For SRCU:</p>
+<ul>
+<li><p><code class="docutils literal notranslate"><span class="pre">synchronize_srcu(&amp;kvm-&gt;srcu)</span></code> is called inside critical sections
+for kvm-&gt;lock, vcpu-&gt;mutex and kvm-&gt;slots_lock.  These locks _cannot_
+be taken inside a kvm-&gt;srcu read-side critical section; that is, the
+following is broken:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>srcu_read_lock(&amp;kvm-&gt;srcu);
+mutex_lock(&amp;kvm-&gt;slots_lock);
+</pre></div>
+</div>
+</li>
+<li><p>kvm-&gt;slots_arch_lock instead is released before the call to
+<code class="docutils literal notranslate"><span class="pre">synchronize_srcu()</span></code>.  It _can_ therefore be taken inside a
+kvm-&gt;srcu read-side critical section, for example while processing
+a vmexit.</p></li>
+</ul>
+<p>On x86:</p>
+<ul class="simple">
+<li><p>vcpu-&gt;mutex is taken outside kvm-&gt;arch.hyperv.hv_lock and kvm-&gt;arch.xen.xen_lock</p></li>
+<li><p>kvm-&gt;arch.mmu_lock is an rwlock.  kvm-&gt;arch.tdp_mmu_pages_lock and
+kvm-&gt;arch.mmu_unsync_pages_lock are taken inside kvm-&gt;arch.mmu_lock, and
+cannot be taken without already holding kvm-&gt;arch.mmu_lock (typically with
+<code class="docutils literal notranslate"><span class="pre">read_lock</span></code> for the TDP MMU, thus the need for additional spinlocks).</p></li>
+</ul>
+<p>Everything else is a leaf: no other lock is taken inside the critical
+sections.</p>
+</section>
+<section id="exception">
+<h2>2. Exception<a class="headerlink" href="#exception" title="Permalink to this headline">¶</a></h2>
+<p>Fast page fault:</p>
+<p>Fast page fault is the fast path which fixes the guest page fault out of
+the mmu-lock on x86. Currently, the page fault can be fast in one of the
+following two cases:</p>
+<ol class="arabic simple">
+<li><p>Access Tracking: The SPTE is not present, but it is marked for access
+tracking. That means we need to restore the saved R/X bits. This is
+described in more detail later below.</p></li>
+<li><p>Write-Protection: The SPTE is present and the fault is caused by
+write-protect. That means we just need to change the W bit of the spte.</p></li>
+</ol>
+<p>What we use to avoid all the race is the Host-writable bit and MMU-writable bit
+on the spte:</p>
+<ul class="simple">
+<li><p>Host-writable means the gfn is writable in the host kernel page tables and in
+its KVM memslot.</p></li>
+<li><p>MMU-writable means the gfn is writable in the guest’s mmu and it is not
+write-protected by shadow page write-protection.</p></li>
+</ul>
+<p>On fast page fault path, we will use cmpxchg to atomically set the spte W
+bit if spte.HOST_WRITEABLE = 1 and spte.WRITE_PROTECT = 1, to restore the saved
+R/X bits if for an access-traced spte, or both. This is safe because whenever
+changing these bits can be detected by cmpxchg.</p>
+<p>But we need carefully check these cases:</p>
+<ol class="arabic simple">
+<li><p>The mapping from gfn to pfn</p></li>
+</ol>
+<p>The mapping from gfn to pfn may be changed since we can only ensure the pfn
+is not changed during cmpxchg. This is a ABA problem, for example, below case
+will happen:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 51%" />
+<col style="width: 49%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td colspan="2"><p>At the beginning:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>gpte = gfn1
+gfn1 is mapped to pfn1 on host
+spte is the shadow page table entry corresponding with gpte and
+spte = pfn1
+</pre></div>
+</div>
+</td>
+</tr>
+<tr class="row-even"><td colspan="2"><p>On fast page fault path:</p></td>
+</tr>
+<tr class="row-odd"><td><p>CPU 0:</p></td>
+<td><p>CPU 1:</p></td>
+</tr>
+<tr class="row-even"><td><div class="highlight-none notranslate"><div class="highlight"><pre><span></span>old_spte = *spte;
+</pre></div>
+</div>
+</td>
+<td></td>
+</tr>
+<tr class="row-odd"><td></td>
+<td><p>pfn1 is swapped out:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>spte = 0;
+</pre></div>
+</div>
+<p>pfn1 is re-alloced for gfn2.</p>
+<p>gpte is changed to point to
+gfn2 by the guest:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>spte = pfn1;
+</pre></div>
+</div>
+</td>
+</tr>
+<tr class="row-even"><td colspan="2"><div class="highlight-none notranslate"><div class="highlight"><pre><span></span>if (cmpxchg(spte, old_spte, old_spte+W)
+    mark_page_dirty(vcpu-&gt;kvm, gfn1)
+         OOPS!!!
+</pre></div>
+</div>
+</td>
+</tr>
+</tbody>
+</table>
+<p>We dirty-log for gfn1, that means gfn2 is lost in dirty-bitmap.</p>
+<p>For direct sp, we can easily avoid it since the spte of direct sp is fixed
+to gfn.  For indirect sp, we disabled fast page fault for simplicity.</p>
+<p>A solution for indirect sp could be to pin the gfn, for example via
+kvm_vcpu_gfn_to_pfn_atomic, before the cmpxchg.  After the pinning:</p>
+<ul class="simple">
+<li><p>We have held the refcount of pfn that means the pfn can not be freed and
+be reused for another gfn.</p></li>
+<li><p>The pfn is writable and therefore it cannot be shared between different gfns
+by KSM.</p></li>
+</ul>
+<p>Then, we can ensure the dirty bitmaps is correctly set for a gfn.</p>
+<ol class="arabic simple" start="2">
+<li><p>Dirty bit tracking</p></li>
+</ol>
+<p>In the origin code, the spte can be fast updated (non-atomically) if the
+spte is read-only and the Accessed bit has already been set since the
+Accessed bit and Dirty bit can not be lost.</p>
+<p>But it is not true after fast page fault since the spte can be marked
+writable between reading spte and updating spte. Like below case:</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 51%" />
+<col style="width: 49%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td colspan="2"><p>At the beginning:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>spte.W = 0
+spte.Accessed = 1
+</pre></div>
+</div>
+</td>
+</tr>
+<tr class="row-even"><td><p>CPU 0:</p></td>
+<td><p>CPU 1:</p></td>
+</tr>
+<tr class="row-odd"><td><p>In mmu_spte_clear_track_bits():</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>old_spte = *spte;
+
+
+/* &#39;if&#39; condition is satisfied. */
+if (old_spte.Accessed == 1 &amp;&amp;
+     old_spte.W == 0)
+   spte = 0ull;
+</pre></div>
+</div>
+</td>
+<td></td>
+</tr>
+<tr class="row-even"><td></td>
+<td><p>on fast page fault path:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>spte.W = 1
+</pre></div>
+</div>
+<p>memory write on the spte:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>spte.Dirty = 1
+</pre></div>
+</div>
+</td>
+</tr>
+<tr class="row-odd"><td><div class="highlight-none notranslate"><div class="highlight"><pre><span></span>else
+  old_spte = xchg(spte, 0ull)
+if (old_spte.Accessed == 1)
+  kvm_set_pfn_accessed(spte.pfn);
+if (old_spte.Dirty == 1)
+  kvm_set_pfn_dirty(spte.pfn);
+  OOPS!!!
+</pre></div>
+</div>
+</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>The Dirty bit is lost in this case.</p>
+<p>In order to avoid this kind of issue, we always treat the spte as “volatile”
+if it can be updated out of mmu-lock, see spte_has_volatile_bits(), it means,
+the spte is always atomically updated in this case.</p>
+<ol class="arabic simple" start="3">
+<li><p>flush tlbs due to spte updated</p></li>
+</ol>
+<p>If the spte is updated from writable to readonly, we should flush all TLBs,
+otherwise rmap_write_protect will find a read-only spte, even though the
+writable spte might be cached on a CPU’s TLB.</p>
+<p>As mentioned before, the spte can be updated to writable out of mmu-lock on
+fast page fault path, in order to easily audit the path, we see if TLBs need
+be flushed caused by this reason in mmu_spte_update() since this is a common
+function to update spte (present -&gt; present).</p>
+<p>Since the spte is “volatile” if it can be updated out of mmu-lock, we always
+atomically update the spte, the race caused by fast page fault can be avoided,
+See the comments in spte_has_volatile_bits() and mmu_spte_update().</p>
+<p>Lockless Access Tracking:</p>
+<p>This is used for Intel CPUs that are using EPT but do not support the EPT A/D
+bits. In this case, PTEs are tagged as A/D disabled (using ignored bits), and
+when the KVM MMU notifier is called to track accesses to a page (via
+kvm_mmu_notifier_clear_flush_young), it marks the PTE not-present in hardware
+by clearing the RWX bits in the PTE and storing the original R &amp; X bits in more
+unused/ignored bits. When the VM tries to access the page later on, a fault is
+generated and the fast page fault mechanism described above is used to
+atomically restore the PTE to a Present state. The W bit is not saved when the
+PTE is marked for access tracking and during restoration to the Present state,
+the W bit is set depending on whether or not it was a write access. If it
+wasn’t, then the W bit will remain clear until a write access happens, at which
+time it will be set using the Dirty tracking mechanism described above.</p>
+</section>
+<section id="reference">
+<h2>3. Reference<a class="headerlink" href="#reference" title="Permalink to this headline">¶</a></h2>
+<section id="kvm-lock">
+<h3><code class="docutils literal notranslate"><span class="pre">kvm_lock</span></code><a class="headerlink" href="#kvm-lock" title="Permalink to this headline">¶</a></h3>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>mutex</p>
+</dd>
+<dt class="field-even">Arch</dt>
+<dd class="field-even"><p>any</p>
+</dd>
+<dt class="field-odd">Protects</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p>vm_list</p></li>
+</ul>
+</dd>
+</dl>
+</section>
+<section id="kvm-count-lock">
+<h3><code class="docutils literal notranslate"><span class="pre">kvm_count_lock</span></code><a class="headerlink" href="#kvm-count-lock" title="Permalink to this headline">¶</a></h3>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>raw_spinlock_t</p>
+</dd>
+<dt class="field-even">Arch</dt>
+<dd class="field-even"><p>any</p>
+</dd>
+<dt class="field-odd">Protects</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p>hardware virtualization enable/disable</p></li>
+</ul>
+</dd>
+<dt class="field-even">Comment</dt>
+<dd class="field-even"><p>‘raw’ because hardware enabling/disabling must be atomic /wrt
+migration.</p>
+</dd>
+</dl>
+</section>
+<section id="kvm-mn-invalidate-lock">
+<h3><code class="docutils literal notranslate"><span class="pre">kvm-&gt;mn_invalidate_lock</span></code><a class="headerlink" href="#kvm-mn-invalidate-lock" title="Permalink to this headline">¶</a></h3>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>spinlock_t</p>
+</dd>
+<dt class="field-even">Arch</dt>
+<dd class="field-even"><p>any</p>
+</dd>
+<dt class="field-odd">Protects</dt>
+<dd class="field-odd"><p>mn_active_invalidate_count, mn_memslots_update_rcuwait</p>
+</dd>
+</dl>
+</section>
+<section id="kvm-arch-tsc-write-lock">
+<h3><code class="docutils literal notranslate"><span class="pre">kvm_arch::tsc_write_lock</span></code><a class="headerlink" href="#kvm-arch-tsc-write-lock" title="Permalink to this headline">¶</a></h3>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>raw_spinlock_t</p>
+</dd>
+<dt class="field-even">Arch</dt>
+<dd class="field-even"><p>x86</p>
+</dd>
+<dt class="field-odd">Protects</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p>kvm_arch::{last_tsc_write,last_tsc_nsec,last_tsc_offset}</p></li>
+<li><p>tsc offset in vmcb</p></li>
+</ul>
+</dd>
+<dt class="field-even">Comment</dt>
+<dd class="field-even"><p>‘raw’ because updating the tsc offsets must not be preempted.</p>
+</dd>
+</dl>
+</section>
+<section id="kvm-mmu-lock">
+<h3><code class="docutils literal notranslate"><span class="pre">kvm-&gt;mmu_lock</span></code><a class="headerlink" href="#kvm-mmu-lock" title="Permalink to this headline">¶</a></h3>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>spinlock_t or rwlock_t</p>
+</dd>
+<dt class="field-even">Arch</dt>
+<dd class="field-even"><p>any</p>
+</dd>
+<dt class="field-odd">Protects</dt>
+<dd class="field-odd"><p>-shadow page/shadow tlb entry</p>
+</dd>
+<dt class="field-even">Comment</dt>
+<dd class="field-even"><p>it is a spinlock since it is used in mmu notifier.</p>
+</dd>
+</dl>
+</section>
+<section id="kvm-srcu">
+<h3><code class="docutils literal notranslate"><span class="pre">kvm-&gt;srcu</span></code><a class="headerlink" href="#kvm-srcu" title="Permalink to this headline">¶</a></h3>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>srcu lock</p>
+</dd>
+<dt class="field-even">Arch</dt>
+<dd class="field-even"><p>any</p>
+</dd>
+<dt class="field-odd">Protects</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p>kvm-&gt;memslots</p></li>
+<li><p>kvm-&gt;buses</p></li>
+</ul>
+</dd>
+<dt class="field-even">Comment</dt>
+<dd class="field-even"><p>The srcu read lock must be held while accessing memslots (e.g.
+when using gfn_to_* functions) and while accessing in-kernel
+MMIO/PIO address-&gt;device structure mapping (kvm-&gt;buses).
+The srcu index can be stored in kvm_vcpu-&gt;srcu_idx per vcpu
+if it is needed by multiple functions.</p>
+</dd>
+</dl>
+</section>
+<section id="kvm-slots-arch-lock">
+<h3><code class="docutils literal notranslate"><span class="pre">kvm-&gt;slots_arch_lock</span></code><a class="headerlink" href="#kvm-slots-arch-lock" title="Permalink to this headline">¶</a></h3>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>mutex</p>
+</dd>
+<dt class="field-even">Arch</dt>
+<dd class="field-even"><p>any (only needed on x86 though)</p>
+</dd>
+<dt class="field-odd">Protects</dt>
+<dd class="field-odd"><p>any arch-specific fields of memslots that have to be modified
+in a <code class="docutils literal notranslate"><span class="pre">kvm-&gt;srcu</span></code> read-side critical section.</p>
+</dd>
+<dt class="field-even">Comment</dt>
+<dd class="field-even"><p>must be held before reading the pointer to the current memslots,
+until after all changes to the memslots are complete</p>
+</dd>
+</dl>
+</section>
+<section id="wakeup-vcpus-on-cpu-lock">
+<h3><code class="docutils literal notranslate"><span class="pre">wakeup_vcpus_on_cpu_lock</span></code><a class="headerlink" href="#wakeup-vcpus-on-cpu-lock" title="Permalink to this headline">¶</a></h3>
+<dl class="field-list simple">
+<dt class="field-odd">Type</dt>
+<dd class="field-odd"><p>spinlock_t</p>
+</dd>
+<dt class="field-even">Arch</dt>
+<dd class="field-even"><p>x86</p>
+</dd>
+<dt class="field-odd">Protects</dt>
+<dd class="field-odd"><p>wakeup_vcpus_on_cpu</p>
+</dd>
+<dt class="field-even">Comment</dt>
+<dd class="field-even"><p>This is a per-CPU lock and it is used for VT-d posted-interrupts.
+When VT-d posted-interrupts is supported and the VM has assigned
+devices, we put the blocked vCPU on the list blocked_vcpu_on_cpu
+protected by blocked_vcpu_on_cpu_lock, when VT-d hardware issues
+wakeup notification event since external interrupts from the
+assigned devices happens, we will find the vCPU on the list to
+wakeup.</p>
+</dd>
+</dl>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">KVM Lock Overview</a><ul>
+<li><a class="reference internal" href="#acquisition-orders">1. Acquisition Orders</a></li>
+<li><a class="reference internal" href="#exception">2. Exception</a></li>
+<li><a class="reference internal" href="#reference">3. Reference</a><ul>
+<li><a class="reference internal" href="#kvm-lock"><code class="docutils literal notranslate"><span class="pre">kvm_lock</span></code></a></li>
+<li><a class="reference internal" href="#kvm-count-lock"><code class="docutils literal notranslate"><span class="pre">kvm_count_lock</span></code></a></li>
+<li><a class="reference internal" href="#kvm-mn-invalidate-lock"><code class="docutils literal notranslate"><span class="pre">kvm-&gt;mn_invalidate_lock</span></code></a></li>
+<li><a class="reference internal" href="#kvm-arch-tsc-write-lock"><code class="docutils literal notranslate"><span class="pre">kvm_arch::tsc_write_lock</span></code></a></li>
+<li><a class="reference internal" href="#kvm-mmu-lock"><code class="docutils literal notranslate"><span class="pre">kvm-&gt;mmu_lock</span></code></a></li>
+<li><a class="reference internal" href="#kvm-srcu"><code class="docutils literal notranslate"><span class="pre">kvm-&gt;srcu</span></code></a></li>
+<li><a class="reference internal" href="#kvm-slots-arch-lock"><code class="docutils literal notranslate"><span class="pre">kvm-&gt;slots_arch_lock</span></code></a></li>
+<li><a class="reference internal" href="#wakeup-vcpus-on-cpu-lock"><code class="docutils literal notranslate"><span class="pre">wakeup_vcpus_on_cpu_lock</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/virt/kvm/locking.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/virt/kvm/locking.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

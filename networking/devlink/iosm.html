@@ -1,0 +1,261 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>iosm devlink support &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="octeontx2 devlink support" href="octeontx2.html" />
+    <link rel="prev" title="prestera devlink support" href="prestera.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="iosm-devlink-support">
+<h1>iosm devlink support<a class="headerlink" href="#iosm-devlink-support" title="Permalink to this headline">¶</a></h1>
+<p>This document describes the devlink features implemented by the <code class="docutils literal notranslate"><span class="pre">iosm</span></code>
+device driver.</p>
+<section id="parameters">
+<h2>Parameters<a class="headerlink" href="#parameters" title="Permalink to this headline">¶</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">iosm</span></code> driver implements the following driver-specific parameters.</p>
+<table class="colwidths-given docutils align-default" id="id1">
+<caption><span class="caption-text">Driver-specific parameters implemented</span><a class="headerlink" href="#id1" title="Permalink to this table">¶</a></caption>
+<colgroup>
+<col style="width: 5%" />
+<col style="width: 5%" />
+<col style="width: 5%" />
+<col style="width: 85%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>Name</p></td>
+<td><p>Type</p></td>
+<td><p>Mode</p></td>
+<td><p>Description</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">erase_full_flash</span></code></p></td>
+<td><p>u8</p></td>
+<td><p>runtime</p></td>
+<td><p>erase_full_flash parameter is used to check if full erase is required for
+the device during firmware flashing.
+If set, Full nand erase command will be sent to the device. By default,
+only conditional erase support is enabled.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="flash-update">
+<h2>Flash Update<a class="headerlink" href="#flash-update" title="Permalink to this headline">¶</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">iosm</span></code> driver implements support for flash update using the
+<code class="docutils literal notranslate"><span class="pre">devlink-flash</span></code> interface.</p>
+<p>It supports updating the device flash using a combined flash image which contains
+the Bootloader images and other modem software images.</p>
+<p>The driver uses DEVLINK_SUPPORT_FLASH_UPDATE_COMPONENT to identify type of
+firmware image that need to be flashed as requested by user space application.
+Supported firmware image types.</p>
+<table class="colwidths-given docutils align-default" id="id2">
+<caption><span class="caption-text">Firmware Image types</span><a class="headerlink" href="#id2" title="Permalink to this table">¶</a></caption>
+<colgroup>
+<col style="width: 15%" />
+<col style="width: 85%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>Name</p></td>
+<td><p>Description</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">PSI</span> <span class="pre">RAM</span></code></p></td>
+<td><p>Primary Signed Image</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">EBL</span></code></p></td>
+<td><p>External Bootloader</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">FLS</span></code></p></td>
+<td><p>Modem Software Image</p></td>
+</tr>
+</tbody>
+</table>
+<p>PSI RAM and EBL are the RAM images which are injected to the device when the
+device is in BOOT ROM stage. Once this is successful, the actual modem firmware
+image is flashed to the device. The modem software image contains multiple files
+each having one secure bin file and at least one Loadmap/Region file. For flashing
+these files, appropriate commands are sent to the modem device along with the
+data required for flashing. The data like region count and address of each region
+has to be passed to the driver using the devlink param command.</p>
+<p>If the device has to be fully erased before firmware flashing, user application
+need to set the erase_full_flash parameter using devlink param command.
+By default, conditional erase feature is supported.</p>
+</section>
+<section id="flash-commands">
+<h2>Flash Commands:<a class="headerlink" href="#flash-commands" title="Permalink to this headline">¶</a></h2>
+<p>1) When modem is in Boot ROM stage, user can use below command to inject PSI RAM
+image using devlink flash command.</p>
+<p>$ devlink dev flash pci/0000:02:00.0 file &lt;PSI_RAM_File_name&gt;</p>
+<p>2) If user want to do a full erase, below command need to be issued to set the
+erase full flash param (To be set only if full erase required).</p>
+<p>$ devlink dev param set pci/0000:02:00.0 name erase_full_flash value true cmode runtime</p>
+<ol class="arabic simple" start="3">
+<li><p>Inject EBL after the modem is in PSI stage.</p></li>
+</ol>
+<p>$ devlink dev flash pci/0000:02:00.0 file &lt;EBL_File_name&gt;</p>
+<p>4) Once EBL is injected successfully, then the actual firmware flashing takes
+place. Below is the sequence of commands used for each of the firmware images.</p>
+<ol class="loweralpha simple">
+<li><p>Flash secure bin file.</p></li>
+</ol>
+<p>$ devlink dev flash pci/0000:02:00.0 file &lt;Secure_bin_file_name&gt;</p>
+<ol class="loweralpha simple" start="2">
+<li><p>Flashing the Loadmap/Region file</p></li>
+</ol>
+<p>$ devlink dev flash pci/0000:02:00.0 file &lt;Load_map_file_name&gt;</p>
+</section>
+<section id="regions">
+<h2>Regions<a class="headerlink" href="#regions" title="Permalink to this headline">¶</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">iosm</span></code> driver supports dumping the coredump logs.</p>
+<p>In case a firmware encounters an exception, a snapshot will be taken by the
+driver. Following regions are accessed for device internal data.</p>
+<table class="colwidths-given docutils align-default" id="id3">
+<caption><span class="caption-text">Regions implemented</span><a class="headerlink" href="#id3" title="Permalink to this table">¶</a></caption>
+<colgroup>
+<col style="width: 15%" />
+<col style="width: 85%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>Name</p></td>
+<td><p>Description</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">report.json</span></code></p></td>
+<td><p>The summary of exception details logged as part of this region.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">coredump.fcd</span></code></p></td>
+<td><p>This region contains the details related to the exception occurred in the
+device (RAM dump).</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">cdd.log</span></code></p></td>
+<td><p>This region contains the logs related to the modem CDD driver.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">eeprom.bin</span></code></p></td>
+<td><p>This region contains the eeprom logs.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">bootcore_trace.bin</span></code></p></td>
+<td><p>This region contains the current instance of bootloader logs.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">bootcore_prev_trace.bin</span></code></p></td>
+<td><p>This region contains the previous instance of bootloader logs.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="region-commands">
+<h2>Region commands<a class="headerlink" href="#region-commands" title="Permalink to this headline">¶</a></h2>
+<p>$ devlink region show</p>
+<p>$ devlink region new pci/0000:02:00.0/report.json</p>
+<p>$ devlink region dump pci/0000:02:00.0/report.json snapshot 0</p>
+<p>$ devlink region del pci/0000:02:00.0/report.json snapshot 0</p>
+<p>$ devlink region new pci/0000:02:00.0/coredump.fcd</p>
+<p>$ devlink region dump pci/0000:02:00.0/coredump.fcd snapshot 1</p>
+<p>$ devlink region del pci/0000:02:00.0/coredump.fcd snapshot 1</p>
+<p>$ devlink region new pci/0000:02:00.0/cdd.log</p>
+<p>$ devlink region dump pci/0000:02:00.0/cdd.log snapshot 2</p>
+<p>$ devlink region del pci/0000:02:00.0/cdd.log snapshot 2</p>
+<p>$ devlink region new pci/0000:02:00.0/eeprom.bin</p>
+<p>$ devlink region dump pci/0000:02:00.0/eeprom.bin snapshot 3</p>
+<p>$ devlink region del pci/0000:02:00.0/eeprom.bin snapshot 3</p>
+<p>$ devlink region new pci/0000:02:00.0/bootcore_trace.bin</p>
+<p>$ devlink region dump pci/0000:02:00.0/bootcore_trace.bin snapshot 4</p>
+<p>$ devlink region del pci/0000:02:00.0/bootcore_trace.bin snapshot 4</p>
+<p>$ devlink region new pci/0000:02:00.0/bootcore_prev_trace.bin</p>
+<p>$ devlink region dump pci/0000:02:00.0/bootcore_prev_trace.bin snapshot 5</p>
+<p>$ devlink region del pci/0000:02:00.0/bootcore_prev_trace.bin snapshot 5</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">iosm devlink support</a><ul>
+<li><a class="reference internal" href="#parameters">Parameters</a></li>
+<li><a class="reference internal" href="#flash-update">Flash Update</a></li>
+<li><a class="reference internal" href="#flash-commands">Flash Commands:</a></li>
+<li><a class="reference internal" href="#regions">Regions</a></li>
+<li><a class="reference internal" href="#region-commands">Region commands</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/networking/devlink/iosm.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/networking/devlink/iosm.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

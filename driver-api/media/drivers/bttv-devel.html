@@ -1,0 +1,218 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>9.1.1. The bttv driver &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="9.1.2. The cpia2 driver" href="cpia2_devel.html" />
+    <link rel="prev" title="9. Media driver-specific documentation" href="index.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="the-bttv-driver">
+<h1><span class="section-number">9.1.1. </span>The bttv driver<a class="headerlink" href="#the-bttv-driver" title="Permalink to this headline">¶</a></h1>
+<section id="bttv-and-sound-mini-howto">
+<h2><span class="section-number">9.1.1.1. </span>bttv and sound mini howto<a class="headerlink" href="#bttv-and-sound-mini-howto" title="Permalink to this headline">¶</a></h2>
+<p>There are a lot of different bt848/849/878/879 based boards available.
+Making video work often is not a big deal, because this is handled
+completely by the bt8xx chip, which is common on all boards.  But
+sound is handled in slightly different ways on each board.</p>
+<p>To handle the grabber boards correctly, there is a array tvcards[] in
+bttv-cards.c, which holds the information required for each board.
+Sound will work only, if the correct entry is used (for video it often
+makes no difference).  The bttv driver prints a line to the kernel
+log, telling which card type is used.  Like this one:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>bttv0: model: BT848(Hauppauge old) [autodetected]
+</pre></div>
+</div>
+<p>You should verify this is correct.  If it isn’t, you have to pass the
+correct board type as insmod argument, <code class="docutils literal notranslate"><span class="pre">insmod</span> <span class="pre">bttv</span> <span class="pre">card=2</span></code> for
+example.  The file <a class="reference internal" href="../../../admin-guide/media/bttv-cardlist.html"><span class="doc">BTTV cards list</span></a> has a list
+of valid arguments for card.</p>
+<p>If your card isn’t listed there, you might check the source code for
+new entries which are not listed yet.  If there isn’t one for your
+card, you can check if one of the existing entries does work for you
+(just trial and error…).</p>
+<p>Some boards have an extra processor for sound to do stereo decoding
+and other nice features.  The msp34xx chips are used by Hauppauge for
+example.  If your board has one, you might have to load a helper
+module like <code class="docutils literal notranslate"><span class="pre">msp3400</span></code> to make sound work.  If there isn’t one for the
+chip used on your board:  Bad luck.  Start writing a new one.  Well,
+you might want to check the video4linux mailing list archive first…</p>
+<p>Of course you need a correctly installed soundcard unless you have the
+speakers connected directly to the grabber board.  Hint: check the
+mixer settings too.  ALSA for example has everything muted by default.</p>
+<section id="how-sound-works-in-detail">
+<h3><span class="section-number">9.1.1.1.1. </span>How sound works in detail<a class="headerlink" href="#how-sound-works-in-detail" title="Permalink to this headline">¶</a></h3>
+<p>Still doesn’t work?  Looks like some driver hacking is required.
+Below is a do-it-yourself description for you.</p>
+<p>The bt8xx chips have 32 general purpose pins, and registers to control
+these pins.  One register is the output enable register
+(<code class="docutils literal notranslate"><span class="pre">BT848_GPIO_OUT_EN</span></code>), it says which pins are actively driven by the
+bt848 chip.  Another one is the data register (<code class="docutils literal notranslate"><span class="pre">BT848_GPIO_DATA</span></code>), where
+you can get/set the status if these pins.  They can be used for input
+and output.</p>
+<p>Most grabber board vendors use these pins to control an external chip
+which does the sound routing.  But every board is a little different.
+These pins are also used by some companies to drive remote control
+receiver chips.  Some boards use the i2c bus instead of the gpio pins
+to connect the mux chip.</p>
+<p>As mentioned above, there is a array which holds the required
+information for each known board.  You basically have to create a new
+line for your board.  The important fields are these two:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct tvcard
+{
+      [ ... ]
+      u32 gpiomask;
+      u32 audiomux[6]; /* Tuner, Radio, external, internal, mute, stereo */
+};
+</pre></div>
+</div>
+<p>gpiomask specifies which pins are used to control the audio mux chip.
+The corresponding bits in the output enable register
+(<code class="docutils literal notranslate"><span class="pre">BT848_GPIO_OUT_EN</span></code>) will be set as these pins must be driven by the
+bt848 chip.</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">audiomux[]</span></code> array holds the data values for the different inputs
+(i.e. which pins must be high/low for tuner/mute/…).  This will be
+written to the data register (<code class="docutils literal notranslate"><span class="pre">BT848_GPIO_DATA</span></code>) to switch the audio
+mux.</p>
+<p>What you have to do is figure out the correct values for gpiomask and
+the audiomux array.  If you have Windows and the drivers four your
+card installed, you might to check out if you can read these registers
+values used by the windows driver.  A tool to do this is available
+from <a class="reference external" href="http://btwincap.sourceforge.net/download.html">http://btwincap.sourceforge.net/download.html</a>.</p>
+<p>You might also dig around in the <code class="docutils literal notranslate"><span class="pre">*.ini</span></code> files of the Windows applications.
+You can have a look at the board to see which of the gpio pins are
+connected at all and then start trial-and-error …</p>
+<p>Starting with release 0.7.41 bttv has a number of insmod options to
+make the gpio debugging easier:</p>
+<blockquote>
+<div><table class="docutils align-default">
+<colgroup>
+<col style="width: 27%" />
+<col style="width: 73%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>bttv_gpio=0/1</p></td>
+<td><p>enable/disable gpio debug messages</p></td>
+</tr>
+<tr class="row-even"><td><p>gpiomask=n</p></td>
+<td><p>set the gpiomask value</p></td>
+</tr>
+<tr class="row-odd"><td><p>audiomux=i,j,…</p></td>
+<td><p>set the values of the audiomux array</p></td>
+</tr>
+<tr class="row-even"><td><p>audioall=a</p></td>
+<td><p>set the values of the audiomux array (one
+value for all array elements, useful to check
+out which effect the particular value has).</p></td>
+</tr>
+</tbody>
+</table>
+</div></blockquote>
+<p>The messages printed with <code class="docutils literal notranslate"><span class="pre">bttv_gpio=1</span></code> look like this:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>bttv0: gpio: en=00000027, out=00000024 in=00ffffd8 [audio: off]
+
+en  =   output _en_able register (BT848_GPIO_OUT_EN)
+out =   _out_put bits of the data register (BT848_GPIO_DATA),
+        i.e. BT848_GPIO_DATA &amp; BT848_GPIO_OUT_EN
+in  =   _in_put bits of the data register,
+        i.e. BT848_GPIO_DATA &amp; ~BT848_GPIO_OUT_EN
+</pre></div>
+</div>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">9.1.1. The bttv driver</a><ul>
+<li><a class="reference internal" href="#bttv-and-sound-mini-howto">9.1.1.1. bttv and sound mini howto</a><ul>
+<li><a class="reference internal" href="#how-sound-works-in-detail">9.1.1.1.1. How sound works in detail</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/driver-api/media/drivers/bttv-devel.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/driver-api/media/drivers/bttv-devel.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

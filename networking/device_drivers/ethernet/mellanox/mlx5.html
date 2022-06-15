@@ -1,0 +1,937 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Mellanox ConnectX(R) mlx5 core VPI Network Driver &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../../" src="../../../../_static/documentation_options.js"></script>
+    <script src="../../../../_static/jquery.js"></script>
+    <script src="../../../../_static/underscore.js"></script>
+    <script src="../../../../_static/doctools.js"></script>
+    <script src="../../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" />
+    <link rel="next" title="Hyper-V network driver" href="../microsoft/netvsc.html" />
+    <link rel="prev" title="Linux kernel networking driver for Marvell’s Octeon PCI Endpoint NIC" href="../marvell/octeon_ep.html" />
+   
+  <link rel="stylesheet" href="../../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="mellanox-connectx-r-mlx5-core-vpi-network-driver">
+<h1>Mellanox ConnectX(R) mlx5 core VPI Network Driver<a class="headerlink" href="#mellanox-connectx-r-mlx5-core-vpi-network-driver" title="Permalink to this headline">¶</a></h1>
+<p>Copyright (c) 2019, Mellanox Technologies LTD.</p>
+<section id="contents">
+<h2>Contents<a class="headerlink" href="#contents" title="Permalink to this headline">¶</a></h2>
+<ul class="simple">
+<li><p><a class="reference internal" href="#enabling-the-driver-and-kconfig-options">Enabling the driver and kconfig options</a></p></li>
+<li><p><a class="reference internal" href="#devlink-info">Devlink info</a></p></li>
+<li><p><a class="reference internal" href="#devlink-parameters">Devlink parameters</a></p></li>
+<li><p><a class="reference internal" href="#bridge-offload">Bridge offload</a></p></li>
+<li><p><a class="reference internal" href="#mlx5-subfunction">mlx5 subfunction</a></p></li>
+<li><p><a class="reference internal" href="#mlx5-function-attributes">mlx5 function attributes</a></p></li>
+<li><p><a class="reference internal" href="#devlink-health-reporters">Devlink health reporters</a></p></li>
+<li><p><a class="reference internal" href="#mlx5-tracepoints">mlx5 tracepoints</a></p></li>
+</ul>
+</section>
+<section id="enabling-the-driver-and-kconfig-options">
+<h2>Enabling the driver and kconfig options<a class="headerlink" href="#enabling-the-driver-and-kconfig-options" title="Permalink to this headline">¶</a></h2>
+<div class="line-block">
+<div class="line">mlx5 core is modular and most of the major mlx5 core driver features can be selected (compiled in/out)</div>
+<div class="line">at build time via kernel Kconfig flags.</div>
+<div class="line">Basic features, ethernet net device rx/tx offloads and XDP, are available with the most basic flags</div>
+<div class="line">CONFIG_MLX5_CORE=y/m and CONFIG_MLX5_CORE_EN=y.</div>
+<div class="line">For the list of advanced features, please see below.</div>
+</div>
+<p><strong>CONFIG_MLX5_CORE=(y/m/n)</strong> (module mlx5_core.ko)</p>
+<div class="line-block">
+<div class="line">The driver can be enabled by choosing CONFIG_MLX5_CORE=y/m in kernel config.</div>
+<div class="line">This will provide mlx5 core driver for mlx5 ulps to interface with (mlx5e, mlx5_ib).</div>
+</div>
+<p><strong>CONFIG_MLX5_CORE_EN=(y/n)</strong></p>
+<div class="line-block">
+<div class="line">Choosing this option will allow basic ethernet netdevice support with all of the standard rx/tx offloads.</div>
+<div class="line">mlx5e is the mlx5 ulp driver which provides netdevice kernel interface, when chosen, mlx5e will be</div>
+<div class="line">built-in into mlx5_core.ko.</div>
+</div>
+<p><strong>CONFIG_MLX5_EN_ARFS=(y/n)</strong></p>
+<div class="line-block">
+<div class="line">Enables Hardware-accelerated receive flow steering (arfs) support, and ntuple filtering.</div>
+<div class="line"><a class="reference external" href="https://community.mellanox.com/s/article/howto-configure-arfs-on-connectx-4">https://community.mellanox.com/s/article/howto-configure-arfs-on-connectx-4</a></div>
+</div>
+<p><strong>CONFIG_MLX5_EN_RXNFC=(y/n)</strong></p>
+<div class="line-block">
+<div class="line">Enables ethtool receive network flow classification, which allows user defined</div>
+<div class="line">flow rules to direct traffic into arbitrary rx queue via ethtool set/get_rxnfc API.</div>
+</div>
+<p><strong>CONFIG_MLX5_CORE_EN_DCB=(y/n)</strong>:</p>
+<div class="line-block">
+<div class="line">Enables <a class="reference external" href="https://community.mellanox.com/s/article/howto-auto-config-pfc-and-ets-on-connectx-4-via-lldp-dcbx">Data Center Bridging (DCB) Support</a>.</div>
+</div>
+<p><strong>CONFIG_MLX5_MPFS=(y/n)</strong></p>
+<div class="line-block">
+<div class="line">Ethernet Multi-Physical Function Switch (MPFS) support in ConnectX NIC.</div>
+<div class="line">MPFs is required for when <a class="reference external" href="http://www.mellanox.com/page/multihost">Multi-Host</a> configuration is enabled to allow passing</div>
+<div class="line">user configured unicast MAC addresses to the requesting PF.</div>
+</div>
+<p><strong>CONFIG_MLX5_ESWITCH=(y/n)</strong></p>
+<div class="line-block">
+<div class="line">Ethernet SRIOV E-Switch support in ConnectX NIC. E-Switch provides internal SRIOV packet steering</div>
+<div class="line">and switching for the enabled VFs and PF in two available modes:</div>
+<div class="line-block">
+<div class="line">1) <a class="reference external" href="https://community.mellanox.com/s/article/howto-configure-sr-iov-for-connectx-4-connectx-5-with-kvm--ethernet-x">Legacy SRIOV mode (L2 mac vlan steering based)</a>.</div>
+<div class="line">2) <a class="reference external" href="https://www.mellanox.com/related-docs/prod_software/ASAP2_Hardware_Offloading_for_vSwitches_User_Manual_v4.4.pdf">Switchdev mode (eswitch offloads)</a>.</div>
+</div>
+</div>
+<p><strong>CONFIG_MLX5_CORE_IPOIB=(y/n)</strong></p>
+<div class="line-block">
+<div class="line">IPoIB offloads &amp; acceleration support.</div>
+<div class="line">Requires CONFIG_MLX5_CORE_EN to provide an accelerated interface for the rdma</div>
+<div class="line">IPoIB ulp netdevice.</div>
+</div>
+<p><strong>CONFIG_MLX5_FPGA=(y/n)</strong></p>
+<div class="line-block">
+<div class="line">Build support for the Innova family of network cards by Mellanox Technologies.</div>
+<div class="line">Innova network cards are comprised of a ConnectX chip and an FPGA chip on one board.</div>
+<div class="line">If you select this option, the mlx5_core driver will include the Innova FPGA core and allow</div>
+<div class="line">building sandbox-specific client drivers.</div>
+</div>
+<p><strong>CONFIG_MLX5_EN_IPSEC=(y/n)</strong></p>
+<div class="line-block">
+<div class="line">Enables <a class="reference external" href="http://www.mellanox.com/related-docs/prod_software/Mellanox_Innova_IPsec_Ethernet_Adapter_Card_User_Manual.pdf">IPSec XFRM cryptography-offload acceleration</a>.</div>
+</div>
+<p><strong>CONFIG_MLX5_EN_TLS=(y/n)</strong></p>
+<div class="line-block">
+<div class="line">TLS cryptography-offload acceleration.</div>
+</div>
+<p><strong>CONFIG_MLX5_INFINIBAND=(y/n/m)</strong> (module mlx5_ib.ko)</p>
+<div class="line-block">
+<div class="line">Provides low-level InfiniBand/RDMA and <a class="reference external" href="https://community.mellanox.com/s/article/recommended-network-configuration-examples-for-roce-deployment">RoCE</a> support.</div>
+</div>
+<p><strong>CONFIG_MLX5_SF=(y/n)</strong></p>
+<div class="line-block">
+<div class="line">Build support for subfunction.</div>
+<div class="line">Subfunctons are more light weight than PCI SRIOV VFs. Choosing this option</div>
+<div class="line">will enable support for creating subfunction devices.</div>
+</div>
+<p><strong>External options</strong> ( Choose if the corresponding mlx5 feature is required )</p>
+<ul class="simple">
+<li><p>CONFIG_PTP_1588_CLOCK: When chosen, mlx5 ptp support will be enabled</p></li>
+<li><p>CONFIG_VXLAN: When chosen, mlx5 vxlan support will be enabled.</p></li>
+<li><p>CONFIG_MLXFW: When chosen, mlx5 firmware flashing support will be enabled (via devlink and ethtool).</p></li>
+</ul>
+</section>
+<section id="devlink-info">
+<h2>Devlink info<a class="headerlink" href="#devlink-info" title="Permalink to this headline">¶</a></h2>
+<p>The devlink info reports the running and stored firmware versions on device.
+It also prints the device PSID which represents the HCA board type ID.</p>
+<p>User command example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ devlink dev info pci/0000:00:06.0
+   pci/0000:00:06.0:
+   driver mlx5_core
+   versions:
+      fixed:
+         fw.psid MT_0000000009
+      running:
+         fw.version 16.26.0100
+      stored:
+         fw.version 16.26.0100
+</pre></div>
+</div>
+</section>
+<section id="devlink-parameters">
+<h2>Devlink parameters<a class="headerlink" href="#devlink-parameters" title="Permalink to this headline">¶</a></h2>
+<section id="flow-steering-mode-device-flow-steering-mode">
+<h3>flow_steering_mode: Device flow steering mode<a class="headerlink" href="#flow-steering-mode-device-flow-steering-mode" title="Permalink to this headline">¶</a></h3>
+<p>The flow steering mode parameter controls the flow steering mode of the driver.
+Two modes are supported:
+1. ‘dmfs’ - Device managed flow steering.
+2. ‘smfs’ - Software/Driver managed flow steering.</p>
+<p>In DMFS mode, the HW steering entities are created and managed through the
+Firmware.
+In SMFS mode, the HW steering entities are created and managed though by
+the driver directly into hardware without firmware intervention.</p>
+<p>SMFS mode is faster and provides better rule insertion rate compared to default DMFS mode.</p>
+<p>User command examples:</p>
+<ul>
+<li><p>Set SMFS flow steering mode:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ devlink dev param set pci/0000:06:00.0 name flow_steering_mode value &quot;smfs&quot; cmode runtime
+</pre></div>
+</div>
+</li>
+<li><p>Read device flow steering mode:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ devlink dev param show pci/0000:06:00.0 name flow_steering_mode
+  pci/0000:06:00.0:
+  name flow_steering_mode type driver-specific
+  values:
+     cmode runtime value smfs
+</pre></div>
+</div>
+</li>
+</ul>
+</section>
+<section id="enable-roce-roce-enablement-state">
+<h3>enable_roce: RoCE enablement state<a class="headerlink" href="#enable-roce-roce-enablement-state" title="Permalink to this headline">¶</a></h3>
+<p>RoCE enablement state controls driver support for RoCE traffic.
+When RoCE is disabled, there is no gid table, only raw ethernet QPs are supported and traffic on the well-known UDP RoCE port is handled as raw ethernet traffic.</p>
+<p>To change RoCE enablement state, a user must change the driverinit cmode value and run devlink reload.</p>
+<p>User command examples:</p>
+<ul>
+<li><p>Disable RoCE:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ devlink dev param set pci/0000:06:00.0 name enable_roce value false cmode driverinit
+$ devlink dev reload pci/0000:06:00.0
+</pre></div>
+</div>
+</li>
+<li><p>Read RoCE enablement state:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ devlink dev param show pci/0000:06:00.0 name enable_roce
+  pci/0000:06:00.0:
+  name enable_roce type generic
+  values:
+     cmode driverinit value true
+</pre></div>
+</div>
+</li>
+</ul>
+</section>
+<section id="esw-port-metadata-eswitch-port-metadata-state">
+<h3>esw_port_metadata: Eswitch port metadata state<a class="headerlink" href="#esw-port-metadata-eswitch-port-metadata-state" title="Permalink to this headline">¶</a></h3>
+<p>When applicable, disabling eswitch metadata can increase packet rate
+up to 20% depending on the use case and packet sizes.</p>
+<p>Eswitch port metadata state controls whether to internally tag packets with
+metadata. Metadata tagging must be enabled for multi-port RoCE, failover
+between representors and stacked devices.
+By default metadata is enabled on the supported devices in E-switch.
+Metadata is applicable only for E-switch in switchdev mode and
+users may disable it when NONE of the below use cases will be in use:
+1. HCA is in Dual/multi-port RoCE mode.
+2. VF/SF representor bonding (Usually used for Live migration)
+3. Stacked devices</p>
+<p>When metadata is disabled, the above use cases will fail to initialize if
+users try to enable them.</p>
+<ul>
+<li><p>Show eswitch port metadata:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ devlink dev param show pci/0000:06:00.0 name esw_port_metadata
+  pci/0000:06:00.0:
+    name esw_port_metadata type driver-specific
+      values:
+        cmode runtime value true
+</pre></div>
+</div>
+</li>
+<li><p>Disable eswitch port metadata:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ devlink dev param set pci/0000:06:00.0 name esw_port_metadata value false cmode runtime
+</pre></div>
+</div>
+</li>
+<li><p>Change eswitch mode to switchdev mode where after choosing the metadata value:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ devlink dev eswitch set pci/0000:06:00.0 mode switchdev
+</pre></div>
+</div>
+</li>
+</ul>
+</section>
+</section>
+<section id="bridge-offload">
+<h2>Bridge offload<a class="headerlink" href="#bridge-offload" title="Permalink to this headline">¶</a></h2>
+<p>The mlx5 driver implements support for offloading bridge rules when in switchdev
+mode. Linux bridge FDBs are automatically offloaded when mlx5 switchdev
+representor is attached to bridge.</p>
+<ul>
+<li><p>Change device to switchdev mode:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ devlink dev eswitch set pci/0000:06:00.0 mode switchdev
+</pre></div>
+</div>
+</li>
+<li><p>Attach mlx5 switchdev representor ‘enp8s0f0’ to bridge netdev ‘bridge1’:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ ip link set enp8s0f0 master bridge1
+</pre></div>
+</div>
+</li>
+</ul>
+<section id="vlans">
+<h3>VLANs<a class="headerlink" href="#vlans" title="Permalink to this headline">¶</a></h3>
+<p>Following bridge VLAN functions are supported by mlx5:</p>
+<ul>
+<li><p>VLAN filtering (including multiple VLANs per port):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ ip link set bridge1 type bridge vlan_filtering 1
+$ bridge vlan add dev enp8s0f0 vid 2-3
+</pre></div>
+</div>
+</li>
+<li><p>VLAN push on bridge ingress:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ bridge vlan add dev enp8s0f0 vid 3 pvid
+</pre></div>
+</div>
+</li>
+<li><p>VLAN pop on bridge egress:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ bridge vlan add dev enp8s0f0 vid 3 untagged
+</pre></div>
+</div>
+</li>
+</ul>
+</section>
+</section>
+<section id="mlx5-subfunction">
+<h2>mlx5 subfunction<a class="headerlink" href="#mlx5-subfunction" title="Permalink to this headline">¶</a></h2>
+<p>mlx5 supports subfunction management using devlink port (see <a class="reference internal" href="../../../devlink/devlink-port.html#devlink-port"><span class="std std-ref">Documentation/networking/devlink/devlink-port.rst</span></a>) interface.</p>
+<p>A subfunction has its own function capabilities and its own resources. This
+means a subfunction has its own dedicated queues (txq, rxq, cq, eq). These
+queues are neither shared nor stolen from the parent PCI function.</p>
+<p>When a subfunction is RDMA capable, it has its own QP1, GID table, and RDMA
+resources neither shared nor stolen from the parent PCI function.</p>
+<p>A subfunction has a dedicated window in PCI BAR space that is not shared
+with the other subfunctions or the parent PCI function. This ensures that all
+devices (netdev, rdma, vdpa, etc.) of the subfunction accesses only assigned
+PCI BAR space.</p>
+<p>A subfunction supports eswitch representation through which it supports tc
+offloads. The user configures eswitch to send/receive packets from/to
+the subfunction port.</p>
+<p>Subfunctions share PCI level resources such as PCI MSI-X IRQs with
+other subfunctions and/or with its parent PCI function.</p>
+<p>Example mlx5 software, system, and device view:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>      _______
+     | admin |
+     | user  |----------
+     |_______|         |
+         |             |
+     ____|____       __|______            _________________
+    |         |     |         |          |                 |
+    | devlink |     | tc tool |          |    user         |
+    | tool    |     |_________|          | applications    |
+    |_________|         |                |_________________|
+          |             |                   |          |
+          |             |                   |          |         Userspace
++---------|-------------|-------------------|----------|--------------------+
+          |             |           +----------+   +----------+   Kernel
+          |             |           |  netdev  |   | rdma dev |
+          |             |           +----------+   +----------+
+  (devlink port add/del |              ^               ^
+   port function set)   |              |               |
+          |             |              +---------------|
+     _____|___          |              |        _______|_______
+    |         |         |              |       | mlx5 class    |
+    | devlink |   +------------+       |       |   drivers     |
+    | kernel  |   | rep netdev |       |       |(mlx5_core,ib) |
+    |_________|   +------------+       |       |_______________|
+          |             |              |               ^
+  (devlink ops)         |              |          (probe/remove)
+ _________|________     |              |           ____|________
+| subfunction      |    |     +---------------+   | subfunction |
+| management driver|-----     | subfunction   |---|  driver     |
+| (mlx5_core)      |          | auxiliary dev |   | (mlx5_core) |
+|__________________|          +---------------+   |_____________|
+          |                                            ^
+ (sf add/del, vhca events)                             |
+          |                                      (device add/del)
+     _____|____                                    ____|________
+    |          |                                  | subfunction |
+    |  PCI NIC |--- activate/deactivate events---&gt;| host driver |
+    |__________|                                  | (mlx5_core) |
+                                                  |_____________|
+</pre></div>
+</div>
+<p>Subfunction is created using devlink port interface.</p>
+<ul>
+<li><p>Change device to switchdev mode:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ devlink dev eswitch set pci/0000:06:00.0 mode switchdev
+</pre></div>
+</div>
+</li>
+<li><p>Add a devlink port of subfunction flavour:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ devlink port add pci/0000:06:00.0 flavour pcisf pfnum 0 sfnum 88
+pci/0000:06:00.0/32768: type eth netdev eth6 flavour pcisf controller 0 pfnum 0 sfnum 88 external false splittable false
+  function:
+    hw_addr 00:00:00:00:00:00 state inactive opstate detached
+</pre></div>
+</div>
+</li>
+<li><p>Show a devlink port of the subfunction:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ devlink port show pci/0000:06:00.0/32768
+pci/0000:06:00.0/32768: type eth netdev enp6s0pf0sf88 flavour pcisf pfnum 0 sfnum 88
+  function:
+    hw_addr 00:00:00:00:00:00 state inactive opstate detached
+</pre></div>
+</div>
+</li>
+<li><p>Delete a devlink port of subfunction after use:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ devlink port del pci/0000:06:00.0/32768
+</pre></div>
+</div>
+</li>
+</ul>
+</section>
+<section id="mlx5-function-attributes">
+<h2>mlx5 function attributes<a class="headerlink" href="#mlx5-function-attributes" title="Permalink to this headline">¶</a></h2>
+<p>The mlx5 driver provides a mechanism to setup PCI VF/SF function attributes in
+a unified way for SmartNIC and non-SmartNIC.</p>
+<p>This is supported only when the eswitch mode is set to switchdev. Port function
+configuration of the PCI VF/SF is supported through devlink eswitch port.</p>
+<p>Port function attributes should be set before PCI VF/SF is enumerated by the
+driver.</p>
+<section id="mac-address-setup">
+<h3>MAC address setup<a class="headerlink" href="#mac-address-setup" title="Permalink to this headline">¶</a></h3>
+<p>mlx5 driver support devlink port function attr mechanism to setup MAC
+address. (refer to <a class="reference internal" href="../../../devlink/devlink-port.html"><span class="doc">Devlink Port</span></a>)</p>
+</section>
+<section id="roce-capability-setup">
+<h3>RoCE capability setup<a class="headerlink" href="#roce-capability-setup" title="Permalink to this headline">¶</a></h3>
+<p>Not all mlx5 PCI devices/SFs require RoCE capability.</p>
+<p>When RoCE capability is disabled, it saves 1 Mbytes worth of system memory per
+PCI devices/SF.</p>
+<p>mlx5 driver support devlink port function attr mechanism to setup RoCE
+capability. (refer to <a class="reference internal" href="../../../devlink/devlink-port.html"><span class="doc">Devlink Port</span></a>)</p>
+</section>
+<section id="migratable-capability-setup">
+<h3>migratable capability setup<a class="headerlink" href="#migratable-capability-setup" title="Permalink to this headline">¶</a></h3>
+<p>User who wants mlx5 PCI VFs to be able to perform live migration need to
+explicitly enable the VF migratable capability.</p>
+<p>mlx5 driver support devlink port function attr mechanism to setup migratable
+capability. (refer to <a class="reference internal" href="../../../devlink/devlink-port.html"><span class="doc">Devlink Port</span></a>)</p>
+</section>
+<section id="sf-state-setup">
+<h3>SF state setup<a class="headerlink" href="#sf-state-setup" title="Permalink to this headline">¶</a></h3>
+<p>To use the SF, the user must activate the SF using the SF function state
+attribute.</p>
+<ul>
+<li><p>Get the state of the SF identified by its unique devlink port index:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ devlink port show ens2f0npf0sf88
+pci/0000:06:00.0/32768: type eth netdev ens2f0npf0sf88 flavour pcisf controller 0 pfnum 0 sfnum 88 external false splittable false
+  function:
+    hw_addr 00:00:00:00:88:88 state inactive opstate detached
+</pre></div>
+</div>
+</li>
+<li><p>Activate the function and verify its state is active:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ devlink port function set ens2f0npf0sf88 state active
+
+$ devlink port show ens2f0npf0sf88
+pci/0000:06:00.0/32768: type eth netdev ens2f0npf0sf88 flavour pcisf controller 0 pfnum 0 sfnum 88 external false splittable false
+  function:
+    hw_addr 00:00:00:00:88:88 state active opstate detached
+</pre></div>
+</div>
+</li>
+</ul>
+<p>Upon function activation, the PF driver instance gets the event from the device
+that a particular SF was activated. It’s the cue to put the device on bus, probe
+it and instantiate the devlink instance and class specific auxiliary devices
+for it.</p>
+<ul>
+<li><p>Show the auxiliary device and port of the subfunction:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ devlink dev show
+devlink dev show auxiliary/mlx5_core.sf.4
+
+$ devlink port show auxiliary/mlx5_core.sf.4/1
+auxiliary/mlx5_core.sf.4/1: type eth netdev p0sf88 flavour virtual port 0 splittable false
+
+$ rdma link show mlx5_0/1
+link mlx5_0/1 state ACTIVE physical_state LINK_UP netdev p0sf88
+
+$ rdma dev show
+8: rocep6s0f1: node_type ca fw 16.29.0550 node_guid 248a:0703:00b3:d113 sys_image_guid 248a:0703:00b3:d112
+13: mlx5_0: node_type ca fw 16.29.0550 node_guid 0000:00ff:fe00:8888 sys_image_guid 248a:0703:00b3:d112
+</pre></div>
+</div>
+</li>
+<li><p>Subfunction auxiliary device and class device hierarchy:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>            mlx5_core.sf.4
+     (subfunction auxiliary device)
+                  /\
+                 /  \
+                /    \
+               /      \
+              /        \
+ mlx5_core.eth.4     mlx5_core.rdma.4
+(sf eth aux dev)     (sf rdma aux dev)
+    |                      |
+    |                      |
+ p0sf88                  mlx5_0
+(sf netdev)          (sf rdma device)
+</pre></div>
+</div>
+</li>
+</ul>
+<p>Additionally, the SF port also gets the event when the driver attaches to the
+auxiliary device of the subfunction. This results in changing the operational
+state of the function. This provides visibility to the user to decide when is it
+safe to delete the SF port for graceful termination of the subfunction.</p>
+<ul>
+<li><p>Show the SF port operational state:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ devlink port show ens2f0npf0sf88
+pci/0000:06:00.0/32768: type eth netdev ens2f0npf0sf88 flavour pcisf controller 0 pfnum 0 sfnum 88 external false splittable false
+  function:
+    hw_addr 00:00:00:00:88:88 state active opstate attached
+</pre></div>
+</div>
+</li>
+</ul>
+</section>
+</section>
+<section id="devlink-health-reporters">
+<h2>Devlink health reporters<a class="headerlink" href="#devlink-health-reporters" title="Permalink to this headline">¶</a></h2>
+<section id="tx-reporter">
+<h3>tx reporter<a class="headerlink" href="#tx-reporter" title="Permalink to this headline">¶</a></h3>
+<p>The tx reporter is responsible for reporting and recovering of the following two error scenarios:</p>
+<ul class="simple">
+<li><dl class="simple">
+<dt>tx timeout</dt><dd><p>Report on kernel tx timeout detection.
+Recover by searching lost interrupts.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>tx error completion</dt><dd><p>Report on error tx completion.
+Recover by flushing the tx queue and reset it.</p>
+</dd>
+</dl>
+</li>
+</ul>
+<p>tx reporter also support on demand diagnose callback, on which it provides
+real time information of its send queues status.</p>
+<p>User commands examples:</p>
+<ul>
+<li><p>Diagnose send queues status:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ devlink health diagnose pci/0000:82:00.0 reporter tx
+</pre></div>
+</div>
+</li>
+</ul>
+<p>NOTE: This command has valid output only when interface is up, otherwise the command has empty output.</p>
+<ul>
+<li><p>Show number of tx errors indicated, number of recover flows ended successfully,
+is autorecover enabled and graceful period from last recover:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ devlink health show pci/0000:82:00.0 reporter tx
+</pre></div>
+</div>
+</li>
+</ul>
+</section>
+<section id="rx-reporter">
+<h3>rx reporter<a class="headerlink" href="#rx-reporter" title="Permalink to this headline">¶</a></h3>
+<p>The rx reporter is responsible for reporting and recovering of the following two error scenarios:</p>
+<ul class="simple">
+<li><dl class="simple">
+<dt>rx queues’ initialization (population) timeout</dt><dd><p>Population of rx queues’ descriptors on ring initialization is done
+in napi context via triggering an irq. In case of a failure to get
+the minimum amount of descriptors, a timeout would occur, and
+descriptors could be recovered by polling the EQ (Event Queue).</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>rx completions with errors (reported by HW on interrupt context)</dt><dd><p>Report on rx completion error.
+Recover (if needed) by flushing the related queue and reset it.</p>
+</dd>
+</dl>
+</li>
+</ul>
+<p>rx reporter also supports on demand diagnose callback, on which it
+provides real time information of its receive queues’ status.</p>
+<ul>
+<li><p>Diagnose rx queues’ status and corresponding completion queue:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ devlink health diagnose pci/0000:82:00.0 reporter rx
+</pre></div>
+</div>
+</li>
+</ul>
+<p>NOTE: This command has valid output only when interface is up. Otherwise, the command has empty output.</p>
+<ul>
+<li><p>Show number of rx errors indicated, number of recover flows ended successfully,
+is autorecover enabled, and graceful period from last recover:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ devlink health show pci/0000:82:00.0 reporter rx
+</pre></div>
+</div>
+</li>
+</ul>
+</section>
+<section id="fw-reporter">
+<h3>fw reporter<a class="headerlink" href="#fw-reporter" title="Permalink to this headline">¶</a></h3>
+<p>The fw reporter implements <cite>diagnose</cite> and <cite>dump</cite> callbacks.
+It follows symptoms of fw error such as fw syndrome by triggering
+fw core dump and storing it into the dump buffer.
+The fw reporter diagnose command can be triggered any time by the user to check
+current fw status.</p>
+<p>User commands examples:</p>
+<ul>
+<li><p>Check fw heath status:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ devlink health diagnose pci/0000:82:00.0 reporter fw
+</pre></div>
+</div>
+</li>
+<li><p>Read FW core dump if already stored or trigger new one:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ devlink health dump show pci/0000:82:00.0 reporter fw
+</pre></div>
+</div>
+</li>
+</ul>
+<p>NOTE: This command can run only on the PF which has fw tracer ownership,
+running it on other PF or any VF will return “Operation not permitted”.</p>
+</section>
+<section id="fw-fatal-reporter">
+<h3>fw fatal reporter<a class="headerlink" href="#fw-fatal-reporter" title="Permalink to this headline">¶</a></h3>
+<p>The fw fatal reporter implements <cite>dump</cite> and <cite>recover</cite> callbacks.
+It follows fatal errors indications by CR-space dump and recover flow.
+The CR-space dump uses vsc interface which is valid even if the FW command
+interface is not functional, which is the case in most FW fatal errors.
+The recover function runs recover flow which reloads the driver and triggers fw
+reset if needed.
+On firmware error, the health buffer is dumped into the dmesg. The log
+level is derived from the error’s severity (given in health buffer).</p>
+<p>User commands examples:</p>
+<ul>
+<li><p>Run fw recover flow manually:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ devlink health recover pci/0000:82:00.0 reporter fw_fatal
+</pre></div>
+</div>
+</li>
+<li><p>Read FW CR-space dump if already stored or trigger new one:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ devlink health dump show pci/0000:82:00.1 reporter fw_fatal
+</pre></div>
+</div>
+</li>
+</ul>
+<p>NOTE: This command can run only on PF.</p>
+</section>
+</section>
+<section id="mlx5-tracepoints">
+<h2>mlx5 tracepoints<a class="headerlink" href="#mlx5-tracepoints" title="Permalink to this headline">¶</a></h2>
+<p>mlx5 driver provides internal tracepoints for tracking and debugging using
+kernel tracepoints interfaces (refer to <a class="reference internal" href="../../../../trace/ftrace.html"><span class="doc">ftrace - Function Tracer</span></a>).</p>
+<p>For the list of support mlx5 events, check <cite>/sys/kernel/debug/tracing/events/mlx5/</cite>.</p>
+<p>tc and eswitch offloads tracepoints:</p>
+<ul>
+<li><p>mlx5e_configure_flower: trace flower filter actions and cookies offloaded to mlx5:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo mlx5:mlx5e_configure_flower &gt;&gt; /sys/kernel/debug/tracing/set_event
+$ cat /sys/kernel/debug/tracing/trace
+...
+tc-6535  [019] ...1  2672.404466: mlx5e_configure_flower: cookie=0000000067874a55 actions= REDIRECT
+</pre></div>
+</div>
+</li>
+<li><p>mlx5e_delete_flower: trace flower filter actions and cookies deleted from mlx5:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo mlx5:mlx5e_delete_flower &gt;&gt; /sys/kernel/debug/tracing/set_event
+$ cat /sys/kernel/debug/tracing/trace
+...
+tc-6569  [010] .N.1  2686.379075: mlx5e_delete_flower: cookie=0000000067874a55 actions= NULL
+</pre></div>
+</div>
+</li>
+<li><p>mlx5e_stats_flower: trace flower stats request:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo mlx5:mlx5e_stats_flower &gt;&gt; /sys/kernel/debug/tracing/set_event
+$ cat /sys/kernel/debug/tracing/trace
+...
+tc-6546  [010] ...1  2679.704889: mlx5e_stats_flower: cookie=0000000060eb3d6a bytes=0 packets=0 lastused=4295560217
+</pre></div>
+</div>
+</li>
+<li><p>mlx5e_tc_update_neigh_used_value: trace tunnel rule neigh update value offloaded to mlx5:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo mlx5:mlx5e_tc_update_neigh_used_value &gt;&gt; /sys/kernel/debug/tracing/set_event
+$ cat /sys/kernel/debug/tracing/trace
+...
+kworker/u48:4-8806  [009] ...1 55117.882428: mlx5e_tc_update_neigh_used_value: netdev: ens1f0 IPv4: 1.1.1.10 IPv6: ::ffff:1.1.1.10 neigh_used=1
+</pre></div>
+</div>
+</li>
+<li><p>mlx5e_rep_neigh_update: trace neigh update tasks scheduled due to neigh state change events:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo mlx5:mlx5e_rep_neigh_update &gt;&gt; /sys/kernel/debug/tracing/set_event
+$ cat /sys/kernel/debug/tracing/trace
+...
+kworker/u48:7-2221  [009] ...1  1475.387435: mlx5e_rep_neigh_update: netdev: ens1f0 MAC: 24:8a:07:9a:17:9a IPv4: 1.1.1.10 IPv6: ::ffff:1.1.1.10 neigh_connected=1
+</pre></div>
+</div>
+</li>
+</ul>
+<p>Bridge offloads tracepoints:</p>
+<ul>
+<li><p>mlx5_esw_bridge_fdb_entry_init: trace bridge FDB entry offloaded to mlx5:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo mlx5:mlx5_esw_bridge_fdb_entry_init &gt;&gt; set_event
+$ cat /sys/kernel/debug/tracing/trace
+...
+kworker/u20:9-2217    [003] ...1   318.582243: mlx5_esw_bridge_fdb_entry_init: net_device=enp8s0f0_0 addr=e4:fd:05:08:00:02 vid=0 flags=0 used=0
+</pre></div>
+</div>
+</li>
+<li><p>mlx5_esw_bridge_fdb_entry_cleanup: trace bridge FDB entry deleted from mlx5:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo mlx5:mlx5_esw_bridge_fdb_entry_cleanup &gt;&gt; set_event
+$ cat /sys/kernel/debug/tracing/trace
+...
+ip-2581    [005] ...1   318.629871: mlx5_esw_bridge_fdb_entry_cleanup: net_device=enp8s0f0_1 addr=e4:fd:05:08:00:03 vid=0 flags=0 used=16
+</pre></div>
+</div>
+</li>
+<li><p>mlx5_esw_bridge_fdb_entry_refresh: trace bridge FDB entry offload refreshed in
+mlx5:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo mlx5:mlx5_esw_bridge_fdb_entry_refresh &gt;&gt; set_event
+$ cat /sys/kernel/debug/tracing/trace
+...
+kworker/u20:8-3849    [003] ...1       466716: mlx5_esw_bridge_fdb_entry_refresh: net_device=enp8s0f0_0 addr=e4:fd:05:08:00:02 vid=3 flags=0 used=0
+</pre></div>
+</div>
+</li>
+<li><p>mlx5_esw_bridge_vlan_create: trace bridge VLAN object add on mlx5
+representor:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo mlx5:mlx5_esw_bridge_vlan_create &gt;&gt; set_event
+$ cat /sys/kernel/debug/tracing/trace
+...
+ip-2560    [007] ...1   318.460258: mlx5_esw_bridge_vlan_create: vid=1 flags=6
+</pre></div>
+</div>
+</li>
+<li><p>mlx5_esw_bridge_vlan_cleanup: trace bridge VLAN object delete from mlx5
+representor:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo mlx5:mlx5_esw_bridge_vlan_cleanup &gt;&gt; set_event
+$ cat /sys/kernel/debug/tracing/trace
+...
+bridge-2582    [007] ...1   318.653496: mlx5_esw_bridge_vlan_cleanup: vid=2 flags=8
+</pre></div>
+</div>
+</li>
+<li><p>mlx5_esw_bridge_vport_init: trace mlx5 vport assigned with bridge upper
+device:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo mlx5:mlx5_esw_bridge_vport_init &gt;&gt; set_event
+$ cat /sys/kernel/debug/tracing/trace
+...
+ip-2560    [007] ...1   318.458915: mlx5_esw_bridge_vport_init: vport_num=1
+</pre></div>
+</div>
+</li>
+<li><p>mlx5_esw_bridge_vport_cleanup: trace mlx5 vport removed from bridge upper
+device:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo mlx5:mlx5_esw_bridge_vport_cleanup &gt;&gt; set_event
+$ cat /sys/kernel/debug/tracing/trace
+...
+ip-5387    [000] ...1       573713: mlx5_esw_bridge_vport_cleanup: vport_num=1
+</pre></div>
+</div>
+</li>
+</ul>
+<p>Eswitch QoS tracepoints:</p>
+<ul>
+<li><p>mlx5_esw_vport_qos_create: trace creation of transmit scheduler arbiter for vport:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo mlx5:mlx5_esw_vport_qos_create &gt;&gt; /sys/kernel/debug/tracing/set_event
+$ cat /sys/kernel/debug/tracing/trace
+...
+&lt;...&gt;-23496   [018] .... 73136.838831: mlx5_esw_vport_qos_create: (0000:82:00.0) vport=2 tsar_ix=4 bw_share=0, max_rate=0 group=000000007b576bb3
+</pre></div>
+</div>
+</li>
+<li><p>mlx5_esw_vport_qos_config: trace configuration of transmit scheduler arbiter for vport:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo mlx5:mlx5_esw_vport_qos_config &gt;&gt; /sys/kernel/debug/tracing/set_event
+$ cat /sys/kernel/debug/tracing/trace
+...
+&lt;...&gt;-26548   [023] .... 75754.223823: mlx5_esw_vport_qos_config: (0000:82:00.0) vport=1 tsar_ix=3 bw_share=34, max_rate=10000 group=000000007b576bb3
+</pre></div>
+</div>
+</li>
+<li><p>mlx5_esw_vport_qos_destroy: trace deletion of transmit scheduler arbiter for vport:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo mlx5:mlx5_esw_vport_qos_destroy &gt;&gt; /sys/kernel/debug/tracing/set_event
+$ cat /sys/kernel/debug/tracing/trace
+...
+&lt;...&gt;-27418   [004] .... 76546.680901: mlx5_esw_vport_qos_destroy: (0000:82:00.0) vport=1 tsar_ix=3
+</pre></div>
+</div>
+</li>
+<li><p>mlx5_esw_group_qos_create: trace creation of transmit scheduler arbiter for rate group:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo mlx5:mlx5_esw_group_qos_create &gt;&gt; /sys/kernel/debug/tracing/set_event
+$ cat /sys/kernel/debug/tracing/trace
+...
+&lt;...&gt;-26578   [008] .... 75776.022112: mlx5_esw_group_qos_create: (0000:82:00.0) group=000000008dac63ea tsar_ix=5
+</pre></div>
+</div>
+</li>
+<li><p>mlx5_esw_group_qos_config: trace configuration of transmit scheduler arbiter for rate group:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo mlx5:mlx5_esw_group_qos_config &gt;&gt; /sys/kernel/debug/tracing/set_event
+$ cat /sys/kernel/debug/tracing/trace
+...
+&lt;...&gt;-27303   [020] .... 76461.455356: mlx5_esw_group_qos_config: (0000:82:00.0) group=000000008dac63ea tsar_ix=5 bw_share=100 max_rate=20000
+</pre></div>
+</div>
+</li>
+<li><p>mlx5_esw_group_qos_destroy: trace deletion of transmit scheduler arbiter for group:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo mlx5:mlx5_esw_group_qos_destroy &gt;&gt; /sys/kernel/debug/tracing/set_event
+$ cat /sys/kernel/debug/tracing/trace
+...
+&lt;...&gt;-27418   [006] .... 76547.187258: mlx5_esw_group_qos_destroy: (0000:82:00.0) group=000000007b576bb3 tsar_ix=1
+</pre></div>
+</div>
+</li>
+</ul>
+<p>SF tracepoints:</p>
+<ul>
+<li><p>mlx5_sf_add: trace addition of the SF port:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo mlx5:mlx5_sf_add &gt;&gt; /sys/kernel/debug/tracing/set_event
+$ cat /sys/kernel/debug/tracing/trace
+...
+devlink-9363    [031] ..... 24610.188722: mlx5_sf_add: (0000:06:00.0) port_index=32768 controller=0 hw_id=0x8000 sfnum=88
+</pre></div>
+</div>
+</li>
+<li><p>mlx5_sf_free: trace freeing of the SF port:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo mlx5:mlx5_sf_free &gt;&gt; /sys/kernel/debug/tracing/set_event
+$ cat /sys/kernel/debug/tracing/trace
+...
+devlink-9830    [038] ..... 26300.404749: mlx5_sf_free: (0000:06:00.0) port_index=32768 controller=0 hw_id=0x8000
+</pre></div>
+</div>
+</li>
+<li><p>mlx5_sf_hwc_alloc: trace allocating of the hardware SF context:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo mlx5:mlx5_sf_hwc_alloc &gt;&gt; /sys/kernel/debug/tracing/set_event
+$ cat /sys/kernel/debug/tracing/trace
+...
+devlink-9775    [031] ..... 26296.385259: mlx5_sf_hwc_alloc: (0000:06:00.0) controller=0 hw_id=0x8000 sfnum=88
+</pre></div>
+</div>
+</li>
+<li><p>mlx5_sf_hwc_free: trace freeing of the hardware SF context:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo mlx5:mlx5_sf_hwc_free &gt;&gt; /sys/kernel/debug/tracing/set_event
+$ cat /sys/kernel/debug/tracing/trace
+...
+kworker/u128:3-9093    [046] ..... 24625.365771: mlx5_sf_hwc_free: (0000:06:00.0) hw_id=0x8000
+</pre></div>
+</div>
+</li>
+<li><p>mlx5_sf_hwc_deferred_free : trace deferred freeing of the hardware SF context:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo mlx5:mlx5_sf_hwc_deferred_free &gt;&gt; /sys/kernel/debug/tracing/set_event
+$ cat /sys/kernel/debug/tracing/trace
+...
+devlink-9519    [046] ..... 24624.400271: mlx5_sf_hwc_deferred_free: (0000:06:00.0) hw_id=0x8000
+</pre></div>
+</div>
+</li>
+<li><p>mlx5_sf_vhca_event: trace SF vhca event and state:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo mlx5:mlx5_sf_vhca_event &gt;&gt; /sys/kernel/debug/tracing/set_event
+$ cat /sys/kernel/debug/tracing/trace
+...
+kworker/u128:3-9093    [046] ..... 24625.365525: mlx5_sf_vhca_event: (0000:06:00.0) hw_id=0x8000 sfnum=88 vhca_state=1
+</pre></div>
+</div>
+</li>
+<li><p>mlx5_sf_dev_add : trace SF device add event:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo mlx5:mlx5_sf_dev_add&gt;&gt; /sys/kernel/debug/tracing/set_event
+$ cat /sys/kernel/debug/tracing/trace
+...
+kworker/u128:3-9093    [000] ..... 24616.524495: mlx5_sf_dev_add: (0000:06:00.0) sfdev=00000000fc5d96fd aux_id=4 hw_id=0x8000 sfnum=88
+</pre></div>
+</div>
+</li>
+<li><p>mlx5_sf_dev_del : trace SF device delete event:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo mlx5:mlx5_sf_dev_del &gt;&gt; /sys/kernel/debug/tracing/set_event
+$ cat /sys/kernel/debug/tracing/trace
+...
+kworker/u128:3-9093    [044] ..... 24624.400749: mlx5_sf_dev_del: (0000:06:00.0) sfdev=00000000fc5d96fd aux_id=4 hw_id=0x8000 sfnum=88
+</pre></div>
+</div>
+</li>
+</ul>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Mellanox ConnectX(R) mlx5 core VPI Network Driver</a><ul>
+<li><a class="reference internal" href="#contents">Contents</a></li>
+<li><a class="reference internal" href="#enabling-the-driver-and-kconfig-options">Enabling the driver and kconfig options</a></li>
+<li><a class="reference internal" href="#devlink-info">Devlink info</a></li>
+<li><a class="reference internal" href="#devlink-parameters">Devlink parameters</a><ul>
+<li><a class="reference internal" href="#flow-steering-mode-device-flow-steering-mode">flow_steering_mode: Device flow steering mode</a></li>
+<li><a class="reference internal" href="#enable-roce-roce-enablement-state">enable_roce: RoCE enablement state</a></li>
+<li><a class="reference internal" href="#esw-port-metadata-eswitch-port-metadata-state">esw_port_metadata: Eswitch port metadata state</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#bridge-offload">Bridge offload</a><ul>
+<li><a class="reference internal" href="#vlans">VLANs</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#mlx5-subfunction">mlx5 subfunction</a></li>
+<li><a class="reference internal" href="#mlx5-function-attributes">mlx5 function attributes</a><ul>
+<li><a class="reference internal" href="#mac-address-setup">MAC address setup</a></li>
+<li><a class="reference internal" href="#roce-capability-setup">RoCE capability setup</a></li>
+<li><a class="reference internal" href="#migratable-capability-setup">migratable capability setup</a></li>
+<li><a class="reference internal" href="#sf-state-setup">SF state setup</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#devlink-health-reporters">Devlink health reporters</a><ul>
+<li><a class="reference internal" href="#tx-reporter">tx reporter</a></li>
+<li><a class="reference internal" href="#rx-reporter">rx reporter</a></li>
+<li><a class="reference internal" href="#fw-reporter">fw reporter</a></li>
+<li><a class="reference internal" href="#fw-fatal-reporter">fw fatal reporter</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#mlx5-tracepoints">mlx5 tracepoints</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../../_sources/networking/device_drivers/ethernet/mellanox/mlx5.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../../_sources/networking/device_drivers/ethernet/mellanox/mlx5.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

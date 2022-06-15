@@ -1,0 +1,446 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Reducing OS jitter due to per-cpu kthreads &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Laptop Drivers" href="laptops/index.html" />
+    <link rel="prev" title="IBM’s Journaled File System (JFS) for Linux" href="jfs.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="reducing-os-jitter-due-to-per-cpu-kthreads">
+<h1>Reducing OS jitter due to per-cpu kthreads<a class="headerlink" href="#reducing-os-jitter-due-to-per-cpu-kthreads" title="Permalink to this headline">¶</a></h1>
+<p>This document lists per-CPU kthreads in the Linux kernel and presents
+options to control their OS jitter.  Note that non-per-CPU kthreads are
+not listed here.  To reduce OS jitter from non-per-CPU kthreads, bind
+them to a “housekeeping” CPU dedicated to such work.</p>
+<section id="references">
+<h2>References<a class="headerlink" href="#references" title="Permalink to this headline">¶</a></h2>
+<ul>
+<li><p><a class="reference internal" href="../core-api/irq/irq-affinity.html"><span class="doc">SMP IRQ affinity</span></a>:  Binding interrupts to sets of CPUs.</p></li>
+<li><p>Documentation/admin-guide/cgroup-v1:  Using cgroups to bind tasks to sets of CPUs.</p></li>
+<li><p>man taskset:  Using the taskset command to bind tasks to sets
+of CPUs.</p></li>
+<li><p>man sched_setaffinity:  Using the sched_setaffinity() system
+call to bind tasks to sets of CPUs.</p></li>
+<li><p>/sys/devices/system/cpu/cpuN/online:  Control CPU N’s hotplug state,
+writing “0” to offline and “1” to online.</p></li>
+<li><p>In order to locate kernel-generated OS jitter on CPU N:</p>
+<blockquote>
+<div><p>cd /sys/kernel/debug/tracing
+echo 1 &gt; max_graph_depth # Increase the “1” for more detail
+echo function_graph &gt; current_tracer
+# run workload
+cat per_cpu/cpuN/trace</p>
+</div></blockquote>
+</li>
+</ul>
+</section>
+<section id="kthreads">
+<h2>kthreads<a class="headerlink" href="#kthreads" title="Permalink to this headline">¶</a></h2>
+<dl class="simple">
+<dt>Name:</dt><dd><p>ehca_comp/%u</p>
+</dd>
+<dt>Purpose:</dt><dd><p>Periodically process Infiniband-related work.</p>
+</dd>
+</dl>
+<p>To reduce its OS jitter, do any of the following:</p>
+<ol class="arabic simple">
+<li><p>Don’t use eHCA Infiniband hardware, instead choosing hardware
+that does not require per-CPU kthreads.  This will prevent these
+kthreads from being created in the first place.  (This will
+work for most people, as this hardware, though important, is
+relatively old and is produced in relatively low unit volumes.)</p></li>
+<li><p>Do all eHCA-Infiniband-related work on other CPUs, including
+interrupts.</p></li>
+<li><p>Rework the eHCA driver so that its per-CPU kthreads are
+provisioned only on selected CPUs.</p></li>
+</ol>
+<dl class="simple">
+<dt>Name:</dt><dd><p>irq/%d-%s</p>
+</dd>
+<dt>Purpose:</dt><dd><p>Handle threaded interrupts.</p>
+</dd>
+</dl>
+<p>To reduce its OS jitter, do the following:</p>
+<ol class="arabic simple">
+<li><p>Use irq affinity to force the irq threads to execute on
+some other CPU.</p></li>
+</ol>
+<dl class="simple">
+<dt>Name:</dt><dd><p>kcmtpd_ctr_%d</p>
+</dd>
+<dt>Purpose:</dt><dd><p>Handle Bluetooth work.</p>
+</dd>
+</dl>
+<p>To reduce its OS jitter, do one of the following:</p>
+<ol class="arabic simple">
+<li><p>Don’t use Bluetooth, in which case these kthreads won’t be
+created in the first place.</p></li>
+<li><p>Use irq affinity to force Bluetooth-related interrupts to
+occur on some other CPU and furthermore initiate all
+Bluetooth activity on some other CPU.</p></li>
+</ol>
+<dl class="simple">
+<dt>Name:</dt><dd><p>ksoftirqd/%u</p>
+</dd>
+<dt>Purpose:</dt><dd><p>Execute softirq handlers when threaded or when under heavy load.</p>
+</dd>
+</dl>
+<p>To reduce its OS jitter, each softirq vector must be handled
+separately as follows:</p>
+<section id="timer-softirq">
+<h3>TIMER_SOFTIRQ<a class="headerlink" href="#timer-softirq" title="Permalink to this headline">¶</a></h3>
+<p>Do all of the following:</p>
+<ol class="arabic simple">
+<li><p>To the extent possible, keep the CPU out of the kernel when it
+is non-idle, for example, by avoiding system calls and by forcing
+both kernel threads and interrupts to execute elsewhere.</p></li>
+<li><p>Build with CONFIG_HOTPLUG_CPU=y.  After boot completes, force
+the CPU offline, then bring it back online.  This forces
+recurring timers to migrate elsewhere.  If you are concerned
+with multiple CPUs, force them all offline before bringing the
+first one back online.  Once you have onlined the CPUs in question,
+do not offline any other CPUs, because doing so could force the
+timer back onto one of the CPUs in question.</p></li>
+</ol>
+</section>
+<section id="net-tx-softirq-and-net-rx-softirq">
+<h3>NET_TX_SOFTIRQ and NET_RX_SOFTIRQ<a class="headerlink" href="#net-tx-softirq-and-net-rx-softirq" title="Permalink to this headline">¶</a></h3>
+<p>Do all of the following:</p>
+<ol class="arabic simple">
+<li><p>Force networking interrupts onto other CPUs.</p></li>
+<li><p>Initiate any network I/O on other CPUs.</p></li>
+<li><p>Once your application has started, prevent CPU-hotplug operations
+from being initiated from tasks that might run on the CPU to
+be de-jittered.  (It is OK to force this CPU offline and then
+bring it back online before you start your application.)</p></li>
+</ol>
+</section>
+<section id="block-softirq">
+<h3>BLOCK_SOFTIRQ<a class="headerlink" href="#block-softirq" title="Permalink to this headline">¶</a></h3>
+<p>Do all of the following:</p>
+<ol class="arabic simple">
+<li><p>Force block-device interrupts onto some other CPU.</p></li>
+<li><p>Initiate any block I/O on other CPUs.</p></li>
+<li><p>Once your application has started, prevent CPU-hotplug operations
+from being initiated from tasks that might run on the CPU to
+be de-jittered.  (It is OK to force this CPU offline and then
+bring it back online before you start your application.)</p></li>
+</ol>
+</section>
+<section id="irq-poll-softirq">
+<h3>IRQ_POLL_SOFTIRQ<a class="headerlink" href="#irq-poll-softirq" title="Permalink to this headline">¶</a></h3>
+<p>Do all of the following:</p>
+<ol class="arabic simple">
+<li><p>Force block-device interrupts onto some other CPU.</p></li>
+<li><p>Initiate any block I/O and block-I/O polling on other CPUs.</p></li>
+<li><p>Once your application has started, prevent CPU-hotplug operations
+from being initiated from tasks that might run on the CPU to
+be de-jittered.  (It is OK to force this CPU offline and then
+bring it back online before you start your application.)</p></li>
+</ol>
+</section>
+<section id="tasklet-softirq">
+<h3>TASKLET_SOFTIRQ<a class="headerlink" href="#tasklet-softirq" title="Permalink to this headline">¶</a></h3>
+<p>Do one or more of the following:</p>
+<ol class="arabic simple">
+<li><p>Avoid use of drivers that use tasklets.  (Such drivers will contain
+calls to things like tasklet_schedule().)</p></li>
+<li><p>Convert all drivers that you must use from tasklets to workqueues.</p></li>
+<li><p>Force interrupts for drivers using tasklets onto other CPUs,
+and also do I/O involving these drivers on other CPUs.</p></li>
+</ol>
+</section>
+<section id="sched-softirq">
+<h3>SCHED_SOFTIRQ<a class="headerlink" href="#sched-softirq" title="Permalink to this headline">¶</a></h3>
+<p>Do all of the following:</p>
+<ol class="arabic simple">
+<li><p>Avoid sending scheduler IPIs to the CPU to be de-jittered,
+for example, ensure that at most one runnable kthread is present
+on that CPU.  If a thread that expects to run on the de-jittered
+CPU awakens, the scheduler will send an IPI that can result in
+a subsequent SCHED_SOFTIRQ.</p></li>
+<li><p>CONFIG_NO_HZ_FULL=y and ensure that the CPU to be de-jittered
+is marked as an adaptive-ticks CPU using the “nohz_full=”
+boot parameter.  This reduces the number of scheduler-clock
+interrupts that the de-jittered CPU receives, minimizing its
+chances of being selected to do the load balancing work that
+runs in SCHED_SOFTIRQ context.</p></li>
+<li><p>To the extent possible, keep the CPU out of the kernel when it
+is non-idle, for example, by avoiding system calls and by
+forcing both kernel threads and interrupts to execute elsewhere.
+This further reduces the number of scheduler-clock interrupts
+received by the de-jittered CPU.</p></li>
+</ol>
+</section>
+<section id="hrtimer-softirq">
+<h3>HRTIMER_SOFTIRQ<a class="headerlink" href="#hrtimer-softirq" title="Permalink to this headline">¶</a></h3>
+<p>Do all of the following:</p>
+<ol class="arabic simple">
+<li><p>To the extent possible, keep the CPU out of the kernel when it
+is non-idle.  For example, avoid system calls and force both
+kernel threads and interrupts to execute elsewhere.</p></li>
+<li><p>Build with CONFIG_HOTPLUG_CPU=y.  Once boot completes, force the
+CPU offline, then bring it back online.  This forces recurring
+timers to migrate elsewhere.  If you are concerned with multiple
+CPUs, force them all offline before bringing the first one
+back online.  Once you have onlined the CPUs in question, do not
+offline any other CPUs, because doing so could force the timer
+back onto one of the CPUs in question.</p></li>
+</ol>
+</section>
+<section id="rcu-softirq">
+<h3>RCU_SOFTIRQ<a class="headerlink" href="#rcu-softirq" title="Permalink to this headline">¶</a></h3>
+<p>Do at least one of the following:</p>
+<ol class="arabic simple">
+<li><p>Offload callbacks and keep the CPU in either dyntick-idle or
+adaptive-ticks state by doing all of the following:</p>
+<ol class="loweralpha simple">
+<li><p>CONFIG_NO_HZ_FULL=y and ensure that the CPU to be
+de-jittered is marked as an adaptive-ticks CPU using the
+“nohz_full=” boot parameter.  Bind the rcuo kthreads to
+housekeeping CPUs, which can tolerate OS jitter.</p></li>
+<li><p>To the extent possible, keep the CPU out of the kernel
+when it is non-idle, for example, by avoiding system
+calls and by forcing both kernel threads and interrupts
+to execute elsewhere.</p></li>
+</ol>
+</li>
+<li><p>Enable RCU to do its processing remotely via dyntick-idle by
+doing all of the following:</p>
+<ol class="loweralpha simple">
+<li><p>Build with CONFIG_NO_HZ=y.</p></li>
+<li><p>Ensure that the CPU goes idle frequently, allowing other
+CPUs to detect that it has passed through an RCU quiescent
+state.  If the kernel is built with CONFIG_NO_HZ_FULL=y,
+userspace execution also allows other CPUs to detect that
+the CPU in question has passed through a quiescent state.</p></li>
+<li><p>To the extent possible, keep the CPU out of the kernel
+when it is non-idle, for example, by avoiding system
+calls and by forcing both kernel threads and interrupts
+to execute elsewhere.</p></li>
+</ol>
+</li>
+</ol>
+<dl class="simple">
+<dt>Name:</dt><dd><p>kworker/%u:%d%s (cpu, id, priority)</p>
+</dd>
+<dt>Purpose:</dt><dd><p>Execute workqueue requests</p>
+</dd>
+</dl>
+<p>To reduce its OS jitter, do any of the following:</p>
+<ol class="arabic">
+<li><p>Run your workload at a real-time priority, which will allow
+preempting the kworker daemons.</p></li>
+<li><p>A given workqueue can be made visible in the sysfs filesystem
+by passing the WQ_SYSFS to that workqueue’s <a class="reference internal" href="../core-api/workqueue.html#c.alloc_workqueue" title="alloc_workqueue"><code class="xref c c-func docutils literal notranslate"><span class="pre">alloc_workqueue()</span></code></a>.
+Such a workqueue can be confined to a given subset of the
+CPUs using the <code class="docutils literal notranslate"><span class="pre">/sys/devices/virtual/workqueue/*/cpumask</span></code> sysfs
+files.  The set of WQ_SYSFS workqueues can be displayed using
+“ls /sys/devices/virtual/workqueue”.  That said, the workqueues
+maintainer would like to caution people against indiscriminately
+sprinkling WQ_SYSFS across all the workqueues.  The reason for
+caution is that it is easy to add WQ_SYSFS, but because sysfs is
+part of the formal user/kernel API, it can be nearly impossible
+to remove it, even if its addition was a mistake.</p></li>
+<li><p>Do any of the following needed to avoid jitter that your
+application cannot tolerate:</p>
+<ol class="loweralpha">
+<li><p>Build your kernel with CONFIG_SLUB=y rather than
+CONFIG_SLAB=y, thus avoiding the slab allocator’s periodic
+use of each CPU’s workqueues to run its cache_reap()
+function.</p></li>
+<li><p>Avoid using oprofile, thus avoiding OS jitter from
+wq_sync_buffer().</p></li>
+<li><p>Limit your CPU frequency so that a CPU-frequency
+governor is not required, possibly enlisting the aid of
+special heatsinks or other cooling technologies.  If done
+correctly, and if you CPU architecture permits, you should
+be able to build your kernel with CONFIG_CPU_FREQ=n to
+avoid the CPU-frequency governor periodically running
+on each CPU, including cs_dbs_timer() and od_dbs_timer().</p>
+<p>WARNING:  Please check your CPU specifications to
+make sure that this is safe on your particular system.</p>
+</li>
+<li><p>As of v3.18, Christoph Lameter’s on-demand vmstat workers
+commit prevents OS jitter due to vmstat_update() on
+CONFIG_SMP=y systems.  Before v3.18, is not possible
+to entirely get rid of the OS jitter, but you can
+decrease its frequency by writing a large value to
+/proc/sys/vm/stat_interval.  The default value is HZ,
+for an interval of one second.  Of course, larger values
+will make your virtual-memory statistics update more
+slowly.  Of course, you can also run your workload at
+a real-time priority, thus preempting vmstat_update(),
+but if your workload is CPU-bound, this is a bad idea.
+However, there is an RFC patch from Christoph Lameter
+(based on an earlier one from Gilad Ben-Yossef) that
+reduces or even eliminates vmstat overhead for some
+workloads at <a class="reference external" href="https://lore.kernel.org/r/00000140e9dfd6bd-40db3d4f-c1be-434f-8132-7820f81bb586-000000&#64;email.amazonses.com">https://lore.kernel.org/r/00000140e9dfd6bd-40db3d4f-c1be-434f-8132-7820f81bb586-000000&#64;email.amazonses.com</a>.</p></li>
+<li><p>If running on high-end powerpc servers, build with
+CONFIG_PPC_RTAS_DAEMON=n.  This prevents the RTAS
+daemon from running on each CPU every second or so.
+(This will require editing Kconfig files and will defeat
+this platform’s RAS functionality.)  This avoids jitter
+due to the rtas_event_scan() function.
+WARNING:  Please check your CPU specifications to
+make sure that this is safe on your particular system.</p></li>
+<li><p>If running on Cell Processor, build your kernel with
+CBE_CPUFREQ_SPU_GOVERNOR=n to avoid OS jitter from
+spu_gov_work().
+WARNING:  Please check your CPU specifications to
+make sure that this is safe on your particular system.</p></li>
+<li><p>If running on PowerMAC, build your kernel with
+CONFIG_PMAC_RACKMETER=n to disable the CPU-meter,
+avoiding OS jitter from rackmeter_do_timer().</p></li>
+</ol>
+</li>
+</ol>
+<dl class="simple">
+<dt>Name:</dt><dd><p>rcuc/%u</p>
+</dd>
+<dt>Purpose:</dt><dd><p>Execute RCU callbacks in CONFIG_RCU_BOOST=y kernels.</p>
+</dd>
+</dl>
+<p>To reduce its OS jitter, do at least one of the following:</p>
+<ol class="arabic simple">
+<li><p>Build the kernel with CONFIG_PREEMPT=n.  This prevents these
+kthreads from being created in the first place, and also obviates
+the need for RCU priority boosting.  This approach is feasible
+for workloads that do not require high degrees of responsiveness.</p></li>
+<li><p>Build the kernel with CONFIG_RCU_BOOST=n.  This prevents these
+kthreads from being created in the first place.  This approach
+is feasible only if your workload never requires RCU priority
+boosting, for example, if you ensure frequent idle time on all
+CPUs that might execute within the kernel.</p></li>
+<li><p>Build with CONFIG_RCU_NOCB_CPU=y and boot with the rcu_nocbs=
+boot parameter offloading RCU callbacks from all CPUs susceptible
+to OS jitter.  This approach prevents the rcuc/%u kthreads from
+having any work to do, so that they are never awakened.</p></li>
+<li><p>Ensure that the CPU never enters the kernel, and, in particular,
+avoid initiating any CPU hotplug operations on this CPU.  This is
+another way of preventing any callbacks from being queued on the
+CPU, again preventing the rcuc/%u kthreads from having any work
+to do.</p></li>
+</ol>
+<dl class="simple">
+<dt>Name:</dt><dd><p>rcuop/%d and rcuos/%d</p>
+</dd>
+<dt>Purpose:</dt><dd><p>Offload RCU callbacks from the corresponding CPU.</p>
+</dd>
+</dl>
+<p>To reduce its OS jitter, do at least one of the following:</p>
+<ol class="arabic simple">
+<li><p>Use affinity, cgroups, or other mechanism to force these kthreads
+to execute on some other CPU.</p></li>
+<li><p>Build with CONFIG_RCU_NOCB_CPU=n, which will prevent these
+kthreads from being created in the first place.  However, please
+note that this will not eliminate OS jitter, but will instead
+shift it to RCU_SOFTIRQ.</p></li>
+</ol>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Reducing OS jitter due to per-cpu kthreads</a><ul>
+<li><a class="reference internal" href="#references">References</a></li>
+<li><a class="reference internal" href="#kthreads">kthreads</a><ul>
+<li><a class="reference internal" href="#timer-softirq">TIMER_SOFTIRQ</a></li>
+<li><a class="reference internal" href="#net-tx-softirq-and-net-rx-softirq">NET_TX_SOFTIRQ and NET_RX_SOFTIRQ</a></li>
+<li><a class="reference internal" href="#block-softirq">BLOCK_SOFTIRQ</a></li>
+<li><a class="reference internal" href="#irq-poll-softirq">IRQ_POLL_SOFTIRQ</a></li>
+<li><a class="reference internal" href="#tasklet-softirq">TASKLET_SOFTIRQ</a></li>
+<li><a class="reference internal" href="#sched-softirq">SCHED_SOFTIRQ</a></li>
+<li><a class="reference internal" href="#hrtimer-softirq">HRTIMER_SOFTIRQ</a></li>
+<li><a class="reference internal" href="#rcu-softirq">RCU_SOFTIRQ</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/admin-guide/kernel-per-CPU-kthreads.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/admin-guide/kernel-per-CPU-kthreads.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

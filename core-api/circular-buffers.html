@@ -1,0 +1,324 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Circular Buffers &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Red-black Trees (rbtree) in Linux" href="rbtree.html" />
+    <link rel="prev" title="ID Allocation" href="idr.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="circular-buffers">
+<h1>Circular Buffers<a class="headerlink" href="#circular-buffers" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">Author</dt>
+<dd class="field-odd"><p>David Howells &lt;<a class="reference external" href="mailto:dhowells&#37;&#52;&#48;redhat&#46;com">dhowells<span>&#64;</span>redhat<span>&#46;</span>com</a>&gt;</p>
+</dd>
+<dt class="field-even">Author</dt>
+<dd class="field-even"><p>Paul E. McKenney &lt;<a class="reference external" href="mailto:paulmck&#37;&#52;&#48;linux&#46;ibm&#46;com">paulmck<span>&#64;</span>linux<span>&#46;</span>ibm<span>&#46;</span>com</a>&gt;</p>
+</dd>
+</dl>
+<p>Linux provides a number of features that can be used to implement circular
+buffering.  There are two sets of such features:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>Convenience functions for determining information about power-of-2 sized
+buffers.</p></li>
+<li><p>Memory barriers for when the producer and the consumer of objects in the
+buffer don’t want to share a lock.</p></li>
+</ol>
+</div></blockquote>
+<p>To use these facilities, as discussed below, there needs to be just one
+producer and just one consumer.  It is possible to handle multiple producers by
+serialising them, and to handle multiple consumers by serialising them.</p>
+<section id="what-is-a-circular-buffer">
+<h2>What is a circular buffer?<a class="headerlink" href="#what-is-a-circular-buffer" title="Permalink to this headline">¶</a></h2>
+<p>First of all, what is a circular buffer?  A circular buffer is a buffer of
+fixed, finite size into which there are two indices:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>A ‘head’ index - the point at which the producer inserts items into the
+buffer.</p></li>
+<li><p>A ‘tail’ index - the point at which the consumer finds the next item in
+the buffer.</p></li>
+</ol>
+</div></blockquote>
+<p>Typically when the tail pointer is equal to the head pointer, the buffer is
+empty; and the buffer is full when the head pointer is one less than the tail
+pointer.</p>
+<p>The head index is incremented when items are added, and the tail index when
+items are removed.  The tail index should never jump the head index, and both
+indices should be wrapped to 0 when they reach the end of the buffer, thus
+allowing an infinite amount of data to flow through the buffer.</p>
+<p>Typically, items will all be of the same unit size, but this isn’t strictly
+required to use the techniques below.  The indices can be increased by more
+than 1 if multiple items or variable-sized items are to be included in the
+buffer, provided that neither index overtakes the other.  The implementer must
+be careful, however, as a region more than one unit in size may wrap the end of
+the buffer and be broken into two segments.</p>
+</section>
+<section id="measuring-power-of-2-buffers">
+<h2>Measuring power-of-2 buffers<a class="headerlink" href="#measuring-power-of-2-buffers" title="Permalink to this headline">¶</a></h2>
+<p>Calculation of the occupancy or the remaining capacity of an arbitrarily sized
+circular buffer would normally be a slow operation, requiring the use of a
+modulus (divide) instruction.  However, if the buffer is of a power-of-2 size,
+then a much quicker bitwise-AND instruction can be used instead.</p>
+<p>Linux provides a set of macros for handling power-of-2 circular buffers.  These
+can be made use of by:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#include &lt;linux/circ_buf.h&gt;
+</pre></div>
+</div>
+<p>The macros are:</p>
+<blockquote>
+<div><ol class="arabic">
+<li><p>Measure the remaining capacity of a buffer:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>CIRC_SPACE(head_index, tail_index, buffer_size);
+</pre></div>
+</div>
+<p>This returns the amount of space left in the buffer[1] into which items
+can be inserted.</p>
+</li>
+<li><p>Measure the maximum consecutive immediate space in a buffer:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>CIRC_SPACE_TO_END(head_index, tail_index, buffer_size);
+</pre></div>
+</div>
+<p>This returns the amount of consecutive space left in the buffer[1] into
+which items can be immediately inserted without having to wrap back to the
+beginning of the buffer.</p>
+</li>
+<li><p>Measure the occupancy of a buffer:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>CIRC_CNT(head_index, tail_index, buffer_size);
+</pre></div>
+</div>
+<p>This returns the number of items currently occupying a buffer[2].</p>
+</li>
+<li><p>Measure the non-wrapping occupancy of a buffer:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>CIRC_CNT_TO_END(head_index, tail_index, buffer_size);
+</pre></div>
+</div>
+<p>This returns the number of consecutive items[2] that can be extracted from
+the buffer without having to wrap back to the beginning of the buffer.</p>
+</li>
+</ol>
+</div></blockquote>
+<p>Each of these macros will nominally return a value between 0 and buffer_size-1,
+however:</p>
+<blockquote>
+<div><ol class="arabic">
+<li><p>CIRC_SPACE*() are intended to be used in the producer.  To the producer
+they will return a lower bound as the producer controls the head index,
+but the consumer may still be depleting the buffer on another CPU and
+moving the tail index.</p>
+<p>To the consumer it will show an upper bound as the producer may be busy
+depleting the space.</p>
+</li>
+<li><p>CIRC_CNT*() are intended to be used in the consumer.  To the consumer they
+will return a lower bound as the consumer controls the tail index, but the
+producer may still be filling the buffer on another CPU and moving the
+head index.</p>
+<p>To the producer it will show an upper bound as the consumer may be busy
+emptying the buffer.</p>
+</li>
+<li><p>To a third party, the order in which the writes to the indices by the
+producer and consumer become visible cannot be guaranteed as they are
+independent and may be made on different CPUs - so the result in such a
+situation will merely be a guess, and may even be negative.</p></li>
+</ol>
+</div></blockquote>
+</section>
+<section id="using-memory-barriers-with-circular-buffers">
+<h2>Using memory barriers with circular buffers<a class="headerlink" href="#using-memory-barriers-with-circular-buffers" title="Permalink to this headline">¶</a></h2>
+<p>By using memory barriers in conjunction with circular buffers, you can avoid
+the need to:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>use a single lock to govern access to both ends of the buffer, thus
+allowing the buffer to be filled and emptied at the same time; and</p></li>
+<li><p>use atomic counter operations.</p></li>
+</ol>
+</div></blockquote>
+<p>There are two sides to this: the producer that fills the buffer, and the
+consumer that empties it.  Only one thing should be filling a buffer at any one
+time, and only one thing should be emptying a buffer at any one time, but the
+two sides can operate simultaneously.</p>
+<section id="the-producer">
+<h3>The producer<a class="headerlink" href="#the-producer" title="Permalink to this headline">¶</a></h3>
+<p>The producer will look something like this:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>spin_lock(&amp;producer_lock);
+
+unsigned long head = buffer-&gt;head;
+/* The spin_unlock() and next spin_lock() provide needed ordering. */
+unsigned long tail = READ_ONCE(buffer-&gt;tail);
+
+if (CIRC_SPACE(head, tail, buffer-&gt;size) &gt;= 1) {
+        /* insert one item into the buffer */
+        struct item *item = buffer[head];
+
+        produce_item(item);
+
+        smp_store_release(buffer-&gt;head,
+                          (head + 1) &amp; (buffer-&gt;size - 1));
+
+        /* wake_up() will make sure that the head is committed before
+         * waking anyone up */
+        wake_up(consumer);
+}
+
+spin_unlock(&amp;producer_lock);
+</pre></div>
+</div>
+<p>This will instruct the CPU that the contents of the new item must be written
+before the head index makes it available to the consumer and then instructs the
+CPU that the revised head index must be written before the consumer is woken.</p>
+<p>Note that wake_up() does not guarantee any sort of barrier unless something
+is actually awakened.  We therefore cannot rely on it for ordering.  However,
+there is always one element of the array left empty.  Therefore, the
+producer must produce two elements before it could possibly corrupt the
+element currently being read by the consumer.  Therefore, the unlock-lock
+pair between consecutive invocations of the consumer provides the necessary
+ordering between the read of the index indicating that the consumer has
+vacated a given element and the write by the producer to that same element.</p>
+</section>
+<section id="the-consumer">
+<h3>The Consumer<a class="headerlink" href="#the-consumer" title="Permalink to this headline">¶</a></h3>
+<p>The consumer will look something like this:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>spin_lock(&amp;consumer_lock);
+
+/* Read index before reading contents at that index. */
+unsigned long head = smp_load_acquire(buffer-&gt;head);
+unsigned long tail = buffer-&gt;tail;
+
+if (CIRC_CNT(head, tail, buffer-&gt;size) &gt;= 1) {
+
+        /* extract one item from the buffer */
+        struct item *item = buffer[tail];
+
+        consume_item(item);
+
+        /* Finish reading descriptor before incrementing tail. */
+        smp_store_release(buffer-&gt;tail,
+                          (tail + 1) &amp; (buffer-&gt;size - 1));
+}
+
+spin_unlock(&amp;consumer_lock);
+</pre></div>
+</div>
+<p>This will instruct the CPU to make sure the index is up to date before reading
+the new item, and then it shall make sure the CPU has finished reading the item
+before it writes the new tail pointer, which will erase the item.</p>
+<p>Note the use of READ_ONCE() and smp_load_acquire() to read the
+opposition index.  This prevents the compiler from discarding and
+reloading its cached value.  This isn’t strictly needed if you can
+be sure that the opposition index will _only_ be used the once.
+The smp_load_acquire() additionally forces the CPU to order against
+subsequent memory references.  Similarly, smp_store_release() is used
+in both algorithms to write the thread’s index.  This documents the
+fact that we are writing to something that can be read concurrently,
+prevents the compiler from tearing the store, and enforces ordering
+against previous accesses.</p>
+</section>
+</section>
+<section id="further-reading">
+<h2>Further reading<a class="headerlink" href="#further-reading" title="Permalink to this headline">¶</a></h2>
+<p>See also Documentation/memory-barriers.txt for a description of Linux’s memory
+barrier facilities.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Circular Buffers</a><ul>
+<li><a class="reference internal" href="#what-is-a-circular-buffer">What is a circular buffer?</a></li>
+<li><a class="reference internal" href="#measuring-power-of-2-buffers">Measuring power-of-2 buffers</a></li>
+<li><a class="reference internal" href="#using-memory-barriers-with-circular-buffers">Using memory barriers with circular buffers</a><ul>
+<li><a class="reference internal" href="#the-producer">The producer</a></li>
+<li><a class="reference internal" href="#the-consumer">The Consumer</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#further-reading">Further reading</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/core-api/circular-buffers.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/core-api/circular-buffers.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

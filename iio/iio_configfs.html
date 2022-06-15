@@ -1,0 +1,202 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Industrial IIO configfs support &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Cirrus Logic EP93xx ADC driver" href="ep93xx_adc.html" />
+    <link rel="prev" title="Industrial I/O" href="index.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="industrial-iio-configfs-support">
+<h1>Industrial IIO configfs support<a class="headerlink" href="#industrial-iio-configfs-support" title="Permalink to this headline">¶</a></h1>
+<section id="overview">
+<h2>1. Overview<a class="headerlink" href="#overview" title="Permalink to this headline">¶</a></h2>
+<p>Configfs is a filesystem-based manager of kernel objects. IIO uses some
+objects that could be easily configured using configfs (e.g.: devices,
+triggers).</p>
+<p>See <a class="reference internal" href="../filesystems/configfs.html"><span class="doc">Configfs - Userspace-driven Kernel Object Configuration</span></a> for more information
+about how configfs works.</p>
+</section>
+<section id="usage">
+<h2>2. Usage<a class="headerlink" href="#usage" title="Permalink to this headline">¶</a></h2>
+<p>In order to use configfs support in IIO we need to select it at compile
+time via CONFIG_IIO_CONFIGFS config option.</p>
+<p>Then, mount the configfs filesystem (usually under /config directory):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ mkdir /config
+$ mount -t configfs none /config
+</pre></div>
+</div>
+<p>At this point, all default IIO groups will be created and can be accessed
+under /config/iio. Next chapters will describe available IIO configuration
+objects.</p>
+</section>
+<section id="software-triggers">
+<h2>3. Software triggers<a class="headerlink" href="#software-triggers" title="Permalink to this headline">¶</a></h2>
+<p>One of the IIO default configfs groups is the “triggers” group. It is
+automagically accessible when the configfs is mounted and can be found
+under /config/iio/triggers.</p>
+<p>IIO software triggers implementation offers support for creating multiple
+trigger types. A new trigger type is usually implemented as a separate
+kernel module following the interface in include/linux/iio/sw_trigger.h:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/*
+ * drivers/iio/trigger/iio-trig-sample.c
+ * sample kernel module implementing a new trigger type
+ */
+#include &lt;linux/iio/sw_trigger.h&gt;
+
+
+static struct iio_sw_trigger *iio_trig_sample_probe(const char *name)
+{
+      /*
+       * This allocates and registers an IIO trigger plus other
+       * trigger type specific initialization.
+       */
+}
+
+static int iio_trig_sample_remove(struct iio_sw_trigger *swt)
+{
+      /*
+       * This undoes the actions in iio_trig_sample_probe
+       */
+}
+
+static const struct iio_sw_trigger_ops iio_trig_sample_ops = {
+      .probe          = iio_trig_sample_probe,
+      .remove         = iio_trig_sample_remove,
+};
+
+static struct iio_sw_trigger_type iio_trig_sample = {
+      .name = &quot;trig-sample&quot;,
+      .owner = THIS_MODULE,
+      .ops = &amp;iio_trig_sample_ops,
+};
+
+module_iio_sw_trigger_driver(iio_trig_sample);
+</pre></div>
+</div>
+<p>Each trigger type has its own directory under /config/iio/triggers. Loading
+iio-trig-sample module will create ‘trig-sample’ trigger type directory
+/config/iio/triggers/trig-sample.</p>
+<p>We support the following interrupt sources (trigger types):</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>hrtimer, uses high resolution timers as interrupt source</p></li>
+</ul>
+</div></blockquote>
+<section id="hrtimer-triggers-creation-and-destruction">
+<h3>3.1 Hrtimer triggers creation and destruction<a class="headerlink" href="#hrtimer-triggers-creation-and-destruction" title="Permalink to this headline">¶</a></h3>
+<p>Loading iio-trig-hrtimer module will register hrtimer trigger types allowing
+users to create hrtimer triggers under /config/iio/triggers/hrtimer.</p>
+<p>e.g:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ mkdir /config/iio/triggers/hrtimer/instance1
+$ rmdir /config/iio/triggers/hrtimer/instance1
+</pre></div>
+</div>
+<p>Each trigger can have one or more attributes specific to the trigger type.</p>
+</section>
+<section id="hrtimer-trigger-types-attributes">
+<h3>3.2 “hrtimer” trigger types attributes<a class="headerlink" href="#hrtimer-trigger-types-attributes" title="Permalink to this headline">¶</a></h3>
+<p>“hrtimer” trigger type doesn’t have any configurable attribute from /config dir.
+It does introduce the sampling_frequency attribute to trigger directory.
+That attribute sets the polling frequency in Hz, with mHz precision.</p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Industrial IIO configfs support</a><ul>
+<li><a class="reference internal" href="#overview">1. Overview</a></li>
+<li><a class="reference internal" href="#usage">2. Usage</a></li>
+<li><a class="reference internal" href="#software-triggers">3. Software triggers</a><ul>
+<li><a class="reference internal" href="#hrtimer-triggers-creation-and-destruction">3.1 Hrtimer triggers creation and destruction</a></li>
+<li><a class="reference internal" href="#hrtimer-trigger-types-attributes">3.2 “hrtimer” trigger types attributes</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/iio/iio_configfs.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/iio/iio_configfs.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

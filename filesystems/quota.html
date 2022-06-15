@@ -1,0 +1,200 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Quota subsystem &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="The seq_file Interface" href="seq_file.html" />
+    <link rel="prev" title="Filesystem Mount API" href="mount_api.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="quota-subsystem">
+<h1>Quota subsystem<a class="headerlink" href="#quota-subsystem" title="Permalink to this headline">¶</a></h1>
+<p>Quota subsystem allows system administrator to set limits on used space and
+number of used inodes (inode is a filesystem structure which is associated with
+each file or directory) for users and/or groups. For both used space and number
+of used inodes there are actually two limits. The first one is called softlimit
+and the second one hardlimit.  A user can never exceed a hardlimit for any
+resource (unless he has CAP_SYS_RESOURCE capability). User is allowed to exceed
+softlimit but only for limited period of time. This period is called “grace
+period” or “grace time”. When grace time is over, user is not able to allocate
+more space/inodes until he frees enough of them to get below softlimit.</p>
+<p>Quota limits (and amount of grace time) are set independently for each
+filesystem.</p>
+<p>For more details about quota design, see the documentation in quota-tools package
+(<a class="reference external" href="https://sourceforge.net/projects/linuxquota">https://sourceforge.net/projects/linuxquota</a>).</p>
+<section id="quota-netlink-interface">
+<h2>Quota netlink interface<a class="headerlink" href="#quota-netlink-interface" title="Permalink to this headline">¶</a></h2>
+<p>When user exceeds a softlimit, runs out of grace time or reaches hardlimit,
+quota subsystem traditionally printed a message to the controlling terminal of
+the process which caused the excess. This method has the disadvantage that
+when user is using a graphical desktop he usually cannot see the message.
+Thus quota netlink interface has been designed to pass information about
+the above events to userspace. There they can be captured by an application
+and processed accordingly.</p>
+<p>The interface uses generic netlink framework (see
+<a class="reference external" href="https://lwn.net/Articles/208755/">https://lwn.net/Articles/208755/</a> and <a class="reference external" href="http://www.infradead.org/~tgr/libnl/">http://www.infradead.org/~tgr/libnl/</a> for
+more details about this layer). The name of the quota generic netlink interface
+is “VFS_DQUOT”. Definitions of constants below are in &lt;linux/quota.h&gt;.  Since
+the quota netlink protocol is not namespace aware, quota netlink messages are
+sent only in initial network namespace.</p>
+<p>Currently, the interface supports only one message type QUOTA_NL_C_WARNING.
+This command is used to send a notification about any of the above mentioned
+events. Each message has six attributes. These are (type of the argument is
+in parentheses):</p>
+<blockquote>
+<div><dl>
+<dt>QUOTA_NL_A_QTYPE (u32)</dt><dd><ul class="simple">
+<li><p>type of quota being exceeded (one of USRQUOTA, GRPQUOTA)</p></li>
+</ul>
+</dd>
+<dt>QUOTA_NL_A_EXCESS_ID (u64)</dt><dd><ul class="simple">
+<li><p>UID/GID (depends on quota type) of user / group whose limit
+is being exceeded.</p></li>
+</ul>
+</dd>
+<dt>QUOTA_NL_A_CAUSED_ID (u64)</dt><dd><ul class="simple">
+<li><p>UID of a user who caused the event</p></li>
+</ul>
+</dd>
+<dt>QUOTA_NL_A_WARNING (u32)</dt><dd><ul>
+<li><p>what kind of limit is exceeded:</p>
+<blockquote>
+<div><dl class="simple">
+<dt>QUOTA_NL_IHARDWARN</dt><dd><p>inode hardlimit</p>
+</dd>
+<dt>QUOTA_NL_ISOFTLONGWARN</dt><dd><p>inode softlimit is exceeded longer
+than given grace period</p>
+</dd>
+<dt>QUOTA_NL_ISOFTWARN</dt><dd><p>inode softlimit</p>
+</dd>
+<dt>QUOTA_NL_BHARDWARN</dt><dd><p>space (block) hardlimit</p>
+</dd>
+<dt>QUOTA_NL_BSOFTLONGWARN</dt><dd><p>space (block) softlimit is exceeded
+longer than given grace period.</p>
+</dd>
+<dt>QUOTA_NL_BSOFTWARN</dt><dd><p>space (block) softlimit</p>
+</dd>
+</dl>
+</div></blockquote>
+</li>
+<li><p>four warnings are also defined for the event when user stops
+exceeding some limit:</p>
+<blockquote>
+<div><dl class="simple">
+<dt>QUOTA_NL_IHARDBELOW</dt><dd><p>inode hardlimit</p>
+</dd>
+<dt>QUOTA_NL_ISOFTBELOW</dt><dd><p>inode softlimit</p>
+</dd>
+<dt>QUOTA_NL_BHARDBELOW</dt><dd><p>space (block) hardlimit</p>
+</dd>
+<dt>QUOTA_NL_BSOFTBELOW</dt><dd><p>space (block) softlimit</p>
+</dd>
+</dl>
+</div></blockquote>
+</li>
+</ul>
+</dd>
+<dt>QUOTA_NL_A_DEV_MAJOR (u32)</dt><dd><ul class="simple">
+<li><p>major number of a device with the affected filesystem</p></li>
+</ul>
+</dd>
+<dt>QUOTA_NL_A_DEV_MINOR (u32)</dt><dd><ul class="simple">
+<li><p>minor number of a device with the affected filesystem</p></li>
+</ul>
+</dd>
+</dl>
+</div></blockquote>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Quota subsystem</a><ul>
+<li><a class="reference internal" href="#quota-netlink-interface">Quota netlink interface</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/filesystems/quota.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/filesystems/quota.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

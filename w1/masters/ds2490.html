@@ -1,0 +1,170 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Kernel driver ds2490 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Kernel driver mxc_w1" href="mxc-w1.html" />
+    <link rel="prev" title="Kernel driver ds2482" href="ds2482.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="kernel-driver-ds2490">
+<h1>Kernel driver ds2490<a class="headerlink" href="#kernel-driver-ds2490" title="Permalink to this headline">¶</a></h1>
+<p>Supported chips:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Maxim DS2490 based</p></li>
+</ul>
+</div></blockquote>
+<p>Author: Evgeniy Polyakov &lt;<a class="reference external" href="mailto:johnpol&#37;&#52;&#48;2ka&#46;mipt&#46;ru">johnpol<span>&#64;</span>2ka<span>&#46;</span>mipt<span>&#46;</span>ru</a>&gt;</p>
+<section id="description">
+<h2>Description<a class="headerlink" href="#description" title="Permalink to this headline">¶</a></h2>
+<p>The Maxim/Dallas Semiconductor DS2490 is a chip
+which allows to build USB &lt;-&gt; W1 bridges.</p>
+<p>DS9490(R) is a USB &lt;-&gt; W1 bus master device
+which has 0x81 family ID integrated chip and DS2490
+low-level operational chip.</p>
+<p>Notes and limitations.</p>
+<ul class="simple">
+<li><p>The weak pullup current is a minimum of 0.9mA and maximum of 6.0mA.</p></li>
+<li><p>The 5V strong pullup is supported with a minimum of 5.9mA and a
+maximum of 30.4 mA.  (From DS2490.pdf)</p></li>
+<li><p>The hardware will detect when devices are attached to the bus on the
+next bus (reset?) operation, however only a message is printed as
+the core w1 code doesn’t make use of the information.  Connecting
+one device tends to give multiple new device notifications.</p></li>
+<li><p>The number of USB bus transactions could be reduced if w1_reset_send
+was added to the API.  The name is just a suggestion.  It would take
+a write buffer and a read buffer (along with sizes) as arguments.
+The ds2490 block I/O command supports reset, write buffer, read
+buffer, and strong pullup all in one command, instead of the current
+1 reset bus, 2 write the match rom command and slave rom id, 3 block
+write and read data.  The write buffer needs to have the match rom
+command and slave rom id prepended to the front of the requested
+write buffer, both of which are known to the driver.</p></li>
+<li><p>The hardware supports normal, flexible, and overdrive bus
+communication speeds, but only the normal is supported.</p></li>
+<li><p>The registered w1_bus_master functions don’t define error
+conditions.  If a bus search is in progress and the ds2490 is
+removed it can produce a good amount of error output before the bus
+search finishes.</p></li>
+<li><p>The hardware supports detecting some error conditions, such as
+short, alarming presence on reset, and no presence on reset, but the
+driver doesn’t query those values.</p></li>
+<li><p>The ds2490 specification doesn’t cover short bulk in reads in
+detail, but my observation is if fewer bytes are requested than are
+available, the bulk read will return an error and the hardware will
+clear the entire bulk in buffer.  It would be possible to read the
+maximum buffer size to not run into this error condition, only extra
+bytes in the buffer is a logic error in the driver.  The code should
+match reads and writes as well as data sizes.  Reads and
+writes are serialized and the status verifies that the chip is idle
+(and data is available) before the read is executed, so it should
+not happen.</p></li>
+<li><p>Running x86_64 2.6.24 UHCI under qemu 0.9.0 under x86_64 2.6.22-rc6
+with a OHCI controller, ds2490 running in the guest would operate
+normally the first time the module was loaded after qemu attached
+the ds2490 hardware, but if the module was unloaded, then reloaded
+most of the time one of the bulk out or in, and usually the bulk in
+would fail.  qemu sets a 50ms timeout and the bulk in would timeout
+even when the status shows data available.  A bulk out write would
+show a successful completion, but the ds2490 status register would
+show 0 bytes written.  Detaching qemu from the ds2490 hardware and
+reattaching would clear the problem.  usbmon output in the guest and
+host did not explain the problem.  My guess is a bug in either qemu
+or the host OS and more likely the host OS.</p></li>
+</ul>
+<p>03-06-2008 David Fries &lt;<a class="reference external" href="mailto:David&#37;&#52;&#48;Fries&#46;net">David<span>&#64;</span>Fries<span>&#46;</span>net</a>&gt;</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Kernel driver ds2490</a><ul>
+<li><a class="reference internal" href="#description">Description</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/w1/masters/ds2490.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/w1/masters/ds2490.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

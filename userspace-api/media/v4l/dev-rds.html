@@ -1,0 +1,284 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>4.9. RDS Interface &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="4.10. Software Defined Radio Interface (SDR)" href="dev-sdr.html" />
+    <link rel="prev" title="4.8. Radio Interface" href="dev-radio.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="rds-interface">
+<span id="rds"></span><h1><span class="section-number">4.9. </span>RDS Interface<a class="headerlink" href="#rds-interface" title="Permalink to this headline">¶</a></h1>
+<p>The Radio Data System transmits supplementary information in binary
+format, for example the station name or travel information, on an
+inaudible audio subcarrier of a radio program. This interface is aimed
+at devices capable of receiving and/or transmitting RDS information.</p>
+<p>For more information see the core RDS standard <a class="reference internal" href="biblio.html#iec62106"><span class="std std-ref">IEC 62106</span></a> and the
+RBDS standard <a class="reference internal" href="biblio.html#nrsc4"><span class="std std-ref">NRSC-4-B</span></a>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Note that the RBDS standard as is used in the USA is almost
+identical to the RDS standard. Any RDS decoder/encoder can also handle
+RBDS. Only some of the fields have slightly different meanings. See the
+RBDS standard for more information.</p>
+</div>
+<p>The RBDS standard also specifies support for MMBS (Modified Mobile
+Search). This is a proprietary format which seems to be discontinued.
+The RDS interface does not support this format. Should support for MMBS
+(or the so-called ‘E blocks’ in general) be needed, then please contact
+the linux-media mailing list:
+<a class="reference external" href="https://linuxtv.org/lists.php">https://linuxtv.org/lists.php</a>.</p>
+<section id="querying-capabilities">
+<h2><span class="section-number">4.9.1. </span>Querying Capabilities<a class="headerlink" href="#querying-capabilities" title="Permalink to this headline">¶</a></h2>
+<p>Devices supporting the RDS capturing API set the
+<code class="docutils literal notranslate"><span class="pre">V4L2_CAP_RDS_CAPTURE</span></code> flag in the <code class="docutils literal notranslate"><span class="pre">capabilities</span></code> field of struct
+<code class="xref c c-type docutils literal notranslate"><span class="pre">v4l2_capability</span></code> returned by the
+<a class="reference internal" href="vidioc-querycap.html#vidioc-querycap"><span class="std std-ref">ioctl VIDIOC_QUERYCAP</span></a> ioctl. Any tuner that
+supports RDS will set the <code class="docutils literal notranslate"><span class="pre">V4L2_TUNER_CAP_RDS</span></code> flag in the
+<code class="docutils literal notranslate"><span class="pre">capability</span></code> field of struct <code class="xref c c-type docutils literal notranslate"><span class="pre">v4l2_tuner</span></code>. If the
+driver only passes RDS blocks without interpreting the data the
+<code class="docutils literal notranslate"><span class="pre">V4L2_TUNER_CAP_RDS_BLOCK_IO</span></code> flag has to be set, see
+<a class="reference internal" href="#reading-rds-data"><span class="std std-ref">Reading RDS data</span></a>. For future use the flag
+<code class="docutils literal notranslate"><span class="pre">V4L2_TUNER_CAP_RDS_CONTROLS</span></code> has also been defined. However, a driver
+for a radio tuner with this capability does not yet exist, so if you are
+planning to write such a driver you should discuss this on the
+linux-media mailing list:
+<a class="reference external" href="https://linuxtv.org/lists.php">https://linuxtv.org/lists.php</a>.</p>
+<p>Whether an RDS signal is present can be detected by looking at the
+<code class="docutils literal notranslate"><span class="pre">rxsubchans</span></code> field of struct <code class="xref c c-type docutils literal notranslate"><span class="pre">v4l2_tuner</span></code>: the
+<code class="docutils literal notranslate"><span class="pre">V4L2_TUNER_SUB_RDS</span></code> will be set if RDS data was detected.</p>
+<p>Devices supporting the RDS output API set the <code class="docutils literal notranslate"><span class="pre">V4L2_CAP_RDS_OUTPUT</span></code>
+flag in the <code class="docutils literal notranslate"><span class="pre">capabilities</span></code> field of struct
+<code class="xref c c-type docutils literal notranslate"><span class="pre">v4l2_capability</span></code> returned by the
+<a class="reference internal" href="vidioc-querycap.html#vidioc-querycap"><span class="std std-ref">ioctl VIDIOC_QUERYCAP</span></a> ioctl. Any modulator that
+supports RDS will set the <code class="docutils literal notranslate"><span class="pre">V4L2_TUNER_CAP_RDS</span></code> flag in the
+<code class="docutils literal notranslate"><span class="pre">capability</span></code> field of struct
+<code class="xref c c-type docutils literal notranslate"><span class="pre">v4l2_modulator</span></code>. In order to enable the RDS
+transmission one must set the <code class="docutils literal notranslate"><span class="pre">V4L2_TUNER_SUB_RDS</span></code> bit in the
+<code class="docutils literal notranslate"><span class="pre">txsubchans</span></code> field of struct
+<code class="xref c c-type docutils literal notranslate"><span class="pre">v4l2_modulator</span></code>. If the driver only passes RDS
+blocks without interpreting the data the <code class="docutils literal notranslate"><span class="pre">V4L2_TUNER_CAP_RDS_BLOCK_IO</span></code>
+flag has to be set. If the tuner is capable of handling RDS entities
+like program identification codes and radio text, the flag
+<code class="docutils literal notranslate"><span class="pre">V4L2_TUNER_CAP_RDS_CONTROLS</span></code> should be set, see
+<a class="reference internal" href="#writing-rds-data"><span class="std std-ref">Writing RDS data</span></a> and
+<a class="reference internal" href="ext-ctrls-fm-tx.html#fm-tx-controls"><span class="std std-ref">FM Transmitter Control Reference</span></a>.</p>
+</section>
+<section id="reading-rds-data">
+<span id="id1"></span><h2><span class="section-number">4.9.2. </span>Reading RDS data<a class="headerlink" href="#reading-rds-data" title="Permalink to this headline">¶</a></h2>
+<p>RDS data can be read from the radio device with the
+<code class="xref c c-func docutils literal notranslate"><span class="pre">read()</span></code> function. The data is packed in groups of
+three bytes.</p>
+</section>
+<section id="writing-rds-data">
+<span id="id2"></span><h2><span class="section-number">4.9.3. </span>Writing RDS data<a class="headerlink" href="#writing-rds-data" title="Permalink to this headline">¶</a></h2>
+<p>RDS data can be written to the radio device with the
+<code class="xref c c-func docutils literal notranslate"><span class="pre">write()</span></code> function. The data is packed in groups of
+three bytes, as follows:</p>
+</section>
+<section id="rds-datastructures">
+<h2><span class="section-number">4.9.4. </span>RDS datastructures<a class="headerlink" href="#rds-datastructures" title="Permalink to this headline">¶</a></h2>
+<dl class="type">
+<dt id="c.V4L.v4l2_rds_data">
+<code class="sig-name descname">v4l2_rds_data</code><a class="headerlink" href="#c.V4L.v4l2_rds_data" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<table class="docutils align-default" id="id3">
+<caption><span class="caption-text">struct v4l2_rds_data</span><a class="headerlink" href="#id3" title="Permalink to this table">¶</a></caption>
+<colgroup>
+<col style="width: 14%" />
+<col style="width: 14%" />
+<col style="width: 71%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>__u8</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">lsb</span></code></p></td>
+<td><p>Least Significant Byte of RDS Block</p></td>
+</tr>
+<tr class="row-even"><td><p>__u8</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">msb</span></code></p></td>
+<td><p>Most Significant Byte of RDS Block</p></td>
+</tr>
+<tr class="row-odd"><td><p>__u8</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">block</span></code></p></td>
+<td><p>Block description</p></td>
+</tr>
+</tbody>
+</table>
+<table class="docutils align-default" id="id4">
+<caption><span class="caption-text">Block description</span><a class="headerlink" href="#id4" title="Permalink to this table">¶</a></caption>
+<colgroup>
+<col style="width: 17%" />
+<col style="width: 83%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>Bits 0-2</p></td>
+<td><p>Block (aka offset) of the received data.</p></td>
+</tr>
+<tr class="row-even"><td><p>Bits 3-5</p></td>
+<td><p>Deprecated. Currently identical to bits 0-2. Do not use these
+bits.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Bit 6</p></td>
+<td><p>Corrected bit. Indicates that an error was corrected for this data
+block.</p></td>
+</tr>
+<tr class="row-even"><td><p>Bit 7</p></td>
+<td><p>Error bit. Indicates that an uncorrectable error occurred during
+reception of this block.</p></td>
+</tr>
+</tbody>
+</table>
+<table class="docutils align-default" id="id5">
+<caption><span class="caption-text">Block defines</span><a class="headerlink" href="#id5" title="Permalink to this table">¶</a></caption>
+<colgroup>
+<col style="width: 13%" />
+<col style="width: 13%" />
+<col style="width: 13%" />
+<col style="width: 63%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>V4L2_RDS_BLOCK_MSK</p></td>
+<td></td>
+<td><p>7</p></td>
+<td><p>Mask for bits 0-2 to get the block ID.</p></td>
+</tr>
+<tr class="row-even"><td><p>V4L2_RDS_BLOCK_A</p></td>
+<td></td>
+<td><p>0</p></td>
+<td><p>Block A.</p></td>
+</tr>
+<tr class="row-odd"><td><p>V4L2_RDS_BLOCK_B</p></td>
+<td></td>
+<td><p>1</p></td>
+<td><p>Block B.</p></td>
+</tr>
+<tr class="row-even"><td><p>V4L2_RDS_BLOCK_C</p></td>
+<td></td>
+<td><p>2</p></td>
+<td><p>Block C.</p></td>
+</tr>
+<tr class="row-odd"><td><p>V4L2_RDS_BLOCK_D</p></td>
+<td></td>
+<td><p>3</p></td>
+<td><p>Block D.</p></td>
+</tr>
+<tr class="row-even"><td><p>V4L2_RDS_BLOCK_C_ALT</p></td>
+<td></td>
+<td><p>4</p></td>
+<td><p>Block C’.</p></td>
+</tr>
+<tr class="row-odd"><td><p>V4L2_RDS_BLOCK_INVALID</p></td>
+<td><p>read-only</p></td>
+<td><p>7</p></td>
+<td><p>An invalid block.</p></td>
+</tr>
+<tr class="row-even"><td><p>V4L2_RDS_BLOCK_CORRECTED</p></td>
+<td><p>read-only</p></td>
+<td><p>0x40</p></td>
+<td><p>A bit error was detected but corrected.</p></td>
+</tr>
+<tr class="row-odd"><td><p>V4L2_RDS_BLOCK_ERROR</p></td>
+<td><p>read-only</p></td>
+<td><p>0x80</p></td>
+<td><p>An uncorrectable error occurred.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">4.9. RDS Interface</a><ul>
+<li><a class="reference internal" href="#querying-capabilities">4.9.1. Querying Capabilities</a></li>
+<li><a class="reference internal" href="#reading-rds-data">4.9.2. Reading RDS data</a></li>
+<li><a class="reference internal" href="#writing-rds-data">4.9.3. Writing RDS data</a></li>
+<li><a class="reference internal" href="#rds-datastructures">4.9.4. RDS datastructures</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/userspace-api/media/v4l/dev-rds.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/userspace-api/media/v4l/dev-rds.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

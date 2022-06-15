@@ -1,0 +1,179 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Sync File API Guide &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="TTY" href="tty/index.html" />
+    <link rel="prev" title="Linux Switchtec Support" href="switchtec.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="sync-file-api-guide">
+<h1>Sync File API Guide<a class="headerlink" href="#sync-file-api-guide" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">Author</dt>
+<dd class="field-odd"><p>Gustavo Padovan &lt;gustavo at padovan dot org&gt;</p>
+</dd>
+</dl>
+<p>This document serves as a guide for device drivers writers on what the
+sync_file API is, and how drivers can support it. Sync file is the carrier of
+the fences(<a class="reference internal" href="dma-buf.html#c.dma_fence" title="dma_fence"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">dma_fence</span></code></a>) that are needed to synchronize between drivers or
+across process boundaries.</p>
+<p>The sync_file API is meant to be used to send and receive fence information
+to/from userspace. It enables userspace to do explicit fencing, where instead
+of attaching a fence to the buffer a producer driver (such as a GPU or V4L
+driver) sends the fence related to the buffer to userspace via a sync_file.</p>
+<p>The sync_file then can be sent to the consumer (DRM driver for example), that
+will not use the buffer for anything before the fence(s) signals, i.e., the
+driver that issued the fence is not using/processing the buffer anymore, so it
+signals that the buffer is ready to use. And vice-versa for the consumer -&gt;
+producer part of the cycle.</p>
+<p>Sync files allows userspace awareness on buffer sharing synchronization between
+drivers.</p>
+<p>Sync file was originally added in the Android kernel but current Linux Desktop
+can benefit a lot from it.</p>
+<section id="in-fences-and-out-fences">
+<h2>in-fences and out-fences<a class="headerlink" href="#in-fences-and-out-fences" title="Permalink to this headline">¶</a></h2>
+<p>Sync files can go either to or from userspace. When a sync_file is sent from
+the driver to userspace we call the fences it contains ‘out-fences’. They are
+related to a buffer that the driver is processing or is going to process, so
+the driver creates an out-fence to be able to notify, through
+<a class="reference internal" href="dma-buf.html#c.dma_fence_signal" title="dma_fence_signal"><code class="xref c c-func docutils literal notranslate"><span class="pre">dma_fence_signal()</span></code></a>, when it has finished using (or processing) that buffer.
+Out-fences are fences that the driver creates.</p>
+<p>On the other hand if the driver receives fence(s) through a sync_file from
+userspace we call these fence(s) ‘in-fences’. Receiving in-fences means that
+we need to wait for the fence(s) to signal before using any buffer related to
+the in-fences.</p>
+</section>
+<section id="creating-sync-files">
+<h2>Creating Sync Files<a class="headerlink" href="#creating-sync-files" title="Permalink to this headline">¶</a></h2>
+<p>When a driver needs to send an out-fence userspace it creates a sync_file.</p>
+<p>Interface:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct sync_file *sync_file_create(struct dma_fence *fence);
+</pre></div>
+</div>
+<p>The caller pass the out-fence and gets back the sync_file. That is just the
+first step, next it needs to install an fd on sync_file-&gt;file. So it gets an
+fd:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>fd = get_unused_fd_flags(O_CLOEXEC);
+</pre></div>
+</div>
+<p>and installs it on sync_file-&gt;file:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>fd_install(fd, sync_file-&gt;file);
+</pre></div>
+</div>
+<p>The sync_file fd now can be sent to userspace.</p>
+<p>If the creation process fail, or the sync_file needs to be released by any
+other reason fput(sync_file-&gt;file) should be used.</p>
+</section>
+<section id="receiving-sync-files-from-userspace">
+<h2>Receiving Sync Files from Userspace<a class="headerlink" href="#receiving-sync-files-from-userspace" title="Permalink to this headline">¶</a></h2>
+<p>When userspace needs to send an in-fence to the driver it passes file descriptor
+of the Sync File to the kernel. The kernel can then retrieve the fences
+from it.</p>
+<p>Interface:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct dma_fence *sync_file_get_fence(int fd);
+</pre></div>
+</div>
+<p>The returned reference is owned by the caller and must be disposed of
+afterwards using <a class="reference internal" href="dma-buf.html#c.dma_fence_put" title="dma_fence_put"><code class="xref c c-func docutils literal notranslate"><span class="pre">dma_fence_put()</span></code></a>. In case of error, a NULL is returned instead.</p>
+<p>References:</p>
+<ol class="arabic simple">
+<li><p><a class="reference internal" href="dma-buf.html#c.sync_file" title="sync_file"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">sync_file</span></code></a> in include/linux/sync_file.h</p></li>
+<li><p>All interfaces mentioned above defined in include/linux/sync_file.h</p></li>
+</ol>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Sync File API Guide</a><ul>
+<li><a class="reference internal" href="#in-fences-and-out-fences">in-fences and out-fences</a></li>
+<li><a class="reference internal" href="#creating-sync-files">Creating Sync Files</a></li>
+<li><a class="reference internal" href="#receiving-sync-files-from-userspace">Receiving Sync Files from Userspace</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/driver-api/sync_file.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/driver-api/sync_file.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

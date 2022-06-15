@@ -1,0 +1,311 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>ARM64 ELF hwcaps &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="RISC-V 体系结构" href="../riscv/index.html" />
+    <link rel="prev" title="Perf 事件属性" href="perf.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../arm64/elf_hwcaps.html#elf-hwcaps-index"><span class="std std-ref">Documentation/arm64/elf_hwcaps.rst</span></a></p>
+</dd>
+</dl>
+<p>Translator: Bailu Lin &lt;<a class="reference external" href="mailto:bailu&#46;lin&#37;&#52;&#48;vivo&#46;com">bailu<span>&#46;</span>lin<span>&#64;</span>vivo<span>&#46;</span>com</a>&gt;</p>
+<section id="arm64-elf-hwcaps">
+<h1>ARM64 ELF hwcaps<a class="headerlink" href="#arm64-elf-hwcaps" title="Permalink to this headline">¶</a></h1>
+<p>这篇文档描述了 arm64 ELF hwcaps 的用法和语义。</p>
+<section id="id1">
+<h2>1. 简介<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>有些硬件或软件功能仅在某些 CPU 实现上和/或在具体某个内核配置上可用，但
+对于处于 EL0 的用户空间代码没有可用的架构发现机制。内核通过在辅助向量表
+公开一组称为 hwcaps 的标志而把这些功能暴露给用户空间。</p>
+<p>用户空间软件可以通过获取辅助向量的 AT_HWCAP 或 AT_HWCAP2 条目来测试功能，
+并测试是否设置了相关标志，例如:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>bool floating_point_is_present(void)
+{
+        unsigned long hwcaps = getauxval(AT_HWCAP);
+        if (hwcaps &amp; HWCAP_FP)
+                return true;
+
+        return false;
+}
+</pre></div>
+</div>
+<p>如果软件依赖于 hwcap 描述的功能，在尝试使用该功能前则应检查相关的 hwcap
+标志以验证该功能是否存在。</p>
+<p>不能通过其他方式探查这些功能。当一个功能不可用时，尝试使用它可能导致不可
+预测的行为，并且无法保证能确切的知道该功能不可用，例如 SIGILL。</p>
+</section>
+<section id="hwcaps">
+<h2>2. Hwcaps 的说明<a class="headerlink" href="#hwcaps" title="Permalink to this headline">¶</a></h2>
+<p>大多数 hwcaps 旨在说明通过架构 ID 寄存器(处于 EL0 的用户空间代码无法访问)
+描述的功能的存在。这些 hwcap 通过 ID 寄存器字段定义，并且应根据 ARM 体系
+结构参考手册（ARM ARM）中定义的字段来解释说明。</p>
+<p>这些 hwcaps 以下面的形式描述:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>idreg.field == val 表示有某个功能。
+</pre></div>
+</div>
+<p>当 idreg.field 中有 val 时，hwcaps 表示 ARM ARM 定义的功能是有效的，但是
+并不是说要完全和 val 相等，也不是说 idreg.field 描述的其他功能就是缺失的。</p>
+<p>其他 hwcaps 可能表明无法仅由 ID 寄存器描述的功能的存在。这些 hwcaps 可能
+没有被 ID 寄存器描述，需要参考其他文档。</p>
+</section>
+<section id="at-hwcap-hwcaps">
+<h2>3. AT_HWCAP 中揭示的 hwcaps<a class="headerlink" href="#at-hwcap-hwcaps" title="Permalink to this headline">¶</a></h2>
+<dl>
+<dt>HWCAP_FP</dt><dd><p>ID_AA64PFR0_EL1.FP == 0b0000 表示有此功能。</p>
+</dd>
+<dt>HWCAP_ASIMD</dt><dd><p>ID_AA64PFR0_EL1.AdvSIMD == 0b0000 表示有此功能。</p>
+</dd>
+<dt>HWCAP_EVTSTRM</dt><dd><p>通用计时器频率配置为大约100KHz以生成事件。</p>
+</dd>
+<dt>HWCAP_AES</dt><dd><p>ID_AA64ISAR0_EL1.AES == 0b0001 表示有此功能。</p>
+</dd>
+<dt>HWCAP_PMULL</dt><dd><p>ID_AA64ISAR0_EL1.AES == 0b0010 表示有此功能。</p>
+</dd>
+<dt>HWCAP_SHA1</dt><dd><p>ID_AA64ISAR0_EL1.SHA1 == 0b0001 表示有此功能。</p>
+</dd>
+<dt>HWCAP_SHA2</dt><dd><p>ID_AA64ISAR0_EL1.SHA2 == 0b0001 表示有此功能。</p>
+</dd>
+<dt>HWCAP_CRC32</dt><dd><p>ID_AA64ISAR0_EL1.CRC32 == 0b0001 表示有此功能。</p>
+</dd>
+<dt>HWCAP_ATOMICS</dt><dd><p>ID_AA64ISAR0_EL1.Atomic == 0b0010 表示有此功能。</p>
+</dd>
+<dt>HWCAP_FPHP</dt><dd><p>ID_AA64PFR0_EL1.FP == 0b0001 表示有此功能。</p>
+</dd>
+<dt>HWCAP_ASIMDHP</dt><dd><p>ID_AA64PFR0_EL1.AdvSIMD == 0b0001 表示有此功能。</p>
+</dd>
+<dt>HWCAP_CPUID</dt><dd><p>根据 <a class="reference internal" href="../../../arm64/cpu-feature-registers.html"><span class="doc">ARM64 CPU Feature Registers</span></a> 描述，EL0 可以访问
+某些 ID 寄存器。</p>
+<p>这些 ID 寄存器可能表示功能的可用性。</p>
+</dd>
+<dt>HWCAP_ASIMDRDM</dt><dd><p>ID_AA64ISAR0_EL1.RDM == 0b0001 表示有此功能。</p>
+</dd>
+<dt>HWCAP_JSCVT</dt><dd><p>ID_AA64ISAR1_EL1.JSCVT == 0b0001 表示有此功能。</p>
+</dd>
+<dt>HWCAP_FCMA</dt><dd><p>ID_AA64ISAR1_EL1.FCMA == 0b0001 表示有此功能。</p>
+</dd>
+<dt>HWCAP_LRCPC</dt><dd><p>ID_AA64ISAR1_EL1.LRCPC == 0b0001 表示有此功能。</p>
+</dd>
+<dt>HWCAP_DCPOP</dt><dd><p>ID_AA64ISAR1_EL1.DPB == 0b0001 表示有此功能。</p>
+</dd>
+<dt>HWCAP_SHA3</dt><dd><p>ID_AA64ISAR0_EL1.SHA3 == 0b0001 表示有此功能。</p>
+</dd>
+<dt>HWCAP_SM3</dt><dd><p>ID_AA64ISAR0_EL1.SM3 == 0b0001 表示有此功能。</p>
+</dd>
+<dt>HWCAP_SM4</dt><dd><p>ID_AA64ISAR0_EL1.SM4 == 0b0001 表示有此功能。</p>
+</dd>
+<dt>HWCAP_ASIMDDP</dt><dd><p>ID_AA64ISAR0_EL1.DP == 0b0001 表示有此功能。</p>
+</dd>
+<dt>HWCAP_SHA512</dt><dd><p>ID_AA64ISAR0_EL1.SHA2 == 0b0010 表示有此功能。</p>
+</dd>
+<dt>HWCAP_SVE</dt><dd><p>ID_AA64PFR0_EL1.SVE == 0b0001 表示有此功能。</p>
+</dd>
+<dt>HWCAP_ASIMDFHM</dt><dd><p>ID_AA64ISAR0_EL1.FHM == 0b0001 表示有此功能。</p>
+</dd>
+<dt>HWCAP_DIT</dt><dd><p>ID_AA64PFR0_EL1.DIT == 0b0001 表示有此功能。</p>
+</dd>
+<dt>HWCAP_USCAT</dt><dd><p>ID_AA64MMFR2_EL1.AT == 0b0001 表示有此功能。</p>
+</dd>
+<dt>HWCAP_ILRCPC</dt><dd><p>ID_AA64ISAR1_EL1.LRCPC == 0b0010 表示有此功能。</p>
+</dd>
+<dt>HWCAP_FLAGM</dt><dd><p>ID_AA64ISAR0_EL1.TS == 0b0001 表示有此功能。</p>
+</dd>
+<dt>HWCAP_SSBS</dt><dd><p>ID_AA64PFR1_EL1.SSBS == 0b0010 表示有此功能。</p>
+</dd>
+<dt>HWCAP_SB</dt><dd><p>ID_AA64ISAR1_EL1.SB == 0b0001 表示有此功能。</p>
+</dd>
+<dt>HWCAP_PACA</dt><dd><p>如 <a class="reference internal" href="../../../arm64/pointer-authentication.html"><span class="doc">Pointer authentication in AArch64 Linux</span></a> 所描述，
+ID_AA64ISAR1_EL1.APA == 0b0001 或 ID_AA64ISAR1_EL1.API == 0b0001
+表示有此功能。</p>
+</dd>
+<dt>HWCAP_PACG</dt><dd><p>如 <a class="reference internal" href="../../../arm64/pointer-authentication.html"><span class="doc">Pointer authentication in AArch64 Linux</span></a> 所描述，
+ID_AA64ISAR1_EL1.GPA == 0b0001 或 ID_AA64ISAR1_EL1.GPI == 0b0001
+表示有此功能。</p>
+</dd>
+</dl>
+<p>HWCAP2_DCPODP</p>
+<blockquote>
+<div><p>ID_AA64ISAR1_EL1.DPB == 0b0010 表示有此功能。</p>
+</div></blockquote>
+<p>HWCAP2_SVE2</p>
+<blockquote>
+<div><p>ID_AA64ZFR0_EL1.SVEVer == 0b0001 表示有此功能。</p>
+</div></blockquote>
+<p>HWCAP2_SVEAES</p>
+<blockquote>
+<div><p>ID_AA64ZFR0_EL1.AES == 0b0001 表示有此功能。</p>
+</div></blockquote>
+<p>HWCAP2_SVEPMULL</p>
+<blockquote>
+<div><p>ID_AA64ZFR0_EL1.AES == 0b0010 表示有此功能。</p>
+</div></blockquote>
+<p>HWCAP2_SVEBITPERM</p>
+<blockquote>
+<div><p>ID_AA64ZFR0_EL1.BitPerm == 0b0001 表示有此功能。</p>
+</div></blockquote>
+<p>HWCAP2_SVESHA3</p>
+<blockquote>
+<div><p>ID_AA64ZFR0_EL1.SHA3 == 0b0001 表示有此功能。</p>
+</div></blockquote>
+<p>HWCAP2_SVESM4</p>
+<blockquote>
+<div><p>ID_AA64ZFR0_EL1.SM4 == 0b0001 表示有此功能。</p>
+</div></blockquote>
+<p>HWCAP2_FLAGM2</p>
+<blockquote>
+<div><p>ID_AA64ISAR0_EL1.TS == 0b0010 表示有此功能。</p>
+</div></blockquote>
+<p>HWCAP2_FRINT</p>
+<blockquote>
+<div><p>ID_AA64ISAR1_EL1.FRINTTS == 0b0001 表示有此功能。</p>
+</div></blockquote>
+<p>HWCAP2_SVEI8MM</p>
+<blockquote>
+<div><p>ID_AA64ZFR0_EL1.I8MM == 0b0001 表示有此功能。</p>
+</div></blockquote>
+<p>HWCAP2_SVEF32MM</p>
+<blockquote>
+<div><p>ID_AA64ZFR0_EL1.F32MM == 0b0001 表示有此功能。</p>
+</div></blockquote>
+<p>HWCAP2_SVEF64MM</p>
+<blockquote>
+<div><p>ID_AA64ZFR0_EL1.F64MM == 0b0001 表示有此功能。</p>
+</div></blockquote>
+<p>HWCAP2_SVEBF16</p>
+<blockquote>
+<div><p>ID_AA64ZFR0_EL1.BF16 == 0b0001 表示有此功能。</p>
+</div></blockquote>
+<p>HWCAP2_I8MM</p>
+<blockquote>
+<div><p>ID_AA64ISAR1_EL1.I8MM == 0b0001 表示有此功能。</p>
+</div></blockquote>
+<p>HWCAP2_BF16</p>
+<blockquote>
+<div><p>ID_AA64ISAR1_EL1.BF16 == 0b0001 表示有此功能。</p>
+</div></blockquote>
+<p>HWCAP2_DGH</p>
+<blockquote>
+<div><p>ID_AA64ISAR1_EL1.DGH == 0b0001 表示有此功能。</p>
+</div></blockquote>
+<p>HWCAP2_RNG</p>
+<blockquote>
+<div><p>ID_AA64ISAR0_EL1.RNDR == 0b0001 表示有此功能。</p>
+</div></blockquote>
+<p>HWCAP2_BTI</p>
+<blockquote>
+<div><p>ID_AA64PFR0_EL1.BT == 0b0001 表示有此功能。</p>
+</div></blockquote>
+</section>
+<section id="at-hwcap">
+<h2>4. 未使用的 AT_HWCAP 位<a class="headerlink" href="#at-hwcap" title="Permalink to this headline">¶</a></h2>
+<p>为了与用户空间交互，内核保证 AT_HWCAP 的第62、63位将始终返回0。</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">ARM64 ELF hwcaps</a><ul>
+<li><a class="reference internal" href="#id1">1. 简介</a></li>
+<li><a class="reference internal" href="#hwcaps">2. Hwcaps 的说明</a></li>
+<li><a class="reference internal" href="#at-hwcap-hwcaps">3. AT_HWCAP 中揭示的 hwcaps</a></li>
+<li><a class="reference internal" href="#at-hwcap">4. 未使用的 AT_HWCAP 位</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/arm64/elf_hwcaps.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/arm64/elf_hwcaps.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

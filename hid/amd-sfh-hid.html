@@ -1,0 +1,243 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>AMD Sensor Fusion Hub &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="I2C/SMBus Subsystem" href="../i2c/index.html" />
+    <link rel="prev" title="Intel Integrated Sensor Hub (ISH)" href="intel-ish-hid.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="amd-sensor-fusion-hub">
+<h1>AMD Sensor Fusion Hub<a class="headerlink" href="#amd-sensor-fusion-hub" title="Permalink to this headline">¶</a></h1>
+<p>AMD Sensor Fusion Hub (SFH) is part of an SOC starting from Ryzen-based platforms.
+The solution is working well on several OEM products. AMD SFH uses HID over PCIe bus.
+In terms of architecture it resembles ISH, however the major difference is all
+the HID reports are generated as part of the kernel driver.</p>
+<section id="block-diagram">
+<h2>Block Diagram<a class="headerlink" href="#block-diagram" title="Permalink to this headline">¶</a></h2>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>    ---------------------------------
+    |  HID User Space Applications  |
+    - -------------------------------
+
+---------------------------------------------
+     ---------------------------------
+    |               HID Core          |
+     ---------------------------------
+
+     ---------------------------------
+    |     AMD HID Transport           |
+     ---------------------------------
+
+     --------------------------------
+    |             AMD HID Client     |
+    |       with HID Report Generator|
+     --------------------------------
+
+     --------------------------------
+    |     AMD MP2 PCIe Driver        |
+     --------------------------------
+OS
+---------------------------------------------
+Hardware + Firmware
+     --------------------------------
+     |     SFH MP2 Processor         |
+     --------------------------------
+</pre></div>
+</div>
+</section>
+<section id="amd-hid-transport-layer">
+<h2>AMD HID Transport Layer<a class="headerlink" href="#amd-hid-transport-layer" title="Permalink to this headline">¶</a></h2>
+<p>AMD SFH transport is also implemented as a bus. Each client application executing in the AMD MP2 is
+registered as a device on this bus. Here, MP2 is an ARM core connected to x86 for processing
+sensor data. The layer, which binds each device (AMD SFH HID driver) identifies the device type and
+registers with the HID core. Transport layer attaches a constant “struct hid_ll_driver” object with
+each device. Once a device is registered with HID core, the callbacks provided via this struct are
+used by HID core to communicate with the device. AMD HID Transport layer implements the synchronous calls.</p>
+</section>
+<section id="amd-hid-client-layer">
+<h2>AMD HID Client Layer<a class="headerlink" href="#amd-hid-client-layer" title="Permalink to this headline">¶</a></h2>
+<p>This layer is responsible to implement HID requests and descriptors. As firmware is OS agnostic, HID
+client layer fills the HID request structure and descriptors. HID client layer is complex as it is
+interface between MP2 PCIe layer and HID. HID client layer initializes the MP2 PCIe layer and holds
+the instance of MP2 layer. It identifies the number of sensors connected using MP2-PCIe layer. Based
+on that allocates the DRAM address for each and every sensor and passes it to MP2-PCIe driver. On
+enumeration of each sensor, client layer fills the HID Descriptor structure and HID input report
+structure. HID Feature report structure is optional. The report descriptor structure varies from
+sensor to sensor.</p>
+</section>
+<section id="amd-mp2-pcie-layer">
+<h2>AMD MP2 PCIe layer<a class="headerlink" href="#amd-mp2-pcie-layer" title="Permalink to this headline">¶</a></h2>
+<p>MP2 PCIe Layer is responsible for making all transactions with the firmware over PCIe.
+The connection establishment between firmware and PCIe happens here.</p>
+<p>The communication between X86 and MP2 is split into three parts.
+1. Command transfer via the C2P mailbox registers.
+2. Data transfer via DRAM.
+3. Supported sensor info via P2C registers.</p>
+<p>Commands are sent to MP2 using C2P Mailbox registers. Writing into C2P Message registers generates
+interrupt to MP2. The client layer allocates the physical memory and the same is sent to MP2 via
+the PCI layer. MP2 firmware writes the command output to the access DRAM memory which the client
+layer has allocated. Firmware always writes minimum of 32 bytes into DRAM. So as a protocol driver
+shall allocate minimum of 32 bytes DRAM space.</p>
+</section>
+<section id="enumeration-and-probing-flow">
+<h2>Enumeration and Probing flow<a class="headerlink" href="#enumeration-and-probing-flow" title="Permalink to this headline">¶</a></h2>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>HID             AMD            AMD                       AMD -PCIe             MP2
+Core         Transport      Client layer                   layer                FW
+ |               |              |                           |                 |
+ |               |              |                 on Boot Driver Loaded       |
+ |               |              |                           |                 |
+ |               |              |                        MP2-PCIe Int         |
+ |               |              |                           |                 |
+ |               |              |---Get Number of sensors-&gt; |                 |
+ |               |              |                       Read P2C              |
+ |               |              |                        Register             |
+ |               |              |                           |                 |
+ |               |              | Loop(for No of Sensors)   |                 |
+ |               |              |----------------------|    |                 |
+ |               |              | Create HID Descriptor|    |                 |
+ |               |              | Create Input  report |    |                 |
+ |               |              |  Descriptor Map      |    |                 |
+ |               |              |  the MP2 FW Index to |    |                 |
+ |               |              |   HID Index          |    |                 |
+ |               |              | Allocate the DRAM    |  Enable              |
+ |               |              |        address       |  Sensors             |
+ |               |              |----------------------|    |                 |
+ |               | HID transport|                           |    Enable       |
+ |               |&lt;--Probe------|                           |---Sensor CMD--&gt; |
+ |               | Create the   |                           |                 |
+ |               | HID device   |                           |                 |
+ |               |    (MFD)     |                           |                 |
+ |               | by Populating|                           |                 |
+ |               |  the HID     |                           |                 |
+ |               |  ll_driver   |                           |                 |
+ | HID           |              |                           |                 |
+ |  add          |              |                           |                 |
+ |Device         |              |                           |                 |
+ |&lt;------------- |              |                           |                 |
+</pre></div>
+</div>
+</section>
+<section id="data-flow-from-application-to-the-amd-sfh-driver">
+<h2>Data Flow from Application to the AMD SFH Driver<a class="headerlink" href="#data-flow-from-application-to-the-amd-sfh-driver" title="Permalink to this headline">¶</a></h2>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>            |              |              |                           |                 |
+            |              |              |                           |                 |
+            |              |              |                           |                 |
+            |              |              |                           |                 |
+            |              |              |                           |                 |
+            |HID_req       |              |                           |                 |
+            |get_report    |              |                           |                 |
+            |-------------&gt;|              |                           |                 |
+            |              | HID_get_input|                           |                 |
+            |              |  report      |                           |                 |
+            |              |-------------&gt;|------------------------|  |                 |
+            |              |              |  Read the DRAM data for|  |                 |
+            |              |              |  requested sensor and  |  |                 |
+            |              |              |  create the HID input  |  |                 |
+            |              |              |  report                |  |                 |
+            |              |              |------------------------|  |                 |
+            |              |Data received |                           |                 |
+            |              | in HID report|                           |                 |
+To          |&lt;-------------|&lt;-------------|                           |                 |
+Applications|              |              |                           |                 |
+    &lt;-------|              |              |                           |                 |
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">AMD Sensor Fusion Hub</a><ul>
+<li><a class="reference internal" href="#block-diagram">Block Diagram</a></li>
+<li><a class="reference internal" href="#amd-hid-transport-layer">AMD HID Transport Layer</a></li>
+<li><a class="reference internal" href="#amd-hid-client-layer">AMD HID Client Layer</a></li>
+<li><a class="reference internal" href="#amd-mp2-pcie-layer">AMD MP2 PCIe layer</a></li>
+<li><a class="reference internal" href="#enumeration-and-probing-flow">Enumeration and Probing flow</a></li>
+<li><a class="reference internal" href="#data-flow-from-application-to-the-amd-sfh-driver">Data Flow from Application to the AMD SFH Driver</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/hid/amd-sfh-hid.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/hid/amd-sfh-hid.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

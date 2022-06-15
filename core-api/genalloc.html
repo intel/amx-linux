@@ -1,0 +1,515 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>The genalloc/genpool subsystem &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="pin_user_pages() and related calls" href="pin_user_pages.html" />
+    <link rel="prev" title="Memory Management APIs" href="mm-api.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="the-genalloc-genpool-subsystem">
+<h1>The genalloc/genpool subsystem<a class="headerlink" href="#the-genalloc-genpool-subsystem" title="Permalink to this headline">¶</a></h1>
+<p>There are a number of memory-allocation subsystems in the kernel, each
+aimed at a specific need.  Sometimes, however, a kernel developer needs to
+implement a new allocator for a specific range of special-purpose memory;
+often that memory is located on a device somewhere.  The author of the
+driver for that device can certainly write a little allocator to get the
+job done, but that is the way to fill the kernel with dozens of poorly
+tested allocators.  Back in 2005, Jes Sorensen lifted one of those
+allocators from the sym53c8xx_2 driver and <a class="reference external" href="https://lwn.net/Articles/125842/">posted</a> it as a generic module
+for the creation of ad hoc memory allocators.  This code was merged
+for the 2.6.13 release; it has been modified considerably since then.</p>
+<p>Code using this allocator should include &lt;linux/genalloc.h&gt;.  The action
+begins with the creation of a pool using one of:</p>
+<dl class="function">
+<dt id="c.gen_pool_create">
+struct gen_pool * <code class="sig-name descname">gen_pool_create</code><span class="sig-paren">(</span>int<em> min_alloc_order</em>, int<em> nid</em><span class="sig-paren">)</span><a class="headerlink" href="#c.gen_pool_create" title="Permalink to this definition">¶</a></dt>
+<dd><p>create a new special memory pool</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">min_alloc_order</span></code></dt><dd><p>log base 2 of number of bytes each bitmap bit represents</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">nid</span></code></dt><dd><p>node id of the node the pool structure should be allocated on, or -1</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Create a new special memory pool that can be used to manage special purpose
+memory not managed by the regular kmalloc/kfree interface.</p>
+</div>
+<dl class="function">
+<dt id="c.devm_gen_pool_create">
+struct gen_pool * <code class="sig-name descname">devm_gen_pool_create</code><span class="sig-paren">(</span>struct <a class="reference internal" href="../driver-api/infrastructure.html#c.device" title="device">device</a><em> *dev</em>, int<em> min_alloc_order</em>, int<em> nid</em>, const char<em> *name</em><span class="sig-paren">)</span><a class="headerlink" href="#c.devm_gen_pool_create" title="Permalink to this definition">¶</a></dt>
+<dd><p>managed gen_pool_create</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>device that provides the gen_pool</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">min_alloc_order</span></code></dt><dd><p>log base 2 of number of bytes each bitmap bit represents</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">nid</span></code></dt><dd><p>node selector for allocated gen_pool, <code class="docutils literal notranslate"><span class="pre">NUMA_NO_NODE</span></code> for all nodes</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*name</span></code></dt><dd><p>name of a gen_pool or NULL, identifies a particular gen_pool on device</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Create a new special memory pool that can be used to manage special purpose
+memory not managed by the regular kmalloc/kfree interface. The pool will be
+automatically destroyed by the device management code.</p>
+</div>
+<p>A call to <a class="reference internal" href="#c.gen_pool_create" title="gen_pool_create"><code class="xref c c-func docutils literal notranslate"><span class="pre">gen_pool_create()</span></code></a> will create a pool.  The granularity of
+allocations is set with min_alloc_order; it is a log-base-2 number like
+those used by the page allocator, but it refers to bytes rather than pages.
+So, if min_alloc_order is passed as 3, then all allocations will be a
+multiple of eight bytes.  Increasing min_alloc_order decreases the memory
+required to track the memory in the pool.  The nid parameter specifies
+which NUMA node should be used for the allocation of the housekeeping
+structures; it can be -1 if the caller doesn’t care.</p>
+<p>The “managed” interface <a class="reference internal" href="#c.devm_gen_pool_create" title="devm_gen_pool_create"><code class="xref c c-func docutils literal notranslate"><span class="pre">devm_gen_pool_create()</span></code></a> ties the pool to a
+specific device.  Among other things, it will automatically clean up the
+pool when the given device is destroyed.</p>
+<p>A pool is shut down with:</p>
+<dl class="function">
+<dt id="c.gen_pool_destroy">
+void <code class="sig-name descname">gen_pool_destroy</code><span class="sig-paren">(</span>struct gen_pool<em> *pool</em><span class="sig-paren">)</span><a class="headerlink" href="#c.gen_pool_destroy" title="Permalink to this definition">¶</a></dt>
+<dd><p>destroy a special memory pool</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">gen_pool</span> <span class="pre">*pool</span></code></dt><dd><p>pool to destroy</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Destroy the specified special memory pool. Verifies that there are no
+outstanding allocations.</p>
+</div>
+<p>It’s worth noting that, if there are still allocations outstanding from the
+given pool, this function will take the rather extreme step of invoking
+BUG(), crashing the entire system.  You have been warned.</p>
+<p>A freshly created pool has no memory to allocate.  It is fairly useless in
+that state, so one of the first orders of business is usually to add memory
+to the pool.  That can be done with one of:</p>
+<dl class="function">
+<dt id="c.gen_pool_add">
+int <code class="sig-name descname">gen_pool_add</code><span class="sig-paren">(</span>struct gen_pool<em> *pool</em>, unsigned long<em> addr</em>, size_t<em> size</em>, int<em> nid</em><span class="sig-paren">)</span><a class="headerlink" href="#c.gen_pool_add" title="Permalink to this definition">¶</a></dt>
+<dd><p>add a new chunk of special memory to the pool</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">gen_pool</span> <span class="pre">*pool</span></code></dt><dd><p>pool to add new memory chunk to</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">addr</span></code></dt><dd><p>starting address of memory chunk to add to pool</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">size_t</span> <span class="pre">size</span></code></dt><dd><p>size in bytes of the memory chunk to add to pool</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">nid</span></code></dt><dd><p>node id of the node the chunk structure and bitmap should be
+allocated on, or -1</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Add a new chunk of special memory to the specified pool.</p>
+<p>Returns 0 on success or a -ve errno on failure.</p>
+</div>
+<dl class="function">
+<dt id="c.gen_pool_add_owner">
+int <code class="sig-name descname">gen_pool_add_owner</code><span class="sig-paren">(</span>struct gen_pool<em> *pool</em>, unsigned long<em> virt</em>, phys_addr_t<em> phys</em>, size_t<em> size</em>, int<em> nid</em>, void<em> *owner</em><span class="sig-paren">)</span><a class="headerlink" href="#c.gen_pool_add_owner" title="Permalink to this definition">¶</a></dt>
+<dd><p>add a new chunk of special memory to the pool</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">gen_pool</span> <span class="pre">*pool</span></code></dt><dd><p>pool to add new memory chunk to</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">virt</span></code></dt><dd><p>virtual starting address of memory chunk to add to pool</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">phys_addr_t</span> <span class="pre">phys</span></code></dt><dd><p>physical starting address of memory chunk to add to pool</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">size_t</span> <span class="pre">size</span></code></dt><dd><p>size in bytes of the memory chunk to add to pool</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">nid</span></code></dt><dd><p>node id of the node the chunk structure and bitmap should be
+allocated on, or -1</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*owner</span></code></dt><dd><p>private data the publisher would like to recall at alloc time</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Add a new chunk of special memory to the specified pool.</p>
+<p>Returns 0 on success or a -ve errno on failure.</p>
+</div>
+<p>A call to <a class="reference internal" href="#c.gen_pool_add" title="gen_pool_add"><code class="xref c c-func docutils literal notranslate"><span class="pre">gen_pool_add()</span></code></a> will place the size bytes of memory
+starting at addr (in the kernel’s virtual address space) into the given
+pool, once again using nid as the node ID for ancillary memory allocations.
+The gen_pool_add_virt() variant associates an explicit physical
+address with the memory; this is only necessary if the pool will be used
+for DMA allocations.</p>
+<p>The functions for allocating memory from the pool (and putting it back)
+are:</p>
+<dl class="function">
+<dt id="c.gen_pool_alloc">
+unsigned long <code class="sig-name descname">gen_pool_alloc</code><span class="sig-paren">(</span>struct gen_pool<em> *pool</em>, size_t<em> size</em><span class="sig-paren">)</span><a class="headerlink" href="#c.gen_pool_alloc" title="Permalink to this definition">¶</a></dt>
+<dd><p>allocate special memory from the pool</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">gen_pool</span> <span class="pre">*pool</span></code></dt><dd><p>pool to allocate from</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">size_t</span> <span class="pre">size</span></code></dt><dd><p>number of bytes to allocate from the pool</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Allocate the requested number of bytes from the specified pool.
+Uses the pool allocation function (with first-fit algorithm by default).
+Can not be used in NMI handler on architectures without
+NMI-safe cmpxchg implementation.</p>
+</div>
+<dl class="function">
+<dt id="c.gen_pool_dma_alloc">
+void * <code class="sig-name descname">gen_pool_dma_alloc</code><span class="sig-paren">(</span>struct gen_pool<em> *pool</em>, size_t<em> size</em>, dma_addr_t<em> *dma</em><span class="sig-paren">)</span><a class="headerlink" href="#c.gen_pool_dma_alloc" title="Permalink to this definition">¶</a></dt>
+<dd><p>allocate special memory from the pool for DMA usage</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">gen_pool</span> <span class="pre">*pool</span></code></dt><dd><p>pool to allocate from</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">size_t</span> <span class="pre">size</span></code></dt><dd><p>number of bytes to allocate from the pool</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">dma_addr_t</span> <span class="pre">*dma</span></code></dt><dd><p>dma-view physical address return value.  Use <code class="docutils literal notranslate"><span class="pre">NULL</span></code> if unneeded.</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Allocate the requested number of bytes from the specified pool.
+Uses the pool allocation function (with first-fit algorithm by default).
+Can not be used in NMI handler on architectures without
+NMI-safe cmpxchg implementation.</p>
+<p><strong>Return</strong></p>
+<p>virtual address of the allocated memory, or <code class="docutils literal notranslate"><span class="pre">NULL</span></code> on failure</p>
+</div>
+<dl class="function">
+<dt id="c.gen_pool_free_owner">
+void <code class="sig-name descname">gen_pool_free_owner</code><span class="sig-paren">(</span>struct gen_pool<em> *pool</em>, unsigned long<em> addr</em>, size_t<em> size</em>, void<em> **owner</em><span class="sig-paren">)</span><a class="headerlink" href="#c.gen_pool_free_owner" title="Permalink to this definition">¶</a></dt>
+<dd><p>free allocated special memory back to the pool</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">gen_pool</span> <span class="pre">*pool</span></code></dt><dd><p>pool to free to</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">addr</span></code></dt><dd><p>starting address of memory to free back to pool</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">size_t</span> <span class="pre">size</span></code></dt><dd><p>size in bytes of memory to free</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">**owner</span></code></dt><dd><p>private data stashed at <a class="reference internal" href="#c.gen_pool_add" title="gen_pool_add"><code class="xref c c-func docutils literal notranslate"><span class="pre">gen_pool_add()</span></code></a> time</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Free previously allocated special memory back to the specified
+pool.  Can not be used in NMI handler on architectures without
+NMI-safe cmpxchg implementation.</p>
+</div>
+<p>As one would expect, <a class="reference internal" href="#c.gen_pool_alloc" title="gen_pool_alloc"><code class="xref c c-func docutils literal notranslate"><span class="pre">gen_pool_alloc()</span></code></a> will allocate size&lt; bytes
+from the given pool.  The <a class="reference internal" href="#c.gen_pool_dma_alloc" title="gen_pool_dma_alloc"><code class="xref c c-func docutils literal notranslate"><span class="pre">gen_pool_dma_alloc()</span></code></a> variant allocates
+memory for use with DMA operations, returning the associated physical
+address in the space pointed to by dma.  This will only work if the memory
+was added with gen_pool_add_virt().  Note that this function
+departs from the usual genpool pattern of using unsigned long values to
+represent kernel addresses; it returns a void * instead.</p>
+<p>That all seems relatively simple; indeed, some developers clearly found it
+to be too simple.  After all, the interface above provides no control over
+how the allocation functions choose which specific piece of memory to
+return.  If that sort of control is needed, the following functions will be
+of interest:</p>
+<dl class="function">
+<dt id="c.gen_pool_alloc_algo_owner">
+unsigned long <code class="sig-name descname">gen_pool_alloc_algo_owner</code><span class="sig-paren">(</span>struct gen_pool<em> *pool</em>, size_t<em> size</em>, genpool_algo_t<em> algo</em>, void<em> *data</em>, void<em> **owner</em><span class="sig-paren">)</span><a class="headerlink" href="#c.gen_pool_alloc_algo_owner" title="Permalink to this definition">¶</a></dt>
+<dd><p>allocate special memory from the pool</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">gen_pool</span> <span class="pre">*pool</span></code></dt><dd><p>pool to allocate from</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">size_t</span> <span class="pre">size</span></code></dt><dd><p>number of bytes to allocate from the pool</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">genpool_algo_t</span> <span class="pre">algo</span></code></dt><dd><p>algorithm passed from caller</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*data</span></code></dt><dd><p>data passed to algorithm</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">**owner</span></code></dt><dd><p>optionally retrieve the chunk owner</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Allocate the requested number of bytes from the specified pool.
+Uses the pool allocation function (with first-fit algorithm by default).
+Can not be used in NMI handler on architectures without
+NMI-safe cmpxchg implementation.</p>
+</div>
+<dl class="function">
+<dt id="c.gen_pool_set_algo">
+void <code class="sig-name descname">gen_pool_set_algo</code><span class="sig-paren">(</span>struct gen_pool<em> *pool</em>, genpool_algo_t<em> algo</em>, void<em> *data</em><span class="sig-paren">)</span><a class="headerlink" href="#c.gen_pool_set_algo" title="Permalink to this definition">¶</a></dt>
+<dd><p>set the allocation algorithm</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">gen_pool</span> <span class="pre">*pool</span></code></dt><dd><p>pool to change allocation algorithm</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">genpool_algo_t</span> <span class="pre">algo</span></code></dt><dd><p>custom algorithm function</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*data</span></code></dt><dd><p>additional data used by <strong>algo</strong></p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Call <strong>algo</strong> for each memory allocation in the pool.
+If <strong>algo</strong> is NULL use gen_pool_first_fit as default
+memory allocation function.</p>
+</div>
+<p>Allocations with gen_pool_alloc_algo() specify an algorithm to be
+used to choose the memory to be allocated; the default algorithm can be set
+with <a class="reference internal" href="#c.gen_pool_set_algo" title="gen_pool_set_algo"><code class="xref c c-func docutils literal notranslate"><span class="pre">gen_pool_set_algo()</span></code></a>.  The data value is passed to the
+algorithm; most ignore it, but it is occasionally needed.  One can,
+naturally, write a special-purpose algorithm, but there is a fair set
+already available:</p>
+<ul class="simple">
+<li><p>gen_pool_first_fit is a simple first-fit allocator; this is the default
+algorithm if none other has been specified.</p></li>
+<li><p>gen_pool_first_fit_align forces the allocation to have a specific
+alignment (passed via data in a genpool_data_align structure).</p></li>
+<li><p>gen_pool_first_fit_order_align aligns the allocation to the order of the
+size.  A 60-byte allocation will thus be 64-byte aligned, for example.</p></li>
+<li><p>gen_pool_best_fit, as one would expect, is a simple best-fit allocator.</p></li>
+<li><p>gen_pool_fixed_alloc allocates at a specific offset (passed in a
+genpool_data_fixed structure via the data parameter) within the pool.
+If the indicated memory is not available the allocation fails.</p></li>
+</ul>
+<p>There is a handful of other functions, mostly for purposes like querying
+the space available in the pool or iterating through chunks of memory.
+Most users, however, should not need much beyond what has been described
+above.  With luck, wider awareness of this module will help to prevent the
+writing of special-purpose memory allocators in the future.</p>
+<dl class="function">
+<dt id="c.gen_pool_virt_to_phys">
+phys_addr_t <code class="sig-name descname">gen_pool_virt_to_phys</code><span class="sig-paren">(</span>struct gen_pool<em> *pool</em>, unsigned long<em> addr</em><span class="sig-paren">)</span><a class="headerlink" href="#c.gen_pool_virt_to_phys" title="Permalink to this definition">¶</a></dt>
+<dd><p>return the physical address of memory</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">gen_pool</span> <span class="pre">*pool</span></code></dt><dd><p>pool to allocate from</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">addr</span></code></dt><dd><p>starting address of memory</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Returns the physical address on success, or -1 on error.</p>
+</div>
+<dl class="function">
+<dt id="c.gen_pool_for_each_chunk">
+void <code class="sig-name descname">gen_pool_for_each_chunk</code><span class="sig-paren">(</span>struct gen_pool<em> *pool</em>, void (<em>*func</em>)(struct gen_pool *pool, struct gen_pool_chunk *chunk, void *data), void<em> *data</em><span class="sig-paren">)</span><a class="headerlink" href="#c.gen_pool_for_each_chunk" title="Permalink to this definition">¶</a></dt>
+<dd><p>call func for every chunk of generic memory pool</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">gen_pool</span> <span class="pre">*pool</span></code></dt><dd><p>the generic memory pool</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">(*func)(struct</span> <span class="pre">gen_pool</span> <span class="pre">*pool,</span> <span class="pre">struct</span> <span class="pre">gen_pool_chunk</span> <span class="pre">*chunk,</span> <span class="pre">void</span> <span class="pre">*data)</span></code></dt><dd><p>func to call</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">*data</span></code></dt><dd><p>additional data used by <strong>func</strong></p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Call <strong>func</strong> for every chunk of generic memory pool.  The <strong>func</strong> is
+called with rcu_read_lock held.</p>
+</div>
+<dl class="function">
+<dt id="c.gen_pool_has_addr">
+bool <code class="sig-name descname">gen_pool_has_addr</code><span class="sig-paren">(</span>struct gen_pool<em> *pool</em>, unsigned long<em> start</em>, size_t<em> size</em><span class="sig-paren">)</span><a class="headerlink" href="#c.gen_pool_has_addr" title="Permalink to this definition">¶</a></dt>
+<dd><p>checks if an address falls within the range of a pool</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">gen_pool</span> <span class="pre">*pool</span></code></dt><dd><p>the generic memory pool</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">unsigned</span> <span class="pre">long</span> <span class="pre">start</span></code></dt><dd><p>start address</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">size_t</span> <span class="pre">size</span></code></dt><dd><p>size of the region</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Check if the range of addresses falls within the specified pool. Returns
+true if the entire range is contained in the pool and false otherwise.</p>
+</div>
+<dl class="function">
+<dt id="c.gen_pool_avail">
+size_t <code class="sig-name descname">gen_pool_avail</code><span class="sig-paren">(</span>struct gen_pool<em> *pool</em><span class="sig-paren">)</span><a class="headerlink" href="#c.gen_pool_avail" title="Permalink to this definition">¶</a></dt>
+<dd><p>get available free space of the pool</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">gen_pool</span> <span class="pre">*pool</span></code></dt><dd><p>pool to get available free space</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Return available free space of the specified pool.</p>
+</div>
+<dl class="function">
+<dt id="c.gen_pool_size">
+size_t <code class="sig-name descname">gen_pool_size</code><span class="sig-paren">(</span>struct gen_pool<em> *pool</em><span class="sig-paren">)</span><a class="headerlink" href="#c.gen_pool_size" title="Permalink to this definition">¶</a></dt>
+<dd><p>get size in bytes of memory managed by the pool</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">gen_pool</span> <span class="pre">*pool</span></code></dt><dd><p>pool to get size</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Return size in bytes of memory managed by the pool.</p>
+</div>
+<dl class="function">
+<dt id="c.gen_pool_get">
+struct gen_pool * <code class="sig-name descname">gen_pool_get</code><span class="sig-paren">(</span>struct <a class="reference internal" href="../driver-api/infrastructure.html#c.device" title="device">device</a><em> *dev</em>, const char<em> *name</em><span class="sig-paren">)</span><a class="headerlink" href="#c.gen_pool_get" title="Permalink to this definition">¶</a></dt>
+<dd><p>Obtain the gen_pool (if any) for a device</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device</span> <span class="pre">*dev</span></code></dt><dd><p>device to retrieve the gen_pool from</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*name</span></code></dt><dd><p>name of a gen_pool or NULL, identifies a particular gen_pool on device</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Returns the gen_pool for the device if one is present, or NULL.</p>
+</div>
+<dl class="function">
+<dt id="c.of_gen_pool_get">
+struct gen_pool * <code class="sig-name descname">of_gen_pool_get</code><span class="sig-paren">(</span>struct device_node<em> *np</em>, const char<em> *propname</em>, int<em> index</em><span class="sig-paren">)</span><a class="headerlink" href="#c.of_gen_pool_get" title="Permalink to this definition">¶</a></dt>
+<dd><p>find a pool by phandle property</p>
+</dd></dl>
+
+<div class="kernelindent docutils container">
+<p><strong>Parameters</strong></p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">device_node</span> <span class="pre">*np</span></code></dt><dd><p>device node</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">const</span> <span class="pre">char</span> <span class="pre">*propname</span></code></dt><dd><p>property name containing phandle(s)</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">index</span></code></dt><dd><p>index into the phandle array</p>
+</dd>
+</dl>
+<p><strong>Description</strong></p>
+<p>Returns the pool that contains the chunk starting at the physical
+address of the device tree node pointed at by the phandle property,
+or NULL if not found.</p>
+</div>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/core-api/genalloc.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/core-api/genalloc.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

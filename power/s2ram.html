@@ -1,0 +1,186 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>How to get s2ram working &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Interaction of Suspend code (S3) with the CPU hotplug infrastructure" href="suspend-and-cpuhotplug.html" />
+    <link rel="prev" title="Runtime Power Management Framework for I/O Devices" href="runtime_pm.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="how-to-get-s2ram-working">
+<h1>How to get s2ram working<a class="headerlink" href="#how-to-get-s2ram-working" title="Permalink to this headline">¶</a></h1>
+<p>2006 Linus Torvalds
+2006 Pavel Machek</p>
+<ol class="arabic simple">
+<li><p>Check suspend.sf.net, program s2ram there has long whitelist of
+“known ok” machines, along with tricks to use on each one.</p></li>
+<li><p>If that does not help, try reading <a class="reference internal" href="tricks.html"><span class="doc">swsusp/S3 tricks</span></a> and
+<a class="reference internal" href="video.html"><span class="doc">Video issues with S3 resume</span></a>. Perhaps problem is as simple as broken module, and
+simple module unload can fix it.</p></li>
+<li><p>You can use Linus’ TRACE_RESUME infrastructure, described below.</p></li>
+</ol>
+<section id="using-trace-resume">
+<h2>Using TRACE_RESUME<a class="headerlink" href="#using-trace-resume" title="Permalink to this headline">¶</a></h2>
+<p>I’ve been working at making the machines I have able to STR, and almost
+always it’s a driver that is buggy. Thank God for the suspend/resume
+debugging - the thing that Chuck tried to disable. That’s often the _only_
+way to debug these things, and it’s actually pretty powerful (but
+time-consuming - having to insert TRACE_RESUME() markers into the device
+driver that doesn’t resume and recompile and reboot).</p>
+<p>Anyway, the way to debug this for people who are interested (have a
+machine that doesn’t boot) is:</p>
+<blockquote>
+<div><ul>
+<li><p>enable PM_DEBUG, and PM_TRACE</p></li>
+<li><p>use a script like this:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#!/bin/sh
+sync
+echo 1 &gt; /sys/power/pm_trace
+echo mem &gt; /sys/power/state
+</pre></div>
+</div>
+<p>to suspend</p>
+</li>
+<li><p>if it doesn’t come back up (which is usually the problem), reboot by
+holding the power button down, and look at the dmesg output for things
+like:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Magic number: 4:156:725
+hash matches drivers/base/power/resume.c:28
+hash matches device 0000:01:00.0
+</pre></div>
+</div>
+<p>which means that the last trace event was just before trying to resume
+device 0000:01:00.0. Then figure out what driver is controlling that
+device (lspci and /sys/devices/pci* is your friend), and see if you can
+fix it, disable it, or trace into its resume function.</p>
+<p>If no device matches the hash (or any matches appear to be false positives),
+the culprit may be a device from a loadable kernel module that is not loaded
+until after the hash is checked. You can check the hash against the current
+devices again after more modules are loaded using sysfs:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>cat /sys/power/pm_trace_dev_match
+</pre></div>
+</div>
+</li>
+</ul>
+</div></blockquote>
+<p>For example, the above happens to be the VGA device on my EVO, which I
+used to run with “radeonfb” (it’s an ATI Radeon mobility). It turns out
+that “radeonfb” simply cannot resume that device - it tries to set the
+PLL’s, and it just _hangs_. Using the regular VGA console and letting X
+resume it instead works fine.</p>
+<section id="note">
+<h3>NOTE<a class="headerlink" href="#note" title="Permalink to this headline">¶</a></h3>
+<p>pm_trace uses the system’s Real Time Clock (RTC) to save the magic number.
+Reason for this is that the RTC is the only reliably available piece of
+hardware during resume operations where a value can be set that will
+survive a reboot.</p>
+<p>pm_trace is not compatible with asynchronous suspend, so it turns
+asynchronous suspend off (which may work around timing or
+ordering-sensitive bugs).</p>
+<p>Consequence is that after a resume (even if it is successful) your system
+clock will have a value corresponding to the magic number instead of the
+correct date/time! It is therefore advisable to use a program like ntp-date
+or rdate to reset the correct date/time from an external time source when
+using this trace option.</p>
+<p>As the clock keeps ticking it is also essential that the reboot is done
+quickly after the resume failure. The trace option does not use the seconds
+or the low order bits of the minutes of the RTC, but a too long delay will
+corrupt the magic value.</p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">How to get s2ram working</a><ul>
+<li><a class="reference internal" href="#using-trace-resume">Using TRACE_RESUME</a><ul>
+<li><a class="reference internal" href="#note">NOTE</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/power/s2ram.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/power/s2ram.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

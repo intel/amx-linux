@@ -1,0 +1,167 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>SPI NOR framework &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="MMC/SD/SDIO card support" href="../mmc/index.html" />
+    <link rel="prev" title="NAND Error-correction Code" href="nand_ecc.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="spi-nor-framework">
+<h1>SPI NOR framework<a class="headerlink" href="#spi-nor-framework" title="Permalink to this headline">¶</a></h1>
+<section id="part-i-why-do-we-need-this-framework">
+<h2>Part I - Why do we need this framework?<a class="headerlink" href="#part-i-why-do-we-need-this-framework" title="Permalink to this headline">¶</a></h2>
+<p>SPI bus controllers (drivers/spi/) only deal with streams of bytes; the bus
+controller operates agnostic of the specific device attached. However, some
+controllers (such as Freescale’s QuadSPI controller) cannot easily handle
+arbitrary streams of bytes, but rather are designed specifically for SPI NOR.</p>
+<p>In particular, Freescale’s QuadSPI controller must know the NOR commands to
+find the right LUT sequence. Unfortunately, the SPI subsystem has no notion of
+opcodes, addresses, or data payloads; a SPI controller simply knows to send or
+receive bytes (Tx and Rx). Therefore, we must define a new layering scheme under
+which the controller driver is aware of the opcodes, addressing, and other
+details of the SPI NOR protocol.</p>
+</section>
+<section id="part-ii-how-does-the-framework-work">
+<h2>Part II - How does the framework work?<a class="headerlink" href="#part-ii-how-does-the-framework-work" title="Permalink to this headline">¶</a></h2>
+<p>This framework just adds a new layer between the MTD and the SPI bus driver.
+With this new layer, the SPI NOR controller driver does not depend on the
+m25p80 code anymore.</p>
+<p>Before this framework, the layer is like:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>          MTD
+------------------------
+         m25p80
+------------------------
+      SPI bus driver
+------------------------
+       SPI NOR chip
+</pre></div>
+</div>
+<p>After this framework, the layer is like:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>          MTD
+------------------------
+     SPI NOR framework
+------------------------
+         m25p80
+------------------------
+      SPI bus driver
+------------------------
+      SPI NOR chip
+</pre></div>
+</div>
+<p>With the SPI NOR controller driver (Freescale QuadSPI), it looks like:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>          MTD
+------------------------
+     SPI NOR framework
+------------------------
+       fsl-quadSPI
+------------------------
+      SPI NOR chip
+</pre></div>
+</div>
+</section>
+<section id="part-iii-how-can-drivers-use-the-framework">
+<h2>Part III - How can drivers use the framework?<a class="headerlink" href="#part-iii-how-can-drivers-use-the-framework" title="Permalink to this headline">¶</a></h2>
+<p>The main API is spi_nor_scan(). Before you call the hook, a driver should
+initialize the necessary fields for spi_nor{}. Please see
+drivers/mtd/spi-nor/spi-nor.c for detail. Please also refer to spi-fsl-qspi.c
+when you want to write a new driver for a SPI NOR controller.
+Another API is spi_nor_restore(), this is used to restore the status of SPI
+flash chip such as addressing mode. Call it whenever detach the driver from
+device or reboot the system.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">SPI NOR framework</a><ul>
+<li><a class="reference internal" href="#part-i-why-do-we-need-this-framework">Part I - Why do we need this framework?</a></li>
+<li><a class="reference internal" href="#part-ii-how-does-the-framework-work">Part II - How does the framework work?</a></li>
+<li><a class="reference internal" href="#part-iii-how-can-drivers-use-the-framework">Part III - How can drivers use the framework?</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/mtd/spi-nor.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/mtd/spi-nor.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,425 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Surface Serial Hub Protocol &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Core Driver Internals" href="internal.html" />
+    <link rel="prev" title="Surface ACPI Notify" href="clients/san.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="surface-serial-hub-protocol">
+<h1>Surface Serial Hub Protocol<a class="headerlink" href="#surface-serial-hub-protocol" title="Permalink to this headline">¶</a></h1>
+<p>The Surface Serial Hub (SSH) is the central communication interface for the
+embedded Surface Aggregator Module controller (SAM or EC), found on newer
+Surface generations. We will refer to this protocol and interface as
+SAM-over-SSH, as opposed to SAM-over-HID for the older generations.</p>
+<p>On Surface devices with SAM-over-SSH, SAM is connected to the host via UART
+and defined in ACPI as device with ID <code class="docutils literal notranslate"><span class="pre">MSHW0084</span></code>. On these devices,
+significant functionality is provided via SAM, including access to battery
+and power information and events, thermal read-outs and events, and many
+more. For Surface Laptops, keyboard input is handled via HID directed
+through SAM, on the Surface Laptop 3 and Surface Book 3 this also includes
+touchpad input.</p>
+<p>Note that the standard disclaimer for this subsystem also applies to this
+document: All of this has been reverse-engineered and may thus be erroneous
+and/or incomplete.</p>
+<p>All CRCs used in the following are two-byte <code class="docutils literal notranslate"><span class="pre">crc_ccitt_false(0xffff,</span> <span class="pre">...)</span></code>.
+All multi-byte values are little-endian, there is no implicit padding between
+values.</p>
+<section id="ssh-packet-protocol-definitions">
+<h2>SSH Packet Protocol: Definitions<a class="headerlink" href="#ssh-packet-protocol-definitions" title="Permalink to this headline">¶</a></h2>
+<p>The fundamental communication unit of the SSH protocol is a frame
+(<a class="reference internal" href="client-api.html#c.ssh_frame" title="ssh_frame"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">ssh_frame</span></code></a>). A frame consists of the following
+fields, packed together and in order:</p>
+<table class="docutils align-default" id="id1">
+<caption><span class="caption-text">SSH Frame</span><a class="headerlink" href="#id1" title="Permalink to this table">¶</a></caption>
+<colgroup>
+<col style="width: 17%" />
+<col style="width: 17%" />
+<col style="width: 67%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Field</p></th>
+<th class="head"><p>Type</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">TYPE</span></code></p></td>
+<td><p><code class="xref c c-type docutils literal notranslate"><span class="pre">u8</span></code></p></td>
+<td><p>Type identifier of the frame.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">LEN</span></code></p></td>
+<td><p><code class="xref c c-type docutils literal notranslate"><span class="pre">u16</span></code></p></td>
+<td><p>Length of the payload associated with the frame.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">SEQ</span></code></p></td>
+<td><p><code class="xref c c-type docutils literal notranslate"><span class="pre">u8</span></code></p></td>
+<td><p>Sequence ID (see explanation below).</p></td>
+</tr>
+</tbody>
+</table>
+<p>Each frame structure is followed by a CRC over this structure. The CRC over
+the frame structure (<code class="docutils literal notranslate"><span class="pre">TYPE</span></code>, <code class="docutils literal notranslate"><span class="pre">LEN</span></code>, and <code class="docutils literal notranslate"><span class="pre">SEQ</span></code> fields) is placed directly
+after the frame structure and before the payload. The payload is followed by
+its own CRC (over all payload bytes). If the payload is not present (i.e.
+the frame has <code class="docutils literal notranslate"><span class="pre">LEN=0</span></code>), the CRC of the payload is still present and will
+evaluate to <code class="docutils literal notranslate"><span class="pre">0xffff</span></code>. The <code class="docutils literal notranslate"><span class="pre">LEN</span></code> field does not include any of the CRCs, it
+equals the number of bytes inbetween the CRC of the frame and the CRC of the
+payload.</p>
+<p>Additionally, the following fixed two-byte sequences are used:</p>
+<table class="docutils align-default" id="id2">
+<caption><span class="caption-text">SSH Byte Sequences</span><a class="headerlink" href="#id2" title="Permalink to this table">¶</a></caption>
+<colgroup>
+<col style="width: 17%" />
+<col style="width: 17%" />
+<col style="width: 67%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Name</p></th>
+<th class="head"><p>Value</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">SYN</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">[0xAA,</span> <span class="pre">0x55]</span></code></p></td>
+<td><p>Synchronization bytes.</p></td>
+</tr>
+</tbody>
+</table>
+<p>A message consists of <code class="docutils literal notranslate"><span class="pre">SYN</span></code>, followed by the frame (<code class="docutils literal notranslate"><span class="pre">TYPE</span></code>, <code class="docutils literal notranslate"><span class="pre">LEN</span></code>, <code class="docutils literal notranslate"><span class="pre">SEQ</span></code> and
+CRC) and, if specified in the frame (i.e. <code class="docutils literal notranslate"><span class="pre">LEN</span> <span class="pre">&gt;</span> <span class="pre">0</span></code>), payload bytes,
+followed finally, regardless if the payload is present, the payload CRC. The
+messages corresponding to an exchange are, in part, identified by having the
+same sequence ID (<code class="docutils literal notranslate"><span class="pre">SEQ</span></code>), stored inside the frame (more on this in the next
+section). The sequence ID is a wrapping counter.</p>
+<p>A frame can have the following types
+(<a class="reference internal" href="client-api.html#c.ssh_frame_type" title="ssh_frame_type"><code class="xref c c-type docutils literal notranslate"><span class="pre">enum</span> <span class="pre">ssh_frame_type</span></code></a>):</p>
+<table class="docutils align-default" id="id3">
+<caption><span class="caption-text">SSH Frame Types</span><a class="headerlink" href="#id3" title="Permalink to this table">¶</a></caption>
+<colgroup>
+<col style="width: 17%" />
+<col style="width: 17%" />
+<col style="width: 67%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Name</p></th>
+<th class="head"><p>Value</p></th>
+<th class="head"><p>Short Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">NAK</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">0x04</span></code></p></td>
+<td><p>Sent on error in previously received message.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">ACK</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">0x40</span></code></p></td>
+<td><p>Sent to acknowledge receival of <code class="docutils literal notranslate"><span class="pre">DATA</span></code> frame.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">DATA_SEQ</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">0x80</span></code></p></td>
+<td><p>Sent to transfer data. Sequenced.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">DATA_NSQ</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">0x00</span></code></p></td>
+<td><p>Same as <code class="docutils literal notranslate"><span class="pre">DATA_SEQ</span></code>, but does not need to be ACKed.</p></td>
+</tr>
+</tbody>
+</table>
+<p>Both <code class="docutils literal notranslate"><span class="pre">NAK</span></code>- and <code class="docutils literal notranslate"><span class="pre">ACK</span></code>-type frames are used to control flow of messages and
+thus do not carry a payload. <code class="docutils literal notranslate"><span class="pre">DATA_SEQ</span></code>- and <code class="docutils literal notranslate"><span class="pre">DATA_NSQ</span></code>-type frames on the
+other hand must carry a payload. The flow sequence and interaction of
+different frame types will be described in more depth in the next section.</p>
+</section>
+<section id="ssh-packet-protocol-flow-sequence">
+<h2>SSH Packet Protocol: Flow Sequence<a class="headerlink" href="#ssh-packet-protocol-flow-sequence" title="Permalink to this headline">¶</a></h2>
+<p>Each exchange begins with <code class="docutils literal notranslate"><span class="pre">SYN</span></code>, followed by a <code class="docutils literal notranslate"><span class="pre">DATA_SEQ</span></code>- or
+<code class="docutils literal notranslate"><span class="pre">DATA_NSQ</span></code>-type frame, followed by its CRC, payload, and payload CRC. In
+case of a <code class="docutils literal notranslate"><span class="pre">DATA_NSQ</span></code>-type frame, the exchange is then finished. In case of a
+<code class="docutils literal notranslate"><span class="pre">DATA_SEQ</span></code>-type frame, the receiving party has to acknowledge receival of
+the frame by responding with a message containing an <code class="docutils literal notranslate"><span class="pre">ACK</span></code>-type frame with
+the same sequence ID of the <code class="docutils literal notranslate"><span class="pre">DATA</span></code> frame. In other words, the sequence ID of
+the <code class="docutils literal notranslate"><span class="pre">ACK</span></code> frame specifies the <code class="docutils literal notranslate"><span class="pre">DATA</span></code> frame to be acknowledged. In case of an
+error, e.g. an invalid CRC, the receiving party responds with a message
+containing an <code class="docutils literal notranslate"><span class="pre">NAK</span></code>-type frame. As the sequence ID of the previous data
+frame, for which an error is indicated via the <code class="docutils literal notranslate"><span class="pre">NAK</span></code> frame, cannot be relied
+upon, the sequence ID of the <code class="docutils literal notranslate"><span class="pre">NAK</span></code> frame should not be used and is set to
+zero. After receival of an <code class="docutils literal notranslate"><span class="pre">NAK</span></code> frame, the sending party should re-send all
+outstanding (non-ACKed) messages.</p>
+<p>Sequence IDs are not synchronized between the two parties, meaning that they
+are managed independently for each party. Identifying the messages
+corresponding to a single exchange thus relies on the sequence ID as well as
+the type of the message, and the context. Specifically, the sequence ID is
+used to associate an <code class="docutils literal notranslate"><span class="pre">ACK</span></code> with its <code class="docutils literal notranslate"><span class="pre">DATA_SEQ</span></code>-type frame, but not
+<code class="docutils literal notranslate"><span class="pre">DATA_SEQ</span></code>- or <code class="docutils literal notranslate"><span class="pre">DATA_NSQ</span></code>-type frames with other <code class="docutils literal notranslate"><span class="pre">DATA</span></code>- type frames.</p>
+<p>An example exchange might look like this:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>tx: -- SYN FRAME(D) CRC(F) PAYLOAD CRC(P) -----------------------------
+rx: ------------------------------------- SYN FRAME(A) CRC(F) CRC(P) --
+</pre></div>
+</div>
+<p>where both frames have the same sequence ID (<code class="docutils literal notranslate"><span class="pre">SEQ</span></code>). Here, <code class="docutils literal notranslate"><span class="pre">FRAME(D)</span></code>
+indicates a <code class="docutils literal notranslate"><span class="pre">DATA_SEQ</span></code>-type frame, <code class="docutils literal notranslate"><span class="pre">FRAME(A)</span></code> an <code class="docutils literal notranslate"><span class="pre">ACK</span></code>-type frame,
+<code class="docutils literal notranslate"><span class="pre">CRC(F)</span></code> the CRC over the previous frame, <code class="docutils literal notranslate"><span class="pre">CRC(P)</span></code> the CRC over the
+previous payload. In case of an error, the exchange would look like this:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>tx: -- SYN FRAME(D) CRC(F) PAYLOAD CRC(P) -----------------------------
+rx: ------------------------------------- SYN FRAME(N) CRC(F) CRC(P) --
+</pre></div>
+</div>
+<p>upon which the sender should re-send the message. <code class="docutils literal notranslate"><span class="pre">FRAME(N)</span></code> indicates an
+<code class="docutils literal notranslate"><span class="pre">NAK</span></code>-type frame. Note that the sequence ID of the <code class="docutils literal notranslate"><span class="pre">NAK</span></code>-type frame is fixed
+to zero. For <code class="docutils literal notranslate"><span class="pre">DATA_NSQ</span></code>-type frames, both exchanges are the same:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>tx: -- SYN FRAME(DATA_NSQ) CRC(F) PAYLOAD CRC(P) ----------------------
+rx: -------------------------------------------------------------------
+</pre></div>
+</div>
+<p>Here, an error can be detected, but not corrected or indicated to the
+sending party. These exchanges are symmetric, i.e. switching <code class="docutils literal notranslate"><span class="pre">rx</span></code> and
+<code class="docutils literal notranslate"><span class="pre">tx</span></code> results again in a valid exchange. Currently, no longer exchanges are
+known.</p>
+</section>
+<section id="commands-requests-responses-and-events">
+<h2>Commands: Requests, Responses, and Events<a class="headerlink" href="#commands-requests-responses-and-events" title="Permalink to this headline">¶</a></h2>
+<p>Commands are sent as payload inside a data frame. Currently, this is the
+only known payload type of <code class="docutils literal notranslate"><span class="pre">DATA</span></code> frames, with a payload-type value of
+<code class="docutils literal notranslate"><span class="pre">0x80</span></code> (<a class="reference internal" href="client-api.html#c.ssh_payload_type" title="ssh_payload_type"><code class="xref c c-type docutils literal notranslate"><span class="pre">SSH_PLD_TYPE_CMD</span></code></a>).</p>
+<p>The command-type payload (<a class="reference internal" href="client-api.html#c.ssh_command" title="ssh_command"><code class="xref c c-type docutils literal notranslate"><span class="pre">struct</span> <span class="pre">ssh_command</span></code></a>)
+consists of an eight-byte command structure, followed by optional and
+variable length command data. The length of this optional data is derived
+from the frame payload length given in the corresponding frame, i.e. it is
+<code class="docutils literal notranslate"><span class="pre">frame.len</span> <span class="pre">-</span> <span class="pre">sizeof(struct</span> <span class="pre">ssh_command)</span></code>. The command struct contains the
+following fields, packed together and in order:</p>
+<table class="docutils align-default" id="id4">
+<caption><span class="caption-text">SSH Command</span><a class="headerlink" href="#id4" title="Permalink to this table">¶</a></caption>
+<colgroup>
+<col style="width: 17%" />
+<col style="width: 17%" />
+<col style="width: 67%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Field</p></th>
+<th class="head"><p>Type</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">TYPE</span></code></p></td>
+<td><p><code class="xref c c-type docutils literal notranslate"><span class="pre">u8</span></code></p></td>
+<td><p>Type of the payload. For commands always <code class="docutils literal notranslate"><span class="pre">0x80</span></code>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">TC</span></code></p></td>
+<td><p><code class="xref c c-type docutils literal notranslate"><span class="pre">u8</span></code></p></td>
+<td><p>Target category.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">TID</span></code> (out)</p></td>
+<td><p><code class="xref c c-type docutils literal notranslate"><span class="pre">u8</span></code></p></td>
+<td><p>Target ID for outgoing (host to EC) commands.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">TID</span></code> (in)</p></td>
+<td><p><code class="xref c c-type docutils literal notranslate"><span class="pre">u8</span></code></p></td>
+<td><p>Target ID for incoming (EC to host) commands.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">IID</span></code></p></td>
+<td><p><code class="xref c c-type docutils literal notranslate"><span class="pre">u8</span></code></p></td>
+<td><p>Instance ID.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">RQID</span></code></p></td>
+<td><p><code class="xref c c-type docutils literal notranslate"><span class="pre">u16</span></code></p></td>
+<td><p>Request ID.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">CID</span></code></p></td>
+<td><p><code class="xref c c-type docutils literal notranslate"><span class="pre">u8</span></code></p></td>
+<td><p>Command ID.</p></td>
+</tr>
+</tbody>
+</table>
+<p>The command struct and data, in general, does not contain any failure
+detection mechanism (e.g. CRCs), this is solely done on the frame level.</p>
+<p>Command-type payloads are used by the host to send commands and requests to
+the EC as well as by the EC to send responses and events back to the host.
+We differentiate between requests (sent by the host), responses (sent by the
+EC in response to a request), and events (sent by the EC without a preceding
+request).</p>
+<p>Commands and events are uniquely identified by their target category
+(<code class="docutils literal notranslate"><span class="pre">TC</span></code>) and command ID (<code class="docutils literal notranslate"><span class="pre">CID</span></code>). The target category specifies a general
+category for the command (e.g. system in general, vs. battery and AC, vs.
+temperature, and so on), while the command ID specifies the command inside
+that category. Only the combination of <code class="docutils literal notranslate"><span class="pre">TC</span></code> + <code class="docutils literal notranslate"><span class="pre">CID</span></code> is unique. Additionally,
+commands have an instance ID (<code class="docutils literal notranslate"><span class="pre">IID</span></code>), which is used to differentiate
+between different sub-devices. For example <code class="docutils literal notranslate"><span class="pre">TC=3</span></code> <code class="docutils literal notranslate"><span class="pre">CID=1</span></code> is a
+request to get the temperature on a thermal sensor, where <code class="docutils literal notranslate"><span class="pre">IID</span></code> specifies
+the respective sensor. If the instance ID is not used, it should be set to
+zero. If instance IDs are used, they, in general, start with a value of one,
+whereas zero may be used for instance independent queries, if applicable. A
+response to a request should have the same target category, command ID, and
+instance ID as the corresponding request.</p>
+<p>Responses are matched to their corresponding request via the request ID
+(<code class="docutils literal notranslate"><span class="pre">RQID</span></code>) field. This is a 16 bit wrapping counter similar to the sequence
+ID on the frames. Note that the sequence ID of the frames for a
+request-response pair does not match. Only the request ID has to match.
+Frame-protocol wise these are two separate exchanges, and may even be
+separated, e.g. by an event being sent after the request but before the
+response. Not all commands produce a response, and this is not detectable by
+<code class="docutils literal notranslate"><span class="pre">TC</span></code> + <code class="docutils literal notranslate"><span class="pre">CID</span></code>. It is the responsibility of the issuing party to wait for a
+response (or signal this to the communication framework, as is done in
+SAN/ACPI via the <code class="docutils literal notranslate"><span class="pre">SNC</span></code> flag).</p>
+<p>Events are identified by unique and reserved request IDs. These IDs should
+not be used by the host when sending a new request. They are used on the
+host to, first, detect events and, second, match them with a registered
+event handler. Request IDs for events are chosen by the host and directed to
+the EC when setting up and enabling an event source (via the
+enable-event-source request). The EC then uses the specified request ID for
+events sent from the respective source. Note that an event should still be
+identified by its target category, command ID, and, if applicable, instance
+ID, as a single event source can send multiple different event types. In
+general, however, a single target category should map to a single reserved
+event request ID.</p>
+<p>Furthermore, requests, responses, and events have an associated target ID
+(<code class="docutils literal notranslate"><span class="pre">TID</span></code>). This target ID is split into output (host to EC) and input (EC to
+host) fields, with the respecting other field (e.g. output field on incoming
+messages) set to zero. Two <code class="docutils literal notranslate"><span class="pre">TID</span></code> values are known: Primary (<code class="docutils literal notranslate"><span class="pre">0x01</span></code>) and
+secondary (<code class="docutils literal notranslate"><span class="pre">0x02</span></code>). In general, the response to a request should have the
+same <code class="docutils literal notranslate"><span class="pre">TID</span></code> value, however, the field (output vs. input) should be used in
+accordance to the direction in which the response is sent (i.e. on the input
+field, as responses are generally sent from the EC to the host).</p>
+<p>Note that, even though requests and events should be uniquely identifiable
+by target category and command ID alone, the EC may require specific
+target ID and instance ID values to accept a command. A command that is
+accepted for <code class="docutils literal notranslate"><span class="pre">TID=1</span></code>, for example, may not be accepted for <code class="docutils literal notranslate"><span class="pre">TID=2</span></code>
+and vice versa.</p>
+</section>
+<section id="limitations-and-observations">
+<h2>Limitations and Observations<a class="headerlink" href="#limitations-and-observations" title="Permalink to this headline">¶</a></h2>
+<p>The protocol can, in theory, handle up to <code class="docutils literal notranslate"><span class="pre">U8_MAX</span></code> frames in parallel,
+with up to <code class="docutils literal notranslate"><span class="pre">U16_MAX</span></code> pending requests (neglecting request IDs reserved for
+events). In practice, however, this is more limited. From our testing
+(although via a python and thus a user-space program), it seems that the EC
+can handle up to four requests (mostly) reliably in parallel at a certain
+time. With five or more requests in parallel, consistent discarding of
+commands (ACKed frame but no command response) has been observed. For five
+simultaneous commands, this reproducibly resulted in one command being
+dropped and four commands being handled.</p>
+<p>However, it has also been noted that, even with three requests in parallel,
+occasional frame drops happen. Apart from this, with a limit of three
+pending requests, no dropped commands (i.e. command being dropped but frame
+carrying command being ACKed) have been observed. In any case, frames (and
+possibly also commands) should be re-sent by the host if a certain timeout
+is exceeded. This is done by the EC for frames with a timeout of one second,
+up to two re-tries (i.e. three transmissions in total). The limit of
+re-tries also applies to received NAKs, and, in a worst case scenario, can
+lead to entire messages being dropped.</p>
+<p>While this also seems to work fine for pending data frames as long as no
+transmission failures occur, implementation and handling of these seems to
+depend on the assumption that there is only one non-acknowledged data frame.
+In particular, the detection of repeated frames relies on the last sequence
+number. This means that, if a frame that has been successfully received by
+the EC is sent again, e.g. due to the host not receiving an <code class="docutils literal notranslate"><span class="pre">ACK</span></code>, the EC
+will only detect this if it has the sequence ID of the last frame received
+by the EC. As an example: Sending two frames with <code class="docutils literal notranslate"><span class="pre">SEQ=0</span></code> and <code class="docutils literal notranslate"><span class="pre">SEQ=1</span></code>
+followed by a repetition of <code class="docutils literal notranslate"><span class="pre">SEQ=0</span></code> will not detect the second <code class="docutils literal notranslate"><span class="pre">SEQ=0</span></code>
+frame as such, and thus execute the command in this frame each time it has
+been received, i.e. twice in this example. Sending <code class="docutils literal notranslate"><span class="pre">SEQ=0</span></code>, <code class="docutils literal notranslate"><span class="pre">SEQ=1</span></code> and
+then repeating <code class="docutils literal notranslate"><span class="pre">SEQ=1</span></code> will detect the second <code class="docutils literal notranslate"><span class="pre">SEQ=1</span></code> as repetition of
+the first one and ignore it, thus executing the contained command only once.</p>
+<p>In conclusion, this suggests a limit of at most one pending un-ACKed frame
+(per party, effectively leading to synchronous communication regarding
+frames) and at most three pending commands. The limit to synchronous frame
+transfers seems to be consistent with behavior observed on Windows.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Surface Serial Hub Protocol</a><ul>
+<li><a class="reference internal" href="#ssh-packet-protocol-definitions">SSH Packet Protocol: Definitions</a></li>
+<li><a class="reference internal" href="#ssh-packet-protocol-flow-sequence">SSH Packet Protocol: Flow Sequence</a></li>
+<li><a class="reference internal" href="#commands-requests-responses-and-events">Commands: Requests, Responses, and Events</a></li>
+<li><a class="reference internal" href="#limitations-and-observations">Limitations and Observations</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/surface_aggregator/ssh.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/surface_aggregator/ssh.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

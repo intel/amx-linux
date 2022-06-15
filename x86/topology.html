@@ -1,0 +1,336 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>4. x86 Topology &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="5. Kernel level exception handling" href="exception-tables.html" />
+    <link rel="prev" title="3. x86 Feature Flags" href="cpuinfo.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="x86-topology">
+<h1><span class="section-number">4. </span>x86 Topology<a class="headerlink" href="#x86-topology" title="Permalink to this headline">¶</a></h1>
+<p>This documents and clarifies the main aspects of x86 topology modelling and
+representation in the kernel. Update/change when doing changes to the
+respective code.</p>
+<p>The architecture-agnostic topology definitions are in
+<a class="reference internal" href="../admin-guide/cputopology.html"><span class="doc">How CPU topology info is exported via sysfs</span></a>. This file holds x86-specific
+differences/specialities which must not necessarily apply to the generic
+definitions. Thus, the way to read up on Linux topology on x86 is to start
+with the generic one and look at this one in parallel for the x86 specifics.</p>
+<p>Needless to say, code should use the generic functions - this file is <em>only</em>
+here to <em>document</em> the inner workings of x86 topology.</p>
+<p>Started by Thomas Gleixner &lt;<a class="reference external" href="mailto:tglx&#37;&#52;&#48;linutronix&#46;de">tglx<span>&#64;</span>linutronix<span>&#46;</span>de</a>&gt; and Borislav Petkov &lt;<a class="reference external" href="mailto:bp&#37;&#52;&#48;alien8&#46;de">bp<span>&#64;</span>alien8<span>&#46;</span>de</a>&gt;.</p>
+<p>The main aim of the topology facilities is to present adequate interfaces to
+code which needs to know/query/use the structure of the running system wrt
+threads, cores, packages, etc.</p>
+<p>The kernel does not care about the concept of physical sockets because a
+socket has no relevance to software. It’s an electromechanical component. In
+the past a socket always contained a single package (see below), but with the
+advent of Multi Chip Modules (MCM) a socket can hold more than one package. So
+there might be still references to sockets in the code, but they are of
+historical nature and should be cleaned up.</p>
+<p>The topology of a system is described in the units of:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>packages</p></li>
+<li><p>cores</p></li>
+<li><p>threads</p></li>
+</ul>
+</div></blockquote>
+<section id="package">
+<h2><span class="section-number">4.1. </span>Package<a class="headerlink" href="#package" title="Permalink to this headline">¶</a></h2>
+<p>Packages contain a number of cores plus shared resources, e.g. DRAM
+controller, shared caches etc.</p>
+<p>Modern systems may also use the term ‘Die’ for package.</p>
+<p>AMD nomenclature for package is ‘Node’.</p>
+<p>Package-related topology information in the kernel:</p>
+<blockquote>
+<div><ul>
+<li><p>cpuinfo_x86.x86_max_cores:</p>
+<p>The number of cores in a package. This information is retrieved via CPUID.</p>
+</li>
+<li><p>cpuinfo_x86.x86_max_dies:</p>
+<p>The number of dies in a package. This information is retrieved via CPUID.</p>
+</li>
+<li><p>cpuinfo_x86.cpu_die_id:</p>
+<p>The physical ID of the die. This information is retrieved via CPUID.</p>
+</li>
+<li><p>cpuinfo_x86.phys_proc_id:</p>
+<p>The physical ID of the package. This information is retrieved via CPUID
+and deduced from the APIC IDs of the cores in the package.</p>
+<p>Modern systems use this value for the socket. There may be multiple
+packages within a socket. This value may differ from cpu_die_id.</p>
+</li>
+<li><p>cpuinfo_x86.logical_proc_id:</p>
+<p>The logical ID of the package. As we do not trust BIOSes to enumerate the
+packages in a consistent way, we introduced the concept of logical package
+ID so we can sanely calculate the number of maximum possible packages in
+the system and have the packages enumerated linearly.</p>
+</li>
+<li><p>topology_max_packages():</p>
+<p>The maximum possible number of packages in the system. Helpful for per
+package facilities to preallocate per package information.</p>
+</li>
+<li><p>cpu_llc_id:</p>
+<p>A per-CPU variable containing:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>On Intel, the first APIC ID of the list of CPUs sharing the Last Level
+Cache</p></li>
+<li><p>On AMD, the Node ID or Core Complex ID containing the Last Level
+Cache. In general, it is a number identifying an LLC uniquely on the
+system.</p></li>
+</ul>
+</div></blockquote>
+</li>
+</ul>
+</div></blockquote>
+</section>
+<section id="cores">
+<h2><span class="section-number">4.2. </span>Cores<a class="headerlink" href="#cores" title="Permalink to this headline">¶</a></h2>
+<p>A core consists of 1 or more threads. It does not matter whether the threads
+are SMT- or CMT-type threads.</p>
+<p>AMDs nomenclature for a CMT core is “Compute Unit”. The kernel always uses
+“core”.</p>
+<p>Core-related topology information in the kernel:</p>
+<blockquote>
+<div><ul>
+<li><p>smp_num_siblings:</p>
+<p>The number of threads in a core. The number of threads in a package can be
+calculated by:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>threads_per_package = cpuinfo_x86.x86_max_cores * smp_num_siblings
+</pre></div>
+</div>
+</li>
+</ul>
+</div></blockquote>
+</section>
+<section id="threads">
+<h2><span class="section-number">4.3. </span>Threads<a class="headerlink" href="#threads" title="Permalink to this headline">¶</a></h2>
+<p>A thread is a single scheduling unit. It’s the equivalent to a logical Linux
+CPU.</p>
+<p>AMDs nomenclature for CMT threads is “Compute Unit Core”. The kernel always
+uses “thread”.</p>
+<p>Thread-related topology information in the kernel:</p>
+<blockquote>
+<div><ul>
+<li><p>topology_core_cpumask():</p>
+<p>The cpumask contains all online threads in the package to which a thread
+belongs.</p>
+<p>The number of online threads is also printed in /proc/cpuinfo “siblings.”</p>
+</li>
+<li><p>topology_sibling_cpumask():</p>
+<p>The cpumask contains all online threads in the core to which a thread
+belongs.</p>
+</li>
+<li><p>topology_logical_package_id():</p>
+<p>The logical package ID to which a thread belongs.</p>
+</li>
+<li><p>topology_physical_package_id():</p>
+<p>The physical package ID to which a thread belongs.</p>
+</li>
+<li><p>topology_core_id();</p>
+<p>The ID of the core to which a thread belongs. It is also printed in /proc/cpuinfo
+“core_id.”</p>
+</li>
+</ul>
+</div></blockquote>
+</section>
+<section id="system-topology-examples">
+<h2><span class="section-number">4.4. </span>System topology examples<a class="headerlink" href="#system-topology-examples" title="Permalink to this headline">¶</a></h2>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The alternative Linux CPU enumeration depends on how the BIOS enumerates the
+threads. Many BIOSes enumerate all threads 0 first and then all threads 1.
+That has the “advantage” that the logical Linux CPU numbers of threads 0 stay
+the same whether threads are enabled or not. That’s merely an implementation
+detail and has no practical impact.</p>
+</div>
+<ol class="arabic">
+<li><p>Single Package, Single Core:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[package 0] -&gt; [core 0] -&gt; [thread 0] -&gt; Linux CPU 0
+</pre></div>
+</div>
+</li>
+<li><p>Single Package, Dual Core</p>
+<ol class="loweralpha">
+<li><p>One thread per core:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[package 0] -&gt; [core 0] -&gt; [thread 0] -&gt; Linux CPU 0
+            -&gt; [core 1] -&gt; [thread 0] -&gt; Linux CPU 1
+</pre></div>
+</div>
+</li>
+<li><p>Two threads per core:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[package 0] -&gt; [core 0] -&gt; [thread 0] -&gt; Linux CPU 0
+                        -&gt; [thread 1] -&gt; Linux CPU 1
+            -&gt; [core 1] -&gt; [thread 0] -&gt; Linux CPU 2
+                        -&gt; [thread 1] -&gt; Linux CPU 3
+</pre></div>
+</div>
+<p>Alternative enumeration:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[package 0] -&gt; [core 0] -&gt; [thread 0] -&gt; Linux CPU 0
+                        -&gt; [thread 1] -&gt; Linux CPU 2
+            -&gt; [core 1] -&gt; [thread 0] -&gt; Linux CPU 1
+                        -&gt; [thread 1] -&gt; Linux CPU 3
+</pre></div>
+</div>
+<p>AMD nomenclature for CMT systems:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[node 0] -&gt; [Compute Unit 0] -&gt; [Compute Unit Core 0] -&gt; Linux CPU 0
+                             -&gt; [Compute Unit Core 1] -&gt; Linux CPU 1
+         -&gt; [Compute Unit 1] -&gt; [Compute Unit Core 0] -&gt; Linux CPU 2
+                             -&gt; [Compute Unit Core 1] -&gt; Linux CPU 3
+</pre></div>
+</div>
+</li>
+</ol>
+</li>
+</ol>
+<ol class="arabic" start="4">
+<li><p>Dual Package, Dual Core</p>
+<ol class="loweralpha">
+<li><p>One thread per core:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[package 0] -&gt; [core 0] -&gt; [thread 0] -&gt; Linux CPU 0
+            -&gt; [core 1] -&gt; [thread 0] -&gt; Linux CPU 1
+
+[package 1] -&gt; [core 0] -&gt; [thread 0] -&gt; Linux CPU 2
+            -&gt; [core 1] -&gt; [thread 0] -&gt; Linux CPU 3
+</pre></div>
+</div>
+</li>
+<li><p>Two threads per core:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[package 0] -&gt; [core 0] -&gt; [thread 0] -&gt; Linux CPU 0
+                        -&gt; [thread 1] -&gt; Linux CPU 1
+            -&gt; [core 1] -&gt; [thread 0] -&gt; Linux CPU 2
+                        -&gt; [thread 1] -&gt; Linux CPU 3
+
+[package 1] -&gt; [core 0] -&gt; [thread 0] -&gt; Linux CPU 4
+                        -&gt; [thread 1] -&gt; Linux CPU 5
+            -&gt; [core 1] -&gt; [thread 0] -&gt; Linux CPU 6
+                        -&gt; [thread 1] -&gt; Linux CPU 7
+</pre></div>
+</div>
+<p>Alternative enumeration:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[package 0] -&gt; [core 0] -&gt; [thread 0] -&gt; Linux CPU 0
+                        -&gt; [thread 1] -&gt; Linux CPU 4
+            -&gt; [core 1] -&gt; [thread 0] -&gt; Linux CPU 1
+                        -&gt; [thread 1] -&gt; Linux CPU 5
+
+[package 1] -&gt; [core 0] -&gt; [thread 0] -&gt; Linux CPU 2
+                        -&gt; [thread 1] -&gt; Linux CPU 6
+            -&gt; [core 1] -&gt; [thread 0] -&gt; Linux CPU 3
+                        -&gt; [thread 1] -&gt; Linux CPU 7
+</pre></div>
+</div>
+<p>AMD nomenclature for CMT systems:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>[node 0] -&gt; [Compute Unit 0] -&gt; [Compute Unit Core 0] -&gt; Linux CPU 0
+                             -&gt; [Compute Unit Core 1] -&gt; Linux CPU 1
+         -&gt; [Compute Unit 1] -&gt; [Compute Unit Core 0] -&gt; Linux CPU 2
+                             -&gt; [Compute Unit Core 1] -&gt; Linux CPU 3
+
+[node 1] -&gt; [Compute Unit 0] -&gt; [Compute Unit Core 0] -&gt; Linux CPU 4
+                             -&gt; [Compute Unit Core 1] -&gt; Linux CPU 5
+         -&gt; [Compute Unit 1] -&gt; [Compute Unit Core 0] -&gt; Linux CPU 6
+                             -&gt; [Compute Unit Core 1] -&gt; Linux CPU 7
+</pre></div>
+</div>
+</li>
+</ol>
+</li>
+</ol>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">4. x86 Topology</a><ul>
+<li><a class="reference internal" href="#package">4.1. Package</a></li>
+<li><a class="reference internal" href="#cores">4.2. Cores</a></li>
+<li><a class="reference internal" href="#threads">4.3. Threads</a></li>
+<li><a class="reference internal" href="#system-topology-examples">4.4. System topology examples</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/x86/topology.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/x86/topology.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

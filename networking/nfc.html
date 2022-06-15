@@ -1,0 +1,219 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Linux NFC subsystem &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Netdev private dataroom for 6lowpan interfaces" href="6lowpan.html" />
+    <link rel="prev" title="Kernel TLS offload" href="tls-offload.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="linux-nfc-subsystem">
+<h1>Linux NFC subsystem<a class="headerlink" href="#linux-nfc-subsystem" title="Permalink to this headline">¶</a></h1>
+<p>The Near Field Communication (NFC) subsystem is required to standardize the
+NFC device drivers development and to create an unified userspace interface.</p>
+<p>This document covers the architecture overview, the device driver interface
+description and the userspace interface description.</p>
+<section id="architecture-overview">
+<h2>Architecture overview<a class="headerlink" href="#architecture-overview" title="Permalink to this headline">¶</a></h2>
+<dl class="simple">
+<dt>The NFC subsystem is responsible for:</dt><dd><ul class="simple">
+<li><p>NFC adapters management;</p></li>
+<li><p>Polling for targets;</p></li>
+<li><p>Low-level data exchange;</p></li>
+</ul>
+</dd>
+</dl>
+<p>The subsystem is divided in some parts. The ‘core’ is responsible for
+providing the device driver interface. On the other side, it is also
+responsible for providing an interface to control operations and low-level
+data exchange.</p>
+<p>The control operations are available to userspace via generic netlink.</p>
+<p>The low-level data exchange interface is provided by the new socket family
+PF_NFC. The NFC_SOCKPROTO_RAW performs raw communication with NFC targets.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>+--------------------------------------+
+|              USER SPACE              |
++--------------------------------------+
+    ^                       ^
+    | low-level             | control
+    | data exchange         | operations
+    |                       |
+    |                       v
+    |                  +-----------+
+    | AF_NFC           |  netlink  |
+    | socket           +-----------+
+    | raw                   ^
+    |                       |
+    v                       v
++---------+            +-----------+
+| rawsock | &lt;--------&gt; |   core    |
++---------+            +-----------+
+                            ^
+                            |
+                            v
+                       +-----------+
+                       |  driver   |
+                       +-----------+
+</pre></div>
+</div>
+</section>
+<section id="device-driver-interface">
+<h2>Device Driver Interface<a class="headerlink" href="#device-driver-interface" title="Permalink to this headline">¶</a></h2>
+<p>When registering on the NFC subsystem, the device driver must inform the core
+of the set of supported NFC protocols and the set of ops callbacks. The ops
+callbacks that must be implemented are the following:</p>
+<ul class="simple">
+<li><p>start_poll - setup the device to poll for targets</p></li>
+<li><p>stop_poll - stop on progress polling operation</p></li>
+<li><p>activate_target - select and initialize one of the targets found</p></li>
+<li><p>deactivate_target - deselect and deinitialize the selected target</p></li>
+<li><p>data_exchange - send data and receive the response (transceive operation)</p></li>
+</ul>
+</section>
+<section id="userspace-interface">
+<h2>Userspace interface<a class="headerlink" href="#userspace-interface" title="Permalink to this headline">¶</a></h2>
+<p>The userspace interface is divided in control operations and low-level data
+exchange operation.</p>
+<p>CONTROL OPERATIONS:</p>
+<p>Generic netlink is used to implement the interface to the control operations.
+The operations are composed by commands and events, all listed below:</p>
+<ul class="simple">
+<li><p>NFC_CMD_GET_DEVICE - get specific device info or dump the device list</p></li>
+<li><p>NFC_CMD_START_POLL - setup a specific device to polling for targets</p></li>
+<li><p>NFC_CMD_STOP_POLL - stop the polling operation in a specific device</p></li>
+<li><p>NFC_CMD_GET_TARGET - dump the list of targets found by a specific device</p></li>
+<li><p>NFC_EVENT_DEVICE_ADDED - reports an NFC device addition</p></li>
+<li><p>NFC_EVENT_DEVICE_REMOVED - reports an NFC device removal</p></li>
+<li><p>NFC_EVENT_TARGETS_FOUND - reports START_POLL results when 1 or more targets
+are found</p></li>
+</ul>
+<p>The user must call START_POLL to poll for NFC targets, passing the desired NFC
+protocols through NFC_ATTR_PROTOCOLS attribute. The device remains in polling
+state until it finds any target. However, the user can stop the polling
+operation by calling STOP_POLL command. In this case, it will be checked if
+the requester of STOP_POLL is the same of START_POLL.</p>
+<p>If the polling operation finds one or more targets, the event TARGETS_FOUND is
+sent (including the device id). The user must call GET_TARGET to get the list of
+all targets found by such device. Each reply message has target attributes with
+relevant information such as the supported NFC protocols.</p>
+<p>All polling operations requested through one netlink socket are stopped when
+it’s closed.</p>
+<p>LOW-LEVEL DATA EXCHANGE:</p>
+<p>The userspace must use PF_NFC sockets to perform any data communication with
+targets. All NFC sockets use AF_NFC:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct sockaddr_nfc {
+       sa_family_t sa_family;
+       __u32 dev_idx;
+       __u32 target_idx;
+       __u32 nfc_protocol;
+};
+</pre></div>
+</div>
+<p>To establish a connection with one target, the user must create an
+NFC_SOCKPROTO_RAW socket and call the ‘connect’ syscall with the sockaddr_nfc
+struct correctly filled. All information comes from NFC_EVENT_TARGETS_FOUND
+netlink event. As a target can support more than one NFC protocol, the user
+must inform which protocol it wants to use.</p>
+<p>Internally, ‘connect’ will result in an activate_target call to the driver.
+When the socket is closed, the target is deactivated.</p>
+<p>The data format exchanged through the sockets is NFC protocol dependent. For
+instance, when communicating with MIFARE tags, the data exchanged are MIFARE
+commands and their responses.</p>
+<p>The first received package is the response to the first sent package and so
+on. In order to allow valid “empty” responses, every data received has a NULL
+header of 1 byte.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Linux NFC subsystem</a><ul>
+<li><a class="reference internal" href="#architecture-overview">Architecture overview</a></li>
+<li><a class="reference internal" href="#device-driver-interface">Device Driver Interface</a></li>
+<li><a class="reference internal" href="#userspace-interface">Userspace interface</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/networking/nfc.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/networking/nfc.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

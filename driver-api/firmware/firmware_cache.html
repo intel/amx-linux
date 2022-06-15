@@ -1,0 +1,135 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Firmware cache &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Direct filesystem lookup" href="direct-fs-lookup.html" />
+    <link rel="prev" title="Built-in firmware" href="built-in-fw.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="firmware-cache">
+<h1>Firmware cache<a class="headerlink" href="#firmware-cache" title="Permalink to this headline">¶</a></h1>
+<p>When Linux resumes from suspend some device drivers require firmware lookups to
+re-initialize devices. During resume there may be a period of time during which
+firmware lookups are not possible, during this short period of time firmware
+requests will fail. Time is of essence though, and delaying drivers to wait for
+the root filesystem for firmware delays user experience with device
+functionality. In order to support these requirements the firmware
+infrastructure implements a firmware cache for device drivers for most API
+calls, automatically behind the scenes.</p>
+<p>The firmware cache makes using certain firmware API calls safe during a device
+driver’s suspend and resume callback.  Users of these API calls needn’t cache
+the firmware by themselves for dealing with firmware loss during system resume.</p>
+<p>The firmware cache works by requesting for firmware prior to suspend and
+caching it in memory. Upon resume device drivers using the firmware API will
+have access to the firmware immediately, without having to wait for the root
+filesystem to mount or dealing with possible race issues with lookups as the
+root filesystem mounts.</p>
+<p>Some implementation details about the firmware cache setup:</p>
+<ul class="simple">
+<li><p>The firmware cache is setup by adding a devres entry for each device that
+uses all synchronous call except <a class="reference internal" href="request_firmware.html#c.request_firmware_into_buf" title="request_firmware_into_buf"><code class="xref c c-func docutils literal notranslate"><span class="pre">request_firmware_into_buf()</span></code></a>.</p></li>
+<li><p>If an asynchronous call is used the firmware cache is only set up for a
+device if the second argument (uevent) to <a class="reference internal" href="request_firmware.html#c.request_firmware_nowait" title="request_firmware_nowait"><code class="xref c c-func docutils literal notranslate"><span class="pre">request_firmware_nowait()</span></code></a> is
+true. When uevent is true it requests that a kobject uevent be sent to
+userspace for the firmware request through the sysfs fallback mechanism
+if the firmware file is not found.</p></li>
+<li><p>If the firmware cache is determined to be needed as per the above two
+criteria the firmware cache is setup by adding a devres entry for the
+device making the firmware request.</p></li>
+<li><p>The firmware devres entry is maintained throughout the lifetime of the
+device. This means that even if you release_firmware() the firmware cache
+will still be used on resume from suspend.</p></li>
+<li><p>The timeout for the fallback mechanism is temporarily reduced to 10 seconds
+as the firmware cache is set up during suspend, the timeout is set back to
+the old value you had configured after the cache is set up.</p></li>
+<li><p>Upon suspend any pending non-uevent firmware requests are killed to avoid
+stalling the kernel, this is done with kill_requests_without_uevent(). Kernel
+calls requiring the non-uevent therefore need to implement their own firmware
+cache mechanism but must not use the firmware API on suspend.</p></li>
+</ul>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/firmware/firmware_cache.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/firmware/firmware_cache.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

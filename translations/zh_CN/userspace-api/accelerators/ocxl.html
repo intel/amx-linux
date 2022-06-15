@@ -1,0 +1,257 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>OpenCAPI （开放相干加速器处理器接口） &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../../" src="../../../../_static/documentation_options.js"></script>
+    <script src="../../../../_static/jquery.js"></script>
+    <script src="../../../../_static/underscore.js"></script>
+    <script src="../../../../_static/doctools.js"></script>
+    <script src="../../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" />
+    <link rel="next" title="eBPF 用户空间API" href="../ebpf/index.html" />
+    <link rel="prev" title="Seccomp BPF (基于过滤器的安全计算)" href="../seccomp_filter.html" />
+   
+  <link rel="stylesheet" href="../../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../../userspace-api/accelerators/ocxl.html"><span class="doc">OpenCAPI (Open Coherent Accelerator Processor Interface)</span></a></p>
+</dd>
+<dt class="field-even">翻译</dt>
+<dd class="field-even"><p>李睿 Rui Li &lt;<a class="reference external" href="mailto:me&#37;&#52;&#48;lirui&#46;org">me<span>&#64;</span>lirui<span>&#46;</span>org</a>&gt;</p>
+</dd>
+</dl>
+<section id="opencapi">
+<h1>OpenCAPI （开放相干加速器处理器接口）<a class="headerlink" href="#opencapi" title="Permalink to this headline">¶</a></h1>
+<p><em>OpenCAPI: Open Coherent Accelerator Processor Interface</em></p>
+<p>OpenCAPI是处理器和加速器之间的一个接口，致力于达到低延迟和高带宽。该规范
+由 <a class="reference external" href="http://opencapi.org/">OpenCAPI Consortium</a> 开发。</p>
+<p>它允许加速器（可以是FPGA、ASIC等）使用虚拟地址连贯地访问主机内存。一个OpenCAPI
+设备也可以托管它自己的内存，并可以由主机访问。</p>
+<p>OpenCAPI在Linux中称为“ocxl”，它作为“cxl”（用于powerpc的IBM CAPI接口的驱动）的
+开放、处理器无关的演进，这么命名是为了避免与ISDN CAPI子系统相混淆。</p>
+<section id="id1">
+<h2>高层视角<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>OpenCAPI定义了一个在物理链路层上实现的数据链路层（TL）和传输层（TL）。任何
+实现DL和TL的处理器或者设备都可以开始共享内存。</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>+-----------+                         +-------------+
+|           |                         |             |
+|           |                         | Accelerated |
+| Processor |                         |  Function   |
+|           |  +--------+             |    Unit     |  +--------+
+|           |--| Memory |             |    (AFU)    |--| Memory |
+|           |  +--------+             |             |  +--------+
++-----------+                         +-------------+
+     |                                       |
++-----------+                         +-------------+
+|    TL     |                         |    TLX      |
++-----------+                         +-------------+
+     |                                       |
++-----------+                         +-------------+
+|    DL     |                         |    DLX      |
++-----------+                         +-------------+
+     |                                       |
+     |                   PHY                 |
+     +---------------------------------------+
+
+Processor：处理器
+Memory：内存
+Accelerated Function Unit：加速函数单元
+</pre></div>
+</div>
+</section>
+<section id="id2">
+<h2>设备发现<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>OpenCAPI依赖一个在设备上实现的与PCI类似的配置空间。因此主机可以通过查询
+配置空间来发现AFU。</p>
+<p>OpenCAPI设备在Linux中被当作类PCI设备（有一些注意事项）。固件需要对硬件进行
+抽象，就好像它是一个PCI链路。许多已有的PCI架构被重用：在模拟标准PCI时，
+设备被扫描并且BAR（基址寄存器）被分配。像“lspci”的命令因此可以被用于查看
+哪些设备可用。</p>
+<p>配置空间定义了可以在物理适配器上可以被找到的AFU，比如它的名字、支持多少内
+存上下文、内存映射IO（MMIO）区域的大小等。</p>
+</section>
+<section id="mmio">
+<h2>MMIO<a class="headerlink" href="#mmio" title="Permalink to this headline">¶</a></h2>
+<p>OpenCAPI为每个AFU定义了两个MMIO区域：</p>
+<ul class="simple">
+<li><p>全局MMIO区域，保存和整个AFU相关的寄存器。</p></li>
+<li><p>每个进程的MMIO区域，对于每个上下文固定大小。</p></li>
+</ul>
+</section>
+<section id="afu">
+<h2>AFU中断<a class="headerlink" href="#afu" title="Permalink to this headline">¶</a></h2>
+<p>OpenCAPI拥有AFU向主机进程发送中断的可能性。它通过定义在传输层的“intrp_req”
+来完成，指定一个定义中断的64位对象句柄。</p>
+<p>驱动允许一个进程分配中断并获取可以传递给AFU的64位对象句柄。</p>
+</section>
+<section id="id3">
+<h2>字符设备<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h2>
+<p>驱动为每个在物理设备上发现的AFU创建一个字符设备。一个物理设备可能拥有多个
+函数，一个函数可以拥有多个AFU。不过编写这篇文档之时，只对导出一个AFU的设备
+测试过。</p>
+<p>字符设备可以在 /dev/ocxl/ 中被找到，其命名为：
+/dev/ocxl/&lt;AFU 名称&gt;.&lt;位置&gt;.&lt;索引&gt;</p>
+<p>&lt;AFU 名称&gt; 是一个最长20个字符的名称，和在AFU配置空间中找到的相同。
+&lt;位置&gt;由驱动添加，可在系统有不止一个相同的OpenCAPI设备时帮助区分设备。
+&lt;索引&gt;也是为了在少见情况下帮助区分AFU，即设备携带多个同样的AFU副本时。</p>
+</section>
+<section id="sysfs">
+<h2>Sysfs类<a class="headerlink" href="#sysfs" title="Permalink to this headline">¶</a></h2>
+<p>添加了代表AFU的ocxl类。查看/sys/class/ocxl。布局在
+Documentation/ABI/testing/sysfs-class-ocxl 中描述。</p>
+</section>
+<section id="api">
+<h2>用户API<a class="headerlink" href="#api" title="Permalink to this headline">¶</a></h2>
+<section id="id4">
+<h3>打开<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h3>
+<p>基于在配置空间中找到的AFU定义，AFU可能支持在多个内存上下文中工作，这种情况
+下相关的字符设备可以被不同进程多次打开。</p>
+</section>
+<section id="ioctl">
+<h3>ioctl<a class="headerlink" href="#ioctl" title="Permalink to this headline">¶</a></h3>
+<p>OCXL_IOCTL_ATTACH:</p>
+<blockquote>
+<div><p>附加调用进程的内存上下文到AFU，以允许AFU访问其内存。</p>
+</div></blockquote>
+<p>OCXL_IOCTL_IRQ_ALLOC:</p>
+<blockquote>
+<div><p>分配AFU中断，返回标识符。</p>
+</div></blockquote>
+<p>OCXL_IOCTL_IRQ_FREE:</p>
+<blockquote>
+<div><p>释放之前分配的AFU中断。</p>
+</div></blockquote>
+<p>OCXL_IOCTL_IRQ_SET_FD:</p>
+<blockquote>
+<div><p>将一个事件文件描述符和AFU中断关联，因此用户进程可以在AFU发送中断时收到通
+知。</p>
+</div></blockquote>
+<p>OCXL_IOCTL_GET_METADATA:</p>
+<blockquote>
+<div><p>从卡中获取配置信息，比如内存映射IO区域的大小、AFU版本和当前上下文的进程
+地址空间ID（PASID）。</p>
+</div></blockquote>
+<p>OCXL_IOCTL_ENABLE_P9_WAIT:</p>
+<blockquote>
+<div><p>允许AFU唤醒执行“等待”的用户空间进程。返回信息给用户空间，允许其配置AFU。
+注意这只在POWER9上可用。</p>
+</div></blockquote>
+<p>OCXL_IOCTL_GET_FEATURES:</p>
+<blockquote>
+<div><p>报告用户空间可用的影响OpenCAPI的CPU特性。</p>
+</div></blockquote>
+</section>
+<section id="mmap">
+<h3>mmap<a class="headerlink" href="#mmap" title="Permalink to this headline">¶</a></h3>
+<p>一个进程可以mmap每个进程的MMIO区域来和AFU交互。</p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">OpenCAPI （开放相干加速器处理器接口）</a><ul>
+<li><a class="reference internal" href="#id1">高层视角</a></li>
+<li><a class="reference internal" href="#id2">设备发现</a></li>
+<li><a class="reference internal" href="#mmio">MMIO</a></li>
+<li><a class="reference internal" href="#afu">AFU中断</a></li>
+<li><a class="reference internal" href="#id3">字符设备</a></li>
+<li><a class="reference internal" href="#sysfs">Sysfs类</a></li>
+<li><a class="reference internal" href="#api">用户API</a><ul>
+<li><a class="reference internal" href="#id4">打开</a></li>
+<li><a class="reference internal" href="#ioctl">ioctl</a></li>
+<li><a class="reference internal" href="#mmap">mmap</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../../_sources/translations/zh_CN/userspace-api/accelerators/ocxl.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../../_sources/translations/zh_CN/userspace-api/accelerators/ocxl.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

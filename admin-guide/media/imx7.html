@@ -1,0 +1,314 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>7.8. i.MX7 Video Capture Driver &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="7.9. Intel Image Processing Unit 3 (IPU3) Imaging Unit (ImgU) driver" href="ipu3.html" />
+    <link rel="prev" title="7.7. i.MX Video Capture Driver" href="imx.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="i-mx7-video-capture-driver">
+<h1><span class="section-number">7.8. </span>i.MX7 Video Capture Driver<a class="headerlink" href="#i-mx7-video-capture-driver" title="Permalink to this headline">¶</a></h1>
+<section id="introduction">
+<h2><span class="section-number">7.8.1. </span>Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>The i.MX7 contrary to the i.MX5/6 family does not contain an Image Processing
+Unit (IPU); because of that the capabilities to perform operations or
+manipulation of the capture frames are less feature rich.</p>
+<p>For image capture the i.MX7 has three units:
+- CMOS Sensor Interface (CSI)
+- Video Multiplexer
+- MIPI CSI-2 Receiver</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>MIPI Camera Input ---&gt; MIPI CSI-2 --- &gt; |\
+                                        | \
+                                        |  \
+                                        | M |
+                                        | U | ------&gt;  CSI ---&gt; Capture
+                                        | X |
+                                        |  /
+Parallel Camera Input ----------------&gt; | /
+                                        |/
+</pre></div>
+</div>
+<p>For additional information, please refer to the latest versions of the i.MX7
+reference manual <a class="footnote-reference brackets" href="#f1" id="id1">1</a>.</p>
+</section>
+<section id="entities">
+<h2><span class="section-number">7.8.2. </span>Entities<a class="headerlink" href="#entities" title="Permalink to this headline">¶</a></h2>
+</section>
+<section id="imx-mipi-csi2">
+<h2><span class="section-number">7.8.3. </span>imx-mipi-csi2<a class="headerlink" href="#imx-mipi-csi2" title="Permalink to this headline">¶</a></h2>
+<p>This is the MIPI CSI-2 receiver entity. It has one sink pad to receive the pixel
+data from MIPI CSI-2 camera sensor. It has one source pad, corresponding to the
+virtual channel 0. This module is compliant to previous version of Samsung
+D-phy, and supports two D-PHY Rx Data lanes.</p>
+</section>
+<section id="csi-mux">
+<h2><span class="section-number">7.8.4. </span>csi-mux<a class="headerlink" href="#csi-mux" title="Permalink to this headline">¶</a></h2>
+<p>This is the video multiplexer. It has two sink pads to select from either camera
+sensor with a parallel interface or from MIPI CSI-2 virtual channel 0.  It has
+a single source pad that routes to the CSI.</p>
+</section>
+<section id="csi">
+<h2><span class="section-number">7.8.5. </span>csi<a class="headerlink" href="#csi" title="Permalink to this headline">¶</a></h2>
+<p>The CSI enables the chip to connect directly to external CMOS image sensor. CSI
+can interface directly with Parallel and MIPI CSI-2 buses. It has 256 x 64 FIFO
+to store received image pixel data and embedded DMA controllers to transfer data
+from the FIFO through AHB bus.</p>
+<p>This entity has one sink pad that receives from the csi-mux entity and a single
+source pad that routes video frames directly to memory buffers. This pad is
+routed to a capture device node.</p>
+</section>
+<section id="usage-notes">
+<h2><span class="section-number">7.8.6. </span>Usage Notes<a class="headerlink" href="#usage-notes" title="Permalink to this headline">¶</a></h2>
+<p>To aid in configuration and for backward compatibility with V4L2 applications
+that access controls only from video device nodes, the capture device interfaces
+inherit controls from the active entities in the current pipeline, so controls
+can be accessed either directly from the subdev or from the active capture
+device interface. For example, the sensor controls are available either from the
+sensor subdevs or from the active capture device.</p>
+</section>
+<section id="warp7-with-ov2680">
+<h2><span class="section-number">7.8.7. </span>Warp7 with OV2680<a class="headerlink" href="#warp7-with-ov2680" title="Permalink to this headline">¶</a></h2>
+<p>On this platform an OV2680 MIPI CSI-2 module is connected to the internal MIPI
+CSI-2 receiver. The following example configures a video capture pipeline with
+an output of 800x600, and BGGR 10 bit bayer format:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># Setup links
+media-ctl -l &quot;&#39;ov2680 1-0036&#39;:0 -&gt; &#39;imx7-mipi-csis.0&#39;:0[1]&quot;
+media-ctl -l &quot;&#39;imx7-mipi-csis.0&#39;:1 -&gt; &#39;csi-mux&#39;:1[1]&quot;
+media-ctl -l &quot;&#39;csi-mux&#39;:2 -&gt; &#39;csi&#39;:0[1]&quot;
+media-ctl -l &quot;&#39;csi&#39;:1 -&gt; &#39;csi capture&#39;:0[1]&quot;
+
+# Configure pads for pipeline
+media-ctl -V &quot;&#39;ov2680 1-0036&#39;:0 [fmt:SBGGR10_1X10/800x600 field:none]&quot;
+media-ctl -V &quot;&#39;csi-mux&#39;:1 [fmt:SBGGR10_1X10/800x600 field:none]&quot;
+media-ctl -V &quot;&#39;csi-mux&#39;:2 [fmt:SBGGR10_1X10/800x600 field:none]&quot;
+media-ctl -V &quot;&#39;imx7-mipi-csis.0&#39;:0 [fmt:SBGGR10_1X10/800x600 field:none]&quot;
+media-ctl -V &quot;&#39;csi&#39;:0 [fmt:SBGGR10_1X10/800x600 field:none]&quot;
+</pre></div>
+</div>
+<p>After this streaming can start. The v4l2-ctl tool can be used to select any of
+the resolutions supported by the sensor.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># media-ctl -p
+Media controller API version 5.2.0
+
+Media device information
+------------------------
+driver          imx7-csi
+model           imx-media
+serial
+bus info
+hw revision     0x0
+driver version  5.2.0
+
+Device topology
+- entity 1: csi (2 pads, 2 links)
+            type V4L2 subdev subtype Unknown flags 0
+            device node name /dev/v4l-subdev0
+        pad0: Sink
+                [fmt:SBGGR10_1X10/800x600 field:none colorspace:srgb xfer:srgb ycbcr:601 quantization:full-range]
+                &lt;- &quot;csi-mux&quot;:2 [ENABLED]
+        pad1: Source
+                [fmt:SBGGR10_1X10/800x600 field:none colorspace:srgb xfer:srgb ycbcr:601 quantization:full-range]
+                -&gt; &quot;csi capture&quot;:0 [ENABLED]
+
+- entity 4: csi capture (1 pad, 1 link)
+            type Node subtype V4L flags 0
+            device node name /dev/video0
+        pad0: Sink
+                &lt;- &quot;csi&quot;:1 [ENABLED]
+
+- entity 10: csi-mux (3 pads, 2 links)
+             type V4L2 subdev subtype Unknown flags 0
+             device node name /dev/v4l-subdev1
+        pad0: Sink
+                [fmt:Y8_1X8/1x1 field:none]
+        pad1: Sink
+               [fmt:SBGGR10_1X10/800x600 field:none]
+                &lt;- &quot;imx7-mipi-csis.0&quot;:1 [ENABLED]
+        pad2: Source
+                [fmt:SBGGR10_1X10/800x600 field:none]
+                -&gt; &quot;csi&quot;:0 [ENABLED]
+
+- entity 14: imx7-mipi-csis.0 (2 pads, 2 links)
+             type V4L2 subdev subtype Unknown flags 0
+             device node name /dev/v4l-subdev2
+        pad0: Sink
+                [fmt:SBGGR10_1X10/800x600 field:none]
+                &lt;- &quot;ov2680 1-0036&quot;:0 [ENABLED]
+        pad1: Source
+                [fmt:SBGGR10_1X10/800x600 field:none]
+                -&gt; &quot;csi-mux&quot;:1 [ENABLED]
+
+- entity 17: ov2680 1-0036 (1 pad, 1 link)
+             type V4L2 subdev subtype Sensor flags 0
+             device node name /dev/v4l-subdev3
+        pad0: Source
+                [fmt:SBGGR10_1X10/800x600@1/30 field:none colorspace:srgb]
+                -&gt; &quot;imx7-mipi-csis.0&quot;:0 [ENABLED]
+</pre></div>
+</div>
+</section>
+<section id="i-mx6ull-evk-with-ov5640">
+<h2><span class="section-number">7.8.8. </span>i.MX6ULL-EVK with OV5640<a class="headerlink" href="#i-mx6ull-evk-with-ov5640" title="Permalink to this headline">¶</a></h2>
+<p>On this platform a parallel OV5640 sensor is connected to the CSI port.
+The following example configures a video capture pipeline with an output
+of 640x480 and UYVY8_2X8 format:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># Setup links
+media-ctl -l &quot;&#39;ov5640 1-003c&#39;:0 -&gt; &#39;csi&#39;:0[1]&quot;
+media-ctl -l &quot;&#39;csi&#39;:1 -&gt; &#39;csi capture&#39;:0[1]&quot;
+
+# Configure pads for pipeline
+media-ctl -v -V &quot;&#39;ov5640 1-003c&#39;:0 [fmt:UYVY8_2X8/640x480 field:none]&quot;
+</pre></div>
+</div>
+<p>After this streaming can start:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>gst-launch-1.0 -v v4l2src device=/dev/video1 ! video/x-raw,format=UYVY,width=640,height=480 ! v4l2convert ! fbdevsink
+</pre></div>
+</div>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># media-ctl -p
+Media controller API version 5.14.0
+
+Media device information
+------------------------
+driver          imx7-csi
+model           imx-media
+serial
+bus info
+hw revision     0x0
+driver version  5.14.0
+
+Device topology
+- entity 1: csi (2 pads, 2 links)
+            type V4L2 subdev subtype Unknown flags 0
+            device node name /dev/v4l-subdev0
+        pad0: Sink
+                [fmt:UYVY8_2X8/640x480 field:none colorspace:srgb xfer:srgb ycbcr:601 quantization:full-range]
+                &lt;- &quot;ov5640 1-003c&quot;:0 [ENABLED,IMMUTABLE]
+        pad1: Source
+                [fmt:UYVY8_2X8/640x480 field:none colorspace:srgb xfer:srgb ycbcr:601 quantization:full-range]
+                -&gt; &quot;csi capture&quot;:0 [ENABLED,IMMUTABLE]
+
+- entity 4: csi capture (1 pad, 1 link)
+            type Node subtype V4L flags 0
+            device node name /dev/video1
+        pad0: Sink
+                &lt;- &quot;csi&quot;:1 [ENABLED,IMMUTABLE]
+
+- entity 10: ov5640 1-003c (1 pad, 1 link)
+             type V4L2 subdev subtype Sensor flags 0
+             device node name /dev/v4l-subdev1
+        pad0: Source
+                [fmt:UYVY8_2X8/640x480@1/30 field:none colorspace:srgb xfer:srgb ycbcr:601 quantization:full-range]
+                -&gt; &quot;csi&quot;:0 [ENABLED,IMMUTABLE]
+</pre></div>
+</div>
+</section>
+<section id="references">
+<h2><span class="section-number">7.8.9. </span>References<a class="headerlink" href="#references" title="Permalink to this headline">¶</a></h2>
+<dl class="footnote brackets">
+<dt class="label" id="f1"><span class="brackets"><a class="fn-backref" href="#id1">1</a></span></dt>
+<dd><p><a class="reference external" href="https://www.nxp.com/docs/en/reference-manual/IMX7SRM.pdf">https://www.nxp.com/docs/en/reference-manual/IMX7SRM.pdf</a></p>
+</dd>
+</dl>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">7.8. i.MX7 Video Capture Driver</a><ul>
+<li><a class="reference internal" href="#introduction">7.8.1. Introduction</a></li>
+<li><a class="reference internal" href="#entities">7.8.2. Entities</a></li>
+<li><a class="reference internal" href="#imx-mipi-csi2">7.8.3. imx-mipi-csi2</a></li>
+<li><a class="reference internal" href="#csi-mux">7.8.4. csi-mux</a></li>
+<li><a class="reference internal" href="#csi">7.8.5. csi</a></li>
+<li><a class="reference internal" href="#usage-notes">7.8.6. Usage Notes</a></li>
+<li><a class="reference internal" href="#warp7-with-ov2680">7.8.7. Warp7 with OV2680</a></li>
+<li><a class="reference internal" href="#i-mx6ull-evk-with-ov5640">7.8.8. i.MX6ULL-EVK with OV5640</a></li>
+<li><a class="reference internal" href="#references">7.8.9. References</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/admin-guide/media/imx7.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/admin-guide/media/imx7.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

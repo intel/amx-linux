@@ -1,0 +1,213 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>7.22. The Virtual Media Controller Driver (vimc) &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="7.23. The Virtual Stateless Decoder Driver (visl)" href="visl.html" />
+    <link rel="prev" title="7.21. The SI476x Driver" href="si476x.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="the-virtual-media-controller-driver-vimc">
+<h1><span class="section-number">7.22. </span>The Virtual Media Controller Driver (vimc)<a class="headerlink" href="#the-virtual-media-controller-driver-vimc" title="Permalink to this headline">¶</a></h1>
+<p>The vimc driver emulates complex video hardware using the V4L2 API and the Media
+API. It has a capture device and three subdevices: sensor, debayer and scaler.</p>
+<section id="topology">
+<h2><span class="section-number">7.22.1. </span>Topology<a class="headerlink" href="#topology" title="Permalink to this headline">¶</a></h2>
+<p>The topology is hardcoded, although you could modify it in vimc-core and
+recompile the driver to achieve your own topology. This is the default topology:</p>
+<figure class="align-center" id="id1">
+<img alt="Diagram of the default media pipeline topology" src="../../_images/vimc.svg" /><figcaption>
+<p><span class="caption-text">Media pipeline graph on vimc</span><a class="headerlink" href="#id1" title="Permalink to this image">¶</a></p>
+</figcaption>
+</figure>
+<section id="configuring-the-topology">
+<h3><span class="section-number">7.22.1.1. </span>Configuring the topology<a class="headerlink" href="#configuring-the-topology" title="Permalink to this headline">¶</a></h3>
+<p>Each subdevice will come with its default configuration (pixelformat, height,
+width, …). One needs to configure the topology in order to match the
+configuration on each linked subdevice to stream frames through the pipeline.
+If the configuration doesn’t match, the stream will fail. The <code class="docutils literal notranslate"><span class="pre">v4l-utils</span></code>
+package is a bundle of user-space applications, that comes with <code class="docutils literal notranslate"><span class="pre">media-ctl</span></code> and
+<code class="docutils literal notranslate"><span class="pre">v4l2-ctl</span></code> that can be used to configure the vimc configuration. This sequence
+of commands fits for the default topology:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>media-ctl -d platform:vimc -V <span class="s1">&#39;&quot;Sensor A&quot;:0[fmt:SBGGR8_1X8/640x480]&#39;</span>
+media-ctl -d platform:vimc -V <span class="s1">&#39;&quot;Debayer A&quot;:0[fmt:SBGGR8_1X8/640x480]&#39;</span>
+media-ctl -d platform:vimc -V <span class="s1">&#39;&quot;Scaler&quot;:0[fmt:RGB888_1X24/640x480]&#39;</span>
+media-ctl -d platform:vimc -V <span class="s1">&#39;&quot;Scaler&quot;:0[crop:(100,50)/400x150]&#39;</span>
+media-ctl -d platform:vimc -V <span class="s1">&#39;&quot;Scaler&quot;:1[fmt:RGB888_1X24/300x700]&#39;</span>
+v4l2-ctl -z platform:vimc -d <span class="s2">&quot;RGB/YUV Capture&quot;</span> -v <span class="nv">width</span><span class="o">=</span><span class="m">300</span>,height<span class="o">=</span><span class="m">700</span>
+v4l2-ctl -z platform:vimc -d <span class="s2">&quot;Raw Capture 0&quot;</span> -v <span class="nv">pixelformat</span><span class="o">=</span>BA81
+</pre></div>
+</div>
+</section>
+</section>
+<section id="subdevices">
+<h2><span class="section-number">7.22.2. </span>Subdevices<a class="headerlink" href="#subdevices" title="Permalink to this headline">¶</a></h2>
+<p>Subdevices define the behavior of an entity in the topology. Depending on the
+subdevice, the entity can have multiple pads of type source or sink.</p>
+<dl class="simple">
+<dt>vimc-sensor:</dt><dd><p>Generates images in several formats using video test pattern generator.
+Exposes:</p>
+<ul class="simple">
+<li><p>1 Pad source</p></li>
+</ul>
+</dd>
+<dt>vimc-lens:</dt><dd><p>Ancillary lens for a sensor. Supports auto focus control. Linked to
+a vimc-sensor using an ancillary link. The lens supports FOCUS_ABSOLUTE
+control.</p>
+</dd>
+</dl>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>media-ctl -p
+...
+- entity <span class="m">28</span>: Lens A <span class="o">(</span><span class="m">0</span> pad, <span class="m">0</span> link<span class="o">)</span>
+                <span class="nb">type</span> V4L2 subdev subtype Lens flags <span class="m">0</span>
+                device node name /dev/v4l-subdev6
+- entity <span class="m">29</span>: Lens B <span class="o">(</span><span class="m">0</span> pad, <span class="m">0</span> link<span class="o">)</span>
+                <span class="nb">type</span> V4L2 subdev subtype Lens flags <span class="m">0</span>
+                device node name /dev/v4l-subdev7
+v4l2-ctl -d /dev/v4l-subdev7 -C focus_absolute
+focus_absolute: <span class="m">0</span>
+</pre></div>
+</div>
+<dl class="simple">
+<dt>vimc-debayer:</dt><dd><p>Transforms images in bayer format into a non-bayer format.
+Exposes:</p>
+<ul class="simple">
+<li><p>1 Pad sink</p></li>
+<li><p>1 Pad source</p></li>
+</ul>
+</dd>
+<dt>vimc-scaler:</dt><dd><p>Re-size the image to meet the source pad resolution. E.g.: if the sync
+pad is configured to 360x480 and the source to 1280x720, the image will
+be stretched to fit the source resolution. Works for any resolution
+within the vimc limitations (even shrinking the image if necessary).
+Exposes:</p>
+<ul class="simple">
+<li><p>1 Pad sink</p></li>
+<li><p>1 Pad source</p></li>
+</ul>
+</dd>
+<dt>vimc-capture:</dt><dd><p>Exposes node /dev/videoX to allow userspace to capture the stream.
+Exposes:</p>
+<ul class="simple">
+<li><p>1 Pad sink</p></li>
+<li><p>1 Pad source</p></li>
+</ul>
+</dd>
+</dl>
+</section>
+<section id="module-options">
+<h2><span class="section-number">7.22.3. </span>Module options<a class="headerlink" href="#module-options" title="Permalink to this headline">¶</a></h2>
+<p>Vimc has a module parameter to configure the driver.</p>
+<ul>
+<li><p><code class="docutils literal notranslate"><span class="pre">allocator=&lt;unsigned</span> <span class="pre">int&gt;</span></code></p>
+<blockquote>
+<div><p>memory allocator selection, default is 0. It specifies the way buffers
+will be allocated.</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>0: vmalloc</p></li>
+<li><p>1: dma-contig</p></li>
+</ul>
+</div></blockquote>
+</div></blockquote>
+</li>
+</ul>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">7.22. The Virtual Media Controller Driver (vimc)</a><ul>
+<li><a class="reference internal" href="#topology">7.22.1. Topology</a><ul>
+<li><a class="reference internal" href="#configuring-the-topology">7.22.1.1. Configuring the topology</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#subdevices">7.22.2. Subdevices</a></li>
+<li><a class="reference internal" href="#module-options">7.22.3. Module options</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/admin-guide/media/vimc.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/admin-guide/media/vimc.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,231 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Kernel driver nouveau &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Kernel driver: x86_pkg_temp_thermal" href="x86_pkg_temperature_thermal.html" />
+    <link rel="prev" title="Intel Powerclamp Driver" href="intel_powerclamp.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="kernel-driver-nouveau">
+<h1>Kernel driver nouveau<a class="headerlink" href="#kernel-driver-nouveau" title="Permalink to this headline">¶</a></h1>
+<p>Supported chips:</p>
+<ul class="simple">
+<li><p>NV43+</p></li>
+</ul>
+<p>Authors: Martin Peres (mupuf) &lt;<a class="reference external" href="mailto:martin&#46;peres&#37;&#52;&#48;free&#46;fr">martin<span>&#46;</span>peres<span>&#64;</span>free<span>&#46;</span>fr</a>&gt;</p>
+<section id="description">
+<h2>Description<a class="headerlink" href="#description" title="Permalink to this headline">¶</a></h2>
+<p>This driver allows to read the GPU core temperature, drive the GPU fan and
+set temperature alarms.</p>
+<p>Currently, due to the absence of in-kernel API to access HWMON drivers, Nouveau
+cannot access any of the i2c external monitoring chips it may find. If you
+have one of those, temperature and/or fan management through Nouveau’s HWMON
+interface is likely not to work. This document may then not cover your situation
+entirely.</p>
+</section>
+<section id="temperature-management">
+<h2>Temperature management<a class="headerlink" href="#temperature-management" title="Permalink to this headline">¶</a></h2>
+<p>Temperature is exposed under as a read-only HWMON attribute temp1_input.</p>
+<p>In order to protect the GPU from overheating, Nouveau supports 4 configurable
+temperature thresholds:</p>
+<blockquote>
+<div><ul class="simple">
+<li><dl class="simple">
+<dt>Fan_boost:</dt><dd><p>Fan speed is set to 100% when reaching this temperature;</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>Downclock:</dt><dd><p>The GPU will be downclocked to reduce its power dissipation;</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>Critical:</dt><dd><p>The GPU is put on hold to further lower power dissipation;</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>Shutdown:</dt><dd><p>Shut the computer down to protect your GPU.</p>
+</dd>
+</dl>
+</li>
+</ul>
+</div></blockquote>
+<dl class="simple">
+<dt>WARNING:</dt><dd><p>Some of these thresholds may not be used by Nouveau depending
+on your chipset.</p>
+</dd>
+</dl>
+<p>The default value for these thresholds comes from the GPU’s vbios. These
+thresholds can be configured thanks to the following HWMON attributes:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Fan_boost: temp1_auto_point1_temp and temp1_auto_point1_temp_hyst;</p></li>
+<li><p>Downclock: temp1_max and temp1_max_hyst;</p></li>
+<li><p>Critical: temp1_crit and temp1_crit_hyst;</p></li>
+<li><p>Shutdown: temp1_emergency and temp1_emergency_hyst.</p></li>
+</ul>
+</div></blockquote>
+<p>NOTE: Remember that the values are stored as milli degrees Celsius. Don’t forget
+to multiply!</p>
+</section>
+<section id="fan-management">
+<h2>Fan management<a class="headerlink" href="#fan-management" title="Permalink to this headline">¶</a></h2>
+<p>Not all cards have a drivable fan. If you do, then the following HWMON
+attributes should be available:</p>
+<blockquote>
+<div><ul class="simple">
+<li><dl class="simple">
+<dt>pwm1_enable:</dt><dd><p>Current fan management mode (NONE, MANUAL or AUTO);</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>pwm1:</dt><dd><p>Current PWM value (power percentage);</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>pwm1_min:</dt><dd><p>The minimum PWM speed allowed;</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>pwm1_max:</dt><dd><p>The maximum PWM speed allowed (bypassed when hitting Fan_boost);</p>
+</dd>
+</dl>
+</li>
+</ul>
+</div></blockquote>
+<p>You may also have the following attribute:</p>
+<blockquote>
+<div><ul class="simple">
+<li><dl class="simple">
+<dt>fan1_input:</dt><dd><p>Speed in RPM of your fan.</p>
+</dd>
+</dl>
+</li>
+</ul>
+</div></blockquote>
+<p>Your fan can be driven in different modes:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>0: The fan is left untouched;</p></li>
+<li><p>1: The fan can be driven in manual (use pwm1 to change the speed);</p></li>
+<li><p>2; The fan is driven automatically depending on the temperature.</p></li>
+</ul>
+</div></blockquote>
+<dl class="simple">
+<dt>NOTE:</dt><dd><p>Be sure to use the manual mode if you want to drive the fan speed manually</p>
+</dd>
+<dt>NOTE2:</dt><dd><p>When operating in manual mode outside the vbios-defined
+[PWM_min, PWM_max] range, the reported fan speed (RPM) may not be accurate
+depending on your hardware.</p>
+</dd>
+</dl>
+</section>
+<section id="bug-reports">
+<h2>Bug reports<a class="headerlink" href="#bug-reports" title="Permalink to this headline">¶</a></h2>
+<p>Thermal management on Nouveau is new and may not work on all cards. If you have
+inquiries, please ping mupuf on IRC (#nouveau, OFTC).</p>
+<p>Bug reports should be filled on Freedesktop’s bug tracker. Please follow
+<a class="reference external" href="https://nouveau.freedesktop.org/wiki/Bugs">https://nouveau.freedesktop.org/wiki/Bugs</a></p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Kernel driver nouveau</a><ul>
+<li><a class="reference internal" href="#description">Description</a></li>
+<li><a class="reference internal" href="#temperature-management">Temperature management</a></li>
+<li><a class="reference internal" href="#fan-management">Fan management</a></li>
+<li><a class="reference internal" href="#bug-reports">Bug reports</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/thermal/nouveau_thermal.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/thermal/nouveau_thermal.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

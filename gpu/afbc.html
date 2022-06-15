@@ -1,0 +1,442 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Arm Framebuffer Compression (AFBC) &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="drm/komeda Arm display driver" href="komeda-kms.html" />
+    <link rel="prev" title="drm/xen-front Xen para-virtualized frontend driver" href="xen-front.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="arm-framebuffer-compression-afbc">
+<h1>Arm Framebuffer Compression (AFBC)<a class="headerlink" href="#arm-framebuffer-compression-afbc" title="Permalink to this headline">¶</a></h1>
+<p>AFBC is a proprietary lossless image compression protocol and format.
+It provides fine-grained random access and minimizes the amount of
+data transferred between IP blocks.</p>
+<p>AFBC can be enabled on drivers which support it via use of the AFBC
+format modifiers defined in drm_fourcc.h. See DRM_FORMAT_MOD_ARM_AFBC(*).</p>
+<p>All users of the AFBC modifiers must follow the usage guidelines laid
+out in this document, to ensure compatibility across different AFBC
+producers and consumers.</p>
+<section id="components-and-ordering">
+<h2>Components and Ordering<a class="headerlink" href="#components-and-ordering" title="Permalink to this headline">¶</a></h2>
+<p>AFBC streams can contain several components - where a component
+corresponds to a color channel (i.e. R, G, B, X, A, Y, Cb, Cr).
+The assignment of input/output color channels must be consistent
+between the encoder and the decoder for correct operation, otherwise
+the consumer will interpret the decoded data incorrectly.</p>
+<p>Furthermore, when the lossless colorspace transform is used
+(AFBC_FORMAT_MOD_YTR, which should be enabled for RGB buffers for
+maximum compression efficiency), the component order must be:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Component 0: R</p></li>
+<li><p>Component 1: G</p></li>
+<li><p>Component 2: B</p></li>
+</ul>
+</div></blockquote>
+<p>The component ordering is communicated via the fourcc code in the
+fourcc:modifier pair. In general, component ‘0’ is considered to
+reside in the least-significant bits of the corresponding linear
+format. For example, COMP(bits):</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>DRM_FORMAT_ABGR8888</p>
+<ul>
+<li><p>Component 0: R(8)</p></li>
+<li><p>Component 1: G(8)</p></li>
+<li><p>Component 2: B(8)</p></li>
+<li><p>Component 3: A(8)</p></li>
+</ul>
+</li>
+<li><p>DRM_FORMAT_BGR888</p>
+<ul>
+<li><p>Component 0: R(8)</p></li>
+<li><p>Component 1: G(8)</p></li>
+<li><p>Component 2: B(8)</p></li>
+</ul>
+</li>
+<li><p>DRM_FORMAT_YUYV</p>
+<ul>
+<li><p>Component 0: Y(8)</p></li>
+<li><p>Component 1: Cb(8, 2x1 subsampled)</p></li>
+<li><p>Component 2: Cr(8, 2x1 subsampled)</p></li>
+</ul>
+</li>
+</ul>
+</div></blockquote>
+<p>In AFBC, ‘X’ components are not treated any differently from any other
+component. Therefore, an AFBC buffer with fourcc DRM_FORMAT_XBGR8888
+encodes with 4 components, like so:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>DRM_FORMAT_XBGR8888</p>
+<ul>
+<li><p>Component 0: R(8)</p></li>
+<li><p>Component 1: G(8)</p></li>
+<li><p>Component 2: B(8)</p></li>
+<li><p>Component 3: X(8)</p></li>
+</ul>
+</li>
+</ul>
+</div></blockquote>
+<p>Please note, however, that the inclusion of a “wasted” ‘X’ channel is
+bad for compression efficiency, and so it’s recommended to avoid
+formats containing ‘X’ bits. If a fourth component is
+required/expected by the encoder/decoder, then it is recommended to
+instead use an equivalent format with alpha, setting all alpha bits to
+‘1’. If there is no requirement for a fourth component, then a format
+which doesn’t include alpha can be used, e.g. DRM_FORMAT_BGR888.</p>
+</section>
+<section id="number-of-planes">
+<h2>Number of Planes<a class="headerlink" href="#number-of-planes" title="Permalink to this headline">¶</a></h2>
+<p>Formats which are typically multi-planar in linear layouts (e.g. YUV
+420), can be encoded into one, or multiple, AFBC planes. As with
+component order, the encoder and decoder must agree about the number
+of planes in order to correctly decode the buffer. The fourcc code is
+used to determine the number of encoded planes in an AFBC buffer,
+matching the number of planes for the linear (unmodified) format.
+Within each plane, the component ordering also follows the fourcc
+code:</p>
+<p>For example:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>DRM_FORMAT_YUYV: nplanes = 1</p>
+<ul>
+<li><p>Plane 0:</p>
+<ul>
+<li><p>Component 0: Y(8)</p></li>
+<li><p>Component 1: Cb(8, 2x1 subsampled)</p></li>
+<li><p>Component 2: Cr(8, 2x1 subsampled)</p></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><p>DRM_FORMAT_NV12: nplanes = 2</p>
+<ul>
+<li><p>Plane 0:</p>
+<ul>
+<li><p>Component 0: Y(8)</p></li>
+</ul>
+</li>
+<li><p>Plane 1:</p>
+<ul>
+<li><p>Component 0: Cb(8, 2x1 subsampled)</p></li>
+<li><p>Component 1: Cr(8, 2x1 subsampled)</p></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</div></blockquote>
+</section>
+<section id="cross-device-interoperability">
+<h2>Cross-device interoperability<a class="headerlink" href="#cross-device-interoperability" title="Permalink to this headline">¶</a></h2>
+<p>For maximum compatibility across devices, the table below defines
+canonical formats for use between AFBC-enabled devices. Formats which
+are listed here must be used exactly as specified when using the AFBC
+modifiers. Formats which are not listed should be avoided.</p>
+<table class="docutils align-default" id="id1">
+<caption><span class="caption-text">AFBC formats</span><a class="headerlink" href="#id1" title="Permalink to this table">¶</a></caption>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>Fourcc code</p></td>
+<td><p>Description</p></td>
+<td><p>Planes/Components</p></td>
+</tr>
+<tr class="row-even"><td><p>DRM_FORMAT_ABGR2101010</p></td>
+<td><p>10-bit per component RGB, with 2-bit alpha</p></td>
+<td><dl class="simple">
+<dt>Plane 0: 4 components</dt><dd><ul class="simple">
+<li><p>Component 0: R(10)</p></li>
+<li><p>Component 1: G(10)</p></li>
+<li><p>Component 2: B(10)</p></li>
+<li><p>Component 3: A(2)</p></li>
+</ul>
+</dd>
+</dl>
+</td>
+</tr>
+<tr class="row-odd"><td><p>DRM_FORMAT_ABGR8888</p></td>
+<td><p>8-bit per component RGB, with 8-bit alpha</p></td>
+<td><dl class="simple">
+<dt>Plane 0: 4 components</dt><dd><ul class="simple">
+<li><p>Component 0: R(8)</p></li>
+<li><p>Component 1: G(8)</p></li>
+<li><p>Component 2: B(8)</p></li>
+<li><p>Component 3: A(8)</p></li>
+</ul>
+</dd>
+</dl>
+</td>
+</tr>
+<tr class="row-even"><td><p>DRM_FORMAT_BGR888</p></td>
+<td><p>8-bit per component RGB</p></td>
+<td><dl class="simple">
+<dt>Plane 0: 3 components</dt><dd><ul class="simple">
+<li><p>Component 0: R(8)</p></li>
+<li><p>Component 1: G(8)</p></li>
+<li><p>Component 2: B(8)</p></li>
+</ul>
+</dd>
+</dl>
+</td>
+</tr>
+<tr class="row-odd"><td><p>DRM_FORMAT_BGR565</p></td>
+<td><p>5/6-bit per component RGB</p></td>
+<td><dl class="simple">
+<dt>Plane 0: 3 components</dt><dd><ul class="simple">
+<li><p>Component 0: R(5)</p></li>
+<li><p>Component 1: G(6)</p></li>
+<li><p>Component 2: B(5)</p></li>
+</ul>
+</dd>
+</dl>
+</td>
+</tr>
+<tr class="row-even"><td><p>DRM_FORMAT_ABGR1555</p></td>
+<td><p>5-bit per component RGB, with 1-bit alpha</p></td>
+<td><dl class="simple">
+<dt>Plane 0: 4 components</dt><dd><ul class="simple">
+<li><p>Component 0: R(5)</p></li>
+<li><p>Component 1: G(5)</p></li>
+<li><p>Component 2: B(5)</p></li>
+<li><p>Component 3: A(1)</p></li>
+</ul>
+</dd>
+</dl>
+</td>
+</tr>
+<tr class="row-odd"><td><p>DRM_FORMAT_VUY888</p></td>
+<td><p>8-bit per component YCbCr 444, single plane</p></td>
+<td><dl class="simple">
+<dt>Plane 0: 3 components</dt><dd><ul class="simple">
+<li><p>Component 0: Y(8)</p></li>
+<li><p>Component 1: Cb(8)</p></li>
+<li><p>Component 2: Cr(8)</p></li>
+</ul>
+</dd>
+</dl>
+</td>
+</tr>
+<tr class="row-even"><td><p>DRM_FORMAT_VUY101010</p></td>
+<td><p>10-bit per component YCbCr 444, single plane</p></td>
+<td><dl class="simple">
+<dt>Plane 0: 3 components</dt><dd><ul class="simple">
+<li><p>Component 0: Y(10)</p></li>
+<li><p>Component 1: Cb(10)</p></li>
+<li><p>Component 2: Cr(10)</p></li>
+</ul>
+</dd>
+</dl>
+</td>
+</tr>
+<tr class="row-odd"><td><p>DRM_FORMAT_YUYV</p></td>
+<td><p>8-bit per component YCbCr 422, single plane</p></td>
+<td><dl class="simple">
+<dt>Plane 0: 3 components</dt><dd><ul class="simple">
+<li><p>Component 0: Y(8)</p></li>
+<li><p>Component 1: Cb(8, 2x1 subsampled)</p></li>
+<li><p>Component 2: Cr(8, 2x1 subsampled)</p></li>
+</ul>
+</dd>
+</dl>
+</td>
+</tr>
+<tr class="row-even"><td><p>DRM_FORMAT_NV16</p></td>
+<td><p>8-bit per component YCbCr 422, two plane</p></td>
+<td><dl class="simple">
+<dt>Plane 0: 1 component</dt><dd><ul class="simple">
+<li><p>Component 0: Y(8)</p></li>
+</ul>
+</dd>
+<dt>Plane 1: 2 components</dt><dd><ul class="simple">
+<li><p>Component 0: Cb(8, 2x1 subsampled)</p></li>
+<li><p>Component 1: Cr(8, 2x1 subsampled)</p></li>
+</ul>
+</dd>
+</dl>
+</td>
+</tr>
+<tr class="row-odd"><td><p>DRM_FORMAT_Y210</p></td>
+<td><p>10-bit per component YCbCr 422, single plane</p></td>
+<td><dl class="simple">
+<dt>Plane 0: 3 components</dt><dd><ul class="simple">
+<li><p>Component 0: Y(10)</p></li>
+<li><p>Component 1: Cb(10, 2x1 subsampled)</p></li>
+<li><p>Component 2: Cr(10, 2x1 subsampled)</p></li>
+</ul>
+</dd>
+</dl>
+</td>
+</tr>
+<tr class="row-even"><td><p>DRM_FORMAT_P210</p></td>
+<td><p>10-bit per component YCbCr 422, two plane</p></td>
+<td><dl class="simple">
+<dt>Plane 0: 1 component</dt><dd><ul class="simple">
+<li><p>Component 0: Y(10)</p></li>
+</ul>
+</dd>
+<dt>Plane 1: 2 components</dt><dd><ul class="simple">
+<li><p>Component 0: Cb(10, 2x1 subsampled)</p></li>
+<li><p>Component 1: Cr(10, 2x1 subsampled)</p></li>
+</ul>
+</dd>
+</dl>
+</td>
+</tr>
+<tr class="row-odd"><td><p>DRM_FORMAT_YUV420_8BIT</p></td>
+<td><p>8-bit per component YCbCr 420, single plane</p></td>
+<td><dl class="simple">
+<dt>Plane 0: 3 components</dt><dd><ul class="simple">
+<li><p>Component 0: Y(8)</p></li>
+<li><p>Component 1: Cb(8, 2x2 subsampled)</p></li>
+<li><p>Component 2: Cr(8, 2x2 subsampled)</p></li>
+</ul>
+</dd>
+</dl>
+</td>
+</tr>
+<tr class="row-even"><td><p>DRM_FORMAT_YUV420_10BIT</p></td>
+<td><p>10-bit per component YCbCr 420, single plane</p></td>
+<td><dl class="simple">
+<dt>Plane 0: 3 components</dt><dd><ul class="simple">
+<li><p>Component 0: Y(10)</p></li>
+<li><p>Component 1: Cb(10, 2x2 subsampled)</p></li>
+<li><p>Component 2: Cr(10, 2x2 subsampled)</p></li>
+</ul>
+</dd>
+</dl>
+</td>
+</tr>
+<tr class="row-odd"><td><p>DRM_FORMAT_NV12</p></td>
+<td><p>8-bit per component YCbCr 420, two plane</p></td>
+<td><dl class="simple">
+<dt>Plane 0: 1 component</dt><dd><ul class="simple">
+<li><p>Component 0: Y(8)</p></li>
+</ul>
+</dd>
+<dt>Plane 1: 2 components</dt><dd><ul class="simple">
+<li><p>Component 0: Cb(8, 2x2 subsampled)</p></li>
+<li><p>Component 1: Cr(8, 2x2 subsampled)</p></li>
+</ul>
+</dd>
+</dl>
+</td>
+</tr>
+<tr class="row-even"><td><p>DRM_FORMAT_P010</p></td>
+<td><p>10-bit per component YCbCr 420, two plane</p></td>
+<td><dl class="simple">
+<dt>Plane 0: 1 component</dt><dd><ul class="simple">
+<li><p>Component 0: Y(10)</p></li>
+</ul>
+</dd>
+<dt>Plane 1: 2 components</dt><dd><ul class="simple">
+<li><p>Component 0: Cb(10, 2x2 subsampled)</p></li>
+<li><p>Component 1: Cr(10, 2x2 subsampled)</p></li>
+</ul>
+</dd>
+</dl>
+</td>
+</tr>
+</tbody>
+</table>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Arm Framebuffer Compression (AFBC)</a><ul>
+<li><a class="reference internal" href="#components-and-ordering">Components and Ordering</a></li>
+<li><a class="reference internal" href="#number-of-planes">Number of Planes</a></li>
+<li><a class="reference internal" href="#cross-device-interoperability">Cross-device interoperability</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/gpu/afbc.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/gpu/afbc.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

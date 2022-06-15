@@ -1,0 +1,266 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>ARM Hypercall Interface &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="Paravirtualized time support for arm64" href="pvtime.html" />
+    <link rel="prev" title="Internal ABI between the kernel and HYP" href="hyp-abi.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="arm-hypercall-interface">
+<h1>ARM Hypercall Interface<a class="headerlink" href="#arm-hypercall-interface" title="Permalink to this headline">¶</a></h1>
+<p>KVM handles the hypercall services as requested by the guests. New hypercall
+services are regularly made available by the ARM specification or by KVM (as
+vendor services) if they make sense from a virtualization point of view.</p>
+<p>This means that a guest booted on two different versions of KVM can observe
+two different “firmware” revisions. This could cause issues if a given guest
+is tied to a particular version of a hypercall service, or if a migration
+causes a different version to be exposed out of the blue to an unsuspecting
+guest.</p>
+<p>In order to remedy this situation, KVM exposes a set of “firmware
+pseudo-registers” that can be manipulated using the GET/SET_ONE_REG
+interface. These registers can be saved/restored by userspace, and set
+to a convenient value as required.</p>
+<p>The following registers are defined:</p>
+<ul>
+<li><p>KVM_REG_ARM_PSCI_VERSION:</p>
+<p>KVM implements the PSCI (Power State Coordination Interface)
+specification in order to provide services such as CPU on/off, reset
+and power-off to the guest.</p>
+<ul class="simple">
+<li><p>Only valid if the vcpu has the KVM_ARM_VCPU_PSCI_0_2 feature set
+(and thus has already been initialized)</p></li>
+<li><p>Returns the current PSCI version on GET_ONE_REG (defaulting to the
+highest PSCI version implemented by KVM and compatible with v0.2)</p></li>
+<li><p>Allows any PSCI version implemented by KVM and compatible with
+v0.2 to be set with SET_ONE_REG</p></li>
+<li><p>Affects the whole VM (even if the register view is per-vcpu)</p></li>
+</ul>
+</li>
+<li><dl class="simple">
+<dt>KVM_REG_ARM_SMCCC_ARCH_WORKAROUND_1:</dt><dd><p>Holds the state of the firmware support to mitigate CVE-2017-5715, as
+offered by KVM to the guest via a HVC call. The workaround is described
+under SMCCC_ARCH_WORKAROUND_1 in [1].</p>
+</dd>
+</dl>
+<p>Accepted values are:</p>
+<blockquote>
+<div><dl class="simple">
+<dt>KVM_REG_ARM_SMCCC_ARCH_WORKAROUND_1_NOT_AVAIL:</dt><dd><p>KVM does not offer
+firmware support for the workaround. The mitigation status for the
+guest is unknown.</p>
+</dd>
+<dt>KVM_REG_ARM_SMCCC_ARCH_WORKAROUND_1_AVAIL:</dt><dd><p>The workaround HVC call is
+available to the guest and required for the mitigation.</p>
+</dd>
+<dt>KVM_REG_ARM_SMCCC_ARCH_WORKAROUND_1_NOT_REQUIRED:</dt><dd><p>The workaround HVC call
+is available to the guest, but it is not needed on this VCPU.</p>
+</dd>
+</dl>
+</div></blockquote>
+</li>
+<li><dl class="simple">
+<dt>KVM_REG_ARM_SMCCC_ARCH_WORKAROUND_2:</dt><dd><p>Holds the state of the firmware support to mitigate CVE-2018-3639, as
+offered by KVM to the guest via a HVC call. The workaround is described
+under SMCCC_ARCH_WORKAROUND_2 in <a class="footnote-reference brackets" href="#id2" id="id1">1</a>.</p>
+</dd>
+</dl>
+<p>Accepted values are:</p>
+<blockquote>
+<div><dl class="simple">
+<dt>KVM_REG_ARM_SMCCC_ARCH_WORKAROUND_2_NOT_AVAIL:</dt><dd><p>A workaround is not
+available. KVM does not offer firmware support for the workaround.</p>
+</dd>
+<dt>KVM_REG_ARM_SMCCC_ARCH_WORKAROUND_2_UNKNOWN:</dt><dd><p>The workaround state is
+unknown. KVM does not offer firmware support for the workaround.</p>
+</dd>
+<dt>KVM_REG_ARM_SMCCC_ARCH_WORKAROUND_2_AVAIL:</dt><dd><p>The workaround is available,
+and can be disabled by a vCPU. If
+KVM_REG_ARM_SMCCC_ARCH_WORKAROUND_2_ENABLED is set, it is active for
+this vCPU.</p>
+</dd>
+<dt>KVM_REG_ARM_SMCCC_ARCH_WORKAROUND_2_NOT_REQUIRED:</dt><dd><p>The workaround is always active on this vCPU or it is not needed.</p>
+</dd>
+</dl>
+</div></blockquote>
+</li>
+</ul>
+<section id="bitmap-feature-firmware-registers">
+<h2>Bitmap Feature Firmware Registers<a class="headerlink" href="#bitmap-feature-firmware-registers" title="Permalink to this headline">¶</a></h2>
+<p>Contrary to the above registers, the following registers exposes the
+hypercall services in the form of a feature-bitmap to the userspace. This
+bitmap is translated to the services that are available to the guest.
+There is a register defined per service call owner and can be accessed via
+GET/SET_ONE_REG interface.</p>
+<p>By default, these registers are set with the upper limit of the features
+that are supported. This way userspace can discover all the usable
+hypercall services via GET_ONE_REG. The user-space can write-back the
+desired bitmap back via SET_ONE_REG. The features for the registers that
+are untouched, probably because userspace isn’t aware of them, will be
+exposed as is to the guest.</p>
+<p>Note that KVM will not allow the userspace to configure the registers
+anymore once any of the vCPUs has run at least once. Instead, it will
+return a -EBUSY.</p>
+<p>The pseudo-firmware bitmap register are as follows:</p>
+<ul>
+<li><dl class="simple">
+<dt>KVM_REG_ARM_STD_BMAP:</dt><dd><p>Controls the bitmap of the ARM Standard Secure Service Calls.</p>
+</dd>
+</dl>
+<p>The following bits are accepted:</p>
+<blockquote>
+<div><dl class="simple">
+<dt>Bit-0: KVM_REG_ARM_STD_BIT_TRNG_V1_0:</dt><dd><p>The bit represents the services offered under v1.0 of ARM True Random
+Number Generator (TRNG) specification, ARM DEN0098.</p>
+</dd>
+</dl>
+</div></blockquote>
+</li>
+<li><dl class="simple">
+<dt>KVM_REG_ARM_STD_HYP_BMAP:</dt><dd><p>Controls the bitmap of the ARM Standard Hypervisor Service Calls.</p>
+</dd>
+</dl>
+<p>The following bits are accepted:</p>
+<blockquote>
+<div><dl class="simple">
+<dt>Bit-0: KVM_REG_ARM_STD_HYP_BIT_PV_TIME:</dt><dd><p>The bit represents the Paravirtualized Time service as represented by
+ARM DEN0057A.</p>
+</dd>
+</dl>
+</div></blockquote>
+</li>
+<li><dl class="simple">
+<dt>KVM_REG_ARM_VENDOR_HYP_BMAP:</dt><dd><p>Controls the bitmap of the Vendor specific Hypervisor Service Calls.</p>
+</dd>
+</dl>
+<p>The following bits are accepted:</p>
+<blockquote>
+<div><dl class="simple">
+<dt>Bit-0: KVM_REG_ARM_VENDOR_HYP_BIT_FUNC_FEAT</dt><dd><p>The bit represents the ARM_SMCCC_VENDOR_HYP_KVM_FEATURES_FUNC_ID
+and ARM_SMCCC_VENDOR_HYP_CALL_UID_FUNC_ID function-ids.</p>
+</dd>
+<dt>Bit-1: KVM_REG_ARM_VENDOR_HYP_BIT_PTP:</dt><dd><p>The bit represents the Precision Time Protocol KVM service.</p>
+</dd>
+</dl>
+</div></blockquote>
+</li>
+</ul>
+<p>Errors:</p>
+<blockquote>
+<div><table class="docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>-ENOENT</p></td>
+<td><p>Unknown register accessed.</p></td>
+</tr>
+<tr class="row-even"><td><p>-EBUSY</p></td>
+<td><p>Attempt a ‘write’ to the register after the VM has started.</p></td>
+</tr>
+<tr class="row-odd"><td><p>-EINVAL</p></td>
+<td><p>Invalid bitmap written to the register.</p></td>
+</tr>
+</tbody>
+</table>
+</div></blockquote>
+<dl class="footnote brackets">
+<dt class="label" id="id2"><span class="brackets"><a class="fn-backref" href="#id1">1</a></span></dt>
+<dd><p><a class="reference external" href="https://developer.arm.com/-/media/developer/pdf/ARM_DEN_0070A_Firmware_interfaces_for_mitigating_CVE-2017-5715.pdf">https://developer.arm.com/-/media/developer/pdf/ARM_DEN_0070A_Firmware_interfaces_for_mitigating_CVE-2017-5715.pdf</a></p>
+</dd>
+</dl>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">ARM Hypercall Interface</a><ul>
+<li><a class="reference internal" href="#bitmap-feature-firmware-registers">Bitmap Feature Firmware Registers</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/virt/kvm/arm/hypercalls.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/virt/kvm/arm/hypercalls.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

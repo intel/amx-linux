@@ -1,0 +1,338 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Core Scheduling &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="L1D Flushing" href="l1d_flush.html" />
+    <link rel="prev" title="SRBDS - Special Register Buffer Data Sampling" href="special-register-buffer-data-sampling.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="core-scheduling">
+<h1>Core Scheduling<a class="headerlink" href="#core-scheduling" title="Permalink to this headline">¶</a></h1>
+<p>Core scheduling support allows userspace to define groups of tasks that can
+share a core. These groups can be specified either for security usecases (one
+group of tasks don’t trust another), or for performance usecases (some
+workloads may benefit from running on the same core as they don’t need the same
+hardware resources of the shared core, or may prefer different cores if they
+do share hardware resource needs). This document only describes the security
+usecase.</p>
+<section id="security-usecase">
+<h2>Security usecase<a class="headerlink" href="#security-usecase" title="Permalink to this headline">¶</a></h2>
+<p>A cross-HT attack involves the attacker and victim running on different Hyper
+Threads of the same core. MDS and L1TF are examples of such attacks.  The only
+full mitigation of cross-HT attacks is to disable Hyper Threading (HT). Core
+scheduling is a scheduler feature that can mitigate some (not all) cross-HT
+attacks. It allows HT to be turned on safely by ensuring that only tasks in a
+user-designated trusted group can share a core. This increase in core sharing
+can also improve performance, however it is not guaranteed that performance
+will always improve, though that is seen to be the case with a number of real
+world workloads. In theory, core scheduling aims to perform at least as good as
+when Hyper Threading is disabled. In practice, this is mostly the case though
+not always: as synchronizing scheduling decisions across 2 or more CPUs in a
+core involves additional overhead - especially when the system is lightly
+loaded. When <code class="docutils literal notranslate"><span class="pre">total_threads</span> <span class="pre">&lt;=</span> <span class="pre">N_CPUS/2</span></code>, the extra overhead may cause core
+scheduling to perform more poorly compared to SMT-disabled, where N_CPUS is the
+total number of CPUs. Please measure the performance of your workloads always.</p>
+</section>
+<section id="usage">
+<h2>Usage<a class="headerlink" href="#usage" title="Permalink to this headline">¶</a></h2>
+<p>Core scheduling support is enabled via the <code class="docutils literal notranslate"><span class="pre">CONFIG_SCHED_CORE</span></code> config option.
+Using this feature, userspace defines groups of tasks that can be co-scheduled
+on the same core. The core scheduler uses this information to make sure that
+tasks that are not in the same group never run simultaneously on a core, while
+doing its best to satisfy the system’s scheduling requirements.</p>
+<p>Core scheduling can be enabled via the <code class="docutils literal notranslate"><span class="pre">PR_SCHED_CORE</span></code> prctl interface.
+This interface provides support for the creation of core scheduling groups, as
+well as admission and removal of tasks from created groups:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#include &lt;sys/prctl.h&gt;
+
+int prctl(int option, unsigned long arg2, unsigned long arg3,
+        unsigned long arg4, unsigned long arg5);
+</pre></div>
+</div>
+<dl class="simple">
+<dt>option:</dt><dd><p><code class="docutils literal notranslate"><span class="pre">PR_SCHED_CORE</span></code></p>
+</dd>
+<dt>arg2:</dt><dd><p>Command for operation, must be one off:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">PR_SCHED_CORE_GET</span></code> – get core_sched cookie of <code class="docutils literal notranslate"><span class="pre">pid</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">PR_SCHED_CORE_CREATE</span></code> – create a new unique cookie for <code class="docutils literal notranslate"><span class="pre">pid</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">PR_SCHED_CORE_SHARE_TO</span></code> – push core_sched cookie to <code class="docutils literal notranslate"><span class="pre">pid</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">PR_SCHED_CORE_SHARE_FROM</span></code> – pull core_sched cookie from <code class="docutils literal notranslate"><span class="pre">pid</span></code>.</p></li>
+</ul>
+</dd>
+<dt>arg3:</dt><dd><p><code class="docutils literal notranslate"><span class="pre">pid</span></code> of the task for which the operation applies.</p>
+</dd>
+<dt>arg4:</dt><dd><p><code class="docutils literal notranslate"><span class="pre">pid_type</span></code> for which the operation applies. It is one of
+<code class="docutils literal notranslate"><span class="pre">PR_SCHED_CORE_SCOPE_</span></code>-prefixed macro constants.  For example, if arg4
+is <code class="docutils literal notranslate"><span class="pre">PR_SCHED_CORE_SCOPE_THREAD_GROUP</span></code>, then the operation of this command
+will be performed for all tasks in the task group of <code class="docutils literal notranslate"><span class="pre">pid</span></code>.</p>
+</dd>
+<dt>arg5:</dt><dd><p>userspace pointer to an unsigned long for storing the cookie returned by
+<code class="docutils literal notranslate"><span class="pre">PR_SCHED_CORE_GET</span></code> command. Should be 0 for all other commands.</p>
+</dd>
+</dl>
+<p>In order for a process to push a cookie to, or pull a cookie from a process, it
+is required to have the ptrace access mode: <cite>PTRACE_MODE_READ_REALCREDS</cite> to the
+process.</p>
+<section id="building-hierarchies-of-tasks">
+<h3>Building hierarchies of tasks<a class="headerlink" href="#building-hierarchies-of-tasks" title="Permalink to this headline">¶</a></h3>
+<p>The simplest way to build hierarchies of threads/processes which share a
+cookie and thus a core is to rely on the fact that the core-sched cookie is
+inherited across forks/clones and execs, thus setting a cookie for the
+‘initial’ script/executable/daemon will place every spawned child in the
+same core-sched group.</p>
+</section>
+<section id="cookie-transferral">
+<h3>Cookie Transferral<a class="headerlink" href="#cookie-transferral" title="Permalink to this headline">¶</a></h3>
+<p>Transferring a cookie between the current and other tasks is possible using
+PR_SCHED_CORE_SHARE_FROM and PR_SCHED_CORE_SHARE_TO to inherit a cookie from a
+specified task or a share a cookie with a task. In combination this allows a
+simple helper program to pull a cookie from a task in an existing core
+scheduling group and share it with already running tasks.</p>
+</section>
+</section>
+<section id="design-implementation">
+<h2>Design/Implementation<a class="headerlink" href="#design-implementation" title="Permalink to this headline">¶</a></h2>
+<p>Each task that is tagged is assigned a cookie internally in the kernel. As
+mentioned in <a class="reference internal" href="#usage">Usage</a>, tasks with the same cookie value are assumed to trust
+each other and share a core.</p>
+<p>The basic idea is that, every schedule event tries to select tasks for all the
+siblings of a core such that all the selected tasks running on a core are
+trusted (same cookie) at any point in time. Kernel threads are assumed trusted.
+The idle task is considered special, as it trusts everything and everything
+trusts it.</p>
+<p>During a schedule() event on any sibling of a core, the highest priority task on
+the sibling’s core is picked and assigned to the sibling calling schedule(), if
+the sibling has the task enqueued. For rest of the siblings in the core,
+highest priority task with the same cookie is selected if there is one runnable
+in their individual run queues. If a task with same cookie is not available,
+the idle task is selected.  Idle task is globally trusted.</p>
+<p>Once a task has been selected for all the siblings in the core, an IPI is sent to
+siblings for whom a new task was selected. Siblings on receiving the IPI will
+switch to the new task immediately. If an idle task is selected for a sibling,
+then the sibling is considered to be in a <cite>forced idle</cite> state. I.e., it may
+have tasks on its on runqueue to run, however it will still have to run idle.
+More on this in the next section.</p>
+<section id="forced-idling-of-hyperthreads">
+<h3>Forced-idling of hyperthreads<a class="headerlink" href="#forced-idling-of-hyperthreads" title="Permalink to this headline">¶</a></h3>
+<p>The scheduler tries its best to find tasks that trust each other such that all
+tasks selected to be scheduled are of the highest priority in a core.  However,
+it is possible that some runqueues had tasks that were incompatible with the
+highest priority ones in the core. Favoring security over fairness, one or more
+siblings could be forced to select a lower priority task if the highest
+priority task is not trusted with respect to the core wide highest priority
+task.  If a sibling does not have a trusted task to run, it will be forced idle
+by the scheduler (idle thread is scheduled to run).</p>
+<p>When the highest priority task is selected to run, a reschedule-IPI is sent to
+the sibling to force it into idle. This results in 4 cases which need to be
+considered depending on whether a VM or a regular usermode process was running
+on either HT:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>       HT1 (attack)            HT2 (victim)
+A      idle -&gt; user space      user space -&gt; idle
+B      idle -&gt; user space      guest -&gt; idle
+C      idle -&gt; guest           user space -&gt; idle
+D      idle -&gt; guest           guest -&gt; idle
+</pre></div>
+</div>
+<p>Note that for better performance, we do not wait for the destination CPU
+(victim) to enter idle mode. This is because the sending of the IPI would bring
+the destination CPU immediately into kernel mode from user space, or VMEXIT
+in the case of guests. At best, this would only leak some scheduler metadata
+which may not be worth protecting. It is also possible that the IPI is received
+too late on some architectures, but this has not been observed in the case of
+x86.</p>
+</section>
+<section id="trust-model">
+<h3>Trust model<a class="headerlink" href="#trust-model" title="Permalink to this headline">¶</a></h3>
+<p>Core scheduling maintains trust relationships amongst groups of tasks by
+assigning them a tag that is the same cookie value.
+When a system with core scheduling boots, all tasks are considered to trust
+each other. This is because the core scheduler does not have information about
+trust relationships until userspace uses the above mentioned interfaces, to
+communicate them. In other words, all tasks have a default cookie value of 0.
+and are considered system-wide trusted. The forced-idling of siblings running
+cookie-0 tasks is also avoided.</p>
+<p>Once userspace uses the above mentioned interfaces to group sets of tasks, tasks
+within such groups are considered to trust each other, but do not trust those
+outside. Tasks outside the group also don’t trust tasks within.</p>
+</section>
+</section>
+<section id="limitations-of-core-scheduling">
+<h2>Limitations of core-scheduling<a class="headerlink" href="#limitations-of-core-scheduling" title="Permalink to this headline">¶</a></h2>
+<p>Core scheduling tries to guarantee that only trusted tasks run concurrently on a
+core. But there could be small window of time during which untrusted tasks run
+concurrently or kernel could be running concurrently with a task not trusted by
+kernel.</p>
+<section id="ipi-processing-delays">
+<h3>IPI processing delays<a class="headerlink" href="#ipi-processing-delays" title="Permalink to this headline">¶</a></h3>
+<p>Core scheduling selects only trusted tasks to run together. IPI is used to notify
+the siblings to switch to the new task. But there could be hardware delays in
+receiving of the IPI on some arch (on x86, this has not been observed). This may
+cause an attacker task to start running on a CPU before its siblings receive the
+IPI. Even though cache is flushed on entry to user mode, victim tasks on siblings
+may populate data in the cache and micro architectural buffers after the attacker
+starts to run and this is a possibility for data leak.</p>
+</section>
+</section>
+<section id="open-cross-ht-issues-that-core-scheduling-does-not-solve">
+<h2>Open cross-HT issues that core scheduling does not solve<a class="headerlink" href="#open-cross-ht-issues-that-core-scheduling-does-not-solve" title="Permalink to this headline">¶</a></h2>
+<section id="for-mds">
+<h3>1. For MDS<a class="headerlink" href="#for-mds" title="Permalink to this headline">¶</a></h3>
+<p>Core scheduling cannot protect against MDS attacks between the siblings
+running in user mode and the others running in kernel mode. Even though all
+siblings run tasks which trust each other, when the kernel is executing
+code on behalf of a task, it cannot trust the code running in the
+sibling. Such attacks are possible for any combination of sibling CPU modes
+(host or guest mode).</p>
+</section>
+<section id="for-l1tf">
+<h3>2. For L1TF<a class="headerlink" href="#for-l1tf" title="Permalink to this headline">¶</a></h3>
+<p>Core scheduling cannot protect against an L1TF guest attacker exploiting a
+guest or host victim. This is because the guest attacker can craft invalid
+PTEs which are not inverted due to a vulnerable guest kernel. The only
+solution is to disable EPT (Extended Page Tables).</p>
+<p>For both MDS and L1TF, if the guest vCPU is configured to not trust each
+other (by tagging separately), then the guest to guest attacks would go away.
+Or it could be a system admin policy which considers guest to guest attacks as
+a guest problem.</p>
+<p>Another approach to resolve these would be to make every untrusted task on the
+system to not trust every other untrusted task. While this could reduce
+parallelism of the untrusted tasks, it would still solve the above issues while
+allowing system processes (trusted tasks) to share a core.</p>
+</section>
+<section id="protecting-the-kernel-irq-syscall-vmexit">
+<h3>3. Protecting the kernel (IRQ, syscall, VMEXIT)<a class="headerlink" href="#protecting-the-kernel-irq-syscall-vmexit" title="Permalink to this headline">¶</a></h3>
+<p>Unfortunately, core scheduling does not protect kernel contexts running on
+sibling hyperthreads from one another. Prototypes of mitigations have been posted
+to LKML to solve this, but it is debatable whether such windows are practically
+exploitable, and whether the performance overhead of the prototypes are worth
+it (not to mention, the added code complexity).</p>
+</section>
+</section>
+<section id="other-use-cases">
+<h2>Other Use cases<a class="headerlink" href="#other-use-cases" title="Permalink to this headline">¶</a></h2>
+<p>The main use case for Core scheduling is mitigating the cross-HT vulnerabilities
+with SMT enabled. There are other use cases where this feature could be used:</p>
+<ul class="simple">
+<li><p>Isolating tasks that needs a whole core: Examples include realtime tasks, tasks
+that uses SIMD instructions etc.</p></li>
+<li><p>Gang scheduling: Requirements for a group of tasks that needs to be scheduled
+together could also be realized using core scheduling. One example is vCPUs of
+a VM.</p></li>
+</ul>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Core Scheduling</a><ul>
+<li><a class="reference internal" href="#security-usecase">Security usecase</a></li>
+<li><a class="reference internal" href="#usage">Usage</a><ul>
+<li><a class="reference internal" href="#building-hierarchies-of-tasks">Building hierarchies of tasks</a></li>
+<li><a class="reference internal" href="#cookie-transferral">Cookie Transferral</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#design-implementation">Design/Implementation</a><ul>
+<li><a class="reference internal" href="#forced-idling-of-hyperthreads">Forced-idling of hyperthreads</a></li>
+<li><a class="reference internal" href="#trust-model">Trust model</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#limitations-of-core-scheduling">Limitations of core-scheduling</a><ul>
+<li><a class="reference internal" href="#ipi-processing-delays">IPI processing delays</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#open-cross-ht-issues-that-core-scheduling-does-not-solve">Open cross-HT issues that core scheduling does not solve</a><ul>
+<li><a class="reference internal" href="#for-mds">1. For MDS</a></li>
+<li><a class="reference internal" href="#for-l1tf">2. For L1TF</a></li>
+<li><a class="reference internal" href="#protecting-the-kernel-irq-syscall-vmexit">3. Protecting the kernel (IRQ, syscall, VMEXIT)</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#other-use-cases">Other Use cases</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/admin-guide/hw-vuln/core-scheduling.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/admin-guide/hw-vuln/core-scheduling.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

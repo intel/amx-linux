@@ -1,0 +1,232 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>LC-trie implementation notes &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Linux Socket Filtering aka Berkeley Packet Filter (BPF)" href="filter.html" />
+    <link rel="prev" title="EQL Driver: Serial IP Load Balancing HOWTO" href="eql.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="lc-trie-implementation-notes">
+<h1>LC-trie implementation notes<a class="headerlink" href="#lc-trie-implementation-notes" title="Permalink to this headline">¶</a></h1>
+<section id="node-types">
+<h2>Node types<a class="headerlink" href="#node-types" title="Permalink to this headline">¶</a></h2>
+<dl class="simple">
+<dt>leaf</dt><dd><p>An end node with data. This has a copy of the relevant key, along
+with ‘hlist’ with routing table entries sorted by prefix length.
+See struct leaf and struct leaf_info.</p>
+</dd>
+<dt>trie node or tnode</dt><dd><p>An internal node, holding an array of child (leaf or tnode) pointers,
+indexed through a subset of the key. See Level Compression.</p>
+</dd>
+</dl>
+</section>
+<section id="a-few-concepts-explained">
+<h2>A few concepts explained<a class="headerlink" href="#a-few-concepts-explained" title="Permalink to this headline">¶</a></h2>
+<dl>
+<dt>Bits (tnode)</dt><dd><p>The number of bits in the key segment used for indexing into the
+child array - the “child index”. See Level Compression.</p>
+</dd>
+<dt>Pos (tnode)</dt><dd><p>The position (in the key) of the key segment used for indexing into
+the child array. See Path Compression.</p>
+</dd>
+<dt>Path Compression / skipped bits</dt><dd><p>Any given tnode is linked to from the child array of its parent, using
+a segment of the key specified by the parent’s “pos” and “bits”
+In certain cases, this tnode’s own “pos” will not be immediately
+adjacent to the parent (pos+bits), but there will be some bits
+in the key skipped over because they represent a single path with no
+deviations. These “skipped bits” constitute Path Compression.
+Note that the search algorithm will simply skip over these bits when
+searching, making it necessary to save the keys in the leaves to
+verify that they actually do match the key we are searching for.</p>
+</dd>
+<dt>Level Compression / child arrays</dt><dd><p>the trie is kept level balanced moving, under certain conditions, the
+children of a full child (see “full_children”) up one level, so that
+instead of a pure binary tree, each internal node (“tnode”) may
+contain an arbitrarily large array of links to several children.
+Conversely, a tnode with a mostly empty child array (see empty_children)
+may be “halved”, having some of its children moved downwards one level,
+in order to avoid ever-increasing child arrays.</p>
+</dd>
+<dt>empty_children</dt><dd><p>the number of positions in the child array of a given tnode that are
+NULL.</p>
+</dd>
+<dt>full_children</dt><dd><p>the number of children of a given tnode that aren’t path compressed.
+(in other words, they aren’t NULL or leaves and their “pos” is equal
+to this tnode’s “pos”+”bits”).</p>
+<p>(The word “full” here is used more in the sense of “complete” than
+as the opposite of “empty”, which might be a tad confusing.)</p>
+</dd>
+</dl>
+</section>
+<section id="comments">
+<h2>Comments<a class="headerlink" href="#comments" title="Permalink to this headline">¶</a></h2>
+<p>We have tried to keep the structure of the code as close to fib_hash as
+possible to allow verification and help up reviewing.</p>
+<dl class="simple">
+<dt>fib_find_node()</dt><dd><p>A good start for understanding this code. This function implements a
+straightforward trie lookup.</p>
+</dd>
+<dt>fib_insert_node()</dt><dd><p>Inserts a new leaf node in the trie. This is bit more complicated than
+fib_find_node(). Inserting a new node means we might have to run the
+level compression algorithm on part of the trie.</p>
+</dd>
+<dt>trie_leaf_remove()</dt><dd><p>Looks up a key, deletes it and runs the level compression algorithm.</p>
+</dd>
+<dt>trie_rebalance()</dt><dd><p>The key function for the dynamic trie after any change in the trie
+it is run to optimize and reorganize. It will walk the trie upwards
+towards the root from a given tnode, doing a resize() at each step
+to implement level compression.</p>
+</dd>
+<dt>resize()</dt><dd><p>Analyzes a tnode and optimizes the child array size by either inflating
+or shrinking it repeatedly until it fulfills the criteria for optimal
+level compression. This part follows the original paper pretty closely
+and there may be some room for experimentation here.</p>
+</dd>
+<dt>inflate()</dt><dd><p>Doubles the size of the child array within a tnode. Used by resize().</p>
+</dd>
+<dt>halve()</dt><dd><p>Halves the size of the child array within a tnode - the inverse of
+inflate(). Used by resize();</p>
+</dd>
+<dt>fn_trie_insert(), fn_trie_delete(), fn_trie_select_default()</dt><dd><p>The route manipulation functions. Should conform pretty closely to the
+corresponding functions in fib_hash.</p>
+</dd>
+<dt>fn_trie_flush()</dt><dd><p>This walks the full trie (using nextleaf()) and searches for empty
+leaves which have to be removed.</p>
+</dd>
+<dt>fn_trie_dump()</dt><dd><p>Dumps the routing table ordered by prefix length. This is somewhat
+slower than the corresponding fib_hash function, as we have to walk the
+entire trie for each prefix length. In comparison, fib_hash is organized
+as one “zone”/hash per prefix length.</p>
+</dd>
+</dl>
+</section>
+<section id="locking">
+<h2>Locking<a class="headerlink" href="#locking" title="Permalink to this headline">¶</a></h2>
+<p>fib_lock is used for an RW-lock in the same way that this is done in fib_hash.
+However, the functions are somewhat separated for other possible locking
+scenarios. It might conceivably be possible to run trie_rebalance via RCU
+to avoid read_lock in the fn_trie_lookup() function.</p>
+</section>
+<section id="main-lookup-mechanism">
+<h2>Main lookup mechanism<a class="headerlink" href="#main-lookup-mechanism" title="Permalink to this headline">¶</a></h2>
+<p>fn_trie_lookup() is the main lookup function.</p>
+<p>The lookup is in its simplest form just like fib_find_node(). We descend the
+trie, key segment by key segment, until we find a leaf. check_leaf() does
+the fib_semantic_match in the leaf’s sorted prefix hlist.</p>
+<p>If we find a match, we are done.</p>
+<p>If we don’t find a match, we enter prefix matching mode. The prefix length,
+starting out at the same as the key length, is reduced one step at a time,
+and we backtrack upwards through the trie trying to find a longest matching
+prefix. The goal is always to reach a leaf and get a positive result from the
+fib_semantic_match mechanism.</p>
+<p>Inside each tnode, the search for longest matching prefix consists of searching
+through the child array, chopping off (zeroing) the least significant “1” of
+the child index until we find a match or the child index consists of nothing but
+zeros.</p>
+<p>At this point we backtrack (t-&gt;stats.backtrack++) up the trie, continuing to
+chop off part of the key in order to find the longest matching prefix.</p>
+<p>At this point we will repeatedly descend subtries to look for a match, and there
+are some optimizations available that can provide us with “shortcuts” to avoid
+descending into dead ends. Look for “HL_OPTIMIZE” sections in the code.</p>
+<p>To alleviate any doubts about the correctness of the route selection process,
+a new netlink operation has been added. Look for NETLINK_FIB_LOOKUP, which
+gives userland access to fib_lookup().</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">LC-trie implementation notes</a><ul>
+<li><a class="reference internal" href="#node-types">Node types</a></li>
+<li><a class="reference internal" href="#a-few-concepts-explained">A few concepts explained</a></li>
+<li><a class="reference internal" href="#comments">Comments</a></li>
+<li><a class="reference internal" href="#locking">Locking</a></li>
+<li><a class="reference internal" href="#main-lookup-mechanism">Main lookup mechanism</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/networking/fib_trie.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/networking/fib_trie.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

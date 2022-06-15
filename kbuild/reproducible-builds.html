@@ -1,0 +1,218 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Reproducible builds &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="GCC plugin infrastructure" href="gcc-plugins.html" />
+    <link rel="prev" title="Recursion issues" href="issues.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="reproducible-builds">
+<h1>Reproducible builds<a class="headerlink" href="#reproducible-builds" title="Permalink to this headline">¶</a></h1>
+<p>It is generally desirable that building the same source code with
+the same set of tools is reproducible, i.e. the output is always
+exactly the same.  This makes it possible to verify that the build
+infrastructure for a binary distribution or embedded system has not
+been subverted.  This can also make it easier to verify that a source
+or tool change does not make any difference to the resulting binaries.</p>
+<p>The <a class="reference external" href="https://reproducible-builds.org/">Reproducible Builds project</a> has more information about this
+general topic.  This document covers the various reasons why building
+the kernel may be unreproducible, and how to avoid them.</p>
+<section id="timestamps">
+<h2>Timestamps<a class="headerlink" href="#timestamps" title="Permalink to this headline">¶</a></h2>
+<p>The kernel embeds timestamps in three places:</p>
+<ul class="simple">
+<li><p>The version string exposed by <code class="docutils literal notranslate"><span class="pre">uname()</span></code> and included in
+<code class="docutils literal notranslate"><span class="pre">/proc/version</span></code></p></li>
+<li><p>File timestamps in the embedded initramfs</p></li>
+<li><p>If enabled via <code class="docutils literal notranslate"><span class="pre">CONFIG_IKHEADERS</span></code>, file timestamps of kernel
+headers embedded in the kernel or respective module,
+exposed via <code class="docutils literal notranslate"><span class="pre">/sys/kernel/kheaders.tar.xz</span></code></p></li>
+</ul>
+<p>By default the timestamp is the current time and in the case of
+<code class="docutils literal notranslate"><span class="pre">kheaders</span></code> the various files’ modification times. This must
+be overridden using the <a class="reference external" href="kbuild.html#kbuild-build-timestamp">KBUILD_BUILD_TIMESTAMP</a> variable.
+If you are building from a git commit, you could use its commit date.</p>
+<p>The kernel does <em>not</em> use the <code class="docutils literal notranslate"><span class="pre">__DATE__</span></code> and <code class="docutils literal notranslate"><span class="pre">__TIME__</span></code> macros,
+and enables warnings if they are used.  If you incorporate external
+code that does use these, you must override the timestamp they
+correspond to by setting the <a class="reference external" href="https://reproducible-builds.org/docs/source-date-epoch/">SOURCE_DATE_EPOCH</a> environment
+variable.</p>
+</section>
+<section id="user-host">
+<h2>User, host<a class="headerlink" href="#user-host" title="Permalink to this headline">¶</a></h2>
+<p>The kernel embeds the building user and host names in
+<code class="docutils literal notranslate"><span class="pre">/proc/version</span></code>.  These must be overridden using the
+<a class="reference external" href="kbuild.html#kbuild-build-user-kbuild-build-host">KBUILD_BUILD_USER and KBUILD_BUILD_HOST</a> variables.  If you are
+building from a git commit, you could use its committer address.</p>
+</section>
+<section id="absolute-filenames">
+<h2>Absolute filenames<a class="headerlink" href="#absolute-filenames" title="Permalink to this headline">¶</a></h2>
+<p>When the kernel is built out-of-tree, debug information may include
+absolute filenames for the source files.  This must be overridden by
+including the <code class="docutils literal notranslate"><span class="pre">-fdebug-prefix-map</span></code> option in the <a class="reference external" href="kbuild.html#kcflags">KCFLAGS</a> variable.</p>
+<p>Depending on the compiler used, the <code class="docutils literal notranslate"><span class="pre">__FILE__</span></code> macro may also expand
+to an absolute filename in an out-of-tree build.  Kbuild automatically
+uses the <code class="docutils literal notranslate"><span class="pre">-fmacro-prefix-map</span></code> option to prevent this, if it is
+supported.</p>
+<p>The Reproducible Builds web site has more information about these
+<a class="reference external" href="https://reproducible-builds.org/docs/build-path/">prefix-map options</a>.</p>
+</section>
+<section id="generated-files-in-source-packages">
+<h2>Generated files in source packages<a class="headerlink" href="#generated-files-in-source-packages" title="Permalink to this headline">¶</a></h2>
+<p>The build processes for some programs under the <code class="docutils literal notranslate"><span class="pre">tools/</span></code>
+subdirectory do not completely support out-of-tree builds.  This may
+cause a later source package build using e.g. <code class="docutils literal notranslate"><span class="pre">make</span> <span class="pre">rpm-pkg</span></code> to
+include generated files.  You should ensure the source tree is
+pristine by running <code class="docutils literal notranslate"><span class="pre">make</span> <span class="pre">mrproper</span></code> or <code class="docutils literal notranslate"><span class="pre">git</span> <span class="pre">clean</span> <span class="pre">-d</span> <span class="pre">-f</span> <span class="pre">-x</span></code> before
+building a source package.</p>
+</section>
+<section id="module-signing">
+<h2>Module signing<a class="headerlink" href="#module-signing" title="Permalink to this headline">¶</a></h2>
+<p>If you enable <code class="docutils literal notranslate"><span class="pre">CONFIG_MODULE_SIG_ALL</span></code>, the default behaviour is to
+generate a different temporary key for each build, resulting in the
+modules being unreproducible.  However, including a signing key with
+your source would presumably defeat the purpose of signing modules.</p>
+<p>One approach to this is to divide up the build process so that the
+unreproducible parts can be treated as sources:</p>
+<ol class="arabic simple">
+<li><p>Generate a persistent signing key.  Add the certificate for the key
+to the kernel source.</p></li>
+<li><p>Set the <code class="docutils literal notranslate"><span class="pre">CONFIG_SYSTEM_TRUSTED_KEYS</span></code> symbol to include the
+signing key’s certificate, set <code class="docutils literal notranslate"><span class="pre">CONFIG_MODULE_SIG_KEY</span></code> to an
+empty string, and disable <code class="docutils literal notranslate"><span class="pre">CONFIG_MODULE_SIG_ALL</span></code>.
+Build the kernel and modules.</p></li>
+<li><p>Create detached signatures for the modules, and publish them as
+sources.</p></li>
+<li><p>Perform a second build that attaches the module signatures.  It
+can either rebuild the modules or use the output of step 2.</p></li>
+</ol>
+</section>
+<section id="structure-randomisation">
+<h2>Structure randomisation<a class="headerlink" href="#structure-randomisation" title="Permalink to this headline">¶</a></h2>
+<p>If you enable <code class="docutils literal notranslate"><span class="pre">CONFIG_RANDSTRUCT</span></code>, you will need to pre-generate
+the random seed in <code class="docutils literal notranslate"><span class="pre">scripts/basic/randstruct.seed</span></code> so the same
+value is used by each build. See <code class="docutils literal notranslate"><span class="pre">scripts/gen-randstruct-seed.sh</span></code>
+for details.</p>
+</section>
+<section id="debug-info-conflicts">
+<h2>Debug info conflicts<a class="headerlink" href="#debug-info-conflicts" title="Permalink to this headline">¶</a></h2>
+<p>This is not a problem of unreproducibility, but of generated files
+being <em>too</em> reproducible.</p>
+<p>Once you set all the necessary variables for a reproducible build, a
+vDSO’s debug information may be identical even for different kernel
+versions.  This can result in file conflicts between debug information
+packages for the different kernel versions.</p>
+<p>To avoid this, you can make the vDSO different for different
+kernel versions by including an arbitrary string of “salt” in it.
+This is specified by the Kconfig symbol <code class="docutils literal notranslate"><span class="pre">CONFIG_BUILD_SALT</span></code>.</p>
+</section>
+<section id="git">
+<h2>Git<a class="headerlink" href="#git" title="Permalink to this headline">¶</a></h2>
+<p>Uncommitted changes or different commit ids in git can also lead
+to different compilation results. For example, after executing
+<code class="docutils literal notranslate"><span class="pre">git</span> <span class="pre">reset</span> <span class="pre">HEAD^</span></code>, even if the code is the same, the
+<code class="docutils literal notranslate"><span class="pre">include/config/kernel.release</span></code> generated during compilation
+will be different, which will eventually lead to binary differences.
+See <code class="docutils literal notranslate"><span class="pre">scripts/setlocalversion</span></code> for details.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Reproducible builds</a><ul>
+<li><a class="reference internal" href="#timestamps">Timestamps</a></li>
+<li><a class="reference internal" href="#user-host">User, host</a></li>
+<li><a class="reference internal" href="#absolute-filenames">Absolute filenames</a></li>
+<li><a class="reference internal" href="#generated-files-in-source-packages">Generated files in source packages</a></li>
+<li><a class="reference internal" href="#module-signing">Module signing</a></li>
+<li><a class="reference internal" href="#structure-randomisation">Structure randomisation</a></li>
+<li><a class="reference internal" href="#debug-info-conflicts">Debug info conflicts</a></li>
+<li><a class="reference internal" href="#git">Git</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/kbuild/reproducible-builds.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/kbuild/reproducible-builds.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

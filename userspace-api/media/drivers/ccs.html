@@ -1,0 +1,202 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>2. MIPI CCS camera sensor driver &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="3. The cx2341x driver" href="cx2341x-uapi.html" />
+    <link rel="prev" title="1. ASPEED video driver" href="aspeed-video.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="mipi-ccs-camera-sensor-driver">
+<h1><span class="section-number">2. </span>MIPI CCS camera sensor driver<a class="headerlink" href="#mipi-ccs-camera-sensor-driver" title="Permalink to this headline">¶</a></h1>
+<p>The MIPI CCS camera sensor driver is a generic driver for <a class="reference external" href="https://www.mipi.org/specifications/camera-command-set">MIPI CCS</a> compliant
+camera sensors. It exposes three sub-devices representing the pixel array,
+the binner and the scaler.</p>
+<p>As the capabilities of individual devices vary, the driver exposes
+interfaces based on the capabilities that exist in hardware.</p>
+<section id="pixel-array-sub-device">
+<h2><span class="section-number">2.1. </span>Pixel Array sub-device<a class="headerlink" href="#pixel-array-sub-device" title="Permalink to this headline">¶</a></h2>
+<p>The pixel array sub-device represents the camera sensor’s pixel matrix, as well
+as analogue crop functionality present in many compliant devices. The analogue
+crop is configured using the <code class="docutils literal notranslate"><span class="pre">V4L2_SEL_TGT_CROP</span></code> on the source pad (0) of the
+entity. The size of the pixel matrix can be obtained by getting the
+<code class="docutils literal notranslate"><span class="pre">V4L2_SEL_TGT_NATIVE_SIZE</span></code> target.</p>
+</section>
+<section id="binner">
+<h2><span class="section-number">2.2. </span>Binner<a class="headerlink" href="#binner" title="Permalink to this headline">¶</a></h2>
+<p>The binner sub-device represents the binning functionality on the sensor. For
+that purpose, selection target <code class="docutils literal notranslate"><span class="pre">V4L2_SEL_TGT_COMPOSE</span></code> is supported on the
+sink pad (0).</p>
+<p>Additionally, if a device has no scaler or digital crop functionality, the
+source pad (1) expses another digital crop selection rectangle that can only
+crop at the end of the lines and frames.</p>
+</section>
+<section id="scaler">
+<h2><span class="section-number">2.3. </span>Scaler<a class="headerlink" href="#scaler" title="Permalink to this headline">¶</a></h2>
+<p>The scaler sub-device represents the digital crop and scaling functionality of
+the sensor. The V4L2 selection target <code class="docutils literal notranslate"><span class="pre">V4L2_SEL_TGT_CROP</span></code> is used to
+configure the digital crop on the sink pad (0) when digital crop is supported.
+Scaling is configured using selection target <code class="docutils literal notranslate"><span class="pre">V4L2_SEL_TGT_COMPOSE</span></code> on the
+sink pad (0) as well.</p>
+<p>Additionally, if the scaler sub-device exists, its source pad (1) exposes
+another digital crop selection rectangle that can only crop at the end of the
+lines and frames.</p>
+</section>
+<section id="digital-and-analogue-crop">
+<h2><span class="section-number">2.4. </span>Digital and analogue crop<a class="headerlink" href="#digital-and-analogue-crop" title="Permalink to this headline">¶</a></h2>
+<p>Digital crop functionality is referred to as cropping that effectively works by
+dropping some data on the floor. Analogue crop, on the other hand, means that
+the cropped information is never retrieved. In case of camera sensors, the
+analogue data is never read from the pixel matrix that are outside the
+configured selection rectangle that designates crop. The difference has an
+effect in device timing and likely also in power consumption.</p>
+</section>
+<section id="private-controls">
+<h2><span class="section-number">2.5. </span>Private controls<a class="headerlink" href="#private-controls" title="Permalink to this headline">¶</a></h2>
+<p>The MIPI CCS driver implements a number of private controls under
+<code class="docutils literal notranslate"><span class="pre">V4L2_CID_USER_BASE_CCS</span></code> to control the MIPI CCS compliant camera sensors.</p>
+<section id="analogue-gain-model">
+<h3><span class="section-number">2.5.1. </span>Analogue gain model<a class="headerlink" href="#analogue-gain-model" title="Permalink to this headline">¶</a></h3>
+<p>The CCS defines an analogue gain model where the gain can be calculated using
+the following formula:</p>
+<blockquote>
+<div><p>gain = m0 * x + c0 / (m1 * x + c1)</p>
+</div></blockquote>
+<p>Either m0 or c0 will be zero. The constants that are device specific, can be
+obtained from the following controls:</p>
+<blockquote>
+<div><p>V4L2_CID_CCS_ANALOGUE_GAIN_M0
+V4L2_CID_CCS_ANALOGUE_GAIN_M1
+V4L2_CID_CCS_ANALOGUE_GAIN_C0
+V4L2_CID_CCS_ANALOGUE_GAIN_C1</p>
+</div></blockquote>
+<p>The analogue gain (<code class="docutils literal notranslate"><span class="pre">x</span></code> in the formula) is controlled through
+<code class="docutils literal notranslate"><span class="pre">V4L2_CID_ANALOGUE_GAIN</span></code> in this case.</p>
+</section>
+<section id="alternate-analogue-gain-model">
+<h3><span class="section-number">2.5.2. </span>Alternate analogue gain model<a class="headerlink" href="#alternate-analogue-gain-model" title="Permalink to this headline">¶</a></h3>
+<p>The CCS defines another analogue gain model called alternate analogue gain. In
+this case, the formula to calculate actual gain consists of linear and
+exponential parts:</p>
+<blockquote>
+<div><p>gain = linear * 2 ^ exponent</p>
+</div></blockquote>
+<p>The <code class="docutils literal notranslate"><span class="pre">linear</span></code> and <code class="docutils literal notranslate"><span class="pre">exponent</span></code> factors can be set using the
+<code class="docutils literal notranslate"><span class="pre">V4L2_CID_CCS_ANALOGUE_LINEAR_GAIN</span></code> and
+<code class="docutils literal notranslate"><span class="pre">V4L2_CID_CCS_ANALOGUE_EXPONENTIAL_GAIN</span></code> controls, respectively</p>
+</section>
+<section id="shading-correction">
+<h3><span class="section-number">2.5.3. </span>Shading correction<a class="headerlink" href="#shading-correction" title="Permalink to this headline">¶</a></h3>
+<p>The CCS standard supports lens shading correction. The feature can be controlled
+using <code class="docutils literal notranslate"><span class="pre">V4L2_CID_CCS_SHADING_CORRECTION</span></code>. Additionally, the luminance
+correction level may be changed using
+<code class="docutils literal notranslate"><span class="pre">V4L2_CID_CCS_LUMINANCE_CORRECTION_LEVEL</span></code>, where value 0 indicates no
+correction and 128 indicates correcting the luminance in corners to 10 % less
+than in the centre.</p>
+<p>Shading correction needs to be enabled for luminance correction level to have an
+effect.</p>
+<p><strong>Copyright</strong> © 2020 Intel Corporation</p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">2. MIPI CCS camera sensor driver</a><ul>
+<li><a class="reference internal" href="#pixel-array-sub-device">2.1. Pixel Array sub-device</a></li>
+<li><a class="reference internal" href="#binner">2.2. Binner</a></li>
+<li><a class="reference internal" href="#scaler">2.3. Scaler</a></li>
+<li><a class="reference internal" href="#digital-and-analogue-crop">2.4. Digital and analogue crop</a></li>
+<li><a class="reference internal" href="#private-controls">2.5. Private controls</a><ul>
+<li><a class="reference internal" href="#analogue-gain-model">2.5.1. Analogue gain model</a></li>
+<li><a class="reference internal" href="#alternate-analogue-gain-model">2.5.2. Alternate analogue gain model</a></li>
+<li><a class="reference internal" href="#shading-correction">2.5.3. Shading correction</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/userspace-api/media/drivers/ccs.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/userspace-api/media/drivers/ccs.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

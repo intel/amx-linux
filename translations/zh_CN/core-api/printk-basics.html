@@ -1,0 +1,237 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>使用printk记录消息 &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="如何获得正确的printk格式占位符" href="printk-formats.html" />
+    <link rel="prev" title="Linux内核API" href="kernel-api.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../core-api/printk-basics.html"><span class="doc">Message logging with printk</span></a></p>
+</dd>
+<dt class="field-even">翻译</dt>
+<dd class="field-even"><p>司延腾 Yanteng Si &lt;<a class="reference external" href="mailto:siyanteng&#37;&#52;&#48;loongson&#46;cn">siyanteng<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;
+周彬彬 Binbin Zhou &lt;<a class="reference external" href="mailto:zhoubinbin&#37;&#52;&#48;loongson&#46;cn">zhoubinbin<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+</dl>
+<section id="printk">
+<span id="cn-printk-basics-rst"></span><h1>使用printk记录消息<a class="headerlink" href="#printk" title="Permalink to this headline">¶</a></h1>
+<p><a class="reference internal" href="../../../core-api/printk-basics.html#c.printk" title="printk"><code class="xref c c-func docutils literal notranslate"><span class="pre">printk()</span></code></a>是Linux内核中最广为人知的函数之一。它是我们打印消息的标准工具，通常也是追踪和调试
+的最基本方法。如果你熟悉printf(3)，你就能够知道<a class="reference internal" href="../../../core-api/printk-basics.html#c.printk" title="printk"><code class="xref c c-func docutils literal notranslate"><span class="pre">printk()</span></code></a>是基于它的，尽管它在功能上有一些不
+同之处:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p><a class="reference internal" href="../../../core-api/printk-basics.html#c.printk" title="printk"><code class="xref c c-func docutils literal notranslate"><span class="pre">printk()</span></code></a> 消息可以指定日志级别。</p></li>
+<li><p>格式字符串虽然与C99基本兼容，但并不遵循完全相同的规范。它有一些扩展和一些限制（没
+有 <code class="docutils literal notranslate"><span class="pre">%n</span></code> 或浮点转换指定符）。参见:ref: <cite>如何正确地获得printk格式指定符&lt;printk-specifiers&gt;</cite> 。</p></li>
+</ul>
+</div></blockquote>
+<p>所有的<a class="reference internal" href="../../../core-api/printk-basics.html#c.printk" title="printk"><code class="xref c c-func docutils literal notranslate"><span class="pre">printk()</span></code></a>消息都会被打印到内核日志缓冲区，这是一个通过/dev/kmsg输出到用户空间的环
+形缓冲区。读取它的通常方法是使用 <code class="docutils literal notranslate"><span class="pre">dmesg</span></code> 。</p>
+<p><a class="reference internal" href="../../../core-api/printk-basics.html#c.printk" title="printk"><code class="xref c c-func docutils literal notranslate"><span class="pre">printk()</span></code></a>的用法通常是这样的:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>printk(KERN_INFO &quot;Message: %s\n&quot;, arg);
+</pre></div>
+</div>
+<p>其中 <code class="docutils literal notranslate"><span class="pre">KERN_INFO</span></code> 是日志级别（注意，它与格式字符串连在一起，日志级别不是一个单独的参数）。
+可用的日志级别是：</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 23%" />
+<col style="width: 11%" />
+<col style="width: 66%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>名称</p></th>
+<th class="head"><p>字符串</p></th>
+<th class="head"><p>别名函数</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>KERN_EMERG</p></td>
+<td><p>“0”</p></td>
+<td><p><a class="reference internal" href="../../../core-api/printk-basics.html#c.pr_emerg" title="pr_emerg"><code class="xref c c-func docutils literal notranslate"><span class="pre">pr_emerg()</span></code></a></p></td>
+</tr>
+<tr class="row-odd"><td><p>KERN_ALERT</p></td>
+<td><p>“1”</p></td>
+<td><p><a class="reference internal" href="../../../core-api/printk-basics.html#c.pr_alert" title="pr_alert"><code class="xref c c-func docutils literal notranslate"><span class="pre">pr_alert()</span></code></a></p></td>
+</tr>
+<tr class="row-even"><td><p>KERN_CRIT</p></td>
+<td><p>“2”</p></td>
+<td><p><a class="reference internal" href="../../../core-api/printk-basics.html#c.pr_crit" title="pr_crit"><code class="xref c c-func docutils literal notranslate"><span class="pre">pr_crit()</span></code></a></p></td>
+</tr>
+<tr class="row-odd"><td><p>KERN_ERR</p></td>
+<td><p>“3”</p></td>
+<td><p><a class="reference internal" href="../../../core-api/printk-basics.html#c.pr_err" title="pr_err"><code class="xref c c-func docutils literal notranslate"><span class="pre">pr_err()</span></code></a></p></td>
+</tr>
+<tr class="row-even"><td><p>KERN_WARNING</p></td>
+<td><p>“4”</p></td>
+<td><p><a class="reference internal" href="../../../core-api/printk-basics.html#c.pr_warn" title="pr_warn"><code class="xref c c-func docutils literal notranslate"><span class="pre">pr_warn()</span></code></a></p></td>
+</tr>
+<tr class="row-odd"><td><p>KERN_NOTICE</p></td>
+<td><p>“5”</p></td>
+<td><p><a class="reference internal" href="../../../core-api/printk-basics.html#c.pr_notice" title="pr_notice"><code class="xref c c-func docutils literal notranslate"><span class="pre">pr_notice()</span></code></a></p></td>
+</tr>
+<tr class="row-even"><td><p>KERN_INFO</p></td>
+<td><p>“6”</p></td>
+<td><p><a class="reference internal" href="../../../core-api/printk-basics.html#c.pr_info" title="pr_info"><code class="xref c c-func docutils literal notranslate"><span class="pre">pr_info()</span></code></a></p></td>
+</tr>
+<tr class="row-odd"><td><p>KERN_DEBUG</p></td>
+<td><p>“7”</p></td>
+<td><p><a class="reference internal" href="../../../core-api/printk-basics.html#c.pr_debug" title="pr_debug"><code class="xref c c-func docutils literal notranslate"><span class="pre">pr_debug()</span></code></a> and <a class="reference internal" href="../../../core-api/printk-basics.html#c.pr_devel" title="pr_devel"><code class="xref c c-func docutils literal notranslate"><span class="pre">pr_devel()</span></code></a>  若定义了DEBUG</p></td>
+</tr>
+<tr class="row-even"><td><p>KERN_DEFAULT</p></td>
+<td><p>“”</p></td>
+<td></td>
+</tr>
+<tr class="row-odd"><td><p>KERN_CONT</p></td>
+<td><p>“c”</p></td>
+<td><p><a class="reference internal" href="../../../core-api/printk-basics.html#c.pr_cont" title="pr_cont"><code class="xref c c-func docutils literal notranslate"><span class="pre">pr_cont()</span></code></a></p></td>
+</tr>
+</tbody>
+</table>
+<p>日志级别指定了一条消息的重要性。内核根据日志级别和当前 <em>console_loglevel</em> （一个内核变量）决
+定是否立即显示消息（将其打印到当前控制台）。如果消息的优先级比 <em>console_loglevel</em> 高（日志级
+别值较低），消息将被打印到控制台。</p>
+<p>如果省略了日志级别，则以 <code class="docutils literal notranslate"><span class="pre">KERN_DEFAULT</span></code> 级别打印消息。</p>
+<p>你可以用以下方法检查当前的 <em>console_loglevel</em></p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ cat /proc/sys/kernel/printk
+4        4        1        7
+</pre></div>
+</div>
+<p>结果显示了 <em>current</em>, <em>default</em>, <em>minimum</em> 和 <em>boot-time-default</em> 日志级别</p>
+<p>要改变当前的 console_loglevel，只需在 <code class="docutils literal notranslate"><span class="pre">/proc/sys/kernel/printk</span></code> 中写入所需的
+级别。例如，要打印所有的消息到控制台上:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># echo 8 &gt; /proc/sys/kernel/printk
+</pre></div>
+</div>
+<p>另一种方式，使用 <code class="docutils literal notranslate"><span class="pre">dmesg</span></code>:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># dmesg -n 5
+</pre></div>
+</div>
+<p>设置 console_loglevel 打印 KERN_WARNING (4) 或更严重的消息到控制台。更多消息参
+见 <code class="docutils literal notranslate"><span class="pre">dmesg(1)</span></code> 。</p>
+<p>作为<a class="reference internal" href="../../../core-api/printk-basics.html#c.printk" title="printk"><code class="xref c c-func docutils literal notranslate"><span class="pre">printk()</span></code></a>的替代方案，你可以使用 <code class="docutils literal notranslate"><span class="pre">pr_*()</span></code> 别名来记录日志。这个系列的宏在宏名中
+嵌入了日志级别。例如:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>pr_info(&quot;Info message no. %d\n&quot;, msg_num);
+</pre></div>
+</div>
+<p>打印 <code class="docutils literal notranslate"><span class="pre">KERN_INFO</span></code> 消息。</p>
+<p>除了比等效的<a class="reference internal" href="../../../core-api/printk-basics.html#c.printk" title="printk"><code class="xref c c-func docutils literal notranslate"><span class="pre">printk()</span></code></a>调用更简洁之外，它们还可以通过<a class="reference internal" href="../../../core-api/printk-basics.html#c.pr_fmt" title="pr_fmt"><code class="xref c c-func docutils literal notranslate"><span class="pre">pr_fmt()</span></code></a>宏为格式字符串使用一个通用
+的定义。例如，在源文件的顶部（在任何  <code class="docutils literal notranslate"><span class="pre">#include</span></code> 指令之前）定义这样的内容。:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#define pr_fmt(fmt) &quot;%s:%s: &quot; fmt, KBUILD_MODNAME, __func__
+</pre></div>
+</div>
+<p>会在该文件中的每一条 pr_*() 消息前加上发起该消息的模块和函数名称。</p>
+<p>为了调试，还有两个有条件编译的宏：
+<a class="reference internal" href="../../../core-api/printk-basics.html#c.pr_debug" title="pr_debug"><code class="xref c c-func docutils literal notranslate"><span class="pre">pr_debug()</span></code></a>和<a class="reference internal" href="../../../core-api/printk-basics.html#c.pr_devel" title="pr_devel"><code class="xref c c-func docutils literal notranslate"><span class="pre">pr_devel()</span></code></a>，除非定义了 <code class="docutils literal notranslate"><span class="pre">DEBUG</span></code> (或者在<a class="reference internal" href="../../../core-api/printk-basics.html#c.pr_debug" title="pr_debug"><code class="xref c c-func docutils literal notranslate"><span class="pre">pr_debug()</span></code></a>的情况下定义了
+<code class="docutils literal notranslate"><span class="pre">CONFIG_DYNAMIC_DEBUG</span></code> )，否则它们会被编译。</p>
+<section id="id1">
+<h2>函数接口<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>该API在以下内核代码中:</p>
+<p>include/linux/printk.h</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">使用printk记录消息</a><ul>
+<li><a class="reference internal" href="#id1">函数接口</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/core-api/printk-basics.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/core-api/printk-basics.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

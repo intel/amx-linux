@@ -1,0 +1,271 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>3. LoongArch的IRQ芯片模型（层级关系） &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="4. Feature status on loongarch architecture" href="features.html" />
+    <link rel="prev" title="2. 启动 Linux/LoongArch" href="booting.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../loongarch/irq-chip-model.html"><span class="doc">IRQ chip model (hierarchy) of LoongArch</span></a></p>
+</dd>
+<dt class="field-even">Translator</dt>
+<dd class="field-even"><p>Huacai Chen &lt;<a class="reference external" href="mailto:chenhuacai&#37;&#52;&#48;loongson&#46;cn">chenhuacai<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+</dl>
+<section id="loongarchirq">
+<h1><span class="section-number">3. </span>LoongArch的IRQ芯片模型（层级关系）<a class="headerlink" href="#loongarchirq" title="Permalink to this headline">¶</a></h1>
+<p>目前，基于LoongArch的处理器（如龙芯3A5000）只能与LS7A芯片组配合工作。LoongArch计算机
+中的中断控制器（即IRQ芯片）包括CPUINTC（CPU Core Interrupt Controller）、LIOINTC（
+Legacy I/O Interrupt Controller）、EIOINTC（Extended I/O Interrupt Controller）、
+HTVECINTC（Hyper-Transport Vector Interrupt Controller）、PCH-PIC（LS7A芯片组的主中
+断控制器）、PCH-LPC（LS7A芯片组的LPC中断控制器）和PCH-MSI（MSI中断控制器）。</p>
+<p>CPUINTC是一种CPU内部的每个核本地的中断控制器，LIOINTC/EIOINTC/HTVECINTC是CPU内部的
+全局中断控制器（每个芯片一个，所有核共享），而PCH-PIC/PCH-LPC/PCH-MSI是CPU外部的中
+断控制器（在配套芯片组里面）。这些中断控制器（或者说IRQ芯片）以一种层次树的组织形式
+级联在一起，一共有两种层级关系模型（传统IRQ模型和扩展IRQ模型）。</p>
+<section id="irq">
+<h2><span class="section-number">3.1. </span>传统IRQ模型<a class="headerlink" href="#irq" title="Permalink to this headline">¶</a></h2>
+<p>在这种模型里面，IPI（Inter-Processor Interrupt）和CPU本地时钟中断直接发送到CPUINTC，
+CPU串口（UARTs）中断发送到LIOINTC，而其他所有设备的中断则分别发送到所连接的PCH-PIC/
+PCH-LPC/PCH-MSI，然后被HTVECINTC统一收集，再发送到LIOINTC，最后到达CPUINTC:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>+-----+     +---------+     +-------+
+| IPI | --&gt; | CPUINTC | &lt;-- | Timer |
++-----+     +---------+     +-------+
+                 ^
+                 |
+            +---------+     +-------+
+            | LIOINTC | &lt;-- | UARTs |
+            +---------+     +-------+
+                 ^
+                 |
+           +-----------+
+           | HTVECINTC |
+           +-----------+
+            ^         ^
+            |         |
+      +---------+ +---------+
+      | PCH-PIC | | PCH-MSI |
+      +---------+ +---------+
+        ^     ^           ^
+        |     |           |
++---------+ +---------+ +---------+
+| PCH-LPC | | Devices | | Devices |
++---------+ +---------+ +---------+
+     ^
+     |
++---------+
+| Devices |
++---------+
+</pre></div>
+</div>
+</section>
+<section id="id1">
+<h2><span class="section-number">3.2. </span>扩展IRQ模型<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>在这种模型里面，IPI（Inter-Processor Interrupt）和CPU本地时钟中断直接发送到CPUINTC，
+CPU串口（UARTs）中断发送到LIOINTC，而其他所有设备的中断则分别发送到所连接的PCH-PIC/
+PCH-LPC/PCH-MSI，然后被EIOINTC统一收集，再直接到达CPUINTC:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>      +-----+     +---------+     +-------+
+      | IPI | --&gt; | CPUINTC | &lt;-- | Timer |
+      +-----+     +---------+     +-------+
+                   ^       ^
+                   |       |
+            +---------+ +---------+     +-------+
+            | EIOINTC | | LIOINTC | &lt;-- | UARTs |
+            +---------+ +---------+     +-------+
+             ^       ^
+             |       |
+      +---------+ +---------+
+      | PCH-PIC | | PCH-MSI |
+      +---------+ +---------+
+        ^     ^           ^
+        |     |           |
++---------+ +---------+ +---------+
+| PCH-LPC | | Devices | | Devices |
++---------+ +---------+ +---------+
+     ^
+     |
++---------+
+| Devices |
++---------+
+</pre></div>
+</div>
+</section>
+<section id="acpi">
+<h2><span class="section-number">3.3. </span>ACPI相关的定义<a class="headerlink" href="#acpi" title="Permalink to this headline">¶</a></h2>
+<p>CPUINTC:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ACPI_MADT_TYPE_CORE_PIC;
+struct acpi_madt_core_pic;
+enum acpi_madt_core_pic_version;
+</pre></div>
+</div>
+<p>LIOINTC:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ACPI_MADT_TYPE_LIO_PIC;
+struct acpi_madt_lio_pic;
+enum acpi_madt_lio_pic_version;
+</pre></div>
+</div>
+<p>EIOINTC:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ACPI_MADT_TYPE_EIO_PIC;
+struct acpi_madt_eio_pic;
+enum acpi_madt_eio_pic_version;
+</pre></div>
+</div>
+<p>HTVECINTC:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ACPI_MADT_TYPE_HT_PIC;
+struct acpi_madt_ht_pic;
+enum acpi_madt_ht_pic_version;
+</pre></div>
+</div>
+<p>PCH-PIC:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ACPI_MADT_TYPE_BIO_PIC;
+struct acpi_madt_bio_pic;
+enum acpi_madt_bio_pic_version;
+</pre></div>
+</div>
+<p>PCH-MSI:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ACPI_MADT_TYPE_MSI_PIC;
+struct acpi_madt_msi_pic;
+enum acpi_madt_msi_pic_version;
+</pre></div>
+</div>
+<p>PCH-LPC:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ACPI_MADT_TYPE_LPC_PIC;
+struct acpi_madt_lpc_pic;
+enum acpi_madt_lpc_pic_version;
+</pre></div>
+</div>
+</section>
+<section id="id2">
+<h2><span class="section-number">3.4. </span>参考文献<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>龙芯3A5000的文档：</p>
+<blockquote>
+<div><p><a class="reference external" href="https://github.com/loongson/LoongArch-Documentation/releases/latest/download/Loongson-3A5000-usermanual-1.02-CN.pdf">https://github.com/loongson/LoongArch-Documentation/releases/latest/download/Loongson-3A5000-usermanual-1.02-CN.pdf</a> (中文版)</p>
+<p><a class="reference external" href="https://github.com/loongson/LoongArch-Documentation/releases/latest/download/Loongson-3A5000-usermanual-1.02-EN.pdf">https://github.com/loongson/LoongArch-Documentation/releases/latest/download/Loongson-3A5000-usermanual-1.02-EN.pdf</a> (英文版)</p>
+</div></blockquote>
+<p>龙芯LS7A芯片组的文档：</p>
+<blockquote>
+<div><p><a class="reference external" href="https://github.com/loongson/LoongArch-Documentation/releases/latest/download/Loongson-7A1000-usermanual-2.00-CN.pdf">https://github.com/loongson/LoongArch-Documentation/releases/latest/download/Loongson-7A1000-usermanual-2.00-CN.pdf</a> (中文版)</p>
+<p><a class="reference external" href="https://github.com/loongson/LoongArch-Documentation/releases/latest/download/Loongson-7A1000-usermanual-2.00-EN.pdf">https://github.com/loongson/LoongArch-Documentation/releases/latest/download/Loongson-7A1000-usermanual-2.00-EN.pdf</a> (英文版)</p>
+</div></blockquote>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<ul class="simple">
+<li><p>CPUINTC：即《龙芯架构参考手册卷一》第7.4节所描述的CSR.ECFG/CSR.ESTAT寄存器及其
+中断控制逻辑；</p></li>
+<li><p>LIOINTC：即《龙芯3A5000处理器使用手册》第11.1节所描述的“传统I/O中断”；</p></li>
+<li><p>EIOINTC：即《龙芯3A5000处理器使用手册》第11.2节所描述的“扩展I/O中断”；</p></li>
+<li><p>HTVECINTC：即《龙芯3A5000处理器使用手册》第14.3节所描述的“HyperTransport中断”；</p></li>
+<li><p>PCH-PIC/PCH-MSI：即《龙芯7A1000桥片用户手册》第5章所描述的“中断控制器”；</p></li>
+<li><p>PCH-LPC：即《龙芯7A1000桥片用户手册》第24.3节所描述的“LPC中断”。</p></li>
+</ul>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">3. LoongArch的IRQ芯片模型（层级关系）</a><ul>
+<li><a class="reference internal" href="#irq">3.1. 传统IRQ模型</a></li>
+<li><a class="reference internal" href="#id1">3.2. 扩展IRQ模型</a></li>
+<li><a class="reference internal" href="#acpi">3.3. ACPI相关的定义</a></li>
+<li><a class="reference internal" href="#id2">3.4. 参考文献</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../../_sources/translations/zh_CN/loongarch/irq-chip-model.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../_sources/translations/zh_CN/loongarch/irq-chip-model.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

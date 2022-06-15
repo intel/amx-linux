@@ -1,0 +1,207 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Transparent proxy support &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Universal TUN/TAP device driver" href="tuntap.html" />
+    <link rel="prev" title="Linux Kernel TIPC" href="tipc.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="transparent-proxy-support">
+<h1>Transparent proxy support<a class="headerlink" href="#transparent-proxy-support" title="Permalink to this headline">¶</a></h1>
+<p>This feature adds Linux 2.2-like transparent proxy support to current kernels.
+To use it, enable the socket match and the TPROXY target in your kernel config.
+You will need policy routing too, so be sure to enable that as well.</p>
+<p>From Linux 4.18 transparent proxy support is also available in nf_tables.</p>
+<section id="making-non-local-sockets-work">
+<h2>1. Making non-local sockets work<a class="headerlink" href="#making-non-local-sockets-work" title="Permalink to this headline">¶</a></h2>
+<p>The idea is that you identify packets with destination address matching a local
+socket on your box, set the packet mark to a certain value:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># iptables -t mangle -N DIVERT
+# iptables -t mangle -A PREROUTING -p tcp -m socket -j DIVERT
+# iptables -t mangle -A DIVERT -j MARK --set-mark 1
+# iptables -t mangle -A DIVERT -j ACCEPT
+</pre></div>
+</div>
+<p>Alternatively you can do this in nft with the following commands:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># nft add table filter
+# nft add chain filter divert &quot;{ type filter hook prerouting priority -150; }&quot;
+# nft add rule filter divert meta l4proto tcp socket transparent 1 meta mark set 1 accept
+</pre></div>
+</div>
+<p>And then match on that value using policy routing to have those packets
+delivered locally:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># ip rule add fwmark 1 lookup 100
+# ip route add local 0.0.0.0/0 dev lo table 100
+</pre></div>
+</div>
+<p>Because of certain restrictions in the IPv4 routing output code you’ll have to
+modify your application to allow it to send datagrams _from_ non-local IP
+addresses. All you have to do is enable the (SOL_IP, IP_TRANSPARENT) socket
+option before calling bind:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>fd = socket(AF_INET, SOCK_STREAM, 0);
+/* - 8&lt; -*/
+int value = 1;
+setsockopt(fd, SOL_IP, IP_TRANSPARENT, &amp;value, sizeof(value));
+/* - 8&lt; -*/
+name.sin_family = AF_INET;
+name.sin_port = htons(0xCAFE);
+name.sin_addr.s_addr = htonl(0xDEADBEEF);
+bind(fd, &amp;name, sizeof(name));
+</pre></div>
+</div>
+<p>A trivial patch for netcat is available here:
+<a class="reference external" href="http://people.netfilter.org/hidden/tproxy/netcat-ip_transparent-support.patch">http://people.netfilter.org/hidden/tproxy/netcat-ip_transparent-support.patch</a></p>
+</section>
+<section id="redirecting-traffic">
+<h2>2. Redirecting traffic<a class="headerlink" href="#redirecting-traffic" title="Permalink to this headline">¶</a></h2>
+<p>Transparent proxying often involves “intercepting” traffic on a router. This is
+usually done with the iptables REDIRECT target; however, there are serious
+limitations of that method. One of the major issues is that it actually
+modifies the packets to change the destination address – which might not be
+acceptable in certain situations. (Think of proxying UDP for example: you won’t
+be able to find out the original destination address. Even in case of TCP
+getting the original destination address is racy.)</p>
+<p>The ‘TPROXY’ target provides similar functionality without relying on NAT. Simply
+add rules like this to the iptables ruleset above:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span># iptables -t mangle -A PREROUTING -p tcp --dport 80 -j TPROXY \
+  --tproxy-mark 0x1/0x1 --on-port 50080
+</pre></div>
+</div>
+<p>Or the following rule to nft:</p>
+<p># nft add rule filter divert tcp dport 80 tproxy to :50080 meta mark set 1 accept</p>
+<p>Note that for this to work you’ll have to modify the proxy to enable (SOL_IP,
+IP_TRANSPARENT) for the listening socket.</p>
+<p>As an example implementation, tcprdr is available here:
+<a class="reference external" href="https://git.breakpoint.cc/cgit/fw/tcprdr.git/">https://git.breakpoint.cc/cgit/fw/tcprdr.git/</a>
+This tool is written by Florian Westphal and it was used for testing during the
+nf_tables implementation.</p>
+</section>
+<section id="iptables-and-nf-tables-extensions">
+<h2>3. Iptables and nf_tables extensions<a class="headerlink" href="#iptables-and-nf-tables-extensions" title="Permalink to this headline">¶</a></h2>
+<p>To use tproxy you’ll need to have the following modules compiled for iptables:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>NETFILTER_XT_MATCH_SOCKET</p></li>
+<li><p>NETFILTER_XT_TARGET_TPROXY</p></li>
+</ul>
+</div></blockquote>
+<p>Or the floowing modules for nf_tables:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>NFT_SOCKET</p></li>
+<li><p>NFT_TPROXY</p></li>
+</ul>
+</div></blockquote>
+</section>
+<section id="application-support">
+<h2>4. Application support<a class="headerlink" href="#application-support" title="Permalink to this headline">¶</a></h2>
+<section id="squid">
+<h3>4.1. Squid<a class="headerlink" href="#squid" title="Permalink to this headline">¶</a></h3>
+<p>Squid 3.HEAD has support built-in. To use it, pass
+‘–enable-linux-netfilter’ to configure and set the ‘tproxy’ option on
+the HTTP listener you redirect traffic to with the TPROXY iptables
+target.</p>
+<p>For more information please consult the following page on the Squid
+wiki: <a class="reference external" href="http://wiki.squid-cache.org/Features/Tproxy4">http://wiki.squid-cache.org/Features/Tproxy4</a></p>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Transparent proxy support</a><ul>
+<li><a class="reference internal" href="#making-non-local-sockets-work">1. Making non-local sockets work</a></li>
+<li><a class="reference internal" href="#redirecting-traffic">2. Redirecting traffic</a></li>
+<li><a class="reference internal" href="#iptables-and-nf-tables-extensions">3. Iptables and nf_tables extensions</a></li>
+<li><a class="reference internal" href="#application-support">4. Application support</a><ul>
+<li><a class="reference internal" href="#squid">4.1. Squid</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/networking/tproxy.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/networking/tproxy.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

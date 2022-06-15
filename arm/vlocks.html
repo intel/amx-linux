@@ -1,0 +1,296 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>vlocks for Bare-Metal Mutual Exclusion &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Porting" href="porting.html" />
+    <link rel="prev" title="The Unified Extensible Firmware Interface (UEFI)" href="uefi.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="vlocks-for-bare-metal-mutual-exclusion">
+<h1>vlocks for Bare-Metal Mutual Exclusion<a class="headerlink" href="#vlocks-for-bare-metal-mutual-exclusion" title="Permalink to this headline">¶</a></h1>
+<p>Voting Locks, or “vlocks” provide a simple low-level mutual exclusion
+mechanism, with reasonable but minimal requirements on the memory
+system.</p>
+<p>These are intended to be used to coordinate critical activity among CPUs
+which are otherwise non-coherent, in situations where the hardware
+provides no other mechanism to support this and ordinary spinlocks
+cannot be used.</p>
+<p>vlocks make use of the atomicity provided by the memory system for
+writes to a single memory location.  To arbitrate, every CPU “votes for
+itself”, by storing a unique number to a common memory location.  The
+final value seen in that memory location when all the votes have been
+cast identifies the winner.</p>
+<p>In order to make sure that the election produces an unambiguous result
+in finite time, a CPU will only enter the election in the first place if
+no winner has been chosen and the election does not appear to have
+started yet.</p>
+<section id="algorithm">
+<h2>Algorithm<a class="headerlink" href="#algorithm" title="Permalink to this headline">¶</a></h2>
+<p>The easiest way to explain the vlocks algorithm is with some pseudo-code:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int currently_voting[NR_CPUS] = { 0, };
+int last_vote = -1; /* no votes yet */
+
+bool vlock_trylock(int this_cpu)
+{
+        /* signal our desire to vote */
+        currently_voting[this_cpu] = 1;
+        if (last_vote != -1) {
+                /* someone already volunteered himself */
+                currently_voting[this_cpu] = 0;
+                return false; /* not ourself */
+        }
+
+        /* let&#39;s suggest ourself */
+        last_vote = this_cpu;
+        currently_voting[this_cpu] = 0;
+
+        /* then wait until everyone else is done voting */
+        for_each_cpu(i) {
+                while (currently_voting[i] != 0)
+                        /* wait */;
+        }
+
+        /* result */
+        if (last_vote == this_cpu)
+                return true; /* we won */
+        return false;
+}
+
+bool vlock_unlock(void)
+{
+        last_vote = -1;
+}
+</pre></div>
+</div>
+<p>The currently_voting[] array provides a way for the CPUs to determine
+whether an election is in progress, and plays a role analogous to the
+“entering” array in Lamport’s bakery algorithm [1].</p>
+<p>However, once the election has started, the underlying memory system
+atomicity is used to pick the winner.  This avoids the need for a static
+priority rule to act as a tie-breaker, or any counters which could
+overflow.</p>
+<p>As long as the last_vote variable is globally visible to all CPUs, it
+will contain only one value that won’t change once every CPU has cleared
+its currently_voting flag.</p>
+</section>
+<section id="features-and-limitations">
+<h2>Features and limitations<a class="headerlink" href="#features-and-limitations" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><ul>
+<li><p>vlocks are not intended to be fair.  In the contended case, it is the
+_last_ CPU which attempts to get the lock which will be most likely
+to win.</p>
+<p>vlocks are therefore best suited to situations where it is necessary
+to pick a unique winner, but it does not matter which CPU actually
+wins.</p>
+</li>
+<li><p>Like other similar mechanisms, vlocks will not scale well to a large
+number of CPUs.</p>
+<p>vlocks can be cascaded in a voting hierarchy to permit better scaling
+if necessary, as in the following hypothetical example for 4096 CPUs:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/* first level: local election */
+my_town = towns[(this_cpu &gt;&gt; 4) &amp; 0xf];
+I_won = vlock_trylock(my_town, this_cpu &amp; 0xf);
+if (I_won) {
+        /* we won the town election, let&#39;s go for the state */
+        my_state = states[(this_cpu &gt;&gt; 8) &amp; 0xf];
+        I_won = vlock_lock(my_state, this_cpu &amp; 0xf));
+        if (I_won) {
+                /* and so on */
+                I_won = vlock_lock(the_whole_country, this_cpu &amp; 0xf];
+                if (I_won) {
+                        /* ... */
+                }
+                vlock_unlock(the_whole_country);
+        }
+        vlock_unlock(my_state);
+}
+vlock_unlock(my_town);
+</pre></div>
+</div>
+</li>
+</ul>
+</div></blockquote>
+</section>
+<section id="arm-implementation">
+<h2>ARM implementation<a class="headerlink" href="#arm-implementation" title="Permalink to this headline">¶</a></h2>
+<p>The current ARM implementation [2] contains some optimisations beyond
+the basic algorithm:</p>
+<blockquote>
+<div><ul>
+<li><p>By packing the members of the currently_voting array close together,
+we can read the whole array in one transaction (providing the number
+of CPUs potentially contending the lock is small enough).  This
+reduces the number of round-trips required to external memory.</p>
+<p>In the ARM implementation, this means that we can use a single load
+and comparison:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>LDR     Rt, [Rn]
+CMP     Rt, #0
+</pre></div>
+</div>
+<p>…in place of code equivalent to:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>LDRB    Rt, [Rn]
+CMP     Rt, #0
+LDRBEQ  Rt, [Rn, #1]
+CMPEQ   Rt, #0
+LDRBEQ  Rt, [Rn, #2]
+CMPEQ   Rt, #0
+LDRBEQ  Rt, [Rn, #3]
+CMPEQ   Rt, #0
+</pre></div>
+</div>
+<p>This cuts down on the fast-path latency, as well as potentially
+reducing bus contention in contended cases.</p>
+<p>The optimisation relies on the fact that the ARM memory system
+guarantees coherency between overlapping memory accesses of
+different sizes, similarly to many other architectures.  Note that
+we do not care which element of currently_voting appears in which
+bits of Rt, so there is no need to worry about endianness in this
+optimisation.</p>
+<p>If there are too many CPUs to read the currently_voting array in
+one transaction then multiple transations are still required.  The
+implementation uses a simple loop of word-sized loads for this
+case.  The number of transactions is still fewer than would be
+required if bytes were loaded individually.</p>
+<p>In principle, we could aggregate further by using LDRD or LDM, but
+to keep the code simple this was not attempted in the initial
+implementation.</p>
+</li>
+<li><p>vlocks are currently only used to coordinate between CPUs which are
+unable to enable their caches yet.  This means that the
+implementation removes many of the barriers which would be required
+when executing the algorithm in cached memory.</p>
+<p>packing of the currently_voting array does not work with cached
+memory unless all CPUs contending the lock are cache-coherent, due
+to cache writebacks from one CPU clobbering values written by other
+CPUs.  (Though if all the CPUs are cache-coherent, you should be
+probably be using proper spinlocks instead anyway).</p>
+</li>
+<li><p>The “no votes yet” value used for the last_vote variable is 0 (not
+-1 as in the pseudocode).  This allows statically-allocated vlocks
+to be implicitly initialised to an unlocked state simply by putting
+them in .bss.</p>
+<p>An offset is added to each CPU’s ID for the purpose of setting this
+variable, so that no CPU uses the value 0 for its ID.</p>
+</li>
+</ul>
+</div></blockquote>
+</section>
+<section id="colophon">
+<h2>Colophon<a class="headerlink" href="#colophon" title="Permalink to this headline">¶</a></h2>
+<p>Originally created and documented by Dave Martin for Linaro Limited, for
+use in ARM-based big.LITTLE platforms, with review and input gratefully
+received from Nicolas Pitre and Achin Gupta.  Thanks to Nicolas for
+grabbing most of this text out of the relevant mail thread and writing
+up the pseudocode.</p>
+<p>Copyright (C) 2012-2013  Linaro Limited
+Distributed under the terms of Version 2 of the GNU General Public
+License, as defined in linux/COPYING.</p>
+</section>
+<section id="references">
+<h2>References<a class="headerlink" href="#references" title="Permalink to this headline">¶</a></h2>
+<dl>
+<dt>[1] Lamport, L. “A New Solution of Dijkstra’s Concurrent Programming</dt><dd><p>Problem”, Communications of the ACM 17, 8 (August 1974), 453-455.</p>
+<p><a class="reference external" href="https://en.wikipedia.org/wiki/Lamport%27s_bakery_algorithm">https://en.wikipedia.org/wiki/Lamport%27s_bakery_algorithm</a></p>
+</dd>
+</dl>
+<p>[2] linux/arch/arm/common/vlock.S, www.kernel.org.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">vlocks for Bare-Metal Mutual Exclusion</a><ul>
+<li><a class="reference internal" href="#algorithm">Algorithm</a></li>
+<li><a class="reference internal" href="#features-and-limitations">Features and limitations</a></li>
+<li><a class="reference internal" href="#arm-implementation">ARM implementation</a></li>
+<li><a class="reference internal" href="#colophon">Colophon</a></li>
+<li><a class="reference internal" href="#references">References</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/arm/vlocks.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/arm/vlocks.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

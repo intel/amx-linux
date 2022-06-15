@@ -1,0 +1,356 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Device Drivers &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="The Linux Kernel Device Model" href="overview.html" />
+    <link rel="prev" title="Devres - Managed Device Resource" href="devres.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="device-drivers">
+<h1>Device Drivers<a class="headerlink" href="#device-drivers" title="Permalink to this headline">¶</a></h1>
+<p>See the kerneldoc for the struct device_driver.</p>
+<section id="allocation">
+<h2>Allocation<a class="headerlink" href="#allocation" title="Permalink to this headline">¶</a></h2>
+<p>Device drivers are statically allocated structures. Though there may
+be multiple devices in a system that a driver supports, struct
+device_driver represents the driver as a whole (not a particular
+device instance).</p>
+</section>
+<section id="initialization">
+<h2>Initialization<a class="headerlink" href="#initialization" title="Permalink to this headline">¶</a></h2>
+<p>The driver must initialize at least the name and bus fields. It should
+also initialize the devclass field (when it arrives), so it may obtain
+the proper linkage internally. It should also initialize as many of
+the callbacks as possible, though each is optional.</p>
+</section>
+<section id="declaration">
+<h2>Declaration<a class="headerlink" href="#declaration" title="Permalink to this headline">¶</a></h2>
+<p>As stated above, struct device_driver objects are statically
+allocated. Below is an example declaration of the eepro100
+driver. This declaration is hypothetical only; it relies on the driver
+being converted completely to the new model:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>static struct device_driver eepro100_driver = {
+       .name          = &quot;eepro100&quot;,
+       .bus           = &amp;pci_bus_type,
+
+       .probe         = eepro100_probe,
+       .remove                = eepro100_remove,
+       .suspend               = eepro100_suspend,
+       .resume                = eepro100_resume,
+};
+</pre></div>
+</div>
+<p>Most drivers will not be able to be converted completely to the new
+model because the bus they belong to has a bus-specific structure with
+bus-specific fields that cannot be generalized.</p>
+<p>The most common example of this are device ID structures. A driver
+typically defines an array of device IDs that it supports. The format
+of these structures and the semantics for comparing device IDs are
+completely bus-specific. Defining them as bus-specific entities would
+sacrifice type-safety, so we keep bus-specific structures around.</p>
+<p>Bus-specific drivers should include a generic struct device_driver in
+the definition of the bus-specific driver. Like this:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct pci_driver {
+       const struct pci_device_id *id_table;
+       struct device_driver     driver;
+};
+</pre></div>
+</div>
+<p>A definition that included bus-specific fields would look like
+(using the eepro100 driver again):</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>static struct pci_driver eepro100_driver = {
+       .id_table       = eepro100_pci_tbl,
+       .driver               = {
+              .name           = &quot;eepro100&quot;,
+              .bus            = &amp;pci_bus_type,
+              .probe          = eepro100_probe,
+              .remove         = eepro100_remove,
+              .suspend        = eepro100_suspend,
+              .resume         = eepro100_resume,
+       },
+};
+</pre></div>
+</div>
+<p>Some may find the syntax of embedded struct initialization awkward or
+even a bit ugly. So far, it’s the best way we’ve found to do what we want…</p>
+</section>
+<section id="registration">
+<h2>Registration<a class="headerlink" href="#registration" title="Permalink to this headline">¶</a></h2>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int driver_register(struct device_driver *drv);
+</pre></div>
+</div>
+<p>The driver registers the structure on startup. For drivers that have
+no bus-specific fields (i.e. don’t have a bus-specific driver
+structure), they would use driver_register and pass a pointer to their
+struct device_driver object.</p>
+<p>Most drivers, however, will have a bus-specific structure and will
+need to register with the bus using something like pci_driver_register.</p>
+<p>It is important that drivers register their driver structure as early as
+possible. Registration with the core initializes several fields in the
+struct device_driver object, including the reference count and the
+lock. These fields are assumed to be valid at all times and may be
+used by the device model core or the bus driver.</p>
+</section>
+<section id="transition-bus-drivers">
+<h2>Transition Bus Drivers<a class="headerlink" href="#transition-bus-drivers" title="Permalink to this headline">¶</a></h2>
+<p>By defining wrapper functions, the transition to the new model can be
+made easier. Drivers can ignore the generic structure altogether and
+let the bus wrapper fill in the fields. For the callbacks, the bus can
+define generic callbacks that forward the call to the bus-specific
+callbacks of the drivers.</p>
+<p>This solution is intended to be only temporary. In order to get class
+information in the driver, the drivers must be modified anyway. Since
+converting drivers to the new model should reduce some infrastructural
+complexity and code size, it is recommended that they are converted as
+class information is added.</p>
+</section>
+<section id="access">
+<h2>Access<a class="headerlink" href="#access" title="Permalink to this headline">¶</a></h2>
+<p>Once the object has been registered, it may access the common fields of
+the object, like the lock and the list of devices:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int driver_for_each_dev(struct device_driver *drv, void *data,
+                        int (*callback)(struct device *dev, void *data));
+</pre></div>
+</div>
+<p>The devices field is a list of all the devices that have been bound to
+the driver. The LDM core provides a helper function to operate on all
+the devices a driver controls. This helper locks the driver on each
+node access, and does proper reference counting on each device as it
+accesses it.</p>
+</section>
+<section id="sysfs">
+<h2>sysfs<a class="headerlink" href="#sysfs" title="Permalink to this headline">¶</a></h2>
+<p>When a driver is registered, a sysfs directory is created in its
+bus’s directory. In this directory, the driver can export an interface
+to userspace to control operation of the driver on a global basis;
+e.g. toggling debugging output in the driver.</p>
+<p>A future feature of this directory will be a ‘devices’ directory. This
+directory will contain symlinks to the directories of devices it
+supports.</p>
+</section>
+<section id="callbacks">
+<h2>Callbacks<a class="headerlink" href="#callbacks" title="Permalink to this headline">¶</a></h2>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int     (*probe)        (struct device *dev);
+</pre></div>
+</div>
+<p>The probe() entry is called in task context, with the bus’s rwsem locked
+and the driver partially bound to the device.  Drivers commonly use
+container_of() to convert “dev” to a bus-specific type, both in probe()
+and other routines.  That type often provides device resource data, such
+as pci_dev.resource[] or platform_device.resources, which is used in
+addition to dev-&gt;platform_data to initialize the driver.</p>
+<p>This callback holds the driver-specific logic to bind the driver to a
+given device.  That includes verifying that the device is present, that
+it’s a version the driver can handle, that driver data structures can
+be allocated and initialized, and that any hardware can be initialized.
+Drivers often store a pointer to their state with dev_set_drvdata().
+When the driver has successfully bound itself to that device, then probe()
+returns zero and the driver model code will finish its part of binding
+the driver to that device.</p>
+<p>A driver’s probe() may return a negative errno value to indicate that
+the driver did not bind to this device, in which case it should have
+released all resources it allocated.</p>
+<p>Optionally, probe() may return -EPROBE_DEFER if the driver depends on
+resources that are not yet available (e.g., supplied by a driver that
+hasn’t initialized yet).  The driver core will put the device onto the
+deferred probe list and will try to call it again later. If a driver
+must defer, it should return -EPROBE_DEFER as early as possible to
+reduce the amount of time spent on setup work that will need to be
+unwound and reexecuted at a later time.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>-EPROBE_DEFER must not be returned if probe() has already created
+child devices, even if those child devices are removed again
+in a cleanup path. If -EPROBE_DEFER is returned after a child
+device has been registered, it may result in an infinite loop of
+.probe() calls to the same driver.</p>
+</div>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>void    (*sync_state)   (struct device *dev);
+</pre></div>
+</div>
+<p>sync_state is called only once for a device. It’s called when all the consumer
+devices of the device have successfully probed. The list of consumers of the
+device is obtained by looking at the device links connecting that device to its
+consumer devices.</p>
+<p>The first attempt to call sync_state() is made during late_initcall_sync() to
+give firmware and drivers time to link devices to each other. During the first
+attempt at calling sync_state(), if all the consumers of the device at that
+point in time have already probed successfully, sync_state() is called right
+away. If there are no consumers of the device during the first attempt, that
+too is considered as “all consumers of the device have probed” and sync_state()
+is called right away.</p>
+<p>If during the first attempt at calling sync_state() for a device, there are
+still consumers that haven’t probed successfully, the sync_state() call is
+postponed and reattempted in the future only when one or more consumers of the
+device probe successfully. If during the reattempt, the driver core finds that
+there are one or more consumers of the device that haven’t probed yet, then
+sync_state() call is postponed again.</p>
+<p>A typical use case for sync_state() is to have the kernel cleanly take over
+management of devices from the bootloader. For example, if a device is left on
+and at a particular hardware configuration by the bootloader, the device’s
+driver might need to keep the device in the boot configuration until all the
+consumers of the device have probed. Once all the consumers of the device have
+probed, the device’s driver can synchronize the hardware state of the device to
+match the aggregated software state requested by all the consumers. Hence the
+name sync_state().</p>
+<p>While obvious examples of resources that can benefit from sync_state() include
+resources such as regulator, sync_state() can also be useful for complex
+resources like IOMMUs. For example, IOMMUs with multiple consumers (devices
+whose addresses are remapped by the IOMMU) might need to keep their mappings
+fixed at (or additive to) the boot configuration until all its consumers have
+probed.</p>
+<p>While the typical use case for sync_state() is to have the kernel cleanly take
+over management of devices from the bootloader, the usage of sync_state() is
+not restricted to that. Use it whenever it makes sense to take an action after
+all the consumers of a device have probed:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int     (*remove)       (struct device *dev);
+</pre></div>
+</div>
+<p>remove is called to unbind a driver from a device. This may be
+called if a device is physically removed from the system, if the
+driver module is being unloaded, during a reboot sequence, or
+in other cases.</p>
+<p>It is up to the driver to determine if the device is present or
+not. It should free any resources allocated specifically for the
+device; i.e. anything in the device’s driver_data field.</p>
+<p>If the device is still present, it should quiesce the device and place
+it into a supported low-power state.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int     (*suspend)      (struct device *dev, pm_message_t state);
+</pre></div>
+</div>
+<p>suspend is called to put the device in a low power state.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int     (*resume)       (struct device *dev);
+</pre></div>
+</div>
+<p>Resume is used to bring a device back from a low power state.</p>
+</section>
+<section id="attributes">
+<h2>Attributes<a class="headerlink" href="#attributes" title="Permalink to this headline">¶</a></h2>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct driver_attribute {
+        struct attribute        attr;
+        ssize_t (*show)(struct device_driver *driver, char *buf);
+        ssize_t (*store)(struct device_driver *, const char *buf, size_t count);
+};
+</pre></div>
+</div>
+<p>Device drivers can export attributes via their sysfs directories.
+Drivers can declare attributes using a DRIVER_ATTR_RW and DRIVER_ATTR_RO
+macro that works identically to the DEVICE_ATTR_RW and DEVICE_ATTR_RO
+macros.</p>
+<p>Example:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>DRIVER_ATTR_RW(debug);
+</pre></div>
+</div>
+<p>This is equivalent to declaring:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>struct driver_attribute driver_attr_debug;
+</pre></div>
+</div>
+<p>This can then be used to add and remove the attribute from the
+driver’s directory using:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>int driver_create_file(struct device_driver *, const struct driver_attribute *);
+void driver_remove_file(struct device_driver *, const struct driver_attribute *);
+</pre></div>
+</div>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Device Drivers</a><ul>
+<li><a class="reference internal" href="#allocation">Allocation</a></li>
+<li><a class="reference internal" href="#initialization">Initialization</a></li>
+<li><a class="reference internal" href="#declaration">Declaration</a></li>
+<li><a class="reference internal" href="#registration">Registration</a></li>
+<li><a class="reference internal" href="#transition-bus-drivers">Transition Bus Drivers</a></li>
+<li><a class="reference internal" href="#access">Access</a></li>
+<li><a class="reference internal" href="#sysfs">sysfs</a></li>
+<li><a class="reference internal" href="#callbacks">Callbacks</a></li>
+<li><a class="reference internal" href="#attributes">Attributes</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/driver-api/driver-model/driver.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/driver-api/driver-model/driver.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

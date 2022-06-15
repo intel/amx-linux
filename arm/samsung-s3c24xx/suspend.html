@@ -1,0 +1,230 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>S3C24XX Suspend Support &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="S3C24XX USB Host support" href="usb-host.html" />
+    <link rel="prev" title="S3C24XX CPUfreq support" href="cpufreq.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="s3c24xx-suspend-support">
+<h1>S3C24XX Suspend Support<a class="headerlink" href="#s3c24xx-suspend-support" title="Permalink to this headline">¶</a></h1>
+<section id="introduction">
+<h2>Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>The S3C24XX supports a low-power suspend mode, where the SDRAM is kept
+in Self-Refresh mode, and all but the essential peripheral blocks are
+powered down. For more information on how this works, please look
+at the relevant CPU datasheet from Samsung.</p>
+</div></blockquote>
+</section>
+<section id="requirements">
+<h2>Requirements<a class="headerlink" href="#requirements" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>A bootloader that can support the necessary resume operation</p></li>
+<li><p>Support for at least 1 source for resume</p></li>
+<li><p>CONFIG_PM enabled in the kernel</p></li>
+<li><p>Any peripherals that are going to be powered down at the same
+time require suspend/resume support.</p></li>
+</ol>
+</div></blockquote>
+</section>
+<section id="resuming">
+<h2>Resuming<a class="headerlink" href="#resuming" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>The S3C2410 user manual defines the process of sending the CPU to
+sleep and how it resumes. The default behaviour of the Linux code
+is to set the GSTATUS3 register to the physical address of the
+code to resume Linux operation.</p>
+<p>GSTATUS4 is currently left alone by the sleep code, and is free to
+use for any other purposes (for example, the EB2410ITX uses this to
+save memory configuration in).</p>
+</div></blockquote>
+</section>
+<section id="machine-support">
+<h2>Machine Support<a class="headerlink" href="#machine-support" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>The machine specific functions must call the s3c_pm_init() function
+to say that its bootloader is capable of resuming. This can be as
+simple as adding the following to the machine’s definition:</p>
+<p>INITMACHINE(s3c_pm_init)</p>
+<p>A board can do its own setup before calling s3c_pm_init, if it
+needs to setup anything else for power management support.</p>
+<p>There is currently no support for over-riding the default method of
+saving the resume address, if your board requires it, then contact
+the maintainer and discuss what is required.</p>
+<p>Note, the original method of adding an late_initcall() is wrong,
+and will end up initialising all compiled machines’ pm init!</p>
+<p>The following is an example of code used for testing wakeup from
+an falling edge on IRQ_EINT0:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>static irqreturn_t button_irq(int irq, void *pw)
+{
+    return IRQ_HANDLED;
+}
+
+statuc void __init machine_init(void)
+{
+    ...
+
+    request_irq(IRQ_EINT0, button_irq, IRQF_TRIGGER_FALLING,
+               &quot;button-irq-eint0&quot;, NULL);
+
+    enable_irq_wake(IRQ_EINT0);
+
+    s3c_pm_init();
+}
+</pre></div>
+</div>
+</div></blockquote>
+</section>
+<section id="debugging">
+<h2>Debugging<a class="headerlink" href="#debugging" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>There are several important things to remember when using PM suspend:</p>
+<ol class="arabic">
+<li><p>The uart drivers will disable the clocks to the UART blocks when
+suspending, which means that use of printascii() or similar direct
+access to the UARTs will cause the debug to stop.</p></li>
+<li><p>While the pm code itself will attempt to re-enable the UART clocks,
+care should be taken that any external clock sources that the UARTs
+rely on are still enabled at that point.</p></li>
+<li><p>If any debugging is placed in the resume path, then it must have the
+relevant clocks and peripherals setup before use (ie, bootloader).</p>
+<p>For example, if you transmit a character from the UART, the baud
+rate and uart controls must be setup beforehand.</p>
+</li>
+</ol>
+</div></blockquote>
+</section>
+<section id="configuration">
+<h2>Configuration<a class="headerlink" href="#configuration" title="Permalink to this headline">¶</a></h2>
+<blockquote>
+<div><p>The S3C2410 specific configuration in <cite>System Type</cite> defines various
+aspects of how the S3C2410 suspend and resume support is configured</p>
+<p><cite>S3C2410 PM Suspend debug</cite></p>
+<blockquote>
+<div><p>This option prints messages to the serial console before and after
+the actual suspend, giving detailed information on what is
+happening</p>
+</div></blockquote>
+<p><cite>S3C2410 PM Suspend Memory CRC</cite></p>
+<blockquote>
+<div><p>Allows the entire memory to be checksummed before and after the
+suspend to see if there has been any corruption of the contents.</p>
+<p>Note, the time to calculate the CRC is dependent on the CPU speed
+and the size of memory. For an 64Mbyte RAM area on an 200MHz
+S3C2410, this can take approximately 4 seconds to complete.</p>
+<p>This support requires the CRC32 function to be enabled.</p>
+</div></blockquote>
+<p><cite>S3C2410 PM Suspend CRC Chunksize (KiB)</cite></p>
+<blockquote>
+<div><p>Defines the size of memory each CRC chunk covers. A smaller value
+will mean that the CRC data block will take more memory, but will
+identify any faults with better precision</p>
+</div></blockquote>
+</div></blockquote>
+</section>
+<section id="document-author">
+<h2>Document Author<a class="headerlink" href="#document-author" title="Permalink to this headline">¶</a></h2>
+<p>Ben Dooks, Copyright 2004 Simtec Electronics</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">S3C24XX Suspend Support</a><ul>
+<li><a class="reference internal" href="#introduction">Introduction</a></li>
+<li><a class="reference internal" href="#requirements">Requirements</a></li>
+<li><a class="reference internal" href="#resuming">Resuming</a></li>
+<li><a class="reference internal" href="#machine-support">Machine Support</a></li>
+<li><a class="reference internal" href="#debugging">Debugging</a></li>
+<li><a class="reference internal" href="#configuration">Configuration</a></li>
+<li><a class="reference internal" href="#document-author">Document Author</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/arm/samsung-s3c24xx/suspend.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/arm/samsung-s3c24xx/suspend.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

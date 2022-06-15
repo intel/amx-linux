@@ -1,0 +1,243 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>14. rotary-encoder - a generic driver for GPIO connected devices &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <script src="../../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="15. Sentelic Touchpad" href="sentelic.html" />
+    <link rel="prev" title="13. pxrc - PhoenixRC Flight Controller Adapter" href="pxrc.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="rotary-encoder-a-generic-driver-for-gpio-connected-devices">
+<h1><span class="section-number">14. </span>rotary-encoder - a generic driver for GPIO connected devices<a class="headerlink" href="#rotary-encoder-a-generic-driver-for-gpio-connected-devices" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">Author</dt>
+<dd class="field-odd"><p>Daniel Mack &lt;<a class="reference external" href="mailto:daniel&#37;&#52;&#48;caiaq&#46;de">daniel<span>&#64;</span>caiaq<span>&#46;</span>de</a>&gt;, Feb 2009</p>
+</dd>
+</dl>
+<section id="function">
+<h2><span class="section-number">14.1. </span>Function<a class="headerlink" href="#function" title="Permalink to this headline">¶</a></h2>
+<p>Rotary encoders are devices which are connected to the CPU or other
+peripherals with two wires. The outputs are phase-shifted by 90 degrees
+and by triggering on falling and rising edges, the turn direction can
+be determined.</p>
+<p>Some encoders have both outputs low in stable states, others also have
+a stable state with both outputs high (half-period mode) and some have
+a stable state in all steps (quarter-period mode).</p>
+<p>The phase diagram of these two outputs look like this:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>                _____       _____       _____
+               |     |     |     |     |     |
+Channel A  ____|     |_____|     |_____|     |____
+
+               :  :  :  :  :  :  :  :  :  :  :  :
+          __       _____       _____       _____
+            |     |     |     |     |     |     |
+Channel B   |_____|     |_____|     |_____|     |__
+
+               :  :  :  :  :  :  :  :  :  :  :  :
+Event          a  b  c  d  a  b  c  d  a  b  c  d
+
+              |&lt;--------&gt;|
+                one step
+
+              |&lt;--&gt;|
+                one step (half-period mode)
+
+              |&lt;&gt;|
+                one step (quarter-period mode)
+</pre></div>
+</div>
+<dl class="simple">
+<dt>For more information, please see</dt><dd><p><a class="reference external" href="https://en.wikipedia.org/wiki/Rotary_encoder">https://en.wikipedia.org/wiki/Rotary_encoder</a></p>
+</dd>
+</dl>
+</section>
+<section id="events-state-machine">
+<h2><span class="section-number">14.2. </span>Events / state machine<a class="headerlink" href="#events-state-machine" title="Permalink to this headline">¶</a></h2>
+<p>In half-period mode, state a) and c) above are used to determine the
+rotational direction based on the last stable state. Events are reported in
+states b) and d) given that the new stable state is different from the last
+(i.e. the rotation was not reversed half-way).</p>
+<p>Otherwise, the following apply:</p>
+<ol class="loweralpha simple">
+<li><dl class="simple">
+<dt>Rising edge on channel A, channel B in low state</dt><dd><p>This state is used to recognize a clockwise turn</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>Rising edge on channel B, channel A in high state</dt><dd><p>When entering this state, the encoder is put into ‘armed’ state,
+meaning that there it has seen half the way of a one-step transition.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>Falling edge on channel A, channel B in high state</dt><dd><p>This state is used to recognize a counter-clockwise turn</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>Falling edge on channel B, channel A in low state</dt><dd><p>Parking position. If the encoder enters this state, a full transition
+should have happened, unless it flipped back on half the way. The
+‘armed’ state tells us about that.</p>
+</dd>
+</dl>
+</li>
+</ol>
+</section>
+<section id="platform-requirements">
+<h2><span class="section-number">14.3. </span>Platform requirements<a class="headerlink" href="#platform-requirements" title="Permalink to this headline">¶</a></h2>
+<p>As there is no hardware dependent call in this driver, the platform it is
+used with must support gpiolib. Another requirement is that IRQs must be
+able to fire on both edges.</p>
+</section>
+<section id="board-integration">
+<h2><span class="section-number">14.4. </span>Board integration<a class="headerlink" href="#board-integration" title="Permalink to this headline">¶</a></h2>
+<p>To use this driver in your system, register a platform_device with the
+name ‘rotary-encoder’ and associate the IRQs and some specific platform
+data with it. Because the driver uses generic device properties, this can
+be done either via device tree, ACPI, or using static board files, like in
+example below:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>/* board support file example */
+
+#include &lt;linux/input.h&gt;
+#include &lt;linux/gpio/machine.h&gt;
+#include &lt;linux/property.h&gt;
+
+#define GPIO_ROTARY_A 1
+#define GPIO_ROTARY_B 2
+
+static struct gpiod_lookup_table rotary_encoder_gpios = {
+        .dev_id = &quot;rotary-encoder.0&quot;,
+        .table = {
+                GPIO_LOOKUP_IDX(&quot;gpio-0&quot;,
+                                GPIO_ROTARY_A, NULL, 0, GPIO_ACTIVE_LOW),
+                GPIO_LOOKUP_IDX(&quot;gpio-0&quot;,
+                                GPIO_ROTARY_B, NULL, 1, GPIO_ACTIVE_HIGH),
+                { },
+        },
+};
+
+static const struct property_entry rotary_encoder_properties[] = {
+        PROPERTY_ENTRY_U32(&quot;rotary-encoder,steps-per-period&quot;, 24),
+        PROPERTY_ENTRY_U32(&quot;linux,axis&quot;,                      ABS_X),
+        PROPERTY_ENTRY_U32(&quot;rotary-encoder,relative_axis&quot;,    0),
+        { },
+};
+
+static const struct software_node rotary_encoder_node = {
+        .properties = rotary_encoder_properties,
+};
+
+static struct platform_device rotary_encoder_device = {
+        .name           = &quot;rotary-encoder&quot;,
+        .id             = 0,
+};
+
+...
+
+gpiod_add_lookup_table(&amp;rotary_encoder_gpios);
+device_add_software_node(&amp;rotary_encoder_device.dev, &amp;rotary_encoder_node);
+platform_device_register(&amp;rotary_encoder_device);
+
+...
+</pre></div>
+</div>
+<p>Please consult device tree binding documentation to see all properties
+supported by the driver.</p>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">14. rotary-encoder - a generic driver for GPIO connected devices</a><ul>
+<li><a class="reference internal" href="#function">14.1. Function</a></li>
+<li><a class="reference internal" href="#events-state-machine">14.2. Events / state machine</a></li>
+<li><a class="reference internal" href="#platform-requirements">14.3. Platform requirements</a></li>
+<li><a class="reference internal" href="#board-integration">14.4. Board integration</a></li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/input/devices/rotary-encoder.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../_sources/input/devices/rotary-encoder.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

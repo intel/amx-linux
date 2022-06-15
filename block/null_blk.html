@@ -1,0 +1,327 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>Null block device driver &#8212; The Linux Kernel 6.2.0-rc4+ documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Block layer support for Persistent Reservations" href="pr.html" />
+    <link rel="prev" title="Kyber I/O scheduler tunables" href="kyber-iosched.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="null-block-device-driver">
+<h1>Null block device driver<a class="headerlink" href="#null-block-device-driver" title="Permalink to this headline">¶</a></h1>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Permalink to this headline">¶</a></h2>
+<p>The null block device (<code class="docutils literal notranslate"><span class="pre">/dev/nullb*</span></code>) is used for benchmarking the various
+block-layer implementations. It emulates a block device of X gigabytes in size.
+It does not execute any read/write operation, just mark them as complete in
+the request queue. The following instances are possible:</p>
+<blockquote>
+<div><p>Multi-queue block-layer</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Request-based.</p></li>
+<li><p>Configurable submission queues per device.</p></li>
+</ul>
+</div></blockquote>
+<p>No block-layer (Known as bio-based)</p>
+<blockquote>
+<div><ul class="simple">
+<li><p>Bio-based. IO requests are submitted directly to the device driver.</p></li>
+<li><p>Directly accepts bio data structure and returns them.</p></li>
+</ul>
+</div></blockquote>
+</div></blockquote>
+<p>All of them have a completion queue for each core in the system.</p>
+</section>
+<section id="module-parameters">
+<h2>Module parameters<a class="headerlink" href="#module-parameters" title="Permalink to this headline">¶</a></h2>
+<dl>
+<dt>queue_mode=[0-2]: Default: 2-Multi-queue</dt><dd><p>Selects which block-layer the module should instantiate with.</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 4%" />
+<col style="width: 96%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>0</p></td>
+<td><p>Bio-based</p></td>
+</tr>
+<tr class="row-even"><td><p>1</p></td>
+<td><p>Single-queue (deprecated)</p></td>
+</tr>
+<tr class="row-odd"><td><p>2</p></td>
+<td><p>Multi-queue</p></td>
+</tr>
+</tbody>
+</table>
+</dd>
+<dt>home_node=[0–nr_nodes]: Default: NUMA_NO_NODE</dt><dd><p>Selects what CPU node the data structures are allocated from.</p>
+</dd>
+<dt>gb=[Size in GB]: Default: 250GB</dt><dd><p>The size of the device reported to the system.</p>
+</dd>
+<dt>bs=[Block size (in bytes)]: Default: 512 bytes</dt><dd><p>The block size reported to the system.</p>
+</dd>
+<dt>nr_devices=[Number of devices]: Default: 1</dt><dd><p>Number of block devices instantiated. They are instantiated as /dev/nullb0,
+etc.</p>
+</dd>
+<dt>irqmode=[0-2]: Default: 1-Soft-irq</dt><dd><p>The completion mode used for completing IOs to the block-layer.</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 1%" />
+<col style="width: 99%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>0</p></td>
+<td><p>None.</p></td>
+</tr>
+<tr class="row-even"><td><p>1</p></td>
+<td><p>Soft-irq. Uses IPI to complete IOs across CPU nodes. Simulates the overhead
+when IOs are issued from another CPU node than the home the device is
+connected to.</p></td>
+</tr>
+<tr class="row-odd"><td><p>2</p></td>
+<td><p>Timer: Waits a specific period (completion_nsec) for each IO before
+completion.</p></td>
+</tr>
+</tbody>
+</table>
+</dd>
+<dt>completion_nsec=[ns]: Default: 10,000ns</dt><dd><p>Combined with irqmode=2 (timer). The time each completion event must wait.</p>
+</dd>
+<dt>submit_queues=[1..nr_cpus]: Default: 1</dt><dd><p>The number of submission queues attached to the device driver. If unset, it
+defaults to 1. For multi-queue, it is ignored when use_per_node_hctx module
+parameter is 1.</p>
+</dd>
+<dt>hw_queue_depth=[0..qdepth]: Default: 64</dt><dd><p>The hardware queue depth of the device.</p>
+</dd>
+<dt>memory_backed=[0/1]: Default: 0</dt><dd><p>Whether or not to use a memory buffer to respond to IO requests</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 2%" />
+<col style="width: 98%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>0</p></td>
+<td><p>Transfer no data in response to IO requests</p></td>
+</tr>
+<tr class="row-even"><td><p>1</p></td>
+<td><p>Use a memory buffer to respond to IO requests</p></td>
+</tr>
+</tbody>
+</table>
+</dd>
+<dt>discard=[0/1]: Default: 0</dt><dd><p>Support discard operations (requires memory-backed null_blk device).</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 3%" />
+<col style="width: 97%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>0</p></td>
+<td><p>Do not support discard operations</p></td>
+</tr>
+<tr class="row-even"><td><p>1</p></td>
+<td><p>Enable support for discard operations</p></td>
+</tr>
+</tbody>
+</table>
+</dd>
+<dt>cache_size=[Size in MB]: Default: 0</dt><dd><p>Cache size in MB for memory-backed device.</p>
+</dd>
+<dt>mbps=[Maximum bandwidth in MB/s]: Default: 0 (no limit)</dt><dd><p>Bandwidth limit for device performance.</p>
+</dd>
+</dl>
+<section id="multi-queue-specific-parameters">
+<h3>Multi-queue specific parameters<a class="headerlink" href="#multi-queue-specific-parameters" title="Permalink to this headline">¶</a></h3>
+<dl>
+<dt>use_per_node_hctx=[0/1]: Default: 0</dt><dd><p>Number of hardware context queues.</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 1%" />
+<col style="width: 99%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>0</p></td>
+<td><p>The number of submit queues are set to the value of the submit_queues
+parameter.</p></td>
+</tr>
+<tr class="row-even"><td><p>1</p></td>
+<td><p>The multi-queue block layer is instantiated with a hardware dispatch
+queue for each CPU node in the system.</p></td>
+</tr>
+</tbody>
+</table>
+</dd>
+<dt>no_sched=[0/1]: Default: 0</dt><dd><p>Enable/disable the io scheduler.</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 3%" />
+<col style="width: 97%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>0</p></td>
+<td><p>nullb* use default blk-mq io scheduler</p></td>
+</tr>
+<tr class="row-even"><td><p>1</p></td>
+<td><p>nullb* doesn’t use io scheduler</p></td>
+</tr>
+</tbody>
+</table>
+</dd>
+<dt>blocking=[0/1]: Default: 0</dt><dd><p>Blocking behavior of the request queue.</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 2%" />
+<col style="width: 98%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>0</p></td>
+<td><p>Register as a non-blocking blk-mq driver device.</p></td>
+</tr>
+<tr class="row-even"><td><p>1</p></td>
+<td><p>Register as a blocking blk-mq driver device, null_blk will set
+the BLK_MQ_F_BLOCKING flag, indicating that it sometimes/always
+needs to block in its -&gt;queue_rq() function.</p></td>
+</tr>
+</tbody>
+</table>
+</dd>
+<dt>shared_tags=[0/1]: Default: 0</dt><dd><p>Sharing tags between devices.</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 2%" />
+<col style="width: 98%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>0</p></td>
+<td><p>Tag set is not shared.</p></td>
+</tr>
+<tr class="row-even"><td><p>1</p></td>
+<td><p>Tag set shared between devices for blk-mq. Only makes sense with
+nr_devices &gt; 1, otherwise there’s no tag set to share.</p></td>
+</tr>
+</tbody>
+</table>
+</dd>
+<dt>zoned=[0/1]: Default: 0</dt><dd><p>Device is a random-access or a zoned block device.</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 1%" />
+<col style="width: 99%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>0</p></td>
+<td><p>Block device is exposed as a random-access block device.</p></td>
+</tr>
+<tr class="row-even"><td><p>1</p></td>
+<td><p>Block device is exposed as a host-managed zoned block device. Requires
+CONFIG_BLK_DEV_ZONED.</p></td>
+</tr>
+</tbody>
+</table>
+</dd>
+<dt>zone_size=[MB]: Default: 256</dt><dd><p>Per zone size when exposed as a zoned block device. Must be a power of two.</p>
+</dd>
+<dt>zone_nr_conv=[nr_conv]: Default: 0</dt><dd><p>The number of conventional zones to create when block device is zoned.  If
+zone_nr_conv &gt;= nr_zones, it will be reduced to nr_zones - 1.</p>
+</dd>
+</dl>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">The Linux Kernel</a></h1>
+
+
+
+<p class="blurb">6.2.0-rc4-6.2.0-rc4+</p>
+
+
+
+
+
+
+
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+  <h3><a href="../index.html">Table of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">Null block device driver</a><ul>
+<li><a class="reference internal" href="#overview">Overview</a></li>
+<li><a class="reference internal" href="#module-parameters">Module parameters</a><ul>
+<li><a class="reference internal" href="#multi-queue-specific-parameters">Multi-queue specific parameters</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/block/null_blk.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;The kernel development community.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.4</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/block/null_blk.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>
