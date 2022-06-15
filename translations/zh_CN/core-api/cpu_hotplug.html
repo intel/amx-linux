@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>内核中的CPU热拔插 &mdash; The Linux Kernel 5.19.0-rc2-selftest+ documentation</title><link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
+    <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" />
+      <link rel="stylesheet" href="../../../_static/theme_overrides.css" type="text/css" />
+      <link rel="stylesheet" href="../../../_static/theme_rtd_colors.css" type="text/css" />
+  <!--[if lt IE 9]>
+    <script src="../../../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  <script id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+        <script src="../../../_static/jquery.js"></script>
+        <script src="../../../_static/underscore.js"></script>
+        <script src="../../../_static/doctools.js"></script>
+        <script src="../../../_static/language_data.js"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+    <link rel="next" title="Linux通用IRQ处理" href="genericirq.html" />
+    <link rel="prev" title="Linux下的缓存和TLB刷新" href="cachetlb.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+            <a href="../../../index.html" class="icon icon-home"> The Linux Kernel
+          </a>
+              <div class="version">
+                5.19.0-rc4
+              </div>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../admin-guide/index.html">The Linux kernel user’s and administrator’s guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../kbuild/index.html">Kernel Build System</a></li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../firmware-guide/index.html">The Linux kernel firmware guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../devicetree/index.html">Open Firmware and Devicetree</a></li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../userspace-api/index.html">The Linux kernel user-space API guide</a></li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../process/index.html">Working with the kernel development community</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../dev-tools/index.html">Development tools for the kernel</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../doc-guide/index.html">How to write kernel documentation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../kernel-hacking/index.html">Kernel Hacking Guides</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../trace/index.html">Linux Tracing Technologies</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../maintainer/index.html">Kernel Maintainer Handbook</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../fault-injection/index.html">fault-injection</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../livepatch/index.html">Kernel Livepatching</a></li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../driver-api/index.html">The Linux driver implementer’s API guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../core-api/index.html">Core API Documentation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../locking/index.html">locking</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../accounting/index.html">Accounting</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../block/index.html">Block</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../cdrom/index.html">cdrom</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../cpu-freq/index.html">Linux CPUFreq - CPU frequency and voltage scaling code in the Linux(TM) kernel</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../fb/index.html">Frame Buffer</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../fpga/index.html">fpga</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../hid/index.html">Human Interface Devices (HID)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../i2c/index.html">I2C/SMBus Subsystem</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../iio/index.html">Industrial I/O</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../isdn/index.html">ISDN</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../infiniband/index.html">InfiniBand</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../leds/index.html">LEDs</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../netlabel/index.html">NetLabel</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../networking/index.html">Networking</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../pcmcia/index.html">pcmcia</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../power/index.html">Power Management</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../target/index.html">TCM Virtual Device</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../timers/index.html">timers</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../spi/index.html">Serial Peripheral Interface (SPI)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../w1/index.html">1-Wire Subsystem</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../watchdog/index.html">Linux Watchdog Support</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../virt/index.html">Linux Virtualization Support</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../input/index.html">The Linux Input Documentation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../hwmon/index.html">Linux Hardware Monitoring</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../gpu/index.html">Linux GPU Driver Developer’s Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../security/index.html">Security Documentation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../sound/index.html">Linux Sound Subsystem Documentation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../crypto/index.html">Linux Kernel Crypto API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../filesystems/index.html">Filesystems in the Linux kernel</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../vm/index.html">Linux Memory Management Documentation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../bpf/index.html">BPF Documentation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../usb/index.html">USB support</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../PCI/index.html">Linux PCI Bus Subsystem</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../scsi/index.html">Linux SCSI Subsystem</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../misc-devices/index.html">Assorted Miscellaneous Devices Documentation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../scheduler/index.html">Linux Scheduler</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../mhi/index.html">MHI</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../peci/index.html">Linux PECI Subsystem</a></li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../asm-annotations.html">Assembler Annotations</a></li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../arch.html">CPU Architectures</a></li>
+</ul>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../tools/index.html">Kernel tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../staging/index.html">Unsorted Documentation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../staging/index.html#atomic-types">Atomic Types</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../staging/index.html#atomic-bitops">Atomic bitops</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../staging/index.html#memory-barriers">Memory Barriers</a></li>
+</ul>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../../index.html">Translations</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="../index.html">中文翻译</a><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="../index.html#id2">许可证文档</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../index.html#id3">用户文档</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../index.html#id4">固件相关文档</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../index.html#id5">应用程序开发人员文档</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../index.html#id6">内核开发简介</a></li>
+<li class="toctree-l3 current"><a class="reference internal" href="../index.html#api">内核API文档</a><ul class="current">
+<li class="toctree-l4 current"><a class="reference internal" href="index.html">核心API文档</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../locking/index.html">锁</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../accounting/index.html">计数</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../cpu-freq/index.html">Linux CPUFreq - Linux(TM)内核中的CPU频率和电压升降代码</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../iio/index.html">工业 I/O</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../infiniband/index.html">infiniband</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../power/index.html">电源管理</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../virt/index.html">Linux虚拟化支持</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../sound/index.html">Linux 声音子系统文档</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../filesystems/index.html">Linux Kernel中的文件系统</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../scheduler/index.html">Linux调度器</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../vm/index.html">Linux内存管理文档</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../peci/index.html">Linux PECI 子系统</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../index.html#id7">体系结构无关文档</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../index.html#id8">特定体系结构文档</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../index.html#id9">其他文档</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../index.html#id10">目录和表格</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../zh_TW/index.html">繁體中文翻譯</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../it_IT/index.html">Traduzione italiana</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../ko_KR/index.html">한국어 번역</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../ja_JP/index.html">日本語訳</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../index.html#disclaimer">Disclaimer</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">The Linux Kernel</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home"></a> &raquo;</li>
+          <li><a href="../../index.html">Translations</a> &raquo;</li>
+          <li><a href="../index.html">中文翻译</a> &raquo;</li>
+          <li><a href="index.html">核心API文档</a> &raquo;</li>
+      <li>内核中的CPU热拔插</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../../../_sources/translations/zh_CN/core-api/cpu_hotplug.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>此文件的目的是为让中文读者更容易阅读和理解，而不是作为一个分支。 因此，
+如果您对此文件有任何意见或更新，请先尝试更新原始英文文件。</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>如果您发现本文档与原始文件有任何不同或者有翻译问题，请联系该文件的译者，
+或者请求时奎亮的帮助：&lt;<a class="reference external" href="mailto:alexs&#37;&#52;&#48;kernel&#46;org">alexs<span>&#64;</span>kernel<span>&#46;</span>org</a>&gt;。</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Original</dt>
+<dd class="field-odd"><p><a class="reference internal" href="../../../core-api/cpu_hotplug.html"><span class="doc">CPU hotplug in the Kernel</span></a></p>
+</dd>
+<dt class="field-even">翻译</dt>
+<dd class="field-even"><p>司延腾 Yanteng Si &lt;<a class="reference external" href="mailto:siyanteng&#37;&#52;&#48;loongson&#46;cn">siyanteng<span>&#64;</span>loongson<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+<dt class="field-odd">校译</dt>
+<dd class="field-odd"><p>吴想成 Wu XiangCheng &lt;<a class="reference external" href="mailto:bobwxc&#37;&#52;&#48;email&#46;cn">bobwxc<span>&#64;</span>email<span>&#46;</span>cn</a>&gt;</p>
+</dd>
+</dl>
+<section id="cpu">
+<span id="cn-core-api-cpu-hotplug"></span><h1>内核中的CPU热拔插<a class="headerlink" href="#cpu" title="Permalink to this headline">¶</a></h1>
+<dl class="field-list simple">
+<dt class="field-odd">时间</dt>
+<dd class="field-odd"><p>2016年12月</p>
+</dd>
+<dt class="field-even">作者</dt>
+<dd class="field-even"><p>Sebastian Andrzej Siewior &lt;<a class="reference external" href="mailto:bigeasy&#37;&#52;&#48;linutronix&#46;de">bigeasy<span>&#64;</span>linutronix<span>&#46;</span>de</a>&gt;,
+Rusty Russell &lt;<a class="reference external" href="mailto:rusty&#37;&#52;&#48;rustcorp&#46;com&#46;au">rusty<span>&#64;</span>rustcorp<span>&#46;</span>com<span>&#46;</span>au</a>&gt;,
+Srivatsa Vaddagiri &lt;<a class="reference external" href="mailto:vatsa&#37;&#52;&#48;in&#46;ibm&#46;com">vatsa<span>&#64;</span>in<span>&#46;</span>ibm<span>&#46;</span>com</a>&gt;,
+Ashok Raj &lt;<a class="reference external" href="mailto:ashok&#46;raj&#37;&#52;&#48;intel&#46;com">ashok<span>&#46;</span>raj<span>&#64;</span>intel<span>&#46;</span>com</a>&gt;,
+Joel Schopp &lt;<a class="reference external" href="mailto:jschopp&#37;&#52;&#48;austin&#46;ibm&#46;com">jschopp<span>&#64;</span>austin<span>&#46;</span>ibm<span>&#46;</span>com</a>&gt;</p>
+</dd>
+</dl>
+<section id="id1">
+<h2>简介<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h2>
+<p>现代系统架构的演进已经在处理器中引入了先进的错误报告和纠正能力。有一些OEM也支
+持可热拔插的NUMA（Non Uniform Memory Access，非统一内存访问）硬件,其中物理
+节点的插入和移除需要支持CPU热插拔。</p>
+<p>这样的进步要求内核可用的CPU被移除，要么是出于配置的原因，要么是出于RAS的目的，
+以保持一个不需要的CPU不在系统执行路径。因此需要在Linux内核中支持CPU热拔插。</p>
+<p>CPU热拔插支持的一个更新颖的用途是它在SMP的暂停恢复支持中的应用。双核和超线程支
+持使得即使是笔记本电脑也能运行不支持这些方法的SMP内核。</p>
+</section>
+<section id="id2">
+<h2>命令行开关<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<dl>
+<dt><code class="docutils literal notranslate"><span class="pre">maxcpus=n</span></code></dt><dd><p>限制启动时的CPU为 <em>n</em> 个。例如，如果你有四个CPU，使用 <code class="docutils literal notranslate"><span class="pre">maxcpus=2</span></code> 将只能启
+动两个。你可以选择稍后让其他CPU上线。</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">nr_cpus=n</span></code></dt><dd><p>限制内核将支持的CPU总量。如果这里提供的数量低于实际可用的CPU数量，那么其他CPU
+以后就不能上线了。</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">additional_cpus=n</span></code></dt><dd><p>使用它来限制可热插拔的CPU。该选项设置
+<code class="docutils literal notranslate"><span class="pre">cpu_possible_mask</span> <span class="pre">=</span> <span class="pre">cpu_present_mask</span> <span class="pre">+</span> <span class="pre">additional_cpus</span></code></p>
+<p>这个选项只限于IA64架构。</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">possible_cpus=n</span></code></dt><dd><p>这个选项设置 <code class="docutils literal notranslate"><span class="pre">cpu_possible_mask</span></code> 中的 <code class="docutils literal notranslate"><span class="pre">possible_cpus</span></code> 位。</p>
+<p>这个选项只限于X86和S390架构。</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">cpu0_hotplug</span></code></dt><dd><p>允许关闭CPU0。</p>
+<p>这个选项只限于X86架构。</p>
+</dd>
+</dl>
+</section>
+<section id="id3">
+<h2>CPU位图<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h2>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">cpu_possible_mask</span></code></dt><dd><p>系统中可能可用CPU的位图。这是用来为per_cpu变量分配一些启动时的内存，这些变量
+不会随着CPU的可用或移除而增加/减少。一旦在启动时的发现阶段被设置，该映射就是静态
+的，也就是说，任何时候都不会增加或删除任何位。根据你的系统需求提前准确地调整它
+可以节省一些启动时的内存。</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">cpu_online_mask</span></code></dt><dd><p>当前在线的所有CPU的位图。在一个CPU可用于内核调度并准备接收设备的中断后，它被
+设置在 <code class="docutils literal notranslate"><span class="pre">__cpu_up()</span></code> 中。当使用 <code class="docutils literal notranslate"><span class="pre">__cpu_disable()</span></code> 关闭一个CPU时，它被清
+空，在此之前，所有的操作系统服务包括中断都被迁移到另一个目标CPU。</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">cpu_present_mask</span></code></dt><dd><p>系统中当前存在的CPU的位图。它们并非全部在线。当物理热拔插被相关的子系统
+（如ACPI）处理时，可以改变和添加新的位或从位图中删除，这取决于事件是
+hot-add/hot-remove。目前还没有定死规定。典型的用法是在启动时启动拓扑结构，这时
+热插拔被禁用。</p>
+</dd>
+</dl>
+<p>你真的不需要操作任何系统的CPU映射。在大多数情况下，它们应该是只读的。当设置每个
+CPU资源时，几乎总是使用 <code class="docutils literal notranslate"><span class="pre">cpu_possible_mask</span></code> 或 <code class="docutils literal notranslate"><span class="pre">for_each_possible_cpu()</span></code>
+来进行迭代。宏 <code class="docutils literal notranslate"><span class="pre">for_each_cpu()</span></code> 可以用来迭代一个自定义的CPU掩码。</p>
+<p>不要使用 <code class="docutils literal notranslate"><span class="pre">cpumask_t</span></code> 以外的任何东西来表示CPU的位图。</p>
+</section>
+<section id="id4">
+<h2>使用CPU热拔插<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h2>
+<p>内核选项 <em>CONFIG_HOTPLUG_CPU</em> 需要被启用。它目前可用于多种架构，包括ARM、MIPS、
+PowerPC和X86。配置是通过sysfs接口完成的:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ ls -lh /sys/devices/system/cpu
+total 0
+drwxr-xr-x  9 root root    0 Dec 21 16:33 cpu0
+drwxr-xr-x  9 root root    0 Dec 21 16:33 cpu1
+drwxr-xr-x  9 root root    0 Dec 21 16:33 cpu2
+drwxr-xr-x  9 root root    0 Dec 21 16:33 cpu3
+drwxr-xr-x  9 root root    0 Dec 21 16:33 cpu4
+drwxr-xr-x  9 root root    0 Dec 21 16:33 cpu5
+drwxr-xr-x  9 root root    0 Dec 21 16:33 cpu6
+drwxr-xr-x  9 root root    0 Dec 21 16:33 cpu7
+drwxr-xr-x  2 root root    0 Dec 21 16:33 hotplug
+-r--r--r--  1 root root 4.0K Dec 21 16:33 offline
+-r--r--r--  1 root root 4.0K Dec 21 16:33 online
+-r--r--r--  1 root root 4.0K Dec 21 16:33 possible
+-r--r--r--  1 root root 4.0K Dec 21 16:33 present
+</pre></div>
+</div>
+<p>文件 <em>offline</em> 、 <em>online</em> 、<em>possible</em> 、<em>present</em> 代表CPU掩码。每个CPU文件
+夹包含一个 <em>online</em> 文件，控制逻辑上的开（1）和关（0）状态。要在逻辑上关闭CPU4:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo 0 &gt; /sys/devices/system/cpu/cpu4/online
+ smpboot: CPU 4 is now offline
+</pre></div>
+</div>
+<p>一旦CPU被关闭，它将从 <em>/proc/interrupts</em> 、<em>/proc/cpuinfo</em> 中被删除，也不应该
+被 <em>top</em> 命令显示出来。要让CPU4重新上线:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo 1 &gt; /sys/devices/system/cpu/cpu4/online
+smpboot: Booting Node 0 Processor 4 APIC 0x1
+</pre></div>
+</div>
+<p>CPU又可以使用了。这应该对所有的CPU都有效。CPU0通常比较特殊，被排除在CPU热拔插之外。
+在X86上，内核选项 <em>CONFIG_BOOTPARAM_HOTPLUG_CPU0</em> 必须被启用，以便能够关闭CPU0。
+或者，可以使用内核命令选项 <em>cpu0_hotplug</em> 。CPU0的一些已知的依赖性:</p>
+<ul class="simple">
+<li><p>从休眠/暂停中恢复。如果CPU0处于离线状态，休眠/暂停将失败。</p></li>
+<li><p>PIC中断。如果检测到PIC中断，CPU0就不能被移除。</p></li>
+</ul>
+<p>如果你发现CPU0上有任何依赖性，请告知Fenghua Yu &lt;<a class="reference external" href="mailto:fenghua&#46;yu&#37;&#52;&#48;intel&#46;com">fenghua<span>&#46;</span>yu<span>&#64;</span>intel<span>&#46;</span>com</a>&gt;。</p>
+</section>
+<section id="id5">
+<h2>CPU的热拔插协作<a class="headerlink" href="#id5" title="Permalink to this headline">¶</a></h2>
+<section id="id6">
+<h3>下线情况<a class="headerlink" href="#id6" title="Permalink to this headline">¶</a></h3>
+<p>一旦CPU被逻辑关闭，注册的热插拔状态的清除回调将被调用，从 <code class="docutils literal notranslate"><span class="pre">CPUHP_ONLINE</span></code> 开始，在
+<code class="docutils literal notranslate"><span class="pre">CPUHP_OFFLINE</span></code> 状态结束。这包括:</p>
+<ul class="simple">
+<li><p>如果任务因暂停操作而被冻结，那么 <em>cpuhp_tasks_frozen</em> 将被设置为true。</p></li>
+<li><p>所有进程都会从这个将要离线的CPU迁移到新的CPU上。新的CPU是从每个进程的当前cpuset中
+选择的，它可能是所有在线CPU的一个子集。</p></li>
+<li><p>所有针对这个CPU的中断都被迁移到新的CPU上。</p></li>
+<li><p>计时器也会被迁移到新的CPU上。</p></li>
+<li><p>一旦所有的服务被迁移，内核会调用一个特定的例程 <code class="docutils literal notranslate"><span class="pre">__cpu_disable()</span></code> 来进行特定的清
+理。</p></li>
+</ul>
+</section>
+<section id="api">
+<h3>使用热插拔API<a class="headerlink" href="#api" title="Permalink to this headline">¶</a></h3>
+<p>一旦一个CPU下线或上线，就有可能收到通知。这对某些需要根据可用CPU数量执行某种设置或清
+理功能的驱动程序来说可能很重要:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#include &lt;linux/cpuhotplug.h&gt;
+
+ret = cpuhp_setup_state(CPUHP_AP_ONLINE_DYN, &quot;X/Y:online&quot;,
+                        Y_online, Y_prepare_down);
+</pre></div>
+</div>
+<p><em>X</em> 是子系统， <em>Y</em> 是特定的驱动程序。 <em>Y_online</em> 回调将在所有在线CPU的注册过程中被调用。
+如果在线回调期间发生错误， <em>Y_prepare_down</em>  回调将在所有之前调用过在线回调的CPU上调
+用。注册完成后，一旦有CPU上线， <em>Y_online</em> 回调将被调用，当CPU关闭时， <em>Y_prepare_down</em>
+将被调用。所有之前在 <em>Y_online</em> 中分配的资源都应该在 <em>Y_prepare_down</em> 中释放。如果在
+注册过程中发生错误，返回值 <em>ret</em> 为负值。否则会返回一个正值，其中包含动态分配状态
+（ <em>CPUHP_AP_ONLINE_DYN</em> ）的分配热拔插。对于预定义的状态，它将返回0。</p>
+<p>该回调可以通过调用 <code class="docutils literal notranslate"><span class="pre">cpuhp_remove_state()</span></code> 来删除。如果是动态分配的状态
+（ <em>CPUHP_AP_ONLINE_DYN</em> ），则使用返回的状态。在移除热插拔状态的过程中，将调用拆解回调。</p>
+<section id="id7">
+<h4>多个实例<a class="headerlink" href="#id7" title="Permalink to this headline">¶</a></h4>
+<p>如果一个驱动程序有多个实例，并且每个实例都需要独立执行回调，那么很可能应该使用
+<code class="docutils literal notranslate"><span class="pre">multi-state</span></code> 。首先需要注册一个多状态的状态:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ret = cpuhp_setup_state_multi(CPUHP_AP_ONLINE_DYN, &quot;X/Y:online,
+                              Y_online, Y_prepare_down);
+Y_hp_online = ret;
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">cpuhp_setup_state_multi()</span></code> 的行为与 <code class="docutils literal notranslate"><span class="pre">cpuhp_setup_state()</span></code> 类似，只是它
+为多状态准备了回调，但不调用回调。这是一个一次性的设置。
+一旦分配了一个新的实例，你需要注册这个新实例:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>ret = cpuhp_state_add_instance(Y_hp_online, &amp;d-&gt;node);
+</pre></div>
+</div>
+<p>这个函数将把这个实例添加到你先前分配的 <code class="docutils literal notranslate"><span class="pre">Y_hp_online</span></code> 状态，并在所有在线的
+CPU上调用先前注册的回调（ <code class="docutils literal notranslate"><span class="pre">Y_online</span></code> ）。 <em>node</em> 元素是你的每个实例数据结构
+中的一个 <code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">hlist_node</span></code> 成员。</p>
+<p>在移除该实例时:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>cpuhp_state_remove_instance(Y_hp_online, &amp;d-&gt;node)
+</pre></div>
+</div>
+<p>应该被调用，这将在所有在线CPU上调用拆分回调。</p>
+</section>
+<section id="id8">
+<h4>手动设置<a class="headerlink" href="#id8" title="Permalink to this headline">¶</a></h4>
+<p>通常情况下，在注册或移除状态时调用setup和teamdown回调是很方便的，因为通常在CPU上线
+（下线）和驱动的初始设置（关闭）时需要执行该操作。然而，每个注册和删除功能也有一个
+_nocalls的后缀，如果不希望调用回调，则不调用所提供的回调。在手动设置（或关闭）期间，
+应该使用 <code class="docutils literal notranslate"><span class="pre">get_online_cpus()</span></code> 和 <code class="docutils literal notranslate"><span class="pre">put_online_cpus()</span></code> 函数来抑制CPU热插拔操作。</p>
+</section>
+</section>
+<section id="id9">
+<h3>事件的顺序<a class="headerlink" href="#id9" title="Permalink to this headline">¶</a></h3>
+<p>热插拔状态被定义在 <code class="docutils literal notranslate"><span class="pre">include/linux/cpuhotplug.h</span></code>:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">CPUHP_OFFLINE</span></code> … <code class="docutils literal notranslate"><span class="pre">CPUHP_AP_OFFLINE</span></code> 状态是在CPU启动前调用的。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">CPUHP_AP_OFFLINE</span></code> … <code class="docutils literal notranslate"><span class="pre">CPUHP_AP_ONLINE</span></code> 状态是在CPU被启动后被调用的。
+中断是关闭的，调度程序还没有在这个CPU上活动。从 <code class="docutils literal notranslate"><span class="pre">CPUHP_AP_OFFLINE</span></code> 开始，
+回调被调用到目标CPU上。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">CPUHP_AP_ONLINE_DYN</span></code> 和 <code class="docutils literal notranslate"><span class="pre">CPUHP_AP_ONLINE_DYN_END</span></code> 之间的状态被保留
+给动态分配。</p></li>
+<li><p>这些状态在CPU关闭时以相反的顺序调用，从 <code class="docutils literal notranslate"><span class="pre">CPUHP_ONLINE</span></code> 开始，在 <code class="docutils literal notranslate"><span class="pre">CPUHP_OFFLINE</span></code>
+停止。这里的回调是在将被关闭的CPU上调用的，直到 <code class="docutils literal notranslate"><span class="pre">CPUHP_AP_OFFLINE</span></code> 。</p></li>
+</ul>
+<p>通过 <code class="docutils literal notranslate"><span class="pre">CPUHP_AP_ONLINE_DYN</span></code> 动态分配的状态通常已经足够了。然而，如果在启动或关闭
+期间需要更早的调用，那么应该获得一个显式状态。如果热拔插事件需要相对于另一个热拔插事
+件的特定排序，也可能需要一个显式状态。</p>
+</section>
+</section>
+<section id="id10">
+<h2>测试热拔插状态<a class="headerlink" href="#id10" title="Permalink to this headline">¶</a></h2>
+<p>验证自定义状态是否按预期工作的一个方法是关闭一个CPU，然后再把它上线。也可以把CPU放到某
+些状态（例如 <code class="docutils literal notranslate"><span class="pre">CPUHP_AP_ONLINE</span></code> ），然后再回到 <code class="docutils literal notranslate"><span class="pre">CPUHP_ONLINE</span></code> 。这将模拟在
+<code class="docutils literal notranslate"><span class="pre">CPUHP_AP_ONLINE</span></code> 之后的一个状态出现错误，从而导致回滚到在线状态。</p>
+<p>所有注册的状态都被列举在 <code class="docutils literal notranslate"><span class="pre">/sys/devices/system/cpu/hotplug/states</span></code></p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ tail /sys/devices/system/cpu/hotplug/states
+138: mm/vmscan:online
+139: mm/vmstat:online
+140: lib/percpu_cnt:online
+141: acpi/cpu-drv:online
+142: base/cacheinfo:online
+143: virtio/net:online
+144: x86/mce:online
+145: printk:online
+168: sched:active
+169: online
+</pre></div>
+</div>
+<p>要将CPU4回滚到 <code class="docutils literal notranslate"><span class="pre">lib/percpu_cnt:online</span></code> ，再回到在线状态，只需发出:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ cat /sys/devices/system/cpu/cpu4/hotplug/state
+169
+$ echo 140 &gt; /sys/devices/system/cpu/cpu4/hotplug/target
+$ cat /sys/devices/system/cpu/cpu4/hotplug/state
+140
+</pre></div>
+</div>
+<p>需要注意的是，状态140的清除回调已经被调用。现在重新上线:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>$ echo 169 &gt; /sys/devices/system/cpu/cpu4/hotplug/target
+$ cat /sys/devices/system/cpu/cpu4/hotplug/state
+169
+</pre></div>
+</div>
+<p>启用追踪事件后，单个步骤也是可见的:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#  TASK-PID   CPU#    TIMESTAMP  FUNCTION
+#     | |       |        |         |
+    bash-394  [001]  22.976: cpuhp_enter: cpu: 0004 target: 140 step: 169 (cpuhp_kick_ap_work)
+ cpuhp/4-31   [004]  22.977: cpuhp_enter: cpu: 0004 target: 140 step: 168 (sched_cpu_deactivate)
+ cpuhp/4-31   [004]  22.990: cpuhp_exit:  cpu: 0004  state: 168 step: 168 ret: 0
+ cpuhp/4-31   [004]  22.991: cpuhp_enter: cpu: 0004 target: 140 step: 144 (mce_cpu_pre_down)
+ cpuhp/4-31   [004]  22.992: cpuhp_exit:  cpu: 0004  state: 144 step: 144 ret: 0
+ cpuhp/4-31   [004]  22.993: cpuhp_multi_enter: cpu: 0004 target: 140 step: 143 (virtnet_cpu_down_prep)
+ cpuhp/4-31   [004]  22.994: cpuhp_exit:  cpu: 0004  state: 143 step: 143 ret: 0
+ cpuhp/4-31   [004]  22.995: cpuhp_enter: cpu: 0004 target: 140 step: 142 (cacheinfo_cpu_pre_down)
+ cpuhp/4-31   [004]  22.996: cpuhp_exit:  cpu: 0004  state: 142 step: 142 ret: 0
+    bash-394  [001]  22.997: cpuhp_exit:  cpu: 0004  state: 140 step: 169 ret: 0
+    bash-394  [005]  95.540: cpuhp_enter: cpu: 0004 target: 169 step: 140 (cpuhp_kick_ap_work)
+ cpuhp/4-31   [004]  95.541: cpuhp_enter: cpu: 0004 target: 169 step: 141 (acpi_soft_cpu_online)
+ cpuhp/4-31   [004]  95.542: cpuhp_exit:  cpu: 0004  state: 141 step: 141 ret: 0
+ cpuhp/4-31   [004]  95.543: cpuhp_enter: cpu: 0004 target: 169 step: 142 (cacheinfo_cpu_online)
+ cpuhp/4-31   [004]  95.544: cpuhp_exit:  cpu: 0004  state: 142 step: 142 ret: 0
+ cpuhp/4-31   [004]  95.545: cpuhp_multi_enter: cpu: 0004 target: 169 step: 143 (virtnet_cpu_online)
+ cpuhp/4-31   [004]  95.546: cpuhp_exit:  cpu: 0004  state: 143 step: 143 ret: 0
+ cpuhp/4-31   [004]  95.547: cpuhp_enter: cpu: 0004 target: 169 step: 144 (mce_cpu_online)
+ cpuhp/4-31   [004]  95.548: cpuhp_exit:  cpu: 0004  state: 144 step: 144 ret: 0
+ cpuhp/4-31   [004]  95.549: cpuhp_enter: cpu: 0004 target: 169 step: 145 (console_cpu_notify)
+ cpuhp/4-31   [004]  95.550: cpuhp_exit:  cpu: 0004  state: 145 step: 145 ret: 0
+ cpuhp/4-31   [004]  95.551: cpuhp_enter: cpu: 0004 target: 169 step: 168 (sched_cpu_activate)
+ cpuhp/4-31   [004]  95.552: cpuhp_exit:  cpu: 0004  state: 168 step: 168 ret: 0
+    bash-394  [005]  95.553: cpuhp_exit:  cpu: 0004  state: 169 step: 140 ret: 0
+</pre></div>
+</div>
+<p>可以看到，CPU4一直下降到时间戳22.996，然后又上升到95.552。所有被调用的回调，
+包括它们的返回代码都可以在跟踪中看到。</p>
+</section>
+<section id="id11">
+<h2>架构的要求<a class="headerlink" href="#id11" title="Permalink to this headline">¶</a></h2>
+<p>需要具备以下功能和配置：</p>
+<dl class="simple">
+<dt><code class="docutils literal notranslate"><span class="pre">CONFIG_HOTPLUG_CPU</span></code></dt><dd><p>这个配置项需要在Kconfig中启用</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">__cpu_up()</span></code></dt><dd><p>调出一个cpu的架构接口</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">__cpu_disable()</span></code></dt><dd><p>关闭CPU的架构接口，在此程序返回后，内核不能再处理任何中断。这包括定时器的关闭。</p>
+</dd>
+<dt><code class="docutils literal notranslate"><span class="pre">__cpu_die()</span></code></dt><dd><p>这实际上是为了确保CPU的死亡。实际上，看看其他架构中实现CPU热拔插的一些示例代
+码。对于那个特定的架构，处理器被从 <code class="docutils literal notranslate"><span class="pre">idle()</span></code> 循环中拿下来。 <code class="docutils literal notranslate"><span class="pre">__cpu_die()</span></code>
+通常会等待一些per_cpu状态的设置，以确保处理器的死亡例程被调用来保持活跃。</p>
+</dd>
+</dl>
+</section>
+<section id="id12">
+<h2>用户空间通知<a class="headerlink" href="#id12" title="Permalink to this headline">¶</a></h2>
+<p>在CPU成功上线或下线后，udev事件被发送。一个udev规则，比如:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>SUBSYSTEM==&quot;cpu&quot;, DRIVERS==&quot;processor&quot;, DEVPATH==&quot;/devices/system/cpu/*&quot;, RUN+=&quot;the_hotplug_receiver.sh&quot;
+</pre></div>
+</div>
+<p>将接收所有事件。一个像这样的脚本:</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>#!/bin/sh
+
+if [ &quot;${ACTION}&quot; = &quot;offline&quot; ]
+then
+    echo &quot;CPU ${DEVPATH##*/} offline&quot;
+
+elif [ &quot;${ACTION}&quot; = &quot;online&quot; ]
+then
+    echo &quot;CPU ${DEVPATH##*/} online&quot;
+
+fi
+</pre></div>
+</div>
+<p>可以进一步处理该事件。</p>
+</section>
+<section id="id13">
+<h2>内核内联文档参考<a class="headerlink" href="#id13" title="Permalink to this headline">¶</a></h2>
+<p>该API在以下内核代码中:</p>
+<p>include/linux/cpuhotplug.h</p>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="cachetlb.html" class="btn btn-neutral float-left" title="Linux下的缓存和TLB刷新" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="genericirq.html" class="btn btn-neutral float-right" title="Linux通用IRQ处理" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright The kernel development community.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
