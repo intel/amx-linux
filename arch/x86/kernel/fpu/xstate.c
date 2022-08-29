@@ -1064,6 +1064,7 @@ void __copy_xstate_to_uabi_buf(struct membuf to, struct fpstate *fpstate,
 			       u32 pkru_val, enum xstate_copy_mode copy_mode)
 {
 	const unsigned int off_mxcsr = offsetof(struct fxregs_state, mxcsr);
+	bool compacted = cpu_feature_enabled(X86_FEATURE_XCOMPACTED);
 	struct xregs_state *xinit = &init_fpstate.regs.xsave;
 	struct xregs_state *xsave = &fpstate->regs.xsave;
 	struct xstate_header header;
@@ -1093,8 +1094,13 @@ void __copy_xstate_to_uabi_buf(struct membuf to, struct fpstate *fpstate,
 	copy_feature(header.xfeatures & XFEATURE_MASK_FP, &to, &xsave->i387,
 		     &xinit->i387, off_mxcsr);
 
-	/* Copy MXCSR when SSE or YMM are set in the feature mask */
-	copy_feature(header.xfeatures & (XFEATURE_MASK_SSE | XFEATURE_MASK_YMM),
+	/*
+	 * Copy MXCSR depending on the XSAVE format. If compacted,
+	 * reference the feature mask. Otherwise, check if any of related
+	 * features is valid.
+	 */
+	copy_feature(compacted ? header.xfeatures & XFEATURE_MASK_SSE :
+		     fpstate->user_xfeatures & (XFEATURE_MASK_SSE | XFEATURE_MASK_YMM),
 		     &to, &xsave->i387.mxcsr, &xinit->i387.mxcsr,
 		     MXCSR_AND_FLAGS_SIZE);
 
@@ -1199,6 +1205,11 @@ static int copy_from_buffer(void *dst, unsigned int offset, unsigned int size,
 static int copy_uabi_to_xstate(struct fpstate *fpstate, const void *kbuf,
 			       const void __user *ubuf)
 {
+	const unsigned int off_stspace = offsetof(struct fxregs_state, st_space);
+	const unsigned int off_xmm = offsetof(struct fxregs_state, xmm_space);
+	const unsigned int off_mxcsr = offsetof(struct fxregs_state, mxcsr);
+	bool compacted = cpu_feature_enabled(X86_FEATURE_XCOMPACTED);
+	struct fxregs_state *fxsave = &fpstate->regs.fxsave;
 	struct xregs_state *xsave = &fpstate->regs.xsave;
 	unsigned int offset, size;
 	struct xstate_header hdr;
@@ -1212,38 +1223,48 @@ static int copy_uabi_to_xstate(struct fpstate *fpstate, const void *kbuf,
 	if (validate_user_xstate_header(&hdr, fpstate))
 		return -EINVAL;
 
-	/* Validate MXCSR when any of the related features is in use */
-	mask = XFEATURE_MASK_FP | XFEATURE_MASK_SSE | XFEATURE_MASK_YMM;
-	if (hdr.xfeatures & mask) {
+	if (hdr.xfeatures & XFEATURE_MASK_FP) {
+		if (copy_from_buffer(fxsave, 0, off_mxcsr, kbuf, ubuf))
+			return -EINVAL;
+		if (copy_from_buffer(fxsave->st_space, off_stspace, sizeof(fxsave->st_space),
+				     kbuf, ubuf))
+			return -EINVAL;
+	}
+
+	/* Validate MXCSR when any of the related features is valid. */
+	mask = XFEATURE_MASK_SSE | XFEATURE_MASK_YMM;
+	if (fpstate->user_xfeatures & mask) {
 		u32 mxcsr[2];
 
-		offset = offsetof(struct fxregs_state, mxcsr);
-		if (copy_from_buffer(mxcsr, offset, sizeof(mxcsr), kbuf, ubuf))
+		if (copy_from_buffer(mxcsr, off_mxcsr, sizeof(mxcsr), kbuf, ubuf))
 			return -EFAULT;
 
 		/* Reserved bits in MXCSR must be zero. */
 		if (mxcsr[0] & ~mxcsr_feature_mask)
 			return -EINVAL;
 
-		/* SSE and YMM require MXCSR even when FP is not in use. */
-		if (!(hdr.xfeatures & XFEATURE_MASK_FP)) {
-			xsave->i387.mxcsr = mxcsr[0];
-			xsave->i387.mxcsr_mask = mxcsr[1];
-		}
+		/*
+		 * Copy MXCSR regardless of the feature mask as userspace
+		 * uses the uncompacted format.
+		 */
+		fxsave->mxcsr = mxcsr[0];
+		fxsave->mxcsr_mask = mxcsr[1];
 	}
 
-	for (i = 0; i < XFEATURE_MAX; i++) {
-		mask = BIT_ULL(i);
+	if (hdr.xfeatures & XFEATURE_MASK_SSE) {
+		if (copy_from_buffer(fxsave->xmm_space, off_xmm, sizeof(fxsave->xmm_space),
+				     kbuf, ubuf))
+			return -EINVAL;
+	}
 
-		if (hdr.xfeatures & mask) {
-			void *dst = __raw_xsave_addr(xsave, i);
+	for_each_extended_xfeature(i, hdr.xfeatures) {
+		void *dst = __raw_xsave_addr(xsave, i);
 
-			offset = xstate_offsets[i];
-			size = xstate_sizes[i];
+		offset = xstate_offsets[i];
+		size = xstate_sizes[i];
 
-			if (copy_from_buffer(dst, offset, size, kbuf, ubuf))
-				return -EFAULT;
-		}
+		if (copy_from_buffer(dst, offset, size, kbuf, ubuf))
+			return -EFAULT;
 	}
 
 	/*
@@ -1256,6 +1277,13 @@ static int copy_uabi_to_xstate(struct fpstate *fpstate, const void *kbuf,
 	 * Add back in the features that came in from userspace:
 	 */
 	xsave->header.xfeatures |= hdr.xfeatures;
+	/*
+	 * Convert the SSE bit in the feature mask as it implies
+	 * differently between the formats. It indicates the MXCSR state
+	 * if compacted; otherwise, it pertains to XMM registers.
+	 */
+	if (compacted && fxsave->mxcsr != MXCSR_DEFAULT)
+		xsave->header.xfeatures |= XFEATURE_MASK_SSE;
 
 	return 0;
 }
