@@ -140,10 +140,11 @@ static unsigned int xfeature_get_offset(u64 xcomp_bv, int xfeature)
 
 	/*
 	 * Non-compacted format and legacy features use the cached fixed
-	 * offsets.
+	 * offsets. N.B. Each legacy state is discontiguously located in
+	 * memory.
 	 */
 	if (!cpu_feature_enabled(X86_FEATURE_XCOMPACTED) ||
-	    xfeature <= XFEATURE_SSE)
+	    WARN_ON_ONCE(xfeature <= XFEATURE_SSE))
 		return xstate_offsets[xfeature];
 
 	/*
@@ -217,14 +218,18 @@ static void __init setup_xstate_cache(void)
 	 * The FP xstates and SSE xstates are legacy states. They are always
 	 * in the fixed offsets in the xsave area in either compacted form
 	 * or standard form.
+	 *
+	 * But, while MXCSR is part of the SSE state, it is located in
+	 * between the FP states. Note that it is erroneous assuming that
+	 * each legacy area is contiguous.
 	 */
 	xstate_offsets[XFEATURE_FP]	= 0;
-	xstate_sizes[XFEATURE_FP]	= offsetof(struct fxregs_state,
-						   xmm_space);
+	xstate_sizes[XFEATURE_FP]	= offsetof(struct fxregs_state, mxcsr) +
+					  sizeof_field(struct fxregs_state, st_space);
 
-	xstate_offsets[XFEATURE_SSE]	= xstate_sizes[XFEATURE_FP];
-	xstate_sizes[XFEATURE_SSE]	= sizeof_field(struct fxregs_state,
-						       xmm_space);
+	xstate_offsets[XFEATURE_SSE]	= offsetof(struct fxregs_state, mxcsr);
+	xstate_sizes[XFEATURE_SSE]	= MXCSR_AND_FLAGS_SIZE +
+					  sizeof_field(struct fxregs_state, xmm_space);
 
 	for_each_extended_xfeature(i, fpu_kernel_cfg.max_features) {
 		cpuid_count(XSTATE_CPUID, i, &eax, &ebx, &ecx, &edx);
