@@ -39,16 +39,6 @@ struct xsave_buffer {
 	};
 };
 
-static inline uint64_t xgetbv(uint32_t index)
-{
-	uint32_t eax, edx;
-
-	asm volatile("xgetbv;"
-		     : "=a" (eax), "=d" (edx)
-		     : "c" (index));
-	return eax + ((uint64_t)edx << 32);
-}
-
 static inline void xsave(struct xsave_buffer *xbuf, uint64_t rfbm)
 {
 	uint32_t rfbm_lo = rfbm;
@@ -110,8 +100,6 @@ static struct {
 
 #define CPUID_LEAF_XSTATE		0xd
 #define CPUID_SUBLEAF_XSTATE_USER	0x0
-#define TILE_CPUID			0x1d
-#define TILE_PALETTE_ID			0x1
 
 static void check_cpuid_xtiledata(void)
 {
@@ -159,12 +147,6 @@ struct xsave_buffer *alloc_xbuf(void)
 static inline void clear_xstate_header(struct xsave_buffer *buffer)
 {
 	memset(&buffer->header, 0, sizeof(buffer->header));
-}
-
-static inline uint64_t get_xstatebv(struct xsave_buffer *buffer)
-{
-	/* XSTATE_BV is at the beginning of the header: */
-	return *(uint64_t *)&buffer->header;
 }
 
 static inline void set_xstatebv(struct xsave_buffer *buffer, uint64_t bv)
@@ -768,8 +750,6 @@ static void test_context_switch(void)
 
 	/* Affinitize to one CPU to force context switches */
 	affinitize_cpu0();
-
-	req_xtiledata_perm();
 
 	printf("[RUN]\tCheck tiledata context switches, %d iterations, %d threads.\n",
 	       ctxtswtest_config.iterations,
