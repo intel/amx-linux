@@ -87,12 +87,9 @@ static void sigill(int sig, siginfo_t *info, void *ctx_void)
 
 int main()
 {
-	stack_t stack = {
-		/* Our sigaltstack scratch space. */
-		.ss_sp = malloc(sizeof(char) * SIGSTKSZ),
-		.ss_size = SIGSTKSZ,
-	};
-	if (sigaltstack(&stack, NULL) != 0)
+	stack_t stack = { };
+
+	if (setup_sigaltstack(&stack) != 0)
 		err(1, "sigaltstack");
 
 	sethandler(SIGSEGV, sigsegv_or_sigbus, SA_ONSTACK);
@@ -218,6 +215,6 @@ int main()
 	set_eflags(get_eflags() & ~X86_EFLAGS_TF);
 #endif
 
-	free(stack.ss_sp);
+	cleanup_sigaltstack(&stack);
 	return 0;
 }

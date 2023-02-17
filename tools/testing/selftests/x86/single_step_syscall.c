@@ -126,13 +126,8 @@ int main()
 	int tmp;
 #endif
 
-	stack.ss_size = SIGSTKSZ;
-	stack.ss_sp = malloc(sizeof(char) * SIGSTKSZ);
-	if (!stack.ss_sp)
-		err(1, "malloc()");
-
-	if (sigaltstack(&stack, NULL) != 0)
-		err(1, "sigaltstack()");
+	if (setup_sigaltstack(&stack) != 0)
+		err(1, "sigaltstack");
 
 	sethandler(SIGTRAP, sigtrap, 0);
 
@@ -193,6 +188,7 @@ int main()
 	 */
 	if (sigsetjmp(jmpbuf, 1) == 0) {
 		unsigned long nr = SYS_getpid;
+
 		printf("[RUN]\tSet TF and check SYSENTER\n");
 		sethandler(SIGSEGV, print_and_longjmp,
 			   SA_RESETHAND | SA_ONSTACK);
@@ -217,6 +213,6 @@ int main()
 	/* Now make sure that another fast syscall doesn't set TF again. */
 	fast_syscall_no_tf();
 
-	free(stack.ss_sp);
+	cleanup_sigaltstack(&stack);
 	return 0;
 }

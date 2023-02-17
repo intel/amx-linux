@@ -741,17 +741,13 @@ int main()
 {
 	int total_nerrs = 0;
 	unsigned short my_cs, my_ss;
+	stack_t stack = { };
 
 	asm volatile ("mov %%cs,%0" : "=r" (my_cs));
 	asm volatile ("mov %%ss,%0" : "=r" (my_ss));
 	setup_ldt();
 
-	stack_t stack = {
-		/* Our sigaltstack scratch space. */
-		.ss_sp = malloc(sizeof(char) * SIGSTKSZ),
-		.ss_size = SIGSTKSZ,
-	};
-	if (sigaltstack(&stack, NULL) != 0)
+	if (setup_sigaltstack(&stack) != 0)
 		err(1, "sigaltstack");
 
 	sethandler(SIGUSR1, sigusr1, 0);
@@ -849,6 +845,6 @@ int main()
 	total_nerrs += test_nonstrict_ss();
 #endif
 
-	free(stack.ss_sp);
+	cleanup_sigaltstack(&stack);
 	return total_nerrs ? 1 : 0;
 }

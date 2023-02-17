@@ -28,17 +28,6 @@ static bool sigalrm_expected;
 
 static unsigned long at_minstack_size;
 
-static int setup_altstack(void *start, unsigned long size)
-{
-	stack_t ss;
-
-	memset(&ss, 0, sizeof(ss));
-	ss.ss_size = size;
-	ss.ss_sp = start;
-
-	return sigaltstack(&ss, NULL);
-}
-
 static jmp_buf jmpbuf;
 
 static void sigsegv(int sig, siginfo_t *info, void *ctx_void)
@@ -63,14 +52,14 @@ static void sigalrm(int sig, siginfo_t *info, void *ctx_void)
 	}
 }
 
-static void test_sigaltstack(void *altstack, unsigned long size)
+static void test_sigaltstack(stack_t *stack)
 {
-	if (setup_altstack(altstack, size)) {
+	if (sigaltstack(stack, NULL)) {
 		/*
 		 * The kernel may return ENOMEM when the altstack size
 		 * is insufficient. Skip the test in this case.
 		 */
-		if (errno == ENOMEM && size < at_minstack_size) {
+		if (errno == ENOMEM && stack->ss_size < at_minstack_size) {
 			printf("[SKIP]\tThe running kernel disallows an insufficient size.\n");
 			return;
 		}
@@ -78,7 +67,7 @@ static void test_sigaltstack(void *altstack, unsigned long size)
 		err(1, "sigaltstack()");
 	}
 
-	sigalrm_expected = (size > at_minstack_size) ? true : false;
+	sigalrm_expected = (stack->ss_size > at_minstack_size) ? true : false;
 
 	sethandler(SIGSEGV, sigsegv, 0);
 	sethandler(SIGALRM, sigalrm, SA_ONSTACK);
@@ -97,19 +86,24 @@ static void test_sigaltstack(void *altstack, unsigned long size)
 
 int main(void)
 {
-	void *altstack;
+	unsigned long enough_size;
+	stack_t stack = { };
 
 	at_minstack_size = getauxval(AT_MINSIGSTKSZ);
 
-	altstack = mmap(NULL, at_minstack_size + SIGSTKSZ, PROT_READ | PROT_WRITE,
-			MAP_PRIVATE | MAP_ANONYMOUS | MAP_STACK, -1, 0);
-	if (altstack == MAP_FAILED)
-		err(1, "mmap()");
+	if (init_sigaltstack(&stack) != 0)
+		err(1, "sigaltstack allocation failed.");
+	enough_size = stack.ss_size;
 
-	if ((ENFORCED_MINSIGSTKSZ + 1) < at_minstack_size)
-		test_sigaltstack(altstack, ENFORCED_MINSIGSTKSZ + 1);
+	if ((ENFORCED_MINSIGSTKSZ + 1) < at_minstack_size) {
+		stack.ss_size = ENFORCED_MINSIGSTKSZ + 1;
+		test_sigaltstack(&stack);
+	}
 
-	test_sigaltstack(altstack, at_minstack_size + SIGSTKSZ);
+	stack.ss_size = enough_size;
+	test_sigaltstack(&stack);
+
+	cleanup_sigaltstack(&stack);
 
 	return nerrs == 0 ? 0 : 1;
 }

@@ -362,29 +362,11 @@ static void validate_xcomp_perm(enum expected_result exp)
 #  define AT_MINSIGSTKSZ	51
 #endif
 
-static void *alloc_altstack(unsigned int size)
+static void setup_altstack(stack_t *stack, enum expected_result exp)
 {
-	void *altstack;
-
-	altstack = mmap(NULL, size, PROT_READ | PROT_WRITE,
-			MAP_PRIVATE | MAP_ANONYMOUS | MAP_STACK, -1, 0);
-
-	if (altstack == MAP_FAILED)
-		fatal_error("mmap() for altstack");
-
-	return altstack;
-}
-
-static void setup_altstack(void *addr, unsigned long size, enum expected_result exp)
-{
-	stack_t ss;
 	int rc;
 
-	memset(&ss, 0, sizeof(ss));
-	ss.ss_size = size;
-	ss.ss_sp = addr;
-
-	rc = sigaltstack(&ss, NULL);
+	rc = sigaltstack(stack, NULL);
 
 	if (exp == FAIL_EXPECTED) {
 		if (rc) {
@@ -401,7 +383,7 @@ static void test_dynamic_sigaltstack(void)
 {
 	unsigned int small_size, enough_size;
 	unsigned long minsigstksz;
-	void *altstack;
+	stack_t stack = { };
 
 	minsigstksz = getauxval(AT_MINSIGSTKSZ);
 	printf("\tAT_MINSIGSTKSZ = %lu\n", minsigstksz);
@@ -416,9 +398,9 @@ static void test_dynamic_sigaltstack(void)
 		return;
 	}
 
-	enough_size = minsigstksz * 2;
-
-	altstack = alloc_altstack(enough_size);
+	if (init_sigaltstack(&stack) != 0)
+		fatal_error("sigaltstack allocation failed.");
+	enough_size = stack.ss_size;
 	printf("\tAllocate memory for altstack (%u bytes).\n", enough_size);
 
 	/*
@@ -427,7 +409,8 @@ static void test_dynamic_sigaltstack(void)
 	 */
 	small_size = minsigstksz - xtiledata.size;
 	printf("\tAfter sigaltstack() with small size (%u bytes).\n", small_size);
-	setup_altstack(altstack, small_size, SUCCESS_EXPECTED);
+	stack.ss_size = small_size;
+	setup_altstack(&stack, SUCCESS_EXPECTED);
 	validate_req_xcomp_perm(FAIL_EXPECTED);
 
 	/*
@@ -436,7 +419,8 @@ static void test_dynamic_sigaltstack(void)
 	 * and thus ARCH_REQ_XCOMP_PERM should succeed.
 	 */
 	printf("\tAfter sigaltstack() with enough size (%u bytes).\n", enough_size);
-	setup_altstack(altstack, enough_size, SUCCESS_EXPECTED);
+	stack.ss_size = enough_size;
+	setup_altstack(&stack, SUCCESS_EXPECTED);
 	validate_req_xcomp_perm(SUCCESS_EXPECTED);
 
 	/*
@@ -446,7 +430,11 @@ static void test_dynamic_sigaltstack(void)
 	 * once XTILEDATA permission is established.
 	 */
 	printf("\tThen, sigaltstack() with small size (%u bytes).\n", small_size);
-	setup_altstack(altstack, small_size, FAIL_EXPECTED);
+	stack.ss_size = small_size;
+	setup_altstack(&stack, FAIL_EXPECTED);
+
+	stack.ss_size = enough_size;
+	cleanup_sigaltstack(&stack);
 }
 
 static void test_dynamic_state(void)

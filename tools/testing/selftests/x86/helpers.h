@@ -5,6 +5,10 @@
 #include <signal.h>
 #include <asm/processor-flags.h>
 
+int init_sigaltstack(stack_t *stack);
+int setup_sigaltstack(stack_t *stack);
+void cleanup_sigaltstack(stack_t *stack);
+
 void sethandler(int sig, void (*handler)(int, siginfo_t *, void *),
 		int flags);
 
