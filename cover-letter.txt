@@ -1,0 +1,57 @@
+From 8c68d9b2bcc096d3b44086ee50420a4c995f9d1e Mon Sep 17 00:00:00 2001
+From: "Chang S. Bae" <chang.seok.bae@intel.com>
+Date: Sat, 25 Feb 2023 03:40:16 -0800
+Subject: [PATCH 0/2] x86/fpu/xstate: Follow up on the init_fpstate fallout again
+
+Dear maintainers,
+
+This series is following up on the last fix [2]. I thought I could
+forget about it with that. But, I was wrong because now this was
+realized as an incomplete solution -- my bad. Here is some context for
+this series:
+
+The last fix [3] has resolved the case when copying the initialized
+dynamic state from init_fpstate to the user buffer in
+__copy_xstate_to_uabi_buf(). (This was intended to resolve the fallout
+of the init_fpstate fix [1].)
+
+But, when copying the *non-initialized* dynamic state from the task
+xstate, the code [4] unconditionally retrieves the address in
+init_fpstate which is needless. Consequently, this triggers a
+false-positive warning as shown in [5] which meaninglessly confuses
+users.
+
+With these repetitive surgeries, a more solid and comprehensive
+solution is more helpful I thought. Considerably removing init_fpstate
+from this loop is not impossible here because dynamic states have an
+all-zeros init state. Then, zeroing the user buffer instead of
+retrieving init_fpstate resolves the issue and simplifies the code.
+
+These issues were discovered from the KVM execution with launching a
+guest and running the KVM self-test as __copy_xstate_to_uabi_buf() was
+called. But, the negligibly missing ptrace test could have disclosed
+them too. So that case is included here.
+
+Thanks,
+Chang
+
+[1] https://lore.kernel.org/lkml/20220824191223.1248-1-chang.seok.bae@intel.com/
+[2] https://lore.kernel.org/lkml/20221018221349.4196-1-chang.seok.bae@intel.com/
+[3] https://lore.kernel.org/lkml/20221021185844.13472-1-chang.seok.bae@intel.com/
+[4] https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/arch/x86/kernel/fpu/xstate.c#n1156
+[5] https://lore.kernel.org/kvm/20230221163655.920289-2-mizhang@google.com/
+
+Chang S. Bae (2):
+  x86/fpu/xstate: Prevent false-positive warning in
+    __copy_xstate_uabi_buf()
+  selftests/x86/amx: Add a ptrace test
+
+ arch/x86/kernel/fpu/xstate.c      |  30 ++++-----
+ tools/testing/selftests/x86/amx.c | 108 +++++++++++++++++++++++++++++-
+ 2 files changed, 119 insertions(+), 19 deletions(-)
+
+
+base-commit: 7fa08de735e41001a70c8ca869b2b159d74c2339
+-- 
+2.17.1
+
