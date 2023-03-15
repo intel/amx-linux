@@ -144,9 +144,18 @@ static void fast_syscall_no_tf(void)
 
 int main()
 {
+	stack_t stack = { };
 #ifdef CAN_BUILD_32
 	int tmp;
 #endif
+
+	stack.ss_size = SIGSTKSZ;
+	stack.ss_sp = malloc(sizeof(char) * SIGSTKSZ);
+	if (!stack.ss_sp)
+		err(1, "malloc()");
+
+	if (sigaltstack(&stack, NULL) != 0)
+		err(1, "sigaltstack()");
 
 	sethandler(SIGTRAP, sigtrap, 0);
 
@@ -208,17 +217,10 @@ int main()
 	if (sigsetjmp(jmpbuf, 1) == 0) {
 		unsigned long nr = SYS_getpid;
 		printf("[RUN]\tSet TF and check SYSENTER\n");
-		stack_t stack = {
-			.ss_sp = malloc(sizeof(char) * SIGSTKSZ),
-			.ss_size = SIGSTKSZ,
-		};
-		if (sigaltstack(&stack, NULL) != 0)
-			err(1, "sigaltstack");
 		sethandler(SIGSEGV, print_and_longjmp,
 			   SA_RESETHAND | SA_ONSTACK);
 		sethandler(SIGILL, print_and_longjmp, SA_RESETHAND);
 		set_eflags(get_eflags() | X86_EFLAGS_TF);
-		free(stack.ss_sp);
 		/* Clear EBP first to make sure we segfault cleanly. */
 		asm volatile ("xorl %%ebp, %%ebp; SYSENTER" : "+a" (nr) :: "flags", "rcx"
 #ifdef __x86_64__
@@ -238,5 +240,6 @@ int main()
 	/* Now make sure that another fast syscall doesn't set TF again. */
 	fast_syscall_no_tf();
 
+	free(stack.ss_sp);
 	return 0;
 }

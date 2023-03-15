@@ -142,7 +142,16 @@ static void handle_and_longjmp(int sig, siginfo_t *si, void *ctx_void)
 
 int main()
 {
+	stack_t stack = { };
 	unsigned long nr;
+
+	stack.ss_size = SIGSTKSZ;
+	stack.ss_sp = malloc(sizeof(char) * SIGSTKSZ);
+	if (!stack.ss_sp)
+		err(1, "malloc()");
+
+	if (sigaltstack(&stack, NULL) != 0)
+		err(1, "sigaltstack()");
 
 	asm volatile ("mov %%ss, %[ss]" : [ss] "=m" (ss));
 	printf("\tSS = 0x%hx, &SS = 0x%p\n", ss, &ss);
@@ -248,15 +257,8 @@ int main()
 	 */
 	if (sigsetjmp(jmpbuf, 1) == 0) {
 		printf("[RUN]\tMOV SS; SYSENTER\n");
-		stack_t stack = {
-			.ss_sp = malloc(sizeof(char) * SIGSTKSZ),
-			.ss_size = SIGSTKSZ,
-		};
-		if (sigaltstack(&stack, NULL) != 0)
-			err(1, "sigaltstack");
 		sethandler(SIGSEGV, handle_and_longjmp, SA_RESETHAND | SA_ONSTACK);
 		nr = SYS_getpid;
-		free(stack.ss_sp);
 		/* Clear EBP first to make sure we segfault cleanly. */
 		asm volatile ("xorl %%ebp, %%ebp; mov %[ss], %%ss; SYSENTER" : "+a" (nr)
 			      : [ss] "m" (ss) : "flags", "rcx"
@@ -281,6 +283,7 @@ int main()
 			);
 	}
 
+	free(stack.ss_sp);
 	printf("[OK]\tI aten't dead\n");
 	return 0;
 }
