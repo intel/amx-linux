@@ -35,8 +35,7 @@
 #include <string.h>
 #include <setjmp.h>
 #include <sys/prctl.h>
-
-#define X86_EFLAGS_RF (1UL << 16)
+#include <asm/processor-flags.h>
 
 #if __x86_64__
 # define REG_IP REG_RIP
