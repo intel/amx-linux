@@ -563,14 +563,11 @@ static bool __init check_xstate_against_struct(int nr)
 static unsigned int xstate_calculate_size(u64 xfeatures, bool compacted)
 {
 	unsigned int topmost = fls64(xfeatures) -  1;
-	unsigned int offset = xstate_offsets[topmost];
 
 	if (topmost <= XFEATURE_SSE)
 		return sizeof(struct xregs_state);
 
-	if (compacted)
-		offset = xfeature_get_offset(xfeatures, topmost);
-	return offset + xstate_sizes[topmost];
+	return xfeature_get_offset(xfeatures, topmost) + xstate_sizes[topmost];
 }
 
 /*
