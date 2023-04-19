@@ -956,7 +956,7 @@ static void *__raw_xsave_addr(struct xregs_state *xsave, int xfeature_nr)
  *	address of the state in the xsave area, or NULL if the
  *	field is not present in the xsave buffer.
  */
-void *get_xsave_addr(struct xregs_state *xsave, int xfeature_nr)
+static void *get_xsave_addr(struct xregs_state *xsave, int xfeature_nr)
 {
 	/*
 	 * Do we even *have* xsave state?
