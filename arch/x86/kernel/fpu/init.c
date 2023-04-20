@@ -213,7 +213,6 @@ static void __init fpu__init_system_xstate_size_legacy(void)
  */
 void __init fpu__init_system(void)
 {
-	fpstate_reset(&current->thread.fpu);
 	fpu__init_system_early_generic();
 
 	/*
