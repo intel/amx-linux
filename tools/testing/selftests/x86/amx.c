@@ -3,6 +3,7 @@
 #define _GNU_SOURCE
 #include <err.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <setjmp.h>
 #include <stdio.h>
@@ -24,6 +25,8 @@
 #ifndef __x86_64__
 # error This test is 64-bit only
 #endif
+
+#define BUF_LEN			1000
 
 #define XSAVE_HDR_OFFSET	512
 #define XSAVE_HDR_SIZE		64
@@ -239,11 +242,10 @@ static inline uint64_t get_fpx_sw_bytes_features(void *buffer)
 }
 
 /* Work around printf() being unsafe in signals: */
-#define SIGNAL_BUF_LEN 1000
-char signal_message_buffer[SIGNAL_BUF_LEN];
+char signal_message_buffer[BUF_LEN];
 void sig_print(char *msg)
 {
-	int left = SIGNAL_BUF_LEN - strlen(signal_message_buffer) - 1;
+	int left = BUF_LEN - strlen(signal_message_buffer) - 1;
 
 	strncat(signal_message_buffer, msg, left);
 }
@@ -767,15 +769,15 @@ static int create_threads(int num, struct futex_info *finfo)
 	return 0;
 }
 
-static void affinitize_cpu0(void)
+static inline void affinitize_cpu(int cpu)
 {
 	cpu_set_t cpuset;
 
 	CPU_ZERO(&cpuset);
-	CPU_SET(0, &cpuset);
+	CPU_SET(cpu, &cpuset);
 
 	if (sched_setaffinity(0, sizeof(cpuset), &cpuset) != 0)
-		fatal_error("sched_setaffinity to CPU 0");
+		fatal_error("sched_setaffinity to CPU %d", cpu);
 }
 
 static void test_context_switch(void)
@@ -784,7 +786,7 @@ static void test_context_switch(void)
 	int i;
 
 	/* Affinitize to one CPU to force context switches */
-	affinitize_cpu0();
+	affinitize_cpu(0);
 
 	req_xtiledata_perm();
 
@@ -926,6 +928,121 @@ static void test_ptrace(void)
 		err(1, "ptrace test");
 }
 
+/* CPU Hotplug test */
+
+static void __hotplug_cpu(int online, int cpu)
+{
+	char buf[BUF_LEN] = {};
+	int fd, rc;
+
+	strncat(buf, "/sys/devices/system/cpu/cpu", BUF_LEN);
+	snprintf(buf + strlen(buf), BUF_LEN - strlen(buf), "%d", cpu);
+	strncat(buf, "/online", BUF_LEN - strlen(buf));
+
+	fd = open(buf, O_RDWR);
+	if (fd == -1)
+		fatal_error("open()");
+
+	snprintf(buf, BUF_LEN, "%d", online);
+	rc = write(fd, buf, strlen(buf));
+	if (rc == -1)
+		fatal_error("write()");
+
+	rc = close(fd);
+	if (rc == -1)
+		fatal_error("close()");
+}
+
+static void offline_cpu(int cpu)
+{
+	__hotplug_cpu(0, cpu);
+}
+
+static void online_cpu(int cpu)
+{
+	__hotplug_cpu(1, cpu);
+}
+
+static jmp_buf jmpbuf;
+
+static void handle_sigsegv(int sig, siginfo_t *si, void *ctx_void)
+{
+	siglongjmp(jmpbuf, 1);
+}
+
+#define RETRY 5
+
+/*
+ * Sanity-check the hotplug CPU for its (re-)initialization.
+ *
+ * Create an AMX thread on a CPU, while the hotplug CPU went offline.
+ * Then, plug the offlined back, and move the thread to run on it.
+ *
+ * Repeat this multiple times to ensure no inconsistent failure.
+ * If something goes wrong, the thread will get a signal or killed.
+ */
+static void *switch_cpus(void *arg)
+{
+	int *result = (int *)arg;
+	int i = 0;
+
+	affinitize_cpu(0);
+	offline_cpu(1);
+	load_rand_tiledata(stashed_xsave);
+
+	sethandler(SIGSEGV, handle_sigsegv, SA_ONSTACK);
+	for (i = 0; i < RETRY; i++) {
+		if (i > 0) {
+			affinitize_cpu(0);
+			offline_cpu(1);
+		}
+		if (sigsetjmp(jmpbuf, 1) == 0) {
+			online_cpu(1);
+			affinitize_cpu(1);
+		} else {
+			*result = 1;
+			goto out;
+		}
+	}
+	*result = 0;
+out:
+	clearhandler(SIGSEGV);
+	return result;
+}
+
+static void test_cpuhp(void)
+{
+	int max_cpu_num = sysconf(_SC_NPROCESSORS_ONLN) - 1;
+	void *thread_retval;
+	pthread_t thread;
+	int result, rc;
+
+	if (!max_cpu_num) {
+		printf("[SKIP]\tThe running system has no more CPU for the hotplug test.\n");
+		return;
+	}
+
+	printf("[RUN]\tTest AMX use with the CPU hotplug.\n");
+
+	if (pthread_create(&thread, NULL, switch_cpus, &result))
+		fatal_error("pthread_create()");
+
+	rc = pthread_join(thread, &thread_retval);
+
+	if (rc)
+		fatal_error("pthread_join()");
+
+	/*
+	 * Either an invalid retval or a failed result indicates
+	 * the test failure.
+	 */
+	if (thread_retval != &result || result != 0)
+		printf("[FAIL]\tThe AMX thread had an issue (%s).\n",
+		       thread_retval != &result ? "killed" : "signaled");
+	else
+		printf("[OK]\tThe AMX thread had no issue.\n");
+}
+
 int main(void)
 {
 	/* Check hardware availability at first */
@@ -947,6 +1064,8 @@ int main(void)
 	test_context_switch();
 
 	test_ptrace();
+
+	test_cpuhp();
 
 	clearhandler(SIGILL);
 	free_stashed_xsave();
